@@ -13,8 +13,9 @@ pub struct Args {
     #[arg(long, value_name = "NAME", global = true)]
     pub context: Option<String>,
 
-    /// Raise log level to debug (shorthand for --log-level debug)
-    #[arg(long, global = true)]
+    /// Raise log level to debug (shorthand for --log-level debug).
+    /// Mutually exclusive with --log-level.
+    #[arg(long, global = true, conflicts_with = "log_level")]
     pub debug: bool,
 
     /// Explicit log level (off, error, warn, info, debug, trace)
