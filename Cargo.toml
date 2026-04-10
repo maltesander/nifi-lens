@@ -1,0 +1,21 @@
+[package]
+name = "nifi-lens"
+version = "0.0.0"
+edition = "2024"
+rust-version = "1.85"
+description = "A keyboard-driven TUI lens into Apache NiFi 2.x. Browse flows, trace flowfiles, tail bulletins, and debug across clusters and versions."
+license = "Apache-2.0"
+repository = "https://github.com/maltesander/nifi-lens"
+homepage = "https://github.com/maltesander/nifi-lens"
+documentation = "https://docs.rs/nifi-lens"
+readme = "README.md"
+keywords = ["nifi", "tui", "observability", "ratatui", "terminal"]
+categories = ["command-line-utilities"]
+
+[[bin]]
+name = "nifilens"
+path = "src/main.rs"
+
+[dependencies]
+
+[dev-dependencies]
