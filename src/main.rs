@@ -1,3 +1,3 @@
-fn main() {
-    println!("nifilens {}", env!("CARGO_PKG_VERSION"));
+fn main() -> std::process::ExitCode {
+    nifi_lens::run()
 }
