@@ -5,6 +5,7 @@
 
 pub mod cli;
 pub mod error;
+pub mod logging;
 
 pub use error::NifiLensError;
 
@@ -29,6 +30,9 @@ fn run_inner(args: cli::Args) -> Result<ExitCode, NifiLensError> {
     if args.allow_writes {
         return Err(NifiLensError::WritesNotImplemented);
     }
+
+    // Initialize logging. The WorkerGuard must stay alive for the whole run.
+    let (_log_guard, _stderr_toggle) = logging::init(&args)?;
 
     match args.command {
         Some(cli::Command::Version) => {
