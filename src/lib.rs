@@ -32,7 +32,11 @@ fn run_inner(args: cli::Args) -> Result<ExitCode, NifiLensError> {
     }
 
     // Initialize logging. The WorkerGuard must stay alive for the whole run.
-    let (_log_guard, _stderr_toggle) = logging::init(&args)?;
+    // `log_guard` intentionally held here — dropping it flushes the async log
+    // writer. `_stderr_toggle` is consumed by Task 12's TUI run loop.
+    let (log_guard, _stderr_toggle) = logging::init(&args)?;
+    // Keep `log_guard` alive for the whole `run_inner` scope.
+    let _ = &log_guard;
 
     match args.command {
         Some(cli::Command::Version) => {

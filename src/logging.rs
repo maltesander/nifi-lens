@@ -40,6 +40,9 @@ impl StderrToggle {
     }
 }
 
+/// Global color setting, captured at `init()` time from `args.no_color`.
+/// `StderrToggle::restore()` reads this value when rebuilding the stderr
+/// layer; there is no mid-session color override mechanism in Phase 0.
 static USE_COLOR: OnceLock<bool> = OnceLock::new();
 
 fn use_color() -> bool {
@@ -110,9 +113,20 @@ pub fn init(args: &Args) -> Result<(WorkerGuard, StderrToggle), NifiLensError> {
     let (stderr_reload, stderr_handle) = reload::Layer::new(Some(stderr_boxed));
     let stderr_toggle = StderrToggle(stderr_handle);
 
-    // The reload layer must be placed first (innermost) so that its subscriber
-    // type parameter S resolves to Registry, not a Layered<...> wrapper.
-    // EnvFilter and file layer are added on top of it.
+    // Subscriber chain:
+    //   Registry → .with(stderr_reload) → .with(file_layer) → .with(env_filter)
+    //
+    // Ordering is load-bearing:
+    //
+    // - `reload::Layer<L, S>` only implements `Layer<S>` for the exact `S` it
+    //   was parameterized with. Placing it innermost pins its `S` to `Registry`
+    //   so the type-system is satisfied.
+    //
+    // - `EnvFilter` placed outermost as a naked `.with(...)` layer acts as a
+    //   **global** pre-filter: events that do not match `nifi_lens=<level>`
+    //   are short-circuited before reaching either the file layer or the
+    //   stderr reload layer. Do NOT additionally use `.with_filter()` on
+    //   either inner layer for the same filter — it would double-filter.
     Registry::default()
         .with(stderr_reload)
         .with(file_layer)
@@ -126,11 +140,41 @@ pub fn init(args: &Args) -> Result<(WorkerGuard, StderrToggle), NifiLensError> {
 }
 
 fn resolve_log_dir() -> Result<PathBuf, NifiLensError> {
-    if let Ok(xdg) = std::env::var("XDG_STATE_HOME") {
+    resolve_log_dir_from(
+        std::env::var("XDG_STATE_HOME").ok().as_deref(),
+        std::env::var("HOME").ok().as_deref(),
+    )
+}
+
+fn resolve_log_dir_from(xdg: Option<&str>, home: Option<&str>) -> Result<PathBuf, NifiLensError> {
+    if let Some(xdg) = xdg {
         return Ok(PathBuf::from(xdg).join("nifilens"));
     }
-    let home = std::env::var("HOME").map_err(|_| NifiLensError::Io {
-        source: std::io::Error::new(std::io::ErrorKind::NotFound, "HOME not set"),
+    let home = home.ok_or_else(|| NifiLensError::Io {
+        source: std::io::Error::other("HOME not set"),
     })?;
     Ok(PathBuf::from(home).join(".local/state/nifilens"))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn resolve_log_dir_prefers_xdg_state_home() {
+        let result = resolve_log_dir_from(Some("/var/state"), Some("/home/user")).unwrap();
+        assert_eq!(result, PathBuf::from("/var/state/nifilens"));
+    }
+
+    #[test]
+    fn resolve_log_dir_falls_back_to_home() {
+        let result = resolve_log_dir_from(None, Some("/home/user")).unwrap();
+        assert_eq!(result, PathBuf::from("/home/user/.local/state/nifilens"));
+    }
+
+    #[test]
+    fn resolve_log_dir_errors_when_home_missing() {
+        let err = resolve_log_dir_from(None, None).unwrap_err();
+        assert!(matches!(err, NifiLensError::Io { .. }));
+    }
 }
