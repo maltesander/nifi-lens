@@ -36,6 +36,7 @@ unicode-width = "0.2"
 
 [dev-dependencies]
 # insta and wiremock land alongside the first tests that need them.
+tempfile = "3"
 
 # Development-only override: uncomment locally when iterating against an
 # unreleased change in ../nifi-rust-client. Must remain commented on `main`
