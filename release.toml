@@ -8,8 +8,6 @@
 publish = false
 push = true
 sign-tag = false
-tag-message = "{{crate_name}} {{version}}"
-pre-release-commit-message = "chore(release): {{version}}"
 consolidate-commits = true
 
 [[pre-release-replacements]]
