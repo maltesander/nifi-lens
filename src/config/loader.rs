@@ -7,14 +7,17 @@ use snafu::ResultExt;
 
 use crate::cli::Args;
 use crate::config::{Config, Credentials, ResolvedContext};
-use crate::error::{ConfigParseSnafu, NifiLensError};
+use crate::error::{
+    CaCertNotFoundSnafu, ConfigMissingSnafu, ConfigParseSnafu, ConfigWorldReadableSnafu,
+    MissingPasswordEnvSnafu, NifiLensError, UnknownContextSnafu,
+};
 
 /// Load the config file pointed at by `args`, resolve the active context,
 /// resolve its credentials, and return both.
 pub fn load(args: &Args) -> Result<(Config, ResolvedContext), NifiLensError> {
     let path = resolve_path(args.config.clone());
     if !path.exists() {
-        return Err(NifiLensError::ConfigMissing { path });
+        return ConfigMissingSnafu { path }.fail();
     }
 
     check_permissions(&path)?;
@@ -33,18 +36,26 @@ pub fn load(args: &Args) -> Result<(Config, ResolvedContext), NifiLensError> {
         .contexts
         .iter()
         .find(|c| c.name == active_name)
-        .ok_or_else(|| NifiLensError::UnknownContext {
-            name: active_name.clone(),
-            available: config.contexts.iter().map(|c| c.name.clone()).collect(),
+        .ok_or_else(|| {
+            UnknownContextSnafu {
+                name: active_name.clone(),
+                available: config
+                    .contexts
+                    .iter()
+                    .map(|c| c.name.clone())
+                    .collect::<Vec<_>>(),
+            }
+            .build()
         })?;
 
     let password = match &context.credentials {
-        Credentials::EnvVar { password_env } => {
-            std::env::var(password_env).map_err(|_| NifiLensError::MissingPasswordEnv {
+        Credentials::EnvVar { password_env } => std::env::var(password_env).map_err(|_| {
+            MissingPasswordEnvSnafu {
                 context: context.name.clone(),
                 var: password_env.clone(),
-            })?
-        }
+            }
+            .build()
+        })?,
         Credentials::Plain { password } => {
             tracing::warn!(context = %context.name, "plaintext password in config");
             password.clone()
@@ -85,9 +96,10 @@ fn check_permissions(path: &Path) -> Result<(), NifiLensError> {
     let meta = std::fs::metadata(path).map_err(|source| NifiLensError::Io { source })?;
     let mode = meta.permissions().mode();
     if mode & 0o077 != 0 {
-        return Err(NifiLensError::ConfigWorldReadable {
+        return ConfigWorldReadableSnafu {
             path: path.to_path_buf(),
-        });
+        }
+        .fail();
     }
     Ok(())
 }
@@ -104,7 +116,7 @@ fn validate_tls(context: &crate::config::Context) -> Result<(), NifiLensError> {
     if let Some(ca) = &context.ca_cert_path
         && !ca.exists()
     {
-        return Err(NifiLensError::CaCertNotFound { path: ca.clone() });
+        return CaCertNotFoundSnafu { path: ca.clone() }.fail();
     }
     Ok(())
 }

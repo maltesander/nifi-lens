@@ -29,6 +29,14 @@ pub struct Context {
     pub ca_cert_path: Option<PathBuf>,
 }
 
+/// Credentials for a single NiFi context.
+///
+/// `#[serde(untagged)]` means serde tries variants in declaration order and
+/// picks the first one whose fields all match. If a user writes BOTH
+/// `password_env = "..."` and `password = "..."` in the same context block,
+/// `EnvVar` wins silently because it is declared first. This is intentional:
+/// env vars are the preferred credential source, so the ambiguity resolves
+/// toward the safer option. Phase 0 does not warn on the combination.
 #[derive(Debug, Clone, Deserialize, PartialEq, Eq)]
 #[serde(untagged)]
 pub enum Credentials {
