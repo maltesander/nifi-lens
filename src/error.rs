@@ -58,18 +58,26 @@ pub enum NifiLensError {
         source: std::io::Error,
     },
 
+    /// `nifi-rust-client` 0.5.0's error type is not yet audited (see Phase 0
+    /// Task 7). We box the source as a trait object so this variant compiles
+    /// before that audit, at the cost of losing snafu's automatic `From`
+    /// conversion — call sites must box the source explicitly.
     #[snafu(display("failed to build nifi-rust-client for context {context:?}: {source}"))]
     ClientBuildFailed {
         context: String,
         source: Box<dyn std::error::Error + Send + Sync>,
     },
 
+    /// See `ClientBuildFailed` for the boxed-source rationale; callers must
+    /// box explicitly.
     #[snafu(display("login failed for context {context:?}: {source}"))]
     LoginFailed {
         context: String,
         source: Box<dyn std::error::Error + Send + Sync>,
     },
 
+    /// See `ClientBuildFailed` for the boxed-source rationale; callers must
+    /// box explicitly.
     #[snafu(display("failed to fetch /flow/about for context {context:?}: {source}"))]
     AboutFailed {
         context: String,
@@ -77,16 +85,23 @@ pub enum NifiLensError {
     },
 
     #[snafu(display("write intents are disabled in Phase 0 (intent: {intent_name})"))]
-    WritesNotAllowed { intent_name: &'static str },
+    WriteIntentRefused { intent_name: &'static str },
 
     #[snafu(display("failed to initialize the terminal: {source}"))]
     TerminalInit { source: std::io::Error },
 
+    /// Boxed because `tracing-subscriber`'s reload / init error types are
+    /// not uniformly `'static` across versions. No context field because
+    /// logging is global, not per-cluster.
     #[snafu(display("failed to initialize logging: {source}"))]
     LoggingInit {
         source: Box<dyn std::error::Error + Send + Sync>,
     },
 
+    /// Last-resort fallback for I/O errors that do not have a more specific
+    /// variant (`ConfigWriteFailed`, `CaCertReadFailed`, `TerminalInit`, …).
+    /// Prefer a specific variant when one exists so the user sees the
+    /// operation context.
     #[snafu(display("I/O error: {source}"))]
     Io { source: std::io::Error },
 }
