@@ -2,7 +2,7 @@
 name = "nifi-lens"
 version = "0.0.0"
 edition = "2024"
-rust-version = "1.85"
+rust-version = "1.88"
 description = "A keyboard-driven TUI lens into Apache NiFi 2.x. Browse flows, trace flowfiles, tail bulletins, and debug across clusters and versions."
 license = "Apache-2.0"
 repository = "https://github.com/maltesander/nifi-lens"
@@ -17,5 +17,28 @@ name = "nifilens"
 path = "src/main.rs"
 
 [dependencies]
+arboard = "3"
+clap = { version = "4", features = ["derive"] }
+color-eyre = "0.6"
+crossterm = "0.28"
+nifi-rust-client = { version = "0.5.0", features = ["dynamic"] }
+nucleo = "0.5"
+ratatui = "0.29"
+semver = "1"
+serde = { version = "1", features = ["derive"] }
+snafu = "0.8"
+tokio = { version = "1", features = ["full"] }
+toml = "0.8"
+tracing = "0.1"
+tracing-appender = "0.2"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+unicode-width = "0.2"
 
 [dev-dependencies]
+# insta and wiremock land alongside the first tests that need them.
+
+# Development-only override: uncomment locally when iterating against an
+# unreleased change in ../nifi-rust-client. Must remain commented on `main`
+# so CI and crates.io releases build against the published version.
+# [patch.crates-io]
+# nifi-rust-client = { path = "../nifi-rust-client/crates/nifi-rust-client" }
