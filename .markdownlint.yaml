@@ -1,0 +1,13 @@
+# markdownlint config for nifi-lens.
+# Relaxes rules that conflict with prose in AGENTS.md / README.md / CHANGELOG.md.
+
+default: true
+
+# MD013: line length — disabled; we write natural prose.
+MD013: false
+
+# MD033: allow inline HTML (badges, etc.)
+MD033: false
+
+# MD041: first line in file must be a top-level heading — allow license headers etc.
+MD041: false
