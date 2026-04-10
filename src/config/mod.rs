@@ -1,5 +1,6 @@
 //! Configuration types and loader for nifi-lens.
 
+pub mod init;
 pub mod loader;
 
 use std::path::PathBuf;

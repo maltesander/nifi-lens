@@ -45,11 +45,18 @@ fn run_inner(args: cli::Args) -> Result<ExitCode, NifiLensError> {
             println!("nifi-rust-client 0.5.0");
             Ok(ExitCode::SUCCESS)
         }
-        Some(cli::Command::Config { .. }) => {
-            // Filled in by Tasks 5 and 6.
-            eprintln!("error: config subcommands not yet implemented");
-            Ok(ExitCode::FAILURE)
-        }
+        Some(cli::Command::Config { action }) => match action {
+            cli::ConfigAction::Init { force } => {
+                let path = config::init::write_template(force)?;
+                eprintln!("wrote template to {}", path.display());
+                Ok(ExitCode::SUCCESS)
+            }
+            cli::ConfigAction::Validate => {
+                // Filled in by Task 6.
+                eprintln!("error: config validate not yet implemented");
+                Ok(ExitCode::FAILURE)
+            }
+        },
         None => {
             // Filled in by Task 12.
             println!("nifilens {}", env!("CARGO_PKG_VERSION"));
