@@ -1,0 +1,25 @@
+# cargo-release configuration for nifi-lens.
+#
+# cargo-release is dry-run by default; --execute is required to mutate state.
+# Publication to crates.io is deliberately disabled here — it happens in
+# .github/workflows/release.yml after the tag is pushed, so the registry
+# token stays in GitHub.
+
+publish = false
+push = true
+sign-tag = false
+tag-message = "{{crate_name}} {{version}}"
+pre-release-commit-message = "chore(release): {{version}}"
+consolidate-commits = true
+
+[[pre-release-replacements]]
+file = "CHANGELOG.md"
+search = "## \\[Unreleased\\]"
+replace = "## [Unreleased]\n\n## [{{version}}] — {{date}}"
+exactly = 1
+
+[[pre-release-replacements]]
+file = "CHANGELOG.md"
+search = "\\[Unreleased\\]: https://github.com/maltesander/nifi-lens/commits/HEAD"
+replace = "[Unreleased]: https://github.com/maltesander/nifi-lens/compare/v{{version}}...HEAD\n[{{version}}]: https://github.com/maltesander/nifi-lens/releases/tag/v{{version}}"
+min = 0
