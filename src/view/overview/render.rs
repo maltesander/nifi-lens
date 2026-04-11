@@ -219,3 +219,131 @@ fn severity_style(s: Severity) -> Style {
         Severity::Unknown => theme::muted(),
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use crate::client::{
+        AboutSnapshot, BulletinBoardSnapshot, BulletinSnapshot, ControllerStatusSnapshot,
+        QueueSnapshot, RootPgStatusSnapshot,
+    };
+    use crate::event::OverviewPayload;
+    use crate::view::overview::state::{OverviewState, apply_payload};
+    use ratatui::Terminal;
+    use ratatui::backend::TestBackend;
+    use std::time::{Duration, UNIX_EPOCH};
+
+    // 2026-04-11T10:14:22Z in unix seconds. Same constant as the reducer
+    // tests so time-dependent rendering stays deterministic. Verified
+    // with `date -u -d @1775902462`.
+    const T0: u64 = 1_775_902_462;
+
+    fn render_to_string(state: &OverviewState) -> String {
+        let backend = TestBackend::new(100, 25);
+        let mut term = Terminal::new(backend).unwrap();
+        term.draw(|f| super::render(f, f.area(), state)).unwrap();
+        format!("{}", term.backend())
+    }
+
+    #[test]
+    fn snapshot_empty_state() {
+        let state = OverviewState::new();
+        insta::assert_snapshot!("overview_empty", render_to_string(&state));
+    }
+
+    #[test]
+    fn snapshot_healthy_cluster() {
+        let mut state = OverviewState::new();
+        let payload = OverviewPayload {
+            about: AboutSnapshot {
+                version: "2.8.0".into(),
+                title: "NiFi".into(),
+            },
+            controller: ControllerStatusSnapshot {
+                running: 42,
+                stopped: 3,
+                invalid: 0,
+                disabled: 1,
+                active_threads: 5,
+                flow_files_queued: 120,
+                bytes_queued: 4096,
+            },
+            root_pg: RootPgStatusSnapshot {
+                flow_files_queued: 120,
+                bytes_queued: 4096,
+                connections: vec![QueueSnapshot {
+                    id: "c1".into(),
+                    group_id: "root".into(),
+                    name: "ingest → enrich".into(),
+                    source_name: "Generate".into(),
+                    destination_name: "Enrich".into(),
+                    fill_percent: 12,
+                    flow_files_queued: 40,
+                    bytes_queued: 512,
+                    queued_display: "40 / 512 B".into(),
+                }],
+            },
+            bulletin_board: BulletinBoardSnapshot::default(),
+            fetched_at: UNIX_EPOCH + Duration::from_secs(T0),
+        };
+        apply_payload(&mut state, payload);
+        insta::assert_snapshot!("overview_healthy", render_to_string(&state));
+    }
+
+    #[test]
+    fn snapshot_unhealthy_cluster() {
+        let mut state = OverviewState::new();
+        let queues = (0..5)
+            .map(|i| QueueSnapshot {
+                id: format!("c{i}"),
+                group_id: "root".into(),
+                name: format!("q{i}"),
+                source_name: "Generate".into(),
+                destination_name: format!("Proc{i}"),
+                fill_percent: 99 - i,
+                flow_files_queued: 9_000 + i * 100,
+                bytes_queued: 1_000_000,
+                queued_display: format!("{}k / 1 MB", 9 + i),
+            })
+            .collect();
+        let bulletins = (0..6)
+            .map(|i| BulletinSnapshot {
+                id: i,
+                level: if i % 2 == 0 {
+                    "ERROR".into()
+                } else {
+                    "WARN".into()
+                },
+                message: "msg".into(),
+                source_id: format!("proc-{}", i % 3),
+                source_name: format!("Proc{}", i % 3),
+                source_type: "PROCESSOR".into(),
+                group_id: "root".into(),
+                timestamp_iso: "2026-04-11T10:14:10Z".into(),
+            })
+            .collect();
+        let payload = OverviewPayload {
+            about: AboutSnapshot {
+                version: "2.8.0".into(),
+                title: "NiFi".into(),
+            },
+            controller: ControllerStatusSnapshot {
+                running: 20,
+                stopped: 10,
+                invalid: 2,
+                disabled: 0,
+                active_threads: 17,
+                flow_files_queued: 50_000,
+                bytes_queued: 8_000_000,
+            },
+            root_pg: RootPgStatusSnapshot {
+                flow_files_queued: 50_000,
+                bytes_queued: 8_000_000,
+                connections: queues,
+            },
+            bulletin_board: BulletinBoardSnapshot { bulletins },
+            fetched_at: UNIX_EPOCH + Duration::from_secs(T0),
+        };
+        apply_payload(&mut state, payload);
+        insta::assert_snapshot!("overview_unhealthy", render_to_string(&state));
+    }
+}

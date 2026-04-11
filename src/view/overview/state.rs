@@ -194,6 +194,7 @@ pub fn apply_payload(state: &mut OverviewState, payload: OverviewPayload) {
         b.count
             .cmp(&a.count)
             .then_with(|| b.max_severity.cmp(&a.max_severity))
+            .then_with(|| a.source_name.cmp(&b.source_name))
     });
     noisy.truncate(TOP_NOISY);
     state.noisy = noisy;
