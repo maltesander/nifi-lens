@@ -407,10 +407,10 @@ fn handle_intent_outcome(
                 intent: None,
             }
         }
-        Ok(IntentOutcome::NotImplementedInPhase0 { intent_name }) => {
+        Ok(IntentOutcome::NotImplementedInPhase { intent_name, phase }) => {
             state.status.banner = Some(Banner {
                 severity: BannerSeverity::Info,
-                message: format!("{intent_name}: not yet implemented in Phase 0"),
+                message: format!("{intent_name}: not yet wired (Phase {phase})"),
                 detail: None,
             });
             UpdateResult {

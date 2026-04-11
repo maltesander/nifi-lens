@@ -39,8 +39,17 @@ pub struct OverviewPayload {
 /// Result of a successful intent dispatch.
 #[derive(Debug, Clone)]
 pub enum IntentOutcome {
-    ContextSwitched { new_version: semver::Version },
-    ViewRefreshed { view: crate::app::state::ViewId },
+    ContextSwitched {
+        new_version: semver::Version,
+    },
+    ViewRefreshed {
+        view: crate::app::state::ViewId,
+    },
     Quitting,
-    NotImplementedInPhase0 { intent_name: &'static str },
+    /// The intent is valid but its target phase hasn't landed yet.
+    /// The banner shows `"{intent_name}: not yet wired (Phase {phase})"`.
+    NotImplementedInPhase {
+        intent_name: &'static str,
+        phase: u8,
+    },
 }

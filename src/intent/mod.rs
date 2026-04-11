@@ -17,7 +17,7 @@ pub enum Intent {
     RefreshView(ViewId),
     Quit,
 
-    // Declared for Phase 1+; dispatcher returns NotImplementedInPhase0.
+    // Declared for Phase 1+; dispatcher returns NotImplementedInPhase.
     OpenProcessGroup(String),
     TraceFlowfile(String), // UUID as string — Phase 4 introduces `uuid::Uuid`
     FetchEventContent { event_id: u64, side: ContentSide },
@@ -91,8 +91,9 @@ impl IntentDispatcher {
             Intent::Quit => Ok(IntentOutcome::Quitting),
             Intent::SwitchContext(name) => self.switch_context(name).await,
             Intent::RefreshView(view) => Ok(IntentOutcome::ViewRefreshed { view }),
-            other => Ok(IntentOutcome::NotImplementedInPhase0 {
+            other => Ok(IntentOutcome::NotImplementedInPhase {
                 intent_name: other.name(),
+                phase: 0,
             }),
         }
     }
