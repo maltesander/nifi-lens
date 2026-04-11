@@ -23,20 +23,33 @@ use crate::cli::Args;
 type DynLayer = Box<dyn tracing_subscriber::Layer<Registry> + Send + Sync>;
 
 /// Handle for toggling the stderr layer on and off (used by the terminal guard).
-pub struct StderrToggle(reload::Handle<Option<DynLayer>, Registry>);
+///
+/// `Clone`-able (via `Arc`) so it can be shared between the `TerminalGuard`
+/// drop impl and the panic hook — both need to restore stderr on exit.
+#[derive(Clone)]
+pub struct StderrToggle {
+    inner: std::sync::Arc<StderrToggleInner>,
+}
+
+struct StderrToggleInner {
+    handle: reload::Handle<Option<DynLayer>, Registry>,
+}
 
 impl StderrToggle {
     /// Suppress stderr log output (called before entering raw mode).
     pub fn suppress(&self) {
-        let _ = self.0.modify(|layer| *layer = None);
+        let _ = self.inner.handle.modify(|layer| *layer = None);
     }
 
-    /// Restore stderr log output (called after leaving raw mode).
+    /// Restore stderr log output (called after leaving raw mode, including panics).
     pub fn restore(&self) {
         // We cannot literally restore the old layer because Box<dyn Layer>
         // isn't Clone; instead we rebuild a fresh stderr layer.
         let stderr_layer = make_stderr_layer(use_color());
-        let _ = self.0.modify(|layer| *layer = Some(stderr_layer));
+        let _ = self
+            .inner
+            .handle
+            .modify(|layer| *layer = Some(stderr_layer));
     }
 }
 
@@ -111,7 +124,11 @@ pub fn init(args: &Args) -> Result<(WorkerGuard, StderrToggle), NifiLensError> {
     // 5. Stderr layer wrapped in a reload handle so we can toggle it off.
     let stderr_boxed: DynLayer = make_stderr_layer(!args.no_color);
     let (stderr_reload, stderr_handle) = reload::Layer::new(Some(stderr_boxed));
-    let stderr_toggle = StderrToggle(stderr_handle);
+    let stderr_toggle = StderrToggle {
+        inner: std::sync::Arc::new(StderrToggleInner {
+            handle: stderr_handle,
+        }),
+    };
 
     // Subscriber chain:
     //   Registry → .with(stderr_reload) → .with(file_layer) → .with(env_filter)

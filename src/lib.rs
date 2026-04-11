@@ -41,10 +41,10 @@ fn run_inner(args: cli::Args) -> Result<ExitCode, NifiLensError> {
 
     // Initialize logging. The WorkerGuard must stay alive for the whole run.
     // `log_guard` intentionally held here — dropping it flushes the async log
-    // writer. `_stderr_toggle` is consumed by Task 12's TUI run loop.
-    let (log_guard, _stderr_toggle) = logging::init(&args)?;
-    // Keep `log_guard` alive for the whole `run_inner` scope.
-    let _ = &log_guard;
+    // writer. `stderr_toggle` is shared with the TUI run loop, TerminalGuard,
+    // and the panic hook via Arc-based Clone.
+    let (log_guard, stderr_toggle) = logging::init(&args)?;
+    let _ = &log_guard; // keep log_guard alive for the duration of run_inner
 
     match args.command {
         Some(cli::Command::Version) => {
@@ -69,9 +69,16 @@ fn run_inner(args: cli::Args) -> Result<ExitCode, NifiLensError> {
             }
         },
         None => {
-            // Filled in by Task 12.
-            println!("nifilens {}", env!("CARGO_PKG_VERSION"));
-            println!("(TUI not yet wired — see Phase 0 Task 12)");
+            let (config, resolved) = config::loader::load(&args)?;
+            let rt = tokio::runtime::Builder::new_multi_thread()
+                .enable_all()
+                .build()
+                .map_err(|source| NifiLensError::Io { source })?;
+            rt.block_on(async move {
+                let client = client::NifiClient::connect(&resolved).await?;
+                app::run(client, config, stderr_toggle.clone()).await?;
+                Ok::<(), NifiLensError>(())
+            })?;
             Ok(ExitCode::SUCCESS)
         }
     }
