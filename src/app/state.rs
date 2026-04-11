@@ -14,7 +14,7 @@ use crate::NifiLensError;
 use crate::config::Config;
 use crate::event::{AppEvent, IntentOutcome, ViewPayload};
 use crate::intent::CrossLink;
-use crate::view::browser::state::{BrowserState, FlowIndex};
+use crate::view::browser::state::{BrowserState, FlowIndex, apply_tree_snapshot, build_flow_index};
 use crate::view::bulletins::state::BulletinsState;
 use crate::view::overview::{OverviewState, apply_payload as apply_overview_payload};
 
@@ -205,6 +205,14 @@ pub fn update(state: &mut AppState, event: AppEvent, config: &Config) -> UpdateR
         }
         AppEvent::Data(ViewPayload::Bulletins(payload)) => {
             crate::view::bulletins::state::apply_payload(&mut state.bulletins, payload);
+            state.last_refresh = Instant::now();
+            UpdateResult {
+                redraw: true,
+                intent: None,
+            }
+        }
+        AppEvent::Data(ViewPayload::Browser(payload)) => {
+            handle_browser_payload(state, payload);
             state.last_refresh = Instant::now();
             UpdateResult {
                 redraw: true,
@@ -565,6 +573,19 @@ fn handle_key(state: &mut AppState, key: KeyEvent, config: &Config) -> UpdateRes
             UpdateResult::default()
         }
         _ => UpdateResult::default(),
+    }
+}
+
+fn handle_browser_payload(state: &mut AppState, payload: crate::event::BrowserPayload) {
+    use crate::event::BrowserPayload;
+    match payload {
+        BrowserPayload::Tree(snap) => {
+            apply_tree_snapshot(&mut state.browser, snap);
+            state.flow_index = Some(build_flow_index(&state.browser));
+        }
+        BrowserPayload::Detail(detail) => {
+            crate::view::browser::state::apply_node_detail(&mut state.browser, *detail);
+        }
     }
 }
 
@@ -972,5 +993,53 @@ mod tests {
             Some("f"),
             "Ctrl+K must not append 'k' to the filter buffer"
         );
+    }
+
+    #[test]
+    fn browser_tree_payload_populates_browser_state_and_flow_index() {
+        use crate::client::{NodeKind, NodeStatusSummary, RawNode, RecursiveSnapshot};
+        use crate::event::{BrowserPayload, ViewPayload};
+        use std::time::SystemTime;
+
+        let mut s = fresh_state();
+        let c = tiny_config();
+        let snap = RecursiveSnapshot {
+            nodes: vec![
+                RawNode {
+                    parent_idx: None,
+                    kind: NodeKind::ProcessGroup,
+                    id: "root".into(),
+                    group_id: "root".into(),
+                    name: "NiFi".into(),
+                    status_summary: NodeStatusSummary::ProcessGroup {
+                        running: 1,
+                        stopped: 0,
+                        invalid: 0,
+                        disabled: 0,
+                    },
+                },
+                RawNode {
+                    parent_idx: Some(0),
+                    kind: NodeKind::Processor,
+                    id: "gen".into(),
+                    group_id: "root".into(),
+                    name: "Gen".into(),
+                    status_summary: NodeStatusSummary::Processor {
+                        run_status: "Running".into(),
+                    },
+                },
+            ],
+            fetched_at: SystemTime::now(),
+        };
+        let r = update(
+            &mut s,
+            AppEvent::Data(ViewPayload::Browser(BrowserPayload::Tree(snap))),
+            &c,
+        );
+        assert!(r.redraw);
+        assert_eq!(s.browser.nodes.len(), 2);
+        assert_eq!(s.browser.visible.len(), 2); // root expanded -> 1 child visible
+        let idx = s.flow_index.as_ref().expect("FlowIndex built");
+        assert_eq!(idx.entries.len(), 2);
     }
 }

@@ -20,6 +20,7 @@ pub enum AppEvent {
 pub enum ViewPayload {
     Overview(OverviewPayload),
     Bulletins(BulletinsPayload),
+    Browser(BrowserPayload),
 }
 
 /// One poll cycle's worth of data for the Overview tab. Composed inside the
@@ -45,6 +46,15 @@ pub struct BulletinsPayload {
     /// Wall-clock time when the worker assembled this payload. Used by
     /// the renderer for the "last Ns ago" label.
     pub fetched_at: std::time::SystemTime,
+}
+
+/// Payload sent from the Browser worker. Two variants — one for the
+/// full tree refresh (15 s cadence), one for an on-demand per-node
+/// detail fetch.
+#[derive(Debug, Clone)]
+pub enum BrowserPayload {
+    Tree(crate::client::RecursiveSnapshot),
+    Detail(Box<crate::view::browser::state::NodeDetailSnapshot>),
 }
 
 /// Result of a successful intent dispatch.
