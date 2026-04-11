@@ -1,8 +1,9 @@
 //! WorkerRegistry: owns the one currently-running view worker task and
 //! swaps it on tab change.
 //!
-//! Phase 1 only spawns a worker for the Overview tab; other tabs get no
-//! worker (Phases 2–4 add theirs).
+//! Phase 1 shipped the Overview worker (10s cadence) and Phase 2 added
+//! the Bulletins worker (5s cadence). Browser (Phase 3) and Tracer
+//! (Phase 4) will plug into the same pattern.
 
 use std::sync::Arc;
 
@@ -72,8 +73,8 @@ impl WorkerRegistry {
     }
 
     /// Abort the currently-running view worker, if any. Called on app
-    /// shutdown. Phase 1 only ever has one active worker, so this aborts
-    /// exactly one handle or none.
+    /// shutdown. The registry only ever holds one active worker, so this
+    /// aborts exactly one handle or none.
     pub fn shutdown(&mut self) {
         tracing::debug!("worker registry: shutting down");
         if let Some((_, handle)) = self.current.take() {
