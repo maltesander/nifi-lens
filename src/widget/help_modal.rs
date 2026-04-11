@@ -12,10 +12,13 @@ Global Keys:
   q / Ctrl+Q        Quit
   Esc               Close modal
 
+Per-View Info:
+  Overview          Live data, refreshes every 10s while active
+
 (Phase 0 — per-view help comes in later phases.)";
 
 pub fn render(frame: &mut Frame, area: Rect) {
-    let modal = center(area, 60, 14);
+    let modal = center(area, 60, 16);
     frame.render_widget(Clear, modal);
     let block = Block::default().title(" Help ").borders(Borders::ALL);
     let p = Paragraph::new(HELP_TEXT)
