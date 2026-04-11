@@ -41,6 +41,10 @@ pub enum NodeKind {
     ControllerService,
 }
 
+/// Type-specific status fields carried alongside each arena node. Mirrors the
+/// different DTO shapes returned by the NiFi API per component kind. The
+/// `Port` variant covers input and output ports, which carry no additional
+/// per-kind status fields beyond their `NodeKind` tag.
 #[derive(Debug, Clone)]
 pub enum NodeStatusSummary {
     ProcessGroup {
@@ -60,7 +64,7 @@ pub enum NodeStatusSummary {
     ControllerService {
         state: String,
     },
-    None,
+    Port,
 }
 
 impl NifiClient {
@@ -116,7 +120,10 @@ fn walk_pg_snapshot(
         parent_idx,
         kind: NodeKind::ProcessGroup,
         id: snap.id.clone().unwrap_or_default(),
-        group_id: snap.id.clone().unwrap_or_default(),
+        // `ProcessGroupStatusSnapshotDto` does not expose a `groupId` / `group_id`
+        // field (unlike processor/connection/port DTOs). The PG's own parent
+        // context comes from its position in the arena via `parent_idx`.
+        group_id: String::new(),
         name: snap.name.clone().unwrap_or_default(),
         // ProcessGroupStatusSnapshotDto does not carry running/stopped/invalid/
         // disabled counts; those live on ControllerStatusDto (whole-cluster).
@@ -180,7 +187,7 @@ fn walk_pg_snapshot(
                 id: p.id.clone().unwrap_or_default(),
                 group_id: p.group_id.clone().unwrap_or_default(),
                 name: p.name.clone().unwrap_or_default(),
-                status_summary: NodeStatusSummary::None,
+                status_summary: NodeStatusSummary::Port,
             });
         }
     }
@@ -196,7 +203,7 @@ fn walk_pg_snapshot(
                 id: p.id.clone().unwrap_or_default(),
                 group_id: p.group_id.clone().unwrap_or_default(),
                 name: p.name.clone().unwrap_or_default(),
-                status_summary: NodeStatusSummary::None,
+                status_summary: NodeStatusSummary::Port,
             });
         }
     }

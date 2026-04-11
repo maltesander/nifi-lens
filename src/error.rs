@@ -147,7 +147,9 @@ pub enum NifiLensError {
         source: Box<dyn std::error::Error + Send + Sync>,
     },
 
-    #[snafu(display("fetching browser tree for context '{context}' failed: {source}"))]
+    /// See `ClientBuildFailed` for the boxed-source rationale; callers must
+    /// box explicitly.
+    #[snafu(display("failed to fetch browser tree for context {context:?}: {source}"))]
     BrowserTreeFailed {
         context: String,
         source: Box<dyn std::error::Error + Send + Sync>,
