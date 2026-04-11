@@ -27,7 +27,7 @@ ratatui = "0.29"
 semver = "1"
 serde = { version = "1", features = ["derive"] }
 snafu = "0.8"
-time = { version = "0.3", features = ["parsing", "macros", "formatting"] }
+time = { version = "0.3", features = ["parsing"] }
 tokio = { version = "1", features = ["full"] }
 toml = "0.8"
 tracing = "0.1"
