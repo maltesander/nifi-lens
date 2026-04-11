@@ -29,7 +29,12 @@ services:
       interval: 10s
       timeout: 5s
       retries: 18
-      start_period: 90s
+      # NiFi 2.x can take 4–6 minutes to finish booting on a 2 vCPU
+      # GitHub Actions runner with two instances competing for CPU.
+      # Kept in sync with run.sh's 600s wait loop so the healthcheck
+      # does not mark the container unhealthy before NiFi finishes
+      # starting.
+      start_period: 300s
 
   nifi-2-8-0:
     image: apache/nifi:2.8.0
@@ -61,4 +66,9 @@ services:
       interval: 10s
       timeout: 5s
       retries: 18
-      start_period: 90s
+      # NiFi 2.x can take 4–6 minutes to finish booting on a 2 vCPU
+      # GitHub Actions runner with two instances competing for CPU.
+      # Kept in sync with run.sh's 600s wait loop so the healthcheck
+      # does not mark the container unhealthy before NiFi finishes
+      # starting.
+      start_period: 300s
