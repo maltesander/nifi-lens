@@ -3,10 +3,12 @@
 //! The library crate holds every module except the `main` entry point.
 //! Integration tests can `use nifi_lens::...` without spawning a binary.
 
+pub mod app;
 pub mod cli;
 pub mod client;
 pub mod config;
 pub mod error;
+pub mod event;
 pub mod logging;
 
 pub use error::NifiLensError;
