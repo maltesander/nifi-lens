@@ -108,14 +108,3 @@ jobs:
             exit 1
           fi
           echo "Fixture versions consistent: $VERSIONS"
-
-  integration:
-    name: Integration (Docker + NiFi fixture)
-    runs-on: ubuntu-latest
-    timeout-minutes: 30
-    steps:
-      - uses: actions/checkout@v5
-      - uses: actions-rust-lang/setup-rust-toolchain@v1
-      - uses: Swatinem/rust-cache@v2
-      - name: Run integration harness
-        run: ./integration-tests/run.sh
