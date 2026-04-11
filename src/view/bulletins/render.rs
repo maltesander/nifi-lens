@@ -32,8 +32,15 @@ const FILTER_BAR_ROWS: u16 = 2;
 const DETAIL_PANE_ROWS: u16 = 6;
 
 pub fn render(frame: &mut Frame, area: Rect, state: &BulletinsState) {
-    let title = build_title(state);
-    let block = Block::default().title(title).borders(Borders::ALL);
+    let age_label = state
+        .last_fetched_at
+        .and_then(|fetched| SystemTime::now().duration_since(fetched).ok())
+        .map(|d| format!(" last {} ago ", format_age(d.as_secs())))
+        .unwrap_or_else(|| " connecting… ".to_string());
+    let block = Block::default()
+        .borders(Borders::ALL)
+        .title_top(Line::from(" Bulletins "))
+        .title_top(Line::from(Span::styled(age_label, theme::muted())).right_aligned());
     let inner = block.inner(area);
     frame.render_widget(block, area);
 
@@ -49,21 +56,6 @@ pub fn render(frame: &mut Frame, area: Rect, state: &BulletinsState) {
     render_filter_bar(frame, rows[0], state);
     render_list(frame, rows[1], state);
     render_detail(frame, rows[2], state);
-}
-
-fn build_title(state: &BulletinsState) -> Line<'static> {
-    let age = state
-        .last_fetched_at
-        .and_then(|fetched| {
-            let now = SystemTime::now();
-            now.duration_since(fetched).ok()
-        })
-        .map(|d| format_age(d.as_secs()))
-        .unwrap_or_else(|| "…".to_string());
-    Line::from(vec![
-        Span::raw(" Bulletins "),
-        Span::styled(format!("  last {age} ago "), theme::muted()),
-    ])
 }
 
 fn format_age(secs: u64) -> String {
