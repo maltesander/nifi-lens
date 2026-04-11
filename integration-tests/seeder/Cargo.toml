@@ -1,0 +1,24 @@
+[package]
+name = "nifilens-fixture-seeder"
+version = "0.0.0"
+edition = "2024"
+rust-version = "1.88"
+publish = false
+description = "Seeds the nifi-lens integration test fixture into a live NiFi cluster."
+license = "Apache-2.0"
+
+[[bin]]
+name = "nifilens-fixture-seeder"
+path = "src/main.rs"
+
+[dependencies]
+clap = { version = "4", features = ["derive"] }
+nifi-lens = { path = "../.." }
+nifi-rust-client = { version = "0.5.0", features = ["dynamic"] }
+snafu = "0.8"
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "time"] }
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+
+[dev-dependencies]
+tempfile = "3"
