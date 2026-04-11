@@ -105,12 +105,12 @@ fn render_sparkline(frame: &mut Frame, area: Rect, buckets: &[BulletinBucket]) {
             .map(|b| b.max_severity)
             .max()
             .unwrap_or(Severity::Unknown);
-        let color = severity_color(max_sev);
+        let style = severity_style(max_sev);
         Line::from(vec![
             Span::raw("bulletins/min (last "),
             Span::styled(SPARKLINE_MINUTES.to_string(), theme::accent()),
             Span::raw(" min, worst "),
-            Span::styled(format!("{max_sev:?}"), Style::default().fg(color)),
+            Span::styled(format!("{max_sev:?}"), style),
             Span::raw(")"),
         ])
     };
@@ -173,13 +173,12 @@ fn render_noisy(frame: &mut Frame, area: Rect, noisy: &[NoisyComponent]) {
         noisy
             .iter()
             .map(|n| {
-                let sev_color = severity_color(n.max_severity);
+                let sev_style = severity_style(n.max_severity);
                 Row::new(vec![
                     Cell::from(n.count.to_string())
                         .style(Style::default().add_modifier(Modifier::BOLD)),
                     Cell::from(n.source_name.clone()),
-                    Cell::from(format!("{:?}", n.max_severity))
-                        .style(Style::default().fg(sev_color)),
+                    Cell::from(format!("{:?}", n.max_severity)).style(sev_style),
                 ])
             })
             .collect()
@@ -212,11 +211,11 @@ fn fill_color(percent: u32) -> Color {
     }
 }
 
-fn severity_color(s: Severity) -> Color {
+fn severity_style(s: Severity) -> Style {
     match s {
-        Severity::Error => Color::Red,
-        Severity::Warning => Color::Yellow,
-        Severity::Info => Color::Blue,
-        Severity::Unknown => Color::DarkGray,
+        Severity::Error => theme::error(),
+        Severity::Warning => theme::warning(),
+        Severity::Info => theme::info(),
+        Severity::Unknown => theme::muted(),
     }
 }
