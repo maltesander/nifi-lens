@@ -144,6 +144,34 @@ ring exceeds its capacity.
   (toggles the Error chip). A cleaner collision rule is a Phase 5
   polish item.
 
+**Accepted Phase 3 edge cases:**
+
+- **Cross-link race on first Browser entry.** `Enter` on a Bulletins
+  row before the Browser tab has ever been visited yields a
+  `"component ... not found in current flow tree"` warning banner.
+  The user retries after the next 15 s tick. Queue-and-retry fix is
+  a Phase 5 polish item.
+- **Detail fetch failures leave `pending_detail` set.** The loading
+  skeleton persists until selection moves or a retry succeeds. The
+  error banner is the user-visible feedback. Phase 5 polish item.
+- **Second `e` collision.** Phase 2's Bulletins `e` already overrode
+  the Phase 0 banner-expand. Phase 3 adds a second override for the
+  Browser properties modal. Phase 5 tracks a cleaner collision rule.
+- **Ports render in the tree but have a minimal detail pane.**
+  Richer port detail is deferred to Phase 5.
+- **Clipboard failures surface as warning banners.** Not errors;
+  clipboard is a nice-to-have.
+- **PG-scoped recent bulletins show 0.** The PG detail pane renders
+  a `"Recent bulletins (0 in this PG)"` header but the actual ring
+  filter is not threaded yet (requires access to `AppState.bulletins`
+  from the render path). Phase 5 polish item.
+- **PG tree row counts show 0.** `ProcessGroupStatusSnapshotDto`
+  does not expose per-PG `running`/`stopped`/`invalid`/`disabled`
+  counts; the recursive fetch populates those fields with 0. The PG
+  detail pane shows the real counts via the separate `get_process_group`
+  call. Per-row tree counts will be wired in a follow-up when an
+  endpoint or library change exposes them.
+
 ## Dependency on `nifi-rust-client`
 
 `nifi-lens` depends on `nifi-rust-client = "0.5.0"` with the `dynamic`
@@ -174,6 +202,11 @@ do not try to teach CI to tolerate it.
 
 **Dependencies are kept alphabetically sorted** in `Cargo.toml`. New deps
 land in the correct position, never appended at the bottom.
+
+Phase 3 activates `arboard` 3 (clipboard support for the `c` keybind)
+and `nucleo` 0.5 (fuzzy matcher powering `Ctrl+F`). Both were added
+earlier in commit `021eadc build: add runtime and dev dependencies`
+and remained unused until Phase 3.
 
 ## Build & Test
 
@@ -334,8 +367,14 @@ usable state.
    with severity / component-type / free-text filters, auto-scroll
    pause with `+N new` badge, and cross-link stubs for Browser / Tracer
    jumps.
-4. **Phase 3 — Browser tab.** Process-group tree, per-node detail, global
-   fuzzy find, cross-links from bulletins.
+4. **Phase 3 — Browser tab.** *(shipped)* Two-pane PG tree + per-node
+   detail view (Processor / Connection / ProcessGroup / Controller
+   Service). 15-second recursive tree poll + on-demand detail fetches.
+   Global `Ctrl+F` fuzzy find (nucleo-backed, lazy-seeded on first
+   Browser entry). `Enter` on a bulletin row now lands on the matching
+   component instead of the Phase 3 stub banner. Properties modal (`e`)
+   for Processor and Controller Service nodes. Clipboard copy (`c`) of
+   the selected node id.
 5. **Phase 4 — Tracer tab.** Forensic flowfile investigation: provenance
    search, lineage timeline, attribute diffs, on-demand content preview.
 6. **Phase 5 — Polish and first release.** Help modal filled out, error

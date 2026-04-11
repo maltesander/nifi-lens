@@ -9,6 +9,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Browser tab: PG tree + per-node detail panes (Processor, Connection,
+  Process Group, Controller Service) with 15-second recursive tree
+  refresh and on-demand detail fetches.
+- Global `Ctrl+F` fuzzy find (nucleo-backed), lazy-seeded on first
+  Browser entry.
+- `Enter` on a Bulletins row now lands on the matching component in
+  Browser (replaces the Phase 3 stub banner).
+- Properties modal (`e`) for Processor and Controller Service nodes.
+- `c` keybind to copy the selected node's id to the clipboard
+  (`arboard`).
+- `r` keybind to force-refresh the Browser tree.
+- Widget: `src/widget/fuzzy_find.rs` backed by `nucleo 0.5`.
 - **Bulletins tab.** Cluster-wide live bulletin tail with severity
   toggles (`e`/`w`/`i`), component-type cycling (`T`), free-text filter
   (`/`), auto-scroll pause (`p`) with a `+N new` badge, and
@@ -101,6 +113,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- `IntentOutcome::NotImplementedInPhase { phase: 3 }` is no longer
+  emitted for `CrossLink::OpenInBrowser`; the dispatcher now returns
+  `IntentOutcome::OpenInBrowserTarget` and the reducer handles the
+  tab switch + ancestor expansion.
 - **`IntentOutcome::NotImplementedInPhase0` → `NotImplementedInPhase {
   phase }`.** Internal refactor; the banner now reports the phase a
   stubbed intent is waiting on.

@@ -27,9 +27,10 @@ Pre-release. The tool is being built in phases; see the roadmap in
 - **Health overview** *(shipped)* — cluster identity, component counts,
   15-minute bulletin-rate sparkline, unhealthy-queue leaderboard, and
   top noisy components on one screen, refreshed every 10 seconds.
-- **Flow browser** — walk the process-group tree, see every detail of a
-  selected processor / connection / controller service on one screen,
-  jump between related components.
+- **Flow browser** *(shipped)* — two-pane PG tree + per-node detail
+  (Processor / Connection / ProcessGroup / Controller Service);
+  `Ctrl+F` fuzzy find across all known components; `e` for a full
+  properties modal; `c` to copy a node id to the clipboard.
 - **Multi-cluster, multi-version** — kubeconfig-style contexts; one binary
   works against every supported NiFi 2.x version via
   [`nifi-rust-client`](https://docs.rs/nifi-rust-client)'s `dynamic` feature.
@@ -85,17 +86,30 @@ operational question.
 counts, bulletin-rate sparkline, top-10 unhealthy queues, noisiest components.
 Refreshes every 10 seconds.
 
-**Bulletins** *(v0.1+)* — cluster-wide bulletin tail with severity,
+**Bulletins** *(shipped)* — cluster-wide bulletin tail with severity,
 component-type, and free-text filters; auto-scroll pause with a new-
-bulletin badge; cross-links to Browser (Phase 3) and Tracer (Phase 4).
+bulletin badge; `Enter` on a row jumps directly to the component in
+the Browser tab.
 
-**Browser** — "Where does X live and what is it doing?" Process-group tree
-with drill-in, per-node detail pane, and global fuzzy find across all known
-components via [`nucleo`](https://crates.io/crates/nucleo).
+**Browser** *(shipped)* — "Where does X live and what is it doing?"
+Two-pane PG tree with drill-in, per-node detail pane, and global
+`Ctrl+F` fuzzy find across all known components via
+[`nucleo`](https://crates.io/crates/nucleo). Press `e` for a full
+properties modal on Processor / Controller Service nodes; `c` to copy
+the selected node's id to the clipboard.
 
 **Tracer** — "Why did this flowfile fail?" Forensic provenance view: paste a
 UUID or component-scoped query, walk the event timeline, see attribute diffs
 per event, preview input and output content on demand (text or hex).
+
+### Browser tab
+
+Two-pane view: PG tree on the left, per-node detail on the right.
+Selection fires an on-demand detail fetch (15 s cadence for the tree,
+on-select for detail). Press `e` on a processor or controller service
+to pop the full properties list in a modal. Press `c` to copy the
+selected node's id to the clipboard. Press `t` on a processor for a
+Tracer cross-link (Phase 4 target — still a stub banner).
 
 ## Keybindings
 
@@ -107,7 +121,7 @@ tool.
 | `Tab` / `Shift+Tab` | Cycle tabs |
 | `F1`–`F4` | Jump to tab directly |
 | `Ctrl+K` | Switch cluster context |
-| `Ctrl+F` | Global component fuzzy find |
+| `Ctrl+F` | Global component fuzzy find (available once the Browser tab has loaded at least once to seed the index) |
 | `?` | Context-aware help modal |
 | `q` / `Ctrl+Q` | Quit |
 
