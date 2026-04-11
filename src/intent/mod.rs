@@ -106,13 +106,13 @@ impl IntentDispatcher {
             Intent::RefreshView(view) => Some(Ok(IntentOutcome::ViewRefreshed { view: *view })),
             Intent::JumpTo(CrossLink::OpenInBrowser { .. }) => {
                 Some(Ok(IntentOutcome::NotImplementedInPhase {
-                    intent_name: "jump to Browser",
+                    intent_name: intent.name(),
                     phase: 3,
                 }))
             }
             Intent::JumpTo(CrossLink::TraceComponent { .. }) => {
                 Some(Ok(IntentOutcome::NotImplementedInPhase {
-                    intent_name: "trace component",
+                    intent_name: intent.name(),
                     phase: 4,
                 }))
             }
