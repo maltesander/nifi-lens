@@ -1,9 +1,11 @@
 //! nifilens-fixture-seeder entry point.
 
+mod cleanup;
 mod cli;
 mod entities;
 mod error;
 mod fixture;
+mod marker;
 mod state;
 
 use clap::Parser as _;
