@@ -4,6 +4,7 @@
 //! Integration tests can `use nifi_lens::...` without spawning a binary.
 
 pub mod cli;
+pub mod client;
 pub mod config;
 pub mod error;
 pub mod logging;
