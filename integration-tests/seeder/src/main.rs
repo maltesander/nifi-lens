@@ -94,8 +94,16 @@ async fn run(args: Args) -> Result<(), SeederError> {
         "connected successfully"
     );
 
-    // Later tasks (T9+) plug fixture logic in here.
-    let _ = client;
+    if args.skip_if_seeded
+        && let Some(id) = marker::find_marker(&client).await?
+    {
+        tracing::info!(%id, "fixture marker already present; exiting early");
+        return Ok(());
+    }
+
+    cleanup::nuke_and_repave(&client).await?;
+    fixture::seed(&client).await?;
+
     Ok(())
 }
 
