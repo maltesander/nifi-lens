@@ -69,8 +69,11 @@ order.
   a `WorkerRegistry` (`src/app/worker.rs`) holding at most one
   `JoinHandle<()>`: on every tab change it aborts the previous worker and
   spawns the new view's worker (no-op when the view already matches).
-  Phase 1 only spawns the Overview worker; Bulletins / Browser / Tracer
-  workers land in their respective phases. Workers run via
+  Phase 2 added the Bulletins worker on a 5-second cadence; Browser /
+  Tracer workers land in their respective phases. Each view's worker
+  resumes from its own cursor on tab re-entry — for Bulletins that is
+  `AppState.bulletins.last_id`, passed into `spawn` by the
+  `WorkerRegistry`. Workers run via
   `tokio::task::spawn_local` on the main-thread `LocalSet` (wired in
   `src/lib.rs`) because `nifi-rust-client` dynamic traits return `!Send`
   futures.
@@ -118,6 +121,28 @@ does not expose).
 `~/.local/state/nifilens/nifilens.log` (rotating, 5 files × 10 MB).
 Default level `info`; `--debug` raises to `debug`. **Never** writes to
 stdout or stderr while the TUI is active.
+
+### Bulletins ring buffer
+
+The Bulletins tab holds a rolling in-memory window of recently-seen
+bulletins. The cap is controlled by `[bulletins] ring_size` in
+`config.toml` (default 5000, valid range 100..=100_000). Memory budget
+at the default is ~1–2 MB. The worker polls
+`flow_api().get_bulletin_board(after, limit=1000)` every 5 seconds,
+dedups via the monotonic `id` cursor, and drops from the front when the
+ring exceeds its capacity.
+
+**Accepted edge cases:**
+
+- **Cluster restart cursor drift.** If NiFi restarts and its in-memory
+  bulletin IDs reset to a lower number, the Bulletins worker will see
+  empty batches until the server's ID stream overtakes `last_id`. Users
+  relaunch the tool in practice. A cursor-reset heuristic is a Phase 5
+  polish item.
+- **`e` key collision.** Phase 0's global `e` expands the error-banner
+  detail. When the Bulletins tab is active, the view-local `e` wins
+  (toggles the Error chip). A cleaner collision rule is a Phase 5
+  polish item.
 
 ## Dependency on `nifi-rust-client`
 
@@ -305,8 +330,10 @@ usable state.
 2. **Phase 1 — Overview tab.** *(shipped)* Health dashboard: identity strip,
    component counts, bulletin-rate sparkline, unhealthy-queue leaderboard,
    top noisy components.
-3. **Phase 2 — Bulletins tab.** Cluster-wide bulletin tail with
-   severity / component / free-text filters and auto-scroll pause.
+3. **Phase 2 — Bulletins tab.** *(shipped)* Cluster-wide bulletin tail
+   with severity / component-type / free-text filters, auto-scroll
+   pause with `+N new` badge, and cross-link stubs for Browser / Tracer
+   jumps.
 4. **Phase 3 — Browser tab.** Process-group tree, per-node detail, global
    fuzzy find, cross-links from bulletins.
 5. **Phase 4 — Tracer tab.** Forensic flowfile investigation: provenance
