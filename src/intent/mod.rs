@@ -104,12 +104,13 @@ impl IntentDispatcher {
         match intent {
             Intent::Quit => Some(Ok(IntentOutcome::Quitting)),
             Intent::RefreshView(view) => Some(Ok(IntentOutcome::ViewRefreshed { view: *view })),
-            Intent::JumpTo(CrossLink::OpenInBrowser { .. }) => {
-                Some(Ok(IntentOutcome::NotImplementedInPhase {
-                    intent_name: intent.name(),
-                    phase: 3,
-                }))
-            }
+            Intent::JumpTo(CrossLink::OpenInBrowser {
+                component_id,
+                group_id,
+            }) => Some(Ok(IntentOutcome::OpenInBrowserTarget {
+                component_id: component_id.clone(),
+                group_id: group_id.clone(),
+            })),
             Intent::JumpTo(CrossLink::TraceComponent { .. }) => {
                 Some(Ok(IntentOutcome::NotImplementedInPhase {
                     intent_name: intent.name(),
@@ -187,19 +188,22 @@ mod tests {
     use crate::event::IntentOutcome;
 
     #[test]
-    fn cross_link_open_in_browser_returns_phase_3_stub() {
+    fn cross_link_open_in_browser_returns_target_outcome() {
         let outcome = IntentDispatcher::handle_pure(&Intent::JumpTo(CrossLink::OpenInBrowser {
             component_id: "proc-1".into(),
             group_id: "root".into(),
         }))
         .expect("JumpTo must be handled by handle_pure")
-        .expect("JumpTo stubs return Ok(...)");
+        .expect("JumpTo returns Ok(...)");
         match outcome {
-            IntentOutcome::NotImplementedInPhase { intent_name, phase } => {
-                assert_eq!(intent_name, "jump to Browser");
-                assert_eq!(phase, 3);
+            IntentOutcome::OpenInBrowserTarget {
+                component_id,
+                group_id,
+            } => {
+                assert_eq!(component_id, "proc-1");
+                assert_eq!(group_id, "root");
             }
-            other => panic!("expected NotImplementedInPhase, got {other:?}"),
+            other => panic!("expected OpenInBrowserTarget, got {other:?}"),
         }
     }
 

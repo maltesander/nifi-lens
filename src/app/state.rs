@@ -14,7 +14,9 @@ use crate::NifiLensError;
 use crate::config::Config;
 use crate::event::{AppEvent, IntentOutcome, ViewPayload};
 use crate::intent::CrossLink;
-use crate::view::browser::state::{BrowserState, FlowIndex, apply_tree_snapshot, build_flow_index};
+use crate::view::browser::state::{
+    BrowserState, FlowIndex, apply_tree_snapshot, build_flow_index, rebuild_visible,
+};
 use crate::view::bulletins::state::BulletinsState;
 use crate::view::overview::{OverviewState, apply_payload as apply_overview_payload};
 
@@ -629,6 +631,47 @@ fn handle_intent_outcome(
                 intent: None,
             }
         }
+        Ok(IntentOutcome::OpenInBrowserTarget {
+            component_id,
+            group_id: _group_id,
+        }) => {
+            state.current_tab = ViewId::Browser;
+            state.modal = None;
+            state.error_detail = None;
+            // Walk the arena for any node matching the component id.
+            let target_arena = state
+                .browser
+                .nodes
+                .iter()
+                .position(|n| n.id == component_id);
+            let Some(arena_idx) = target_arena else {
+                state.status.banner = Some(Banner {
+                    severity: BannerSeverity::Warning,
+                    message: format!("component {component_id} not found in current flow tree"),
+                    detail: None,
+                });
+                return UpdateResult {
+                    redraw: true,
+                    intent: None,
+                };
+            };
+            // Expand every ancestor.
+            let mut cursor = state.browser.nodes[arena_idx].parent;
+            while let Some(p) = cursor {
+                state.browser.expanded.insert(p);
+                cursor = state.browser.nodes[p].parent;
+            }
+            rebuild_visible(&mut state.browser);
+            if let Some(pos) = state.browser.visible.iter().position(|&i| i == arena_idx) {
+                state.browser.selected = pos;
+            }
+            state.browser.emit_detail_request_for_current_selection();
+            state.status.banner = None;
+            UpdateResult {
+                redraw: true,
+                intent: None,
+            }
+        }
         Err(err) => {
             let msg = err.to_string();
             state.status.banner = Some(Banner {
@@ -1041,5 +1084,90 @@ mod tests {
         assert_eq!(s.browser.visible.len(), 2); // root expanded -> 1 child visible
         let idx = s.flow_index.as_ref().expect("FlowIndex built");
         assert_eq!(idx.entries.len(), 2);
+    }
+
+    #[test]
+    fn open_in_browser_target_switches_tab_and_expands_ancestors() {
+        use crate::client::{NodeKind, NodeStatusSummary, RawNode, RecursiveSnapshot};
+        use crate::event::{BrowserPayload, ViewPayload};
+        use std::time::SystemTime;
+
+        let mut s = fresh_state();
+        let c = tiny_config();
+        // Seed a small tree: root → ingest → upd.
+        let snap = RecursiveSnapshot {
+            nodes: vec![
+                RawNode {
+                    parent_idx: None,
+                    kind: NodeKind::ProcessGroup,
+                    id: "root".into(),
+                    group_id: "root".into(),
+                    name: "root".into(),
+                    status_summary: NodeStatusSummary::ProcessGroup {
+                        running: 0,
+                        stopped: 0,
+                        invalid: 0,
+                        disabled: 0,
+                    },
+                },
+                RawNode {
+                    parent_idx: Some(0),
+                    kind: NodeKind::ProcessGroup,
+                    id: "ingest".into(),
+                    group_id: "root".into(),
+                    name: "ingest".into(),
+                    status_summary: NodeStatusSummary::ProcessGroup {
+                        running: 0,
+                        stopped: 0,
+                        invalid: 0,
+                        disabled: 0,
+                    },
+                },
+                RawNode {
+                    parent_idx: Some(1),
+                    kind: NodeKind::Processor,
+                    id: "upd".into(),
+                    group_id: "ingest".into(),
+                    name: "UpdateAttribute".into(),
+                    status_summary: NodeStatusSummary::Processor {
+                        run_status: "Running".into(),
+                    },
+                },
+            ],
+            fetched_at: SystemTime::now(),
+        };
+        update(
+            &mut s,
+            AppEvent::Data(ViewPayload::Browser(BrowserPayload::Tree(snap))),
+            &c,
+        );
+
+        // Jump to "upd".
+        let outcome = Ok(IntentOutcome::OpenInBrowserTarget {
+            component_id: "upd".into(),
+            group_id: "ingest".into(),
+        });
+        update(&mut s, AppEvent::IntentOutcome(outcome), &c);
+        assert_eq!(s.current_tab, ViewId::Browser);
+        let arena = s.browser.nodes.iter().position(|n| n.id == "upd").unwrap();
+        let visible = s.browser.visible.iter().position(|&i| i == arena).unwrap();
+        assert_eq!(s.browser.selected, visible);
+        // Ancestor expanded: "ingest" (arena 1) ∈ expanded.
+        assert!(s.browser.expanded.contains(&1));
+    }
+
+    #[test]
+    fn open_in_browser_target_warns_when_id_not_in_arena() {
+        let mut s = fresh_state();
+        let c = tiny_config();
+        let outcome = Ok(IntentOutcome::OpenInBrowserTarget {
+            component_id: "ghost".into(),
+            group_id: "root".into(),
+        });
+        update(&mut s, AppEvent::IntentOutcome(outcome), &c);
+        assert_eq!(s.current_tab, ViewId::Browser);
+        let banner = s.status.banner.as_ref().unwrap();
+        assert_eq!(banner.severity, BannerSeverity::Warning);
+        assert!(banner.message.contains("ghost"));
     }
 }
