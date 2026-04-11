@@ -9,7 +9,7 @@ Global Keys:
   Tab / Shift+Tab   Cycle tabs
   F1..F4            Jump to tab
   Ctrl+K            Switch context
-  Ctrl+F            Fuzzy find (not yet implemented)
+  Ctrl+F            Global fuzzy find (requires Browser seed)
   ?                 Toggle this help
   q / Ctrl+Q        Quit
   Esc               Close modal
@@ -37,7 +37,16 @@ Bulletins Tab:
 
 const BROWSER_TEXT: &str = "\
 Browser Tab:
-  (coming in Phase 3)
+  ↑/↓ or j/k       Move selection
+  PgUp/PgDn         Page scroll
+  Home/End          Jump to first / last row
+  Enter / → / l     Expand PG and drill in (leaf: no-op)
+  Backspace / ← / h Collapse PG / move to parent
+  r                 Force-refresh tree
+  e                 Expand properties (Processor/CS with detail)
+  c                 Copy selected node id to clipboard
+  t                 Trace selected processor (Phase 4 stub)
+  Ctrl+F            Open fuzzy find
 ";
 
 const TRACER_TEXT: &str = "\
