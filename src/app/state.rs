@@ -449,6 +449,7 @@ mod tests {
     fn tiny_config() -> Config {
         Config {
             current_context: "dev".into(),
+            bulletins: Default::default(),
             contexts: vec![
                 Context {
                     name: "dev".into(),

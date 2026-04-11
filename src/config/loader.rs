@@ -26,6 +26,8 @@ pub fn load(args: &Args) -> Result<(Config, ResolvedContext), NifiLensError> {
     let config: Config =
         toml::from_str(&contents).context(ConfigParseSnafu { path: path.clone() })?;
 
+    validate_bulletins(&config.bulletins)?;
+
     let active_name = args
         .context
         .as_deref()
@@ -106,6 +108,18 @@ fn check_permissions(path: &Path) -> Result<(), NifiLensError> {
 
 #[cfg(not(unix))]
 fn check_permissions(_path: &Path) -> Result<(), NifiLensError> {
+    Ok(())
+}
+
+fn validate_bulletins(bulletins: &crate::config::BulletinsConfig) -> Result<(), NifiLensError> {
+    if !(100..=100_000).contains(&bulletins.ring_size) {
+        return Err(NifiLensError::ConfigInvalid {
+            detail: format!(
+                "bulletins.ring_size must be between 100 and 100000 (got {})",
+                bulletins.ring_size
+            ),
+        });
+    }
     Ok(())
 }
 
@@ -300,6 +314,93 @@ password = "x"
             }
             other => panic!("expected UnknownContext, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn bulletins_defaults_when_missing() {
+        let file = temp_config_with(
+            r#"
+current_context = "dev"
+
+[[contexts]]
+name = "dev"
+url = "https://dev:8443"
+username = "admin"
+password = "x"
+"#,
+        );
+        let args = args_for(file.path(), None);
+        let (config, _) = load(&args).unwrap();
+        assert_eq!(config.bulletins.ring_size, 5000);
+    }
+
+    #[test]
+    fn bulletins_explicit_ring_size_parses() {
+        let file = temp_config_with(
+            r#"
+current_context = "dev"
+
+[bulletins]
+ring_size = 2500
+
+[[contexts]]
+name = "dev"
+url = "https://dev:8443"
+username = "admin"
+password = "x"
+"#,
+        );
+        let args = args_for(file.path(), None);
+        let (config, _) = load(&args).unwrap();
+        assert_eq!(config.bulletins.ring_size, 2500);
+    }
+
+    #[test]
+    fn bulletins_ring_size_below_floor_errors() {
+        let file = temp_config_with(
+            r#"
+current_context = "dev"
+
+[bulletins]
+ring_size = 50
+
+[[contexts]]
+name = "dev"
+url = "https://dev:8443"
+username = "admin"
+password = "x"
+"#,
+        );
+        let args = args_for(file.path(), None);
+        let err = load(&args).unwrap_err();
+        match err {
+            NifiLensError::ConfigInvalid { detail } => {
+                assert!(detail.contains("ring_size"));
+                assert!(detail.contains("50"));
+            }
+            other => panic!("expected ConfigInvalid, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn bulletins_ring_size_above_ceiling_errors() {
+        let file = temp_config_with(
+            r#"
+current_context = "dev"
+
+[bulletins]
+ring_size = 500000
+
+[[contexts]]
+name = "dev"
+url = "https://dev:8443"
+username = "admin"
+password = "x"
+"#,
+        );
+        let args = args_for(file.path(), None);
+        let err = load(&args).unwrap_err();
+        assert!(matches!(err, NifiLensError::ConfigInvalid { .. }));
     }
 
     #[test]

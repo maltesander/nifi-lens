@@ -12,7 +12,27 @@ use serde::Deserialize;
 pub struct Config {
     pub current_context: String,
     #[serde(default)]
+    pub bulletins: BulletinsConfig,
+    #[serde(default)]
     pub contexts: Vec<Context>,
+}
+
+#[derive(Debug, Clone, Deserialize, PartialEq, Eq)]
+pub struct BulletinsConfig {
+    #[serde(default = "default_ring_size")]
+    pub ring_size: usize,
+}
+
+impl Default for BulletinsConfig {
+    fn default() -> Self {
+        Self {
+            ring_size: default_ring_size(),
+        }
+    }
+}
+
+fn default_ring_size() -> usize {
+    5000
 }
 
 #[derive(Debug, Clone, Deserialize, PartialEq, Eq)]

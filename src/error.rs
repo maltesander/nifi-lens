@@ -29,6 +29,9 @@ pub enum NifiLensError {
         source: toml::de::Error,
     },
 
+    #[snafu(display("config is invalid: {detail}"))]
+    ConfigInvalid { detail: String },
+
     #[snafu(display("config at {} already exists; pass --force to overwrite", path.display()))]
     ConfigAlreadyExists { path: PathBuf },
 
