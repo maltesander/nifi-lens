@@ -364,3 +364,208 @@ fn wrap_lines(s: &str, width: usize, max_lines: usize) -> Vec<String> {
 
     lines
 }
+
+#[cfg(test)]
+mod tests {
+    use super::render;
+    use crate::client::BulletinSnapshot;
+    use crate::event::BulletinsPayload;
+    use crate::view::bulletins::state::{BulletinsState, apply_payload};
+    use ratatui::Terminal;
+    use ratatui::backend::TestBackend;
+    use std::time::{Duration, UNIX_EPOCH};
+
+    // 2026-04-11T10:14:22Z in unix seconds.
+    const T0: u64 = 1_775_902_462;
+
+    fn b(
+        id: i64,
+        level: &str,
+        source_type: &str,
+        source_name: &str,
+        message: &str,
+        ts: &str,
+    ) -> BulletinSnapshot {
+        BulletinSnapshot {
+            id,
+            level: level.into(),
+            message: message.into(),
+            source_id: format!("src-{id}"),
+            source_name: source_name.into(),
+            source_type: source_type.into(),
+            group_id: "root".into(),
+            timestamp_iso: ts.into(),
+        }
+    }
+
+    fn seed_state(rows: Vec<BulletinSnapshot>) -> BulletinsState {
+        let mut s = BulletinsState::with_capacity(100);
+        apply_payload(
+            &mut s,
+            BulletinsPayload {
+                bulletins: rows,
+                fetched_at: UNIX_EPOCH + Duration::from_secs(T0),
+            },
+        );
+        s
+    }
+
+    fn render_to_string(state: &BulletinsState) -> String {
+        let backend = TestBackend::new(120, 30);
+        let mut term = Terminal::new(backend).unwrap();
+        term.draw(|f| render(f, f.area(), state)).unwrap();
+        format!("{}", term.backend())
+    }
+
+    #[test]
+    fn snapshot_empty() {
+        let state = BulletinsState::with_capacity(100);
+        insta::assert_snapshot!("bulletins_empty", render_to_string(&state));
+    }
+
+    #[test]
+    fn snapshot_seeded_all_on() {
+        let rows = vec![
+            b(
+                1,
+                "INFO",
+                "PROCESSOR",
+                "GenerateFlowFile",
+                "1 file generated",
+                "2026-04-11T10:14:10Z",
+            ),
+            b(
+                2,
+                "WARN",
+                "PROCESSOR",
+                "UpdateAttribute",
+                "expression evaluated to empty string",
+                "2026-04-11T10:14:12Z",
+            ),
+            b(
+                3,
+                "ERROR",
+                "PROCESSOR",
+                "PutKafka",
+                "NotLeaderForPartitionException: server is not the leader",
+                "2026-04-11T10:14:20Z",
+            ),
+            b(
+                4,
+                "INFO",
+                "CONTROLLER_SERVICE",
+                "AvroReader",
+                "reader initialized",
+                "2026-04-11T10:14:21Z",
+            ),
+            b(
+                5,
+                "ERROR",
+                "PROCESSOR",
+                "PutDatabaseRecord",
+                "connection refused: database unreachable",
+                "2026-04-11T10:14:22Z",
+            ),
+        ];
+        let state = seed_state(rows);
+        insta::with_settings!(
+            { filters => vec![(r"last [^\s]+ ago", "last <DUR> ago")] },
+            { insta::assert_snapshot!("bulletins_seeded_all_on", render_to_string(&state)); }
+        );
+    }
+
+    #[test]
+    fn snapshot_filtered_severity_only_errors() {
+        let rows = vec![
+            b(1, "INFO", "PROCESSOR", "A", "info", "2026-04-11T10:14:10Z"),
+            b(2, "WARN", "PROCESSOR", "B", "warn", "2026-04-11T10:14:12Z"),
+            b(
+                3,
+                "ERROR",
+                "PROCESSOR",
+                "C",
+                "error one",
+                "2026-04-11T10:14:20Z",
+            ),
+            b(
+                4,
+                "ERROR",
+                "PROCESSOR",
+                "D",
+                "error two",
+                "2026-04-11T10:14:22Z",
+            ),
+        ];
+        let mut state = seed_state(rows);
+        state.toggle_info();
+        state.toggle_warning();
+        insta::with_settings!(
+            { filters => vec![(r"last [^\s]+ ago", "last <DUR> ago")] },
+            {
+                insta::assert_snapshot!(
+                    "bulletins_filtered_severity_only_errors",
+                    render_to_string(&state)
+                );
+            }
+        );
+    }
+
+    #[test]
+    fn snapshot_paused_with_badge() {
+        let rows = vec![
+            b(1, "ERROR", "PROCESSOR", "A", "one", "2026-04-11T10:14:10Z"),
+            b(2, "ERROR", "PROCESSOR", "B", "two", "2026-04-11T10:14:12Z"),
+            b(
+                3,
+                "ERROR",
+                "PROCESSOR",
+                "C",
+                "three",
+                "2026-04-11T10:14:14Z",
+            ),
+            b(4, "ERROR", "PROCESSOR", "D", "four", "2026-04-11T10:14:16Z"),
+        ];
+        let mut state = seed_state(rows);
+        state.auto_scroll = false;
+        state.selected = 1;
+        state.new_since_pause = 7;
+        insta::with_settings!(
+            { filters => vec![(r"last [^\s]+ ago", "last <DUR> ago")] },
+            { insta::assert_snapshot!("bulletins_paused_with_badge", render_to_string(&state)); }
+        );
+    }
+
+    #[test]
+    fn snapshot_text_input_active() {
+        let rows = vec![
+            b(
+                1,
+                "ERROR",
+                "PROCESSOR",
+                "PutKafka",
+                "IOException: timeout",
+                "2026-04-11T10:14:10Z",
+            ),
+            b(
+                2,
+                "INFO",
+                "PROCESSOR",
+                "GenerateFlowFile",
+                "ok",
+                "2026-04-11T10:14:12Z",
+            ),
+        ];
+        let mut state = seed_state(rows);
+        state.enter_text_input_mode();
+        let prev = state.selected_ring_index();
+        state.push_text_input('i', prev);
+        let prev = state.selected_ring_index();
+        state.push_text_input('o', prev);
+        insta::with_settings!(
+            { filters => vec![(r"last [^\s]+ ago", "last <DUR> ago")] },
+            {
+                insta::assert_snapshot!("bulletins_text_input_active", render_to_string(&state));
+            }
+        );
+    }
+}
