@@ -5,6 +5,7 @@
 //! login time. The wrapped client is exposed via `Deref` so callers can write
 //! `client.flow_api().get_about_info()` without an explicit accessor.
 
+pub mod browser;
 pub mod build;
 
 use std::ops::{Deref, DerefMut};
@@ -388,3 +389,5 @@ pub struct BulletinSnapshot {
 pub struct BulletinBoardSnapshot {
     pub bulletins: Vec<BulletinSnapshot>,
 }
+
+pub use browser::{NodeKind, NodeStatusSummary, RawNode, RecursiveSnapshot};

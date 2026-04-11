@@ -147,6 +147,12 @@ pub enum NifiLensError {
         source: Box<dyn std::error::Error + Send + Sync>,
     },
 
+    #[snafu(display("fetching browser tree for context '{context}' failed: {source}"))]
+    BrowserTreeFailed {
+        context: String,
+        source: Box<dyn std::error::Error + Send + Sync>,
+    },
+
     #[snafu(display("write intents are disabled in Phase 0 (intent: {intent_name})"))]
     WriteIntentRefused { intent_name: &'static str },
 

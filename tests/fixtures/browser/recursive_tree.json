@@ -1,0 +1,98 @@
+{
+  "processGroupStatus": {
+    "id": "root",
+    "name": "NiFi Flow",
+    "aggregateSnapshot": {
+      "id": "root",
+      "name": "NiFi Flow",
+      "runningCount": 5,
+      "stoppedCount": 1,
+      "invalidCount": 0,
+      "disabledCount": 0,
+      "activeThreadCount": 2,
+      "flowFilesQueued": 42,
+      "bytesQueued": 4096,
+      "processorStatusSnapshots": [
+        {
+          "id": "gen-1",
+          "processorStatusSnapshot": {
+            "id": "gen-1",
+            "name": "GenerateFlowFile",
+            "type": "org.apache.nifi.processors.standard.GenerateFlowFile",
+            "groupId": "root",
+            "runStatus": "Running",
+            "activeThreadCount": 0
+          }
+        }
+      ],
+      "connectionStatusSnapshots": [
+        {
+          "id": "conn-1",
+          "connectionStatusSnapshot": {
+            "id": "conn-1",
+            "name": "gen->upd",
+            "groupId": "root",
+            "sourceId": "gen-1",
+            "sourceName": "GenerateFlowFile",
+            "destinationId": "upd-1",
+            "destinationName": "UpdateAttribute",
+            "percentUseCount": 34,
+            "percentUseBytes": 12,
+            "flowFilesQueued": 12,
+            "bytesQueued": 1024,
+            "queued": "12 / 1 KB"
+          }
+        }
+      ],
+      "processGroupStatusSnapshots": [
+        {
+          "id": "ingest",
+          "processGroupStatusSnapshot": {
+            "id": "ingest",
+            "name": "ingest",
+            "runningCount": 3,
+            "stoppedCount": 0,
+            "invalidCount": 0,
+            "disabledCount": 0,
+            "activeThreadCount": 1,
+            "processorStatusSnapshots": [
+              {
+                "id": "upd-1",
+                "processorStatusSnapshot": {
+                  "id": "upd-1",
+                  "name": "UpdateAttribute",
+                  "type": "org.apache.nifi.processors.attributes.UpdateAttribute",
+                  "groupId": "ingest",
+                  "runStatus": "Running",
+                  "activeThreadCount": 1
+                }
+              }
+            ],
+            "inputPortStatusSnapshots": [
+              {
+                "id": "in-1",
+                "portStatusSnapshot": {
+                  "id": "in-1",
+                  "name": "from-outside",
+                  "groupId": "ingest",
+                  "runStatus": "Running"
+                }
+              }
+            ],
+            "outputPortStatusSnapshots": [
+              {
+                "id": "out-1",
+                "portStatusSnapshot": {
+                  "id": "out-1",
+                  "name": "to-enrich",
+                  "groupId": "ingest",
+                  "runStatus": "Running"
+                }
+              }
+            ]
+          }
+        }
+      ]
+    }
+  }
+}
