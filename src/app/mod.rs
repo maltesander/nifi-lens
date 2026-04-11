@@ -43,7 +43,7 @@ pub async fn run(
     install_panic_hook(stderr_toggle.clone());
     let mut terminal = build_terminal()?;
 
-    let mut state = AppState::new(context_name, detected_version);
+    let mut state = AppState::new(context_name, detected_version, &config);
     let mut workers = WorkerRegistry::new();
     workers.ensure(state.current_tab, &client, &tx);
 
@@ -64,6 +64,7 @@ pub async fn run(
             let tx = tx.clone();
             let intent = match pending {
                 PendingIntent::SwitchContext(name) => Intent::SwitchContext(name),
+                PendingIntent::JumpTo(link) => Intent::JumpTo(link),
                 PendingIntent::Quit => Intent::Quit,
             };
             // Intent dispatch runs on the multi-thread runtime via

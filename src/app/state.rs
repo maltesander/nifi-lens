@@ -11,6 +11,8 @@ use semver::Version;
 use crate::NifiLensError;
 use crate::config::Config;
 use crate::event::{AppEvent, IntentOutcome, ViewPayload};
+use crate::intent::CrossLink;
+use crate::view::bulletins::state::BulletinsState;
 use crate::view::overview::{OverviewState, apply_payload as apply_overview_payload};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -49,13 +51,14 @@ pub struct AppState {
     pub last_refresh: Instant,
     pub modal: Option<Modal>,
     pub overview: OverviewState,
+    pub bulletins: BulletinsState,
     pub status: StatusLine,
     pub error_detail: Option<String>,
     pub should_quit: bool,
 }
 
 impl AppState {
-    pub fn new(context_name: String, detected_version: Version) -> Self {
+    pub fn new(context_name: String, detected_version: Version, config: &Config) -> Self {
         Self {
             current_tab: ViewId::Overview,
             context_name,
@@ -63,6 +66,7 @@ impl AppState {
             last_refresh: Instant::now(),
             modal: None,
             overview: OverviewState::new(),
+            bulletins: BulletinsState::with_capacity(config.bulletins.ring_size),
             status: StatusLine::default(),
             error_detail: None,
             should_quit: false,
@@ -168,6 +172,7 @@ pub struct UpdateResult {
 #[derive(Debug)]
 pub enum PendingIntent {
     SwitchContext(String),
+    JumpTo(CrossLink),
     Quit,
 }
 
@@ -191,8 +196,14 @@ pub fn update(state: &mut AppState, event: AppEvent, config: &Config) -> UpdateR
                 intent: None,
             }
         }
-        // Stub: replaced by a real apply_payload call in Task 7.
-        AppEvent::Data(ViewPayload::Bulletins(_)) => UpdateResult::default(),
+        AppEvent::Data(ViewPayload::Bulletins(payload)) => {
+            crate::view::bulletins::state::apply_payload(&mut state.bulletins, payload);
+            state.last_refresh = Instant::now();
+            UpdateResult {
+                redraw: true,
+                intent: None,
+            }
+        }
         AppEvent::IntentOutcome(outcome) => handle_intent_outcome(state, outcome),
         AppEvent::Quit => {
             state.should_quit = true;
@@ -270,6 +281,172 @@ fn handle_key(state: &mut AppState, key: KeyEvent, config: &Config) -> UpdateRes
                     _ => return UpdateResult::default(),
                 }
             }
+        }
+    }
+
+    // Text-input mode captures every key except Esc/Enter/Backspace.
+    if state.current_tab == ViewId::Bulletins && state.bulletins.text_input.is_some() {
+        match key.code {
+            KeyCode::Esc => {
+                let prev = state.bulletins.selected_ring_index();
+                state.bulletins.cancel_text_input(prev);
+                return UpdateResult {
+                    redraw: true,
+                    intent: None,
+                };
+            }
+            KeyCode::Enter => {
+                let prev = state.bulletins.selected_ring_index();
+                state.bulletins.commit_text_input(prev);
+                return UpdateResult {
+                    redraw: true,
+                    intent: None,
+                };
+            }
+            KeyCode::Backspace => {
+                let prev = state.bulletins.selected_ring_index();
+                state.bulletins.pop_text_input(prev);
+                return UpdateResult {
+                    redraw: true,
+                    intent: None,
+                };
+            }
+            KeyCode::Char(ch) => {
+                let prev = state.bulletins.selected_ring_index();
+                state.bulletins.push_text_input(ch, prev);
+                return UpdateResult {
+                    redraw: true,
+                    intent: None,
+                };
+            }
+            _ => return UpdateResult::default(),
+        }
+    }
+
+    // Bulletins view-local keys take priority over global `e`. Accept
+    // NONE or SHIFT modifiers so `G` and `T` (typed as Shift+g / Shift+t)
+    // reach the handler — crossterm delivers them as
+    // `KeyCode::Char('G')` with `KeyModifiers::SHIFT`.
+    if state.current_tab == ViewId::Bulletins
+        && matches!(key.modifiers, KeyModifiers::NONE | KeyModifiers::SHIFT)
+    {
+        match key.code {
+            KeyCode::Char('e') => {
+                state.bulletins.toggle_error();
+                return UpdateResult {
+                    redraw: true,
+                    intent: None,
+                };
+            }
+            KeyCode::Char('w') => {
+                state.bulletins.toggle_warning();
+                return UpdateResult {
+                    redraw: true,
+                    intent: None,
+                };
+            }
+            KeyCode::Char('i') => {
+                state.bulletins.toggle_info();
+                return UpdateResult {
+                    redraw: true,
+                    intent: None,
+                };
+            }
+            KeyCode::Char('T') => {
+                state.bulletins.cycle_component_type();
+                return UpdateResult {
+                    redraw: true,
+                    intent: None,
+                };
+            }
+            KeyCode::Char('c') => {
+                state.bulletins.clear_filters();
+                return UpdateResult {
+                    redraw: true,
+                    intent: None,
+                };
+            }
+            KeyCode::Char('p') => {
+                state.bulletins.toggle_pause();
+                return UpdateResult {
+                    redraw: true,
+                    intent: None,
+                };
+            }
+            KeyCode::Char('/') => {
+                state.bulletins.enter_text_input_mode();
+                return UpdateResult {
+                    redraw: true,
+                    intent: None,
+                };
+            }
+            KeyCode::Char('g') | KeyCode::Home => {
+                state.bulletins.jump_to_oldest();
+                return UpdateResult {
+                    redraw: true,
+                    intent: None,
+                };
+            }
+            KeyCode::Char('G') | KeyCode::End => {
+                state.bulletins.jump_to_newest();
+                return UpdateResult {
+                    redraw: true,
+                    intent: None,
+                };
+            }
+            KeyCode::Up | KeyCode::Char('k') => {
+                state.bulletins.move_selection_up();
+                return UpdateResult {
+                    redraw: true,
+                    intent: None,
+                };
+            }
+            KeyCode::Down | KeyCode::Char('j') => {
+                state.bulletins.move_selection_down();
+                return UpdateResult {
+                    redraw: true,
+                    intent: None,
+                };
+            }
+            KeyCode::Enter => {
+                if let Some(idx) = state.bulletins.selected_ring_index() {
+                    let b = &state.bulletins.ring[idx];
+                    let link = CrossLink::OpenInBrowser {
+                        component_id: b.source_id.clone(),
+                        group_id: b.group_id.clone(),
+                    };
+                    return UpdateResult {
+                        redraw: true,
+                        intent: Some(PendingIntent::JumpTo(link)),
+                    };
+                }
+                return UpdateResult::default();
+            }
+            KeyCode::Char('t') => {
+                if let Some(idx) = state.bulletins.selected_ring_index() {
+                    let b = &state.bulletins.ring[idx];
+                    use time::OffsetDateTime;
+                    use time::format_description::well_known::Rfc3339;
+                    let since = OffsetDateTime::parse(&b.timestamp_iso, &Rfc3339)
+                        .ok()
+                        .and_then(|dt| {
+                            std::time::UNIX_EPOCH.checked_add(std::time::Duration::from_secs(
+                                dt.unix_timestamp().max(0) as u64,
+                            ))
+                        })
+                        .unwrap_or_else(std::time::SystemTime::now);
+                    let link = CrossLink::TraceComponent {
+                        component_id: b.source_id.clone(),
+                        since,
+                    };
+                    return UpdateResult {
+                        redraw: true,
+                        intent: Some(PendingIntent::JumpTo(link)),
+                    };
+                }
+                return UpdateResult::default();
+            }
+            _ => {}
         }
     }
 
@@ -445,7 +622,8 @@ mod tests {
     use crate::config::{Context, Credentials, VersionStrategy};
 
     fn fresh_state() -> AppState {
-        AppState::new("dev".into(), Version::new(2, 9, 0))
+        let c = tiny_config();
+        AppState::new("dev".into(), Version::new(2, 9, 0), &c)
     }
 
     fn tiny_config() -> Config {
@@ -605,6 +783,107 @@ mod tests {
             s.status.banner.as_ref().unwrap().severity,
             BannerSeverity::Error
         );
+    }
+
+    #[test]
+    fn bulletins_data_event_seeds_ring() {
+        use crate::client::BulletinSnapshot;
+        use crate::event::{BulletinsPayload, ViewPayload};
+        use std::time::SystemTime;
+
+        let mut s = fresh_state();
+        let c = tiny_config();
+        let payload = BulletinsPayload {
+            bulletins: vec![BulletinSnapshot {
+                id: 1,
+                level: "ERROR".into(),
+                message: "m".into(),
+                source_id: "a".into(),
+                source_name: "A".into(),
+                source_type: "PROCESSOR".into(),
+                group_id: "root".into(),
+                timestamp_iso: "2026-04-11T10:14:22Z".into(),
+            }],
+            fetched_at: SystemTime::now(),
+        };
+        let r = update(&mut s, AppEvent::Data(ViewPayload::Bulletins(payload)), &c);
+        assert!(r.redraw);
+        assert_eq!(s.bulletins.ring.len(), 1);
+    }
+
+    #[test]
+    fn on_bulletins_tab_e_toggles_error_chip() {
+        let mut s = fresh_state();
+        let c = tiny_config();
+        s.current_tab = ViewId::Bulletins;
+        assert!(s.bulletins.filters.show_error);
+        update(&mut s, key(KeyCode::Char('e'), KeyModifiers::NONE), &c);
+        assert!(!s.bulletins.filters.show_error);
+    }
+
+    #[test]
+    fn on_bulletins_tab_slash_enters_text_input_mode() {
+        let mut s = fresh_state();
+        let c = tiny_config();
+        s.current_tab = ViewId::Bulletins;
+        update(&mut s, key(KeyCode::Char('/'), KeyModifiers::NONE), &c);
+        assert!(s.bulletins.text_input.is_some());
+    }
+
+    #[test]
+    fn bulletins_text_input_mode_consumes_chars_and_global_keys_are_suppressed() {
+        let mut s = fresh_state();
+        let c = tiny_config();
+        s.current_tab = ViewId::Bulletins;
+        update(&mut s, key(KeyCode::Char('/'), KeyModifiers::NONE), &c);
+        update(&mut s, key(KeyCode::Char('f'), KeyModifiers::NONE), &c);
+        update(&mut s, key(KeyCode::Char('o'), KeyModifiers::NONE), &c);
+        update(&mut s, key(KeyCode::Char('o'), KeyModifiers::NONE), &c);
+        assert_eq!(s.bulletins.text_input.as_deref(), Some("foo"));
+        // Tab should NOT cycle tabs while typing.
+        update(&mut s, key(KeyCode::Tab, KeyModifiers::NONE), &c);
+        assert_eq!(s.current_tab, ViewId::Bulletins);
+        // Enter commits.
+        update(&mut s, key(KeyCode::Enter, KeyModifiers::NONE), &c);
+        assert!(s.bulletins.text_input.is_none());
+        assert_eq!(s.bulletins.filters.text, "foo");
+    }
+
+    #[test]
+    fn on_bulletins_tab_enter_emits_jump_to_browser_intent() {
+        use crate::client::BulletinSnapshot;
+        use crate::event::{BulletinsPayload, ViewPayload};
+        use std::time::SystemTime;
+
+        let mut s = fresh_state();
+        let c = tiny_config();
+        s.current_tab = ViewId::Bulletins;
+        // Seed one bulletin so there's a selection.
+        let payload = BulletinsPayload {
+            bulletins: vec![BulletinSnapshot {
+                id: 1,
+                level: "ERROR".into(),
+                message: "m".into(),
+                source_id: "proc-1".into(),
+                source_name: "A".into(),
+                source_type: "PROCESSOR".into(),
+                group_id: "root".into(),
+                timestamp_iso: "2026-04-11T10:14:22Z".into(),
+            }],
+            fetched_at: SystemTime::now(),
+        };
+        update(&mut s, AppEvent::Data(ViewPayload::Bulletins(payload)), &c);
+        let r = update(&mut s, key(KeyCode::Enter, KeyModifiers::NONE), &c);
+        match r.intent {
+            Some(PendingIntent::JumpTo(crate::intent::CrossLink::OpenInBrowser {
+                component_id,
+                group_id,
+            })) => {
+                assert_eq!(component_id, "proc-1");
+                assert_eq!(group_id, "root");
+            }
+            other => panic!("expected JumpTo(OpenInBrowser), got {other:?}"),
+        }
     }
 
     #[test]
