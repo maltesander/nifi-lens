@@ -66,6 +66,14 @@ pub async fn run(
                 PendingIntent::SwitchContext(name) => Intent::SwitchContext(name),
                 PendingIntent::Quit => Intent::Quit,
             };
+            // Intent dispatch runs on the multi-thread runtime via
+            // `tokio::spawn`, NOT on the main-thread `LocalSet` that hosts
+            // the Overview worker. That means the future below must be
+            // `Send`. The intent dispatcher only holds `Arc<RwLock<...>>`
+            // and owned intent values, which are all `Send`. If a future
+            // intent dispatch needs a `!Send` path (e.g., a direct call
+            // into the dynamic client traits), switch to `spawn_local`
+            // and accept that the work runs on the UI thread.
             tokio::spawn(async move {
                 let outcome = dispatcher.dispatch(intent).await;
                 let _ = tx.send(AppEvent::IntentOutcome(outcome)).await;

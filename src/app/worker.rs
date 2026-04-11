@@ -8,6 +8,7 @@ use std::sync::Arc;
 
 use tokio::sync::{RwLock, mpsc};
 use tokio::task::JoinHandle;
+use tracing;
 
 use crate::app::state::ViewId;
 use crate::client::NifiClient;
@@ -35,24 +36,38 @@ impl WorkerRegistry {
         if matches!(&self.current, Some((existing, _)) if *existing == view) {
             return;
         }
-        if let Some((_, handle)) = self.current.take() {
+        if let Some((existing_view, handle)) = self.current.take() {
+            tracing::debug!(
+                from = ?existing_view,
+                to = ?view,
+                "worker registry: swapping view worker"
+            );
             handle.abort();
         }
         let handle = match view {
-            ViewId::Overview => Some(crate::view::overview::worker::spawn(
-                client.clone(),
-                tx.clone(),
-            )),
+            ViewId::Overview => {
+                tracing::debug!(?view, "worker registry: spawning overview worker");
+                Some(crate::view::overview::worker::spawn(
+                    client.clone(),
+                    tx.clone(),
+                ))
+            }
             // Phases 2–4 will spawn bulletins / browser / tracer workers here.
-            ViewId::Bulletins | ViewId::Browser | ViewId::Tracer => None,
+            ViewId::Bulletins | ViewId::Browser | ViewId::Tracer => {
+                tracing::debug!(?view, "worker registry: no worker for this view");
+                None
+            }
         };
         if let Some(handle) = handle {
             self.current = Some((view, handle));
         }
     }
 
-    /// Abort whatever is running. Called on app shutdown.
+    /// Abort the currently-running view worker, if any. Called on app
+    /// shutdown. Phase 1 only ever has one active worker, so this aborts
+    /// exactly one handle or none.
     pub fn shutdown(&mut self) {
+        tracing::debug!("worker registry: shutting down");
         if let Some((_, handle)) = self.current.take() {
             handle.abort();
         }
