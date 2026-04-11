@@ -11,7 +11,7 @@ use ratatui::widgets::{Block, Borders, Paragraph};
 
 use crate::theme;
 
-/// Render a centered "<title> — coming in <phase>" message.
+/// Render a centered `"{title} — coming in {phase}"` message.
 pub fn render_placeholder(frame: &mut Frame, area: Rect, title: &str, phase: &str) {
     let block = Block::default()
         .borders(Borders::ALL)
