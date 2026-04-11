@@ -2,6 +2,7 @@
 
 mod cli;
 mod error;
+mod state;
 
 use clap::Parser as _;
 use tracing_subscriber::EnvFilter;
