@@ -2,6 +2,7 @@
 
 pub mod state;
 pub mod ui;
+pub mod worker;
 
 use std::io::Stdout;
 use std::sync::Arc;
@@ -15,6 +16,7 @@ use ratatui::backend::CrosstermBackend;
 use tokio::sync::{RwLock, mpsc};
 
 use crate::app::state::{AppState, PendingIntent, update};
+use crate::app::worker::WorkerRegistry;
 use crate::client::NifiClient;
 use crate::config::Config;
 use crate::error::NifiLensError;
@@ -42,6 +44,8 @@ pub async fn run(
     let mut terminal = build_terminal()?;
 
     let mut state = AppState::new(context_name, detected_version);
+    let mut workers = WorkerRegistry::new();
+    workers.ensure(state.current_tab, &client, &tx);
 
     let dispatcher = Arc::new(IntentDispatcher {
         client: client.clone(),
@@ -77,8 +81,11 @@ pub async fn run(
                 .draw(|f| ui::render(f, &state))
                 .map_err(|source| NifiLensError::TerminalInit { source })?;
         }
+
+        workers.ensure(state.current_tab, &client, &tx);
     }
 
+    workers.shutdown();
     Ok(())
 }
 
