@@ -7,6 +7,8 @@ use std::time::Instant;
 
 use crossterm::event::{Event, KeyCode, KeyEvent, KeyModifiers};
 use semver::Version;
+use time::OffsetDateTime;
+use time::format_description::well_known::Rfc3339;
 
 use crate::NifiLensError;
 use crate::config::Config;
@@ -425,8 +427,6 @@ fn handle_key(state: &mut AppState, key: KeyEvent, config: &Config) -> UpdateRes
             KeyCode::Char('t') => {
                 if let Some(idx) = state.bulletins.selected_ring_index() {
                     let b = &state.bulletins.ring[idx];
-                    use time::OffsetDateTime;
-                    use time::format_description::well_known::Rfc3339;
                     let since = OffsetDateTime::parse(&b.timestamp_iso, &Rfc3339)
                         .ok()
                         .and_then(|dt| {
