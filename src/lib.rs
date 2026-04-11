@@ -11,6 +11,9 @@ pub mod error;
 pub mod event;
 pub mod intent;
 pub mod logging;
+pub mod theme;
+pub mod view;
+pub mod widget;
 
 pub use error::NifiLensError;
 
