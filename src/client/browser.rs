@@ -273,7 +273,7 @@ impl NifiClient {
                     }
                 })
             })?;
-        let component = pg_entity.component.clone().unwrap_or_default();
+        let component = pg_entity.component.unwrap_or_default();
         let status_agg = pg_entity
             .status
             .as_ref()
@@ -345,4 +345,27 @@ impl NifiClient {
 /// dot.
 pub(crate) fn short_type(fqn: &str) -> String {
     fqn.rsplit('.').next().unwrap_or(fqn).to_string()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::short_type;
+
+    #[test]
+    fn short_type_strips_package_prefix() {
+        assert_eq!(
+            short_type("org.apache.nifi.kafka.service.Kafka3ConnectionService"),
+            "Kafka3ConnectionService"
+        );
+    }
+
+    #[test]
+    fn short_type_passthrough_when_no_dot() {
+        assert_eq!(short_type("MyProcessor"), "MyProcessor");
+    }
+
+    #[test]
+    fn short_type_empty_string() {
+        assert_eq!(short_type(""), "");
+    }
 }

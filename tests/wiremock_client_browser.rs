@@ -122,6 +122,9 @@ async fn browser_pg_detail_combines_pg_and_cs_list() {
     assert_eq!(detail.name, "ingest");
     assert_eq!(detail.parent_group_id.as_deref(), Some("root"));
     assert_eq!(detail.running, 3);
+    assert_eq!(detail.stopped, 0);
+    assert_eq!(detail.invalid, 0);
+    assert_eq!(detail.disabled, 0);
     assert_eq!(detail.active_threads, 1);
     assert_eq!(detail.flow_files_queued, 4);
     assert_eq!(detail.bytes_queued, 2048);
@@ -129,10 +132,9 @@ async fn browser_pg_detail_combines_pg_and_cs_list() {
     assert_eq!(detail.controller_services.len(), 2);
     assert_eq!(detail.controller_services[0].name, "http-pool");
     assert_eq!(detail.controller_services[0].state, "ENABLED");
-    assert!(
-        detail.controller_services[0]
-            .type_short
-            .contains("StandardRestrictedSSLContextService")
+    assert_eq!(
+        detail.controller_services[0].type_short,
+        "StandardRestrictedSSLContextService"
     );
     assert_eq!(detail.controller_services[1].name, "kafka-brokers");
     assert_eq!(detail.controller_services[1].state, "DISABLED");

@@ -169,7 +169,7 @@ pub enum NifiLensError {
     /// See `ClientBuildFailed` for the boxed-source rationale; callers
     /// must box explicitly.
     #[snafu(display(
-        "failed to fetch controller services for PG {id:?} on context {context:?}: {source}"
+        "failed to fetch controller services for PG {id:?} for context {context:?}: {source}"
     ))]
     ControllerServicesListFailed {
         context: String,
