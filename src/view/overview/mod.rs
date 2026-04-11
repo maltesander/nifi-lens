@@ -1,13 +1,17 @@
 //! Overview tab: cluster health dashboard.
 //!
-//! This module will grow through Phase 1 to include a pure state reducer
-//! (`state`), a ratatui renderer (`render`), and a polling worker task
-//! (`worker`). For the duration of Task 1 it preserves the Phase 0
-//! placeholder so the directory move is a no-op from the user's view.
+//! - `state` holds a pure reducer (testable without a terminal).
+//! - `render` (Task 8) draws the snapshot into a ratatui frame.
+//! - `worker` (Task 9) spawns the polling task that feeds the reducer.
+
+pub mod state;
 
 use ratatui::Frame;
 use ratatui::layout::Rect;
 
+pub use state::{OverviewState, apply_payload};
+
 pub fn render(frame: &mut Frame, area: Rect) {
+    // Placeholder until Task 8 wires the real renderer.
     super::render_placeholder(frame, area, "Overview", "Phase 1");
 }
