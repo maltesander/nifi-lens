@@ -148,6 +148,8 @@ async fn root_pg_status_flattens_connections() {
     assert_eq!(snapshot.connections[0].flow_files_queued, 9500);
     assert_eq!(snapshot.connections[1].id, "conn-b");
     assert_eq!(snapshot.connections[1].fill_percent, 5);
+    assert_eq!(snapshot.flow_files_queued, 500);
+    assert_eq!(snapshot.bytes_queued, 1024);
 }
 
 #[tokio::test]

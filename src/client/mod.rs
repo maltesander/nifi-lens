@@ -186,7 +186,6 @@ impl NifiClient {
 
     /// Calls `flow_api().get_controller_status()` and flattens the response.
     pub async fn controller_status(&self) -> Result<ControllerStatusSnapshot, NifiLensError> {
-        use nifi_rust_client::dynamic::traits::FlowApi as _;
         tracing::debug!(context = %self.context_name, "fetching /flow/status");
         let entity = self
             .inner
@@ -255,7 +254,6 @@ impl NifiClient {
         after_id: Option<i64>,
         limit: Option<u32>,
     ) -> Result<BulletinBoardSnapshot, NifiLensError> {
-        use nifi_rust_client::dynamic::traits::FlowApi as _;
         tracing::debug!(context = %self.context_name, "fetching /flow/bulletin-board");
         let after = after_id.map(|n| n.to_string());
         let limit_s = limit.map(|n| n.to_string());
