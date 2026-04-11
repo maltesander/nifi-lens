@@ -32,6 +32,8 @@ pub fn render(frame: &mut Frame, state: &AppState) {
             Modal::ErrorDetail => render_error_detail(frame, root, state),
             // FuzzyFind render overlay lands in Task 18.
             Modal::FuzzyFind(_) => {}
+            // Properties render overlay lands in Task 18.
+            Modal::Properties(_) => {}
         }
     }
 }

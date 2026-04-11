@@ -89,6 +89,7 @@ pub enum Modal {
     ContextSwitcher(ContextSwitcherState),
     ErrorDetail,
     FuzzyFind(crate::widget::fuzzy_find::FuzzyFindState),
+    Properties(crate::view::browser::state::PropertiesModalState),
 }
 
 #[derive(Debug)]
@@ -368,6 +369,49 @@ fn handle_key(state: &mut AppState, key: KeyEvent, config: &Config) -> UpdateRes
                     _ => return UpdateResult::default(),
                 }
             }
+            Modal::Properties(ps) => {
+                match key.code {
+                    KeyCode::Esc | KeyCode::Char('e') => {
+                        state.modal = None;
+                        return UpdateResult {
+                            redraw: true,
+                            intent: None,
+                        };
+                    }
+                    KeyCode::Down | KeyCode::Char('j') => {
+                        // The renderer reconciles `scroll` against the
+                        // actual flattened row count; we use a large
+                        // placeholder max here and let the renderer clamp.
+                        ps.scroll_down(usize::MAX);
+                        return UpdateResult {
+                            redraw: true,
+                            intent: None,
+                        };
+                    }
+                    KeyCode::Up | KeyCode::Char('k') => {
+                        ps.scroll_up();
+                        return UpdateResult {
+                            redraw: true,
+                            intent: None,
+                        };
+                    }
+                    KeyCode::PageDown => {
+                        ps.page_down(10, usize::MAX);
+                        return UpdateResult {
+                            redraw: true,
+                            intent: None,
+                        };
+                    }
+                    KeyCode::PageUp => {
+                        ps.page_up(10);
+                        return UpdateResult {
+                            redraw: true,
+                            intent: None,
+                        };
+                    }
+                    _ => return UpdateResult::default(),
+                }
+            }
         }
     }
 
@@ -624,6 +668,71 @@ fn handle_key(state: &mut AppState, key: KeyEvent, config: &Config) -> UpdateRes
                 return UpdateResult {
                     redraw: true,
                     intent: None,
+                };
+            }
+            KeyCode::Char('e') => {
+                // Open Properties modal only for Processor / CS with
+                // detail loaded. No-op otherwise.
+                let Some(&arena_idx) = state.browser.visible.get(state.browser.selected) else {
+                    return UpdateResult::default();
+                };
+                let node_kind = state.browser.nodes[arena_idx].kind;
+                let has_detail = state.browser.details.contains_key(&arena_idx);
+                use crate::client::NodeKind as NK;
+                if matches!(node_kind, NK::Processor | NK::ControllerService) && has_detail {
+                    state.modal = Some(Modal::Properties(
+                        crate::view::browser::state::PropertiesModalState::new(arena_idx),
+                    ));
+                    return UpdateResult {
+                        redraw: true,
+                        intent: None,
+                    };
+                }
+                return UpdateResult::default();
+            }
+            KeyCode::Char('c') => {
+                // Copy selected node's id to clipboard.
+                let Some(&arena_idx) = state.browser.visible.get(state.browser.selected) else {
+                    return UpdateResult::default();
+                };
+                let id = state.browser.nodes[arena_idx].id.clone();
+                match arboard::Clipboard::new().and_then(|mut cb| cb.set_text(id.clone())) {
+                    Ok(()) => {
+                        state.status.banner = Some(Banner {
+                            severity: BannerSeverity::Info,
+                            message: format!("copied id: {id}"),
+                            detail: None,
+                        });
+                    }
+                    Err(err) => {
+                        state.status.banner = Some(Banner {
+                            severity: BannerSeverity::Warning,
+                            message: format!("clipboard: {err}"),
+                            detail: None,
+                        });
+                    }
+                }
+                return UpdateResult {
+                    redraw: true,
+                    intent: None,
+                };
+            }
+            KeyCode::Char('t') => {
+                // Emit the Phase 4 TraceComponent cross-link for Processors only.
+                let Some(&arena_idx) = state.browser.visible.get(state.browser.selected) else {
+                    return UpdateResult::default();
+                };
+                let node = &state.browser.nodes[arena_idx];
+                if !matches!(node.kind, crate::client::NodeKind::Processor) {
+                    return UpdateResult::default();
+                }
+                let link = crate::intent::CrossLink::TraceComponent {
+                    component_id: node.id.clone(),
+                    since: std::time::SystemTime::now(),
+                };
+                return UpdateResult {
+                    redraw: true,
+                    intent: Some(PendingIntent::JumpTo(link)),
                 };
             }
             _ => {}
@@ -1519,5 +1628,75 @@ mod tests {
         let r = update(&mut s, key(KeyCode::Esc, KeyModifiers::NONE), &c);
         assert!(s.modal.is_none());
         assert!(r.intent.is_none());
+    }
+
+    #[test]
+    fn e_on_processor_with_detail_opens_properties_modal() {
+        use crate::client::ProcessorDetail;
+        use crate::view::browser::state::NodeDetail;
+
+        let (mut s, c) = seeded_browser_state();
+        // Seed detail for "gen" (arena 1).
+        s.browser.details.insert(
+            1,
+            NodeDetail::Processor(ProcessorDetail {
+                id: "gen".into(),
+                name: "Gen".into(),
+                type_name: "x".into(),
+                bundle: String::new(),
+                run_status: "Running".into(),
+                scheduling_strategy: String::new(),
+                scheduling_period: String::new(),
+                concurrent_tasks: 1,
+                run_duration_ms: 0,
+                penalty_duration: String::new(),
+                yield_duration: String::new(),
+                bulletin_level: String::new(),
+                properties: vec![("k".into(), "v".into())],
+                validation_errors: vec![],
+            }),
+        );
+        s.browser.selected = 1; // visible row for arena 1
+        update(&mut s, key(KeyCode::Char('e'), KeyModifiers::NONE), &c);
+        assert!(matches!(s.modal, Some(Modal::Properties(_))));
+    }
+
+    #[test]
+    fn e_on_processor_without_detail_is_noop() {
+        let (mut s, c) = seeded_browser_state();
+        s.browser.selected = 1;
+        update(&mut s, key(KeyCode::Char('e'), KeyModifiers::NONE), &c);
+        assert!(s.modal.is_none());
+    }
+
+    #[test]
+    fn e_on_pg_is_noop() {
+        let (mut s, c) = seeded_browser_state();
+        s.browser.selected = 0; // root PG
+        update(&mut s, key(KeyCode::Char('e'), KeyModifiers::NONE), &c);
+        assert!(s.modal.is_none());
+    }
+
+    #[test]
+    fn esc_closes_properties_modal() {
+        use crate::view::browser::state::PropertiesModalState;
+        let (mut s, c) = seeded_browser_state();
+        s.modal = Some(Modal::Properties(PropertiesModalState::new(1)));
+        update(&mut s, key(KeyCode::Esc, KeyModifiers::NONE), &c);
+        assert!(s.modal.is_none());
+    }
+
+    #[test]
+    fn t_on_processor_emits_trace_component_crosslink() {
+        use crate::intent::CrossLink;
+        let (mut s, c) = seeded_browser_state();
+        s.browser.selected = 1; // "gen" processor
+        let r = update(&mut s, key(KeyCode::Char('t'), KeyModifiers::NONE), &c);
+        match r.intent {
+            Some(PendingIntent::JumpTo(CrossLink::TraceComponent { component_id, .. })) => {
+                assert_eq!(component_id, "gen");
+            }
+            other => panic!("expected TraceComponent, got {other:?}"),
+        }
     }
 }

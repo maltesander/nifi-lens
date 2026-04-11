@@ -353,6 +353,45 @@ pub struct FlowIndexEntry {
     pub haystack: String,
 }
 
+#[derive(Debug)]
+pub struct PropertiesModalState {
+    /// Arena index of the node whose properties we're showing. The
+    /// renderer re-resolves the property list from `BrowserState.details`
+    /// on every frame; if the node is gone after a tree refresh, the
+    /// modal will close itself at render time.
+    pub arena_idx: usize,
+    pub scroll: usize,
+}
+
+impl PropertiesModalState {
+    pub fn new(arena_idx: usize) -> Self {
+        Self {
+            arena_idx,
+            scroll: 0,
+        }
+    }
+
+    pub fn scroll_down(&mut self, max: usize) {
+        if self.scroll + 1 < max {
+            self.scroll += 1;
+        }
+    }
+
+    pub fn scroll_up(&mut self) {
+        if self.scroll > 0 {
+            self.scroll -= 1;
+        }
+    }
+
+    pub fn page_down(&mut self, by: usize, max: usize) {
+        self.scroll = (self.scroll + by).min(max.saturating_sub(1));
+    }
+
+    pub fn page_up(&mut self, by: usize) {
+        self.scroll = self.scroll.saturating_sub(by);
+    }
+}
+
 /// Build a fresh `FlowIndex` from the arena. Walks parent pointers to
 /// produce each node's group path (e.g. `"root/ingest/enrich"`). PGs,
 /// processors, connections, ports, and controller services are all
