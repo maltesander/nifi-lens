@@ -38,6 +38,112 @@ impl BrowserState {
     pub fn new() -> Self {
         Self::default()
     }
+
+    pub fn move_down(&mut self) {
+        if self.visible.is_empty() {
+            return;
+        }
+        if self.selected + 1 < self.visible.len() {
+            self.selected += 1;
+        }
+    }
+
+    pub fn move_up(&mut self) {
+        if self.selected > 0 {
+            self.selected -= 1;
+        }
+    }
+
+    pub fn page_down(&mut self, by: usize) {
+        if self.visible.is_empty() {
+            return;
+        }
+        self.selected = (self.selected + by).min(self.visible.len() - 1);
+    }
+
+    pub fn page_up(&mut self, by: usize) {
+        self.selected = self.selected.saturating_sub(by);
+    }
+
+    pub fn jump_home(&mut self) {
+        self.selected = 0;
+    }
+
+    pub fn jump_end(&mut self) {
+        if !self.visible.is_empty() {
+            self.selected = self.visible.len() - 1;
+        }
+    }
+
+    /// `Enter` / `→` / `l` behavior. On a collapsed PG, expands and moves
+    /// selection to the first child. On an expanded PG, moves to the
+    /// first child (drill-in). On a leaf, no-op.
+    pub fn enter_selection(&mut self) {
+        let Some(&arena_idx) = self.visible.get(self.selected) else {
+            return;
+        };
+        let is_pg = matches!(self.nodes[arena_idx].kind, NodeKind::ProcessGroup);
+        if !is_pg {
+            return;
+        }
+        let was_expanded = self.expanded.contains(&arena_idx);
+        if !was_expanded {
+            self.expanded.insert(arena_idx);
+            rebuild_visible(self);
+        }
+        // Move selection to the first child (if any).
+        let first_child = self.nodes[arena_idx].children.first().copied();
+        if let Some(child) = first_child
+            && let Some(pos) = self.visible.iter().position(|&i| i == child)
+        {
+            self.selected = pos;
+        }
+    }
+
+    /// `Backspace` / `←` / `h` behavior. On an expanded PG with its row
+    /// selected: collapses. On any other node: moves selection to the
+    /// parent.
+    pub fn backspace_selection(&mut self) {
+        let Some(&arena_idx) = self.visible.get(self.selected) else {
+            return;
+        };
+        let node = &self.nodes[arena_idx];
+        let is_expanded_pg =
+            matches!(node.kind, NodeKind::ProcessGroup) && self.expanded.contains(&arena_idx);
+        if is_expanded_pg {
+            self.expanded.remove(&arena_idx);
+            rebuild_visible(self);
+            // Keep selection on the PG row — find its new visible index.
+            if let Some(pos) = self.visible.iter().position(|&i| i == arena_idx) {
+                self.selected = pos;
+            }
+            return;
+        }
+        // Otherwise, walk up to parent.
+        let parent = node.parent;
+        if let Some(p) = parent
+            && let Some(pos) = self.visible.iter().position(|&i| i == p)
+        {
+            self.selected = pos;
+        }
+    }
+
+    /// Set `pending_detail` to the currently-selected arena index and
+    /// push a `DetailRequest` on `detail_tx` when a sender exists.
+    pub fn emit_detail_request_for_current_selection(&mut self) {
+        let Some(&arena_idx) = self.visible.get(self.selected) else {
+            return;
+        };
+        self.pending_detail = Some(arena_idx);
+        let node = &self.nodes[arena_idx];
+        if let Some(tx) = self.detail_tx.as_ref() {
+            let _ = tx.send(DetailRequest {
+                arena_idx,
+                kind: node.kind,
+                id: node.id.clone(),
+            });
+        }
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -64,6 +170,17 @@ pub struct DetailRequest {
     pub arena_idx: usize,
     pub kind: NodeKind,
     pub id: String,
+}
+
+/// Envelope the worker wraps around a fetched detail before pushing it
+/// back to the UI task via `AppEvent::Data(ViewPayload::Browser(
+/// BrowserPayload::Detail(...)))`. Task 11 adds the event plumbing.
+#[derive(Debug, Clone)]
+pub struct NodeDetailSnapshot {
+    pub arena_idx: usize,
+    pub kind: NodeKind,
+    pub id: String,
+    pub detail: NodeDetail,
 }
 
 /// Fold a full recursive tree snapshot into the state. Preserves
@@ -170,6 +287,25 @@ pub fn apply_tree_snapshot(state: &mut BrowserState, snap: RecursiveSnapshot) {
     }
 }
 
+/// Insert or update the cached detail for the node at the payload's
+/// arena index. Drops the payload if the arena no longer contains that
+/// index (tree refreshed between request and response), or if the node
+/// at that index changed. Only clears `pending_detail` when the payload
+/// matches the current pending index.
+pub fn apply_node_detail(state: &mut BrowserState, payload: NodeDetailSnapshot) {
+    if payload.arena_idx >= state.nodes.len() {
+        return;
+    }
+    let node = &state.nodes[payload.arena_idx];
+    if node.id != payload.id || node.kind != payload.kind {
+        return; // stale: node at that index changed
+    }
+    state.details.insert(payload.arena_idx, payload.detail);
+    if state.pending_detail == Some(payload.arena_idx) {
+        state.pending_detail = None;
+    }
+}
+
 /// Rebuild `visible` by walking the arena in depth-first tree order,
 /// including a PG's children only when the PG is in `expanded`.
 pub fn rebuild_visible(state: &mut BrowserState) {
@@ -204,6 +340,7 @@ mod tests {
     use super::*;
     use crate::client::browser::{NodeKind, NodeStatusSummary, RawNode};
     use std::time::UNIX_EPOCH;
+    use tokio::sync::mpsc;
 
     fn pg(id: &str, parent: Option<usize>, running: u32) -> RawNode {
         RawNode {
@@ -405,5 +542,219 @@ mod tests {
         s.expanded.remove(&3);
         rebuild_visible(&mut s);
         assert_eq!(s.visible.len(), 4);
+    }
+
+    #[test]
+    fn move_down_advances_visible_index() {
+        let mut s = BrowserState::new();
+        apply_tree_snapshot(&mut s, demo_snap());
+        assert_eq!(s.selected, 0);
+        s.move_down();
+        assert_eq!(s.selected, 1);
+        s.move_down();
+        s.move_down();
+        s.move_down(); // beyond the last row: clamps.
+        assert_eq!(s.selected, s.visible.len() - 1);
+    }
+
+    #[test]
+    fn move_up_at_zero_stays_at_zero() {
+        let mut s = BrowserState::new();
+        apply_tree_snapshot(&mut s, demo_snap());
+        s.move_up();
+        assert_eq!(s.selected, 0);
+    }
+
+    #[test]
+    fn enter_on_collapsed_pg_expands_and_moves_to_first_child() {
+        let mut s = BrowserState::new();
+        apply_tree_snapshot(&mut s, demo_snap());
+        // Move selection to "ingest" (visible row 3, arena 3).
+        s.selected = 3;
+        s.enter_selection();
+        assert!(s.expanded.contains(&3));
+        // First child of ingest is "upd" at arena 4.
+        let selected_arena = s.visible[s.selected];
+        assert_eq!(s.nodes[selected_arena].id, "upd");
+    }
+
+    #[test]
+    fn enter_on_leaf_is_noop() {
+        let mut s = BrowserState::new();
+        apply_tree_snapshot(&mut s, demo_snap());
+        s.selected = 1; // "gen" processor
+        let before = s.selected;
+        s.enter_selection();
+        assert_eq!(s.selected, before);
+    }
+
+    #[test]
+    fn backspace_on_expanded_pg_collapses_subtree_in_place() {
+        let mut s = BrowserState::new();
+        apply_tree_snapshot(&mut s, demo_snap());
+        s.expanded.insert(3);
+        rebuild_visible(&mut s);
+        s.selected = 3; // "ingest"
+        s.backspace_selection();
+        assert!(!s.expanded.contains(&3));
+        let selected_arena = s.visible[s.selected];
+        assert_eq!(s.nodes[selected_arena].id, "ingest");
+    }
+
+    #[test]
+    fn backspace_on_leaf_selects_parent() {
+        let mut s = BrowserState::new();
+        apply_tree_snapshot(&mut s, demo_snap());
+        s.expanded.insert(3);
+        rebuild_visible(&mut s);
+        // Select "upd" (child of ingest).
+        let upd_arena = s.nodes.iter().position(|n| n.id == "upd").unwrap();
+        let upd_visible = s.visible.iter().position(|&i| i == upd_arena).unwrap();
+        s.selected = upd_visible;
+
+        s.backspace_selection();
+        let new_arena = s.visible[s.selected];
+        assert_eq!(s.nodes[new_arena].id, "ingest");
+    }
+
+    #[test]
+    fn page_down_moves_by_height() {
+        let mut s = BrowserState::new();
+        apply_tree_snapshot(&mut s, demo_snap());
+        s.page_down(2);
+        assert_eq!(s.selected, 2);
+        s.page_down(100);
+        assert_eq!(s.selected, s.visible.len() - 1);
+    }
+
+    #[test]
+    fn home_and_end_jump_to_first_and_last_visible() {
+        let mut s = BrowserState::new();
+        apply_tree_snapshot(&mut s, demo_snap());
+        s.jump_end();
+        assert_eq!(s.selected, s.visible.len() - 1);
+        s.jump_home();
+        assert_eq!(s.selected, 0);
+    }
+
+    #[test]
+    fn selection_change_sets_pending_detail_and_pushes_request() {
+        let mut s = BrowserState::new();
+        apply_tree_snapshot(&mut s, demo_snap());
+        let (tx, mut rx) = mpsc::unbounded_channel();
+        s.detail_tx = Some(tx);
+        s.move_down(); // select arena 1 ("gen")
+        s.emit_detail_request_for_current_selection();
+        assert_eq!(s.pending_detail, Some(1));
+        let req = rx.try_recv().expect("request pushed");
+        assert_eq!(req.arena_idx, 1);
+        assert_eq!(req.kind, NodeKind::Processor);
+        assert_eq!(req.id, "gen");
+    }
+
+    #[test]
+    fn selection_change_with_no_detail_tx_is_noop_but_sets_pending() {
+        let mut s = BrowserState::new();
+        apply_tree_snapshot(&mut s, demo_snap());
+        s.move_down();
+        s.emit_detail_request_for_current_selection();
+        assert_eq!(s.pending_detail, Some(1));
+    }
+
+    #[test]
+    fn apply_node_detail_clears_pending_when_matching_index() {
+        use crate::client::ProcessorDetail;
+        let mut s = BrowserState::new();
+        apply_tree_snapshot(&mut s, demo_snap());
+        s.pending_detail = Some(1);
+        let payload = NodeDetailSnapshot {
+            arena_idx: 1,
+            kind: NodeKind::Processor,
+            id: "gen".into(),
+            detail: NodeDetail::Processor(ProcessorDetail {
+                id: "gen".into(),
+                name: "Gen".into(),
+                type_name: "x".into(),
+                bundle: String::new(),
+                run_status: "Running".into(),
+                scheduling_strategy: String::new(),
+                scheduling_period: String::new(),
+                concurrent_tasks: 1,
+                run_duration_ms: 0,
+                penalty_duration: String::new(),
+                yield_duration: String::new(),
+                bulletin_level: String::new(),
+                properties: vec![],
+                validation_errors: vec![],
+            }),
+        };
+        apply_node_detail(&mut s, payload);
+        assert_eq!(s.pending_detail, None);
+        assert!(matches!(s.details.get(&1), Some(NodeDetail::Processor(_))));
+    }
+
+    #[test]
+    fn apply_node_detail_accepts_stale_response_without_clearing_pending() {
+        use crate::client::ProcessorDetail;
+        let mut s = BrowserState::new();
+        apply_tree_snapshot(&mut s, demo_snap());
+        s.pending_detail = Some(2); // user moved on to arena 2
+        let payload = NodeDetailSnapshot {
+            arena_idx: 1,
+            kind: NodeKind::Processor,
+            id: "gen".into(),
+            detail: NodeDetail::Processor(ProcessorDetail {
+                id: "gen".into(),
+                name: "Gen".into(),
+                type_name: "x".into(),
+                bundle: String::new(),
+                run_status: "Running".into(),
+                scheduling_strategy: String::new(),
+                scheduling_period: String::new(),
+                concurrent_tasks: 1,
+                run_duration_ms: 0,
+                penalty_duration: String::new(),
+                yield_duration: String::new(),
+                bulletin_level: String::new(),
+                properties: vec![],
+                validation_errors: vec![],
+            }),
+        };
+        apply_node_detail(&mut s, payload);
+        assert_eq!(s.pending_detail, Some(2));
+        assert!(s.details.contains_key(&1));
+    }
+
+    #[test]
+    fn apply_node_detail_silently_drops_when_node_gone() {
+        use crate::client::ProcessorDetail;
+        let mut s = BrowserState::new();
+        apply_tree_snapshot(&mut s, demo_snap());
+        // Bogus arena_idx beyond current nodes length.
+        let bogus = s.nodes.len();
+        let payload = NodeDetailSnapshot {
+            arena_idx: bogus,
+            kind: NodeKind::Processor,
+            id: "gone".into(),
+            detail: NodeDetail::Processor(ProcessorDetail {
+                id: "gone".into(),
+                name: "Gone".into(),
+                type_name: "x".into(),
+                bundle: String::new(),
+                run_status: String::new(),
+                scheduling_strategy: String::new(),
+                scheduling_period: String::new(),
+                concurrent_tasks: 0,
+                run_duration_ms: 0,
+                penalty_duration: String::new(),
+                yield_duration: String::new(),
+                bulletin_level: String::new(),
+                properties: vec![],
+                validation_errors: vec![],
+            }),
+        };
+        let before = s.details.len();
+        apply_node_detail(&mut s, payload);
+        assert_eq!(s.details.len(), before);
     }
 }
