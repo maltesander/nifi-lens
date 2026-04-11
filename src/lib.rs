@@ -9,6 +9,7 @@ pub mod client;
 pub mod config;
 pub mod error;
 pub mod event;
+pub mod intent;
 pub mod logging;
 
 pub use error::NifiLensError;
