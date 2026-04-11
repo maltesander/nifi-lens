@@ -1,0 +1,46 @@
+{
+  "process_group_entity": {
+    "id": "ingest",
+    "component": {
+      "id": "ingest",
+      "name": "ingest",
+      "parentGroupId": "root",
+      "runningCount": 3,
+      "stoppedCount": 0,
+      "invalidCount": 0,
+      "disabledCount": 0
+    },
+    "status": {
+      "id": "ingest",
+      "aggregateSnapshot": {
+        "id": "ingest",
+        "activeThreadCount": 1,
+        "flowFilesQueued": 4,
+        "bytesQueued": 2048,
+        "queued": "4 / 2 KB"
+      }
+    }
+  },
+  "controller_services_entity": {
+    "controllerServices": [
+      {
+        "id": "cs-1",
+        "component": {
+          "id": "cs-1",
+          "name": "http-pool",
+          "type": "org.apache.nifi.ssl.StandardRestrictedSSLContextService",
+          "state": "ENABLED"
+        }
+      },
+      {
+        "id": "cs-2",
+        "component": {
+          "id": "cs-2",
+          "name": "kafka-brokers",
+          "type": "org.apache.nifi.kafka.service.Kafka3ConnectionService",
+          "state": "DISABLED"
+        }
+      }
+    ]
+  }
+}

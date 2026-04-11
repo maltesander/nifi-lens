@@ -390,4 +390,7 @@ pub struct BulletinBoardSnapshot {
     pub bulletins: Vec<BulletinSnapshot>,
 }
 
-pub use browser::{NodeKind, NodeStatusSummary, RawNode, RecursiveSnapshot};
+pub use browser::{
+    ControllerServiceSummary, NodeKind, NodeStatusSummary, ProcessGroupDetail, RawNode,
+    RecursiveSnapshot,
+};

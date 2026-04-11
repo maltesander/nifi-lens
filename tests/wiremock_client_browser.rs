@@ -1,6 +1,6 @@
 //! Wiremock tests: Phase 3 browser client wrappers.
 
-use nifi_lens::client::{NifiClient, NodeKind, RecursiveSnapshot};
+use nifi_lens::client::{NifiClient, NodeKind, ProcessGroupDetail, RecursiveSnapshot};
 use nifi_lens::config::{ResolvedContext, VersionStrategy};
 use wiremock::matchers::{method, path, query_param};
 use wiremock::{Mock, MockServer, ResponseTemplate};
@@ -91,4 +91,49 @@ async fn browser_tree_parses_nested_pgs_into_flat_recursive_snapshot() {
         child_count, 3,
         "ingest must contain proc + input + output port"
     );
+}
+
+#[tokio::test]
+async fn browser_pg_detail_combines_pg_and_cs_list() {
+    let server = MockServer::start().await;
+    stub_login_and_about(&server).await;
+
+    let fixture = load_fixture("process_group.json");
+    Mock::given(method("GET"))
+        .and(path("/nifi-api/process-groups/ingest"))
+        .respond_with(
+            ResponseTemplate::new(200).set_body_json(fixture["process_group_entity"].clone()),
+        )
+        .mount(&server)
+        .await;
+    Mock::given(method("GET"))
+        .and(path(
+            "/nifi-api/flow/process-groups/ingest/controller-services",
+        ))
+        .respond_with(
+            ResponseTemplate::new(200).set_body_json(fixture["controller_services_entity"].clone()),
+        )
+        .mount(&server)
+        .await;
+
+    let client = NifiClient::connect(&ctx(server.uri())).await.unwrap();
+    let detail: ProcessGroupDetail = client.browser_pg_detail("ingest").await.expect("ok");
+    assert_eq!(detail.id, "ingest");
+    assert_eq!(detail.name, "ingest");
+    assert_eq!(detail.parent_group_id.as_deref(), Some("root"));
+    assert_eq!(detail.running, 3);
+    assert_eq!(detail.active_threads, 1);
+    assert_eq!(detail.flow_files_queued, 4);
+    assert_eq!(detail.bytes_queued, 2048);
+    assert_eq!(detail.queued_display, "4 / 2 KB");
+    assert_eq!(detail.controller_services.len(), 2);
+    assert_eq!(detail.controller_services[0].name, "http-pool");
+    assert_eq!(detail.controller_services[0].state, "ENABLED");
+    assert!(
+        detail.controller_services[0]
+            .type_short
+            .contains("StandardRestrictedSSLContextService")
+    );
+    assert_eq!(detail.controller_services[1].name, "kafka-brokers");
+    assert_eq!(detail.controller_services[1].state, "DISABLED");
 }

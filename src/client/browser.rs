@@ -3,7 +3,9 @@
 
 use std::time::SystemTime;
 
-use nifi_rust_client::dynamic::traits::{FlowApi as _, FlowStatusApi as _};
+use nifi_rust_client::dynamic::traits::{
+    FlowApi as _, FlowControllerServicesApi as _, FlowStatusApi as _, ProcessGroupsApi as _,
+};
 
 use crate::client::NifiClient;
 use crate::client::classify_or_fallback;
@@ -215,4 +217,132 @@ fn walk_pg_snapshot(
             }
         }
     }
+}
+
+/// Identity + aggregate counts for a single Process Group, combined from
+/// two API calls: `GET /process-groups/{id}` and
+/// `GET /flow/process-groups/{id}/controller-services`.
+#[derive(Debug, Clone)]
+pub struct ProcessGroupDetail {
+    pub id: String,
+    pub name: String,
+    pub parent_group_id: Option<String>,
+    pub running: u32,
+    pub stopped: u32,
+    pub invalid: u32,
+    pub disabled: u32,
+    pub active_threads: u32,
+    pub flow_files_queued: u32,
+    pub bytes_queued: u64,
+    pub queued_display: String,
+    pub controller_services: Vec<ControllerServiceSummary>,
+}
+
+/// Minimal controller-service summary used in the Browser detail pane.
+#[derive(Debug, Clone)]
+pub struct ControllerServiceSummary {
+    pub id: String,
+    pub name: String,
+    pub type_short: String,
+    pub state: String,
+}
+
+impl NifiClient {
+    /// Two-endpoint fetch: the process group's `component` for identity
+    /// and aggregate counts, then the PG's controller services list.
+    /// Maps each call to its own typed error variant so callers can
+    /// tell which endpoint failed.
+    pub async fn browser_pg_detail(
+        &self,
+        pg_id: &str,
+    ) -> Result<ProcessGroupDetail, NifiLensError> {
+        tracing::debug!(context = %self.context_name(), %pg_id, "fetching PG detail");
+
+        // 1) Base PG entity — identity + component counts.
+        let pg_entity = self
+            .inner
+            .processgroups_api()
+            .get_process_group(pg_id)
+            .await
+            .map_err(|err| {
+                classify_or_fallback(self.context_name(), Box::new(err), |source| {
+                    NifiLensError::ProcessGroupDetailFailed {
+                        context: self.context_name().to_string(),
+                        id: pg_id.to_string(),
+                        source,
+                    }
+                })
+            })?;
+        let component = pg_entity.component.clone().unwrap_or_default();
+        let status_agg = pg_entity
+            .status
+            .as_ref()
+            .and_then(|s| s.aggregate_snapshot.as_ref());
+
+        // 2) CS list for this PG.
+        let cs_entity = self
+            .inner
+            .flow_api()
+            .controller_services(pg_id)
+            .get_controller_services_from_group(None, None, None, None)
+            .await
+            .map_err(|err| {
+                classify_or_fallback(self.context_name(), Box::new(err), |source| {
+                    NifiLensError::ControllerServicesListFailed {
+                        context: self.context_name().to_string(),
+                        id: pg_id.to_string(),
+                        source,
+                    }
+                })
+            })?;
+
+        let controller_services = cs_entity
+            .controller_services
+            .unwrap_or_default()
+            .into_iter()
+            .filter_map(|e| {
+                let c = e.component?;
+                Some(ControllerServiceSummary {
+                    id: c.id.clone().unwrap_or_default(),
+                    name: c.name.clone().unwrap_or_default(),
+                    // NOTE: the library uses `r#type` (raw identifier) for
+                    // the `type` JSON field; the plan called this `type_field`
+                    // but the actual Rust field is `r#type`.
+                    type_short: short_type(c.r#type.as_deref().unwrap_or("")),
+                    state: c.state.clone().unwrap_or_default(),
+                })
+            })
+            .collect();
+
+        Ok(ProcessGroupDetail {
+            id: pg_id.to_string(),
+            name: component.name.unwrap_or_default(),
+            parent_group_id: component.parent_group_id,
+            running: component.running_count.unwrap_or(0).max(0) as u32,
+            stopped: component.stopped_count.unwrap_or(0).max(0) as u32,
+            invalid: component.invalid_count.unwrap_or(0).max(0) as u32,
+            disabled: component.disabled_count.unwrap_or(0).max(0) as u32,
+            active_threads: status_agg
+                .and_then(|a| a.active_thread_count)
+                .unwrap_or(0)
+                .max(0) as u32,
+            flow_files_queued: status_agg
+                .and_then(|a| a.flow_files_queued)
+                .unwrap_or(0)
+                .max(0) as u32,
+            bytes_queued: status_agg.and_then(|a| a.bytes_queued).unwrap_or(0).max(0) as u64,
+            queued_display: status_agg
+                .and_then(|a| a.queued.clone())
+                .unwrap_or_default(),
+            controller_services,
+        })
+    }
+}
+
+/// Extract the short class name from a fully qualified Java type, e.g.
+/// `org.apache.nifi.kafka.service.Kafka3ConnectionService` →
+/// `Kafka3ConnectionService`. Passed-through unchanged when there is no
+/// dot.
+pub(crate) fn short_type(fqn: &str) -> String {
+    fqn.rsplit('.').next().unwrap_or(fqn).to_string()
 }
