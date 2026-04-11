@@ -11,6 +11,7 @@
     },
     "state": "ENABLED",
     "parentGroupId": "ingest",
+    "bulletinLevel": "WARN",
     "properties": {
       "Keystore Filename": "/opt/nifi/keystore.jks",
       "Keystore Type": "JKS",

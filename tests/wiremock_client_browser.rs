@@ -245,6 +245,7 @@ async fn browser_cs_detail_carries_state_and_properties() {
     assert_eq!(d.parent_group_id.as_deref(), Some("ingest"));
     assert_eq!(d.properties.len(), 4);
     assert!(d.validation_errors.is_empty());
+    assert_eq!(d.bulletin_level, "WARN");
 }
 
 #[tokio::test]
