@@ -2,6 +2,7 @@
 
 mod cli;
 mod error;
+mod fixture;
 mod state;
 
 use clap::Parser as _;
