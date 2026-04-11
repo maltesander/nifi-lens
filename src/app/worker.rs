@@ -32,6 +32,7 @@ impl WorkerRegistry {
         view: ViewId,
         client: &Arc<RwLock<NifiClient>>,
         tx: &mpsc::Sender<AppEvent>,
+        bulletins_last_id: Option<i64>,
     ) {
         if matches!(&self.current, Some((existing, _)) if *existing == view) {
             return;
@@ -52,8 +53,15 @@ impl WorkerRegistry {
                     tx.clone(),
                 ))
             }
-            // Phases 2–4 will spawn bulletins / browser / tracer workers here.
-            ViewId::Bulletins | ViewId::Browser | ViewId::Tracer => {
+            ViewId::Bulletins => {
+                tracing::debug!(?view, "worker registry: spawning bulletins worker");
+                Some(crate::view::bulletins::worker::spawn(
+                    client.clone(),
+                    tx.clone(),
+                    bulletins_last_id,
+                ))
+            }
+            ViewId::Browser | ViewId::Tracer => {
                 tracing::debug!(?view, "worker registry: no worker for this view");
                 None
             }
