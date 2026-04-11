@@ -183,12 +183,22 @@ fn render_list(frame: &mut Frame, area: Rect, state: &BulletinsState) {
         frame.render_widget(centered, spot);
         return;
     }
-    let rows: Vec<Row> = filtered
+    let visible_rows = area.height.saturating_sub(1) as usize; // subtract 1 for header
+    let scroll_offset = if visible_rows == 0 {
+        0
+    } else if state.selected >= visible_rows {
+        state.selected + 1 - visible_rows
+    } else {
+        0
+    };
+    let window = &filtered[scroll_offset..filtered.len().min(scroll_offset + visible_rows)];
+    let selected_in_window = state.selected.saturating_sub(scroll_offset);
+    let rows: Vec<Row> = window
         .iter()
         .map(|&i| &state.ring[i])
         .enumerate()
         .map(|(idx, b)| {
-            let style = if idx == state.selected {
+            let style = if idx == selected_in_window {
                 Style::default().add_modifier(Modifier::REVERSED)
             } else {
                 Style::default()
