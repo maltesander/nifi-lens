@@ -85,9 +85,9 @@ operational question.
 counts, bulletin-rate sparkline, top-10 unhealthy queues, noisiest components.
 Refreshes every 10 seconds.
 
-**Bulletins** — "What's going wrong?" Live cluster-wide bulletin tail with
-severity / component / free-text filters, auto-scroll with pause, and
-cross-links to Browser and Tracer.
+**Bulletins** *(v0.1+)* — cluster-wide bulletin tail with severity,
+component-type, and free-text filters; auto-scroll pause with a new-
+bulletin badge; cross-links to Browser (Phase 3) and Tracer (Phase 4).
 
 **Browser** — "Where does X live and what is it doing?" Process-group tree
 with drill-in, per-node detail pane, and global fuzzy find across all known
@@ -117,6 +117,11 @@ Config file lives at `~/.config/nifilens/config.toml` and is kubeconfig-style:
 
 ```toml
 current_context = "dev"
+
+# Optional: Bulletins tab ring buffer size. Default 5000; valid range
+# 100..=100000. Larger values keep more history at the cost of memory.
+[bulletins]
+ring_size = 5000
 
 [[contexts]]
 name = "dev"

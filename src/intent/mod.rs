@@ -17,7 +17,7 @@ pub enum Intent {
     RefreshView(ViewId),
     Quit,
 
-    // Declared for Phase 1+; dispatcher returns NotImplementedInPhase0.
+    // Declared for Phase 1+; dispatcher returns NotImplementedInPhase.
     OpenProcessGroup(String),
     TraceFlowfile(String), // UUID as string — Phase 4 introduces `uuid::Uuid`
     FetchEventContent { event_id: u64, side: ContentSide },
@@ -39,7 +39,19 @@ pub enum ContentSide {
 
 #[derive(Debug, Clone)]
 pub enum CrossLink {
-    ComponentId(String),
+    /// From Bulletins `Enter`: open Browser on the selected bulletin's
+    /// component. Phase 3 wires this.
+    OpenInBrowser {
+        component_id: String,
+        group_id: String,
+    },
+    /// From Bulletins `t`: open Tracer with a component-filtered query
+    /// seeded from the bulletin's component and timestamp. Phase 4
+    /// wires this.
+    TraceComponent {
+        component_id: String,
+        since: std::time::SystemTime,
+    },
 }
 
 impl Intent {
@@ -51,7 +63,8 @@ impl Intent {
             Self::OpenProcessGroup(_) => "OpenProcessGroup",
             Self::TraceFlowfile(_) => "TraceFlowfile",
             Self::FetchEventContent { .. } => "FetchEventContent",
-            Self::JumpTo(_) => "JumpTo",
+            Self::JumpTo(CrossLink::OpenInBrowser { .. }) => "jump to Browser",
+            Self::JumpTo(CrossLink::TraceComponent { .. }) => "trace component",
             Self::StartProcessor(_) => "StartProcessor",
             Self::StopProcessor(_) => "StopProcessor",
             Self::EnableControllerService(_) => "EnableControllerService",
@@ -78,21 +91,47 @@ pub struct IntentDispatcher {
 }
 
 impl IntentDispatcher {
+    /// Intent arms that don't touch the client. Factored out so tests
+    /// can exercise them without building a dispatcher (which would
+    /// otherwise require a live NifiClient). Returns `None` for any
+    /// intent that needs the client.
+    fn handle_pure(intent: &Intent) -> Option<Result<IntentOutcome, NifiLensError>> {
+        if intent.is_write() {
+            return Some(Err(NifiLensError::WriteIntentRefused {
+                intent_name: intent.name(),
+            }));
+        }
+        match intent {
+            Intent::Quit => Some(Ok(IntentOutcome::Quitting)),
+            Intent::RefreshView(view) => Some(Ok(IntentOutcome::ViewRefreshed { view: *view })),
+            Intent::JumpTo(CrossLink::OpenInBrowser { .. }) => {
+                Some(Ok(IntentOutcome::NotImplementedInPhase {
+                    intent_name: intent.name(),
+                    phase: 3,
+                }))
+            }
+            Intent::JumpTo(CrossLink::TraceComponent { .. }) => {
+                Some(Ok(IntentOutcome::NotImplementedInPhase {
+                    intent_name: intent.name(),
+                    phase: 4,
+                }))
+            }
+            _ => None,
+        }
+    }
+
     pub async fn dispatch(&self, intent: Intent) -> Result<IntentOutcome, NifiLensError> {
         tracing::debug!(intent = intent.name(), "dispatching");
 
-        if intent.is_write() {
-            return Err(NifiLensError::WriteIntentRefused {
-                intent_name: intent.name(),
-            });
+        if let Some(outcome) = Self::handle_pure(&intent) {
+            return outcome;
         }
 
         match intent {
-            Intent::Quit => Ok(IntentOutcome::Quitting),
             Intent::SwitchContext(name) => self.switch_context(name).await,
-            Intent::RefreshView(view) => Ok(IntentOutcome::ViewRefreshed { view }),
-            other => Ok(IntentOutcome::NotImplementedInPhase0 {
+            other => Ok(IntentOutcome::NotImplementedInPhase {
                 intent_name: other.name(),
+                phase: 0,
             }),
         }
     }
@@ -145,6 +184,43 @@ impl IntentDispatcher {
 mod tests {
     use super::*;
 
+    use crate::event::IntentOutcome;
+
+    #[test]
+    fn cross_link_open_in_browser_returns_phase_3_stub() {
+        let outcome = IntentDispatcher::handle_pure(&Intent::JumpTo(CrossLink::OpenInBrowser {
+            component_id: "proc-1".into(),
+            group_id: "root".into(),
+        }))
+        .expect("JumpTo must be handled by handle_pure")
+        .expect("JumpTo stubs return Ok(...)");
+        match outcome {
+            IntentOutcome::NotImplementedInPhase { intent_name, phase } => {
+                assert_eq!(intent_name, "jump to Browser");
+                assert_eq!(phase, 3);
+            }
+            other => panic!("expected NotImplementedInPhase, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn cross_link_trace_component_returns_phase_4_stub() {
+        use std::time::SystemTime;
+        let outcome = IntentDispatcher::handle_pure(&Intent::JumpTo(CrossLink::TraceComponent {
+            component_id: "proc-1".into(),
+            since: SystemTime::UNIX_EPOCH,
+        }))
+        .expect("JumpTo must be handled by handle_pure")
+        .expect("JumpTo stubs return Ok(...)");
+        match outcome {
+            IntentOutcome::NotImplementedInPhase { intent_name, phase } => {
+                assert_eq!(intent_name, "trace component");
+                assert_eq!(phase, 4);
+            }
+            other => panic!("expected NotImplementedInPhase, got {other:?}"),
+        }
+    }
+
     #[test]
     fn name_for_each_variant() {
         assert_eq!(Intent::Quit.name(), "Quit");
@@ -165,8 +241,20 @@ mod tests {
             "FetchEventContent"
         );
         assert_eq!(
-            Intent::JumpTo(CrossLink::ComponentId("x".into())).name(),
-            "JumpTo"
+            Intent::JumpTo(CrossLink::OpenInBrowser {
+                component_id: "x".into(),
+                group_id: "root".into(),
+            })
+            .name(),
+            "jump to Browser"
+        );
+        assert_eq!(
+            Intent::JumpTo(CrossLink::TraceComponent {
+                component_id: "x".into(),
+                since: std::time::SystemTime::UNIX_EPOCH,
+            })
+            .name(),
+            "trace component"
         );
         assert_eq!(Intent::StopProcessor("x".into()).name(), "StopProcessor");
         assert_eq!(
@@ -199,6 +287,19 @@ mod tests {
             }
             .is_write()
         );
-        assert!(!Intent::JumpTo(CrossLink::ComponentId("x".into())).is_write());
+        assert!(
+            !Intent::JumpTo(CrossLink::OpenInBrowser {
+                component_id: "x".into(),
+                group_id: "root".into(),
+            })
+            .is_write()
+        );
+        assert!(
+            !Intent::JumpTo(CrossLink::TraceComponent {
+                component_id: "x".into(),
+                since: std::time::SystemTime::UNIX_EPOCH,
+            })
+            .is_write()
+        );
     }
 }

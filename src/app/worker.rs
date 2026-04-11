@@ -1,8 +1,9 @@
 //! WorkerRegistry: owns the one currently-running view worker task and
 //! swaps it on tab change.
 //!
-//! Phase 1 only spawns a worker for the Overview tab; other tabs get no
-//! worker (Phases 2–4 add theirs).
+//! Phase 1 shipped the Overview worker (10s cadence) and Phase 2 added
+//! the Bulletins worker (5s cadence). Browser (Phase 3) and Tracer
+//! (Phase 4) will plug into the same pattern.
 
 use std::sync::Arc;
 
@@ -32,6 +33,7 @@ impl WorkerRegistry {
         view: ViewId,
         client: &Arc<RwLock<NifiClient>>,
         tx: &mpsc::Sender<AppEvent>,
+        bulletins_last_id: Option<i64>,
     ) {
         if matches!(&self.current, Some((existing, _)) if *existing == view) {
             return;
@@ -52,8 +54,15 @@ impl WorkerRegistry {
                     tx.clone(),
                 ))
             }
-            // Phases 2–4 will spawn bulletins / browser / tracer workers here.
-            ViewId::Bulletins | ViewId::Browser | ViewId::Tracer => {
+            ViewId::Bulletins => {
+                tracing::debug!(?view, "worker registry: spawning bulletins worker");
+                Some(crate::view::bulletins::worker::spawn(
+                    client.clone(),
+                    tx.clone(),
+                    bulletins_last_id,
+                ))
+            }
+            ViewId::Browser | ViewId::Tracer => {
                 tracing::debug!(?view, "worker registry: no worker for this view");
                 None
             }
@@ -64,8 +73,8 @@ impl WorkerRegistry {
     }
 
     /// Abort the currently-running view worker, if any. Called on app
-    /// shutdown. Phase 1 only ever has one active worker, so this aborts
-    /// exactly one handle or none.
+    /// shutdown. The registry only ever holds one active worker, so this
+    /// aborts exactly one handle or none.
     pub fn shutdown(&mut self) {
         tracing::debug!("worker registry: shutting down");
         if let Some((_, handle)) = self.current.take() {

@@ -9,6 +9,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Bulletins tab.** Cluster-wide live bulletin tail with severity
+  toggles (`e`/`w`/`i`), component-type cycling (`T`), free-text filter
+  (`/`), auto-scroll pause (`p`) with a `+N new` badge, and
+  `Enter`/`t` cross-link stubs that emit Phase 3 / Phase 4 intents.
+- **`[bulletins] ring_size` config knob.** Optional; default 5000;
+  valid range 100..=100_000. Controls the size of the in-memory ring
+  the Bulletins tab keeps.
+- **Per-view help modal sections.** The `?` help modal now renders a
+  per-tab keybind section below the global keys.
 - **Multi-version integration test fixture.** `integration-tests/run.sh`
   now boots NiFi 2.6.0 and 2.8.0 simultaneously and seeds both via a new
   `nifilens-fixture-seeder` workspace binary, producing a realistic flow
@@ -92,6 +101,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **`IntentOutcome::NotImplementedInPhase0` → `NotImplementedInPhase {
+  phase }`.** Internal refactor; the banner now reports the phase a
+  stubbed intent is waiting on.
+- **`CrossLink::ComponentId(String)` → `OpenInBrowser { .. }` /
+  `TraceComponent { .. }`.** Stronger typing around cross-tab jumps.
 - **Crate is now lib + bin.** `src/lib.rs` holds every module;
   `src/main.rs` is a thin wrapper calling `nifi_lens::run()`. Integration
   tests can `use nifi_lens::...` without spawning the binary.

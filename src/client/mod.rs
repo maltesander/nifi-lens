@@ -340,6 +340,32 @@ pub struct RootPgStatusSnapshot {
     pub connections: Vec<QueueSnapshot>,
 }
 
+/// Bulletin severity in sort order: Info < Warning < Error. `Unknown`
+/// covers everything NiFi sends outside of the standard three.
+///
+/// This type lives in the `client` module because severity is a property of
+/// bulletins, and every view that processes bulletins (Overview, Bulletins,
+/// future tabs) needs to parse it.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, PartialOrd, Ord)]
+pub enum Severity {
+    #[default]
+    Unknown,
+    Info,
+    Warning,
+    Error,
+}
+
+impl Severity {
+    pub fn parse(level: &str) -> Self {
+        match level.to_ascii_uppercase().as_str() {
+            "ERROR" => Self::Error,
+            "WARN" | "WARNING" => Self::Warning,
+            "INFO" => Self::Info,
+            _ => Self::Unknown,
+        }
+    }
+}
+
 /// One bulletin row as surfaced to the Overview tab.
 #[derive(Debug, Clone)]
 pub struct BulletinSnapshot {

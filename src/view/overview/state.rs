@@ -8,6 +8,8 @@ use std::time::SystemTime;
 use crate::client::{AboutSnapshot, ControllerStatusSnapshot, QueueSnapshot, RootPgStatusSnapshot};
 use crate::event::OverviewPayload;
 
+pub use crate::client::Severity;
+
 /// Size of the rolling bulletin-rate sparkline (minutes).
 pub const SPARKLINE_MINUTES: usize = 15;
 /// How many unhealthy queues to keep in the leaderboard.
@@ -20,28 +22,6 @@ pub const TOP_NOISY: usize = 5;
 pub struct BulletinBucket {
     pub count: u32,
     pub max_severity: Severity,
-}
-
-/// Bulletin severity in sort order: Info < Warning < Error. `Unknown`
-/// covers everything NiFi sends outside of the standard three.
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, PartialOrd, Ord)]
-pub enum Severity {
-    #[default]
-    Unknown,
-    Info,
-    Warning,
-    Error,
-}
-
-impl Severity {
-    pub fn parse(level: &str) -> Self {
-        match level.to_ascii_uppercase().as_str() {
-            "ERROR" => Self::Error,
-            "WARN" | "WARNING" => Self::Warning,
-            "INFO" => Self::Info,
-            _ => Self::Unknown,
-        }
-    }
 }
 
 #[derive(Debug, Clone)]

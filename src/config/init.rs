@@ -14,6 +14,12 @@ const TEMPLATE: &str = r#"# nifi-lens configuration file.
 
 current_context = "dev"
 
+# Bulletins tab ring buffer size. The Bulletins tab keeps a rolling
+# in-memory window of recently-seen bulletins; this knob caps it.
+# Valid range: 100..=100000. Default: 5000.
+# [bulletins]
+# ring_size = 5000
+
 # Example context. Duplicate this block for additional clusters.
 [[contexts]]
 # Human-readable name. Matches `current_context` above and `--context` on
@@ -96,5 +102,11 @@ mod tests {
         assert_eq!(parsed.current_context, "dev");
         assert_eq!(parsed.contexts.len(), 1);
         assert_eq!(parsed.contexts[0].name, "dev");
+    }
+
+    #[test]
+    fn template_bulletins_ring_size_defaults_when_block_commented() {
+        let parsed: crate::config::Config = toml::from_str(TEMPLATE).expect("template parses");
+        assert_eq!(parsed.bulletins.ring_size, 5000);
     }
 }
