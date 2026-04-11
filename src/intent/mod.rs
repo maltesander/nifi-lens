@@ -91,31 +91,44 @@ pub struct IntentDispatcher {
 }
 
 impl IntentDispatcher {
+    /// Intent arms that don't touch the client. Factored out so tests
+    /// can exercise them without building a dispatcher (which would
+    /// otherwise require a live NifiClient). Returns `None` for any
+    /// intent that needs the client.
+    fn handle_pure(intent: &Intent) -> Option<Result<IntentOutcome, NifiLensError>> {
+        if intent.is_write() {
+            return Some(Err(NifiLensError::WriteIntentRefused {
+                intent_name: intent.name(),
+            }));
+        }
+        match intent {
+            Intent::Quit => Some(Ok(IntentOutcome::Quitting)),
+            Intent::RefreshView(view) => Some(Ok(IntentOutcome::ViewRefreshed { view: *view })),
+            Intent::JumpTo(CrossLink::OpenInBrowser { .. }) => {
+                Some(Ok(IntentOutcome::NotImplementedInPhase {
+                    intent_name: "jump to Browser",
+                    phase: 3,
+                }))
+            }
+            Intent::JumpTo(CrossLink::TraceComponent { .. }) => {
+                Some(Ok(IntentOutcome::NotImplementedInPhase {
+                    intent_name: "trace component",
+                    phase: 4,
+                }))
+            }
+            _ => None,
+        }
+    }
+
     pub async fn dispatch(&self, intent: Intent) -> Result<IntentOutcome, NifiLensError> {
         tracing::debug!(intent = intent.name(), "dispatching");
 
-        if intent.is_write() {
-            return Err(NifiLensError::WriteIntentRefused {
-                intent_name: intent.name(),
-            });
+        if let Some(outcome) = Self::handle_pure(&intent) {
+            return outcome;
         }
 
         match intent {
-            Intent::Quit => Ok(IntentOutcome::Quitting),
             Intent::SwitchContext(name) => self.switch_context(name).await,
-            Intent::RefreshView(view) => Ok(IntentOutcome::ViewRefreshed { view }),
-            Intent::JumpTo(CrossLink::OpenInBrowser { .. }) => {
-                Ok(IntentOutcome::NotImplementedInPhase {
-                    intent_name: "jump to Browser",
-                    phase: 3,
-                })
-            }
-            Intent::JumpTo(CrossLink::TraceComponent { .. }) => {
-                Ok(IntentOutcome::NotImplementedInPhase {
-                    intent_name: "trace component",
-                    phase: 4,
-                })
-            }
             other => Ok(IntentOutcome::NotImplementedInPhase {
                 intent_name: other.name(),
                 phase: 0,
@@ -172,20 +185,15 @@ mod tests {
     use super::*;
 
     use crate::event::IntentOutcome;
-    use std::time::SystemTime;
 
-    #[tokio::test]
-    async fn cross_link_open_in_browser_returns_phase_3_stub() {
-        let (dispatcher, client_leak) = stub_dispatcher();
-        let outcome = dispatcher
-            .dispatch(Intent::JumpTo(CrossLink::OpenInBrowser {
-                component_id: "proc-1".into(),
-                group_id: "root".into(),
-            }))
-            .await
-            .unwrap();
-        // Prevent drop of the fake Arc — it was created from a leaked Box.
-        std::mem::forget(client_leak);
+    #[test]
+    fn cross_link_open_in_browser_returns_phase_3_stub() {
+        let outcome = IntentDispatcher::handle_pure(&Intent::JumpTo(CrossLink::OpenInBrowser {
+            component_id: "proc-1".into(),
+            group_id: "root".into(),
+        }))
+        .expect("JumpTo must be handled by handle_pure")
+        .expect("JumpTo stubs return Ok(...)");
         match outcome {
             IntentOutcome::NotImplementedInPhase { intent_name, phase } => {
                 assert_eq!(intent_name, "jump to Browser");
@@ -195,18 +203,15 @@ mod tests {
         }
     }
 
-    #[tokio::test]
-    async fn cross_link_trace_component_returns_phase_4_stub() {
-        let (dispatcher, client_leak) = stub_dispatcher();
-        let outcome = dispatcher
-            .dispatch(Intent::JumpTo(CrossLink::TraceComponent {
-                component_id: "proc-1".into(),
-                since: SystemTime::UNIX_EPOCH,
-            }))
-            .await
-            .unwrap();
-        // Prevent drop of the fake Arc — it was created from a leaked Box.
-        std::mem::forget(client_leak);
+    #[test]
+    fn cross_link_trace_component_returns_phase_4_stub() {
+        use std::time::SystemTime;
+        let outcome = IntentDispatcher::handle_pure(&Intent::JumpTo(CrossLink::TraceComponent {
+            component_id: "proc-1".into(),
+            since: SystemTime::UNIX_EPOCH,
+        }))
+        .expect("JumpTo must be handled by handle_pure")
+        .expect("JumpTo stubs return Ok(...)");
         match outcome {
             IntentOutcome::NotImplementedInPhase { intent_name, phase } => {
                 assert_eq!(intent_name, "trace component");
@@ -214,39 +219,6 @@ mod tests {
             }
             other => panic!("expected NotImplementedInPhase, got {other:?}"),
         }
-    }
-
-    /// Tiny dispatcher with a real Arc<RwLock<NifiClient>> is awkward to
-    /// build (requires a live login). Instead, we build the dispatcher
-    /// with a stub client constructed via transmute from a leaked raw
-    /// allocation. The caller must `std::mem::forget` the returned
-    /// `Arc<RwLock<NifiClient>>` handle to prevent a double-free.
-    ///
-    /// SAFETY: the dispatch paths exercised by these tests never read
-    /// the client field. If a future test calls a non-JumpTo arm, it
-    /// must build a real dispatcher.
-    fn stub_dispatcher() -> (IntentDispatcher, Arc<RwLock<u8>>) {
-        use crate::config::Config;
-        // Allocate a real Arc<RwLock<u8>> (trivially constructible), then
-        // transmute it to Arc<RwLock<NifiClient>>. The Arc internals are
-        // identical regardless of T (same pointer / refcount layout), and we
-        // guarantee never to deref the inner value.  We return the original
-        // Arc<RwLock<u8>> so the caller can `forget` it, avoiding the
-        // double-free that would result from dropping both the transmuted copy
-        // and the original.
-        let real: Arc<RwLock<u8>> = Arc::new(RwLock::new(0u8));
-        // Clone to get a second handle; the caller will forget this clone.
-        let caller_handle = Arc::clone(&real);
-        // SAFETY: Arc<RwLock<u8>> and Arc<RwLock<NifiClient>> have the same
-        // representation. We never deref the NifiClient side; we only store
-        // it and drop it (via forget) without touching the payload.
-        let client: Arc<RwLock<crate::client::NifiClient>> = unsafe { std::mem::transmute(real) }; // same repr; payload never deref'd
-        let config = Arc::new(Config {
-            current_context: "dev".into(),
-            bulletins: Default::default(),
-            contexts: vec![],
-        });
-        (IntentDispatcher { client, config }, caller_handle)
     }
 
     #[test]
