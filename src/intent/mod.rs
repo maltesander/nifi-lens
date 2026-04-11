@@ -39,7 +39,19 @@ pub enum ContentSide {
 
 #[derive(Debug, Clone)]
 pub enum CrossLink {
-    ComponentId(String),
+    /// From Bulletins `Enter`: open Browser on the selected bulletin's
+    /// component. Phase 3 wires this.
+    OpenInBrowser {
+        component_id: String,
+        group_id: String,
+    },
+    /// From Bulletins `t`: open Tracer with a component-filtered query
+    /// seeded from the bulletin's component and timestamp. Phase 4
+    /// wires this.
+    TraceComponent {
+        component_id: String,
+        since: std::time::SystemTime,
+    },
 }
 
 impl Intent {
@@ -51,7 +63,8 @@ impl Intent {
             Self::OpenProcessGroup(_) => "OpenProcessGroup",
             Self::TraceFlowfile(_) => "TraceFlowfile",
             Self::FetchEventContent { .. } => "FetchEventContent",
-            Self::JumpTo(_) => "JumpTo",
+            Self::JumpTo(CrossLink::OpenInBrowser { .. }) => "jump to Browser",
+            Self::JumpTo(CrossLink::TraceComponent { .. }) => "trace component",
             Self::StartProcessor(_) => "StartProcessor",
             Self::StopProcessor(_) => "StopProcessor",
             Self::EnableControllerService(_) => "EnableControllerService",
@@ -91,6 +104,18 @@ impl IntentDispatcher {
             Intent::Quit => Ok(IntentOutcome::Quitting),
             Intent::SwitchContext(name) => self.switch_context(name).await,
             Intent::RefreshView(view) => Ok(IntentOutcome::ViewRefreshed { view }),
+            Intent::JumpTo(CrossLink::OpenInBrowser { .. }) => {
+                Ok(IntentOutcome::NotImplementedInPhase {
+                    intent_name: "jump to Browser",
+                    phase: 3,
+                })
+            }
+            Intent::JumpTo(CrossLink::TraceComponent { .. }) => {
+                Ok(IntentOutcome::NotImplementedInPhase {
+                    intent_name: "trace component",
+                    phase: 4,
+                })
+            }
             other => Ok(IntentOutcome::NotImplementedInPhase {
                 intent_name: other.name(),
                 phase: 0,
@@ -146,6 +171,84 @@ impl IntentDispatcher {
 mod tests {
     use super::*;
 
+    use crate::event::IntentOutcome;
+    use std::time::SystemTime;
+
+    #[tokio::test]
+    async fn cross_link_open_in_browser_returns_phase_3_stub() {
+        let (dispatcher, client_leak) = stub_dispatcher();
+        let outcome = dispatcher
+            .dispatch(Intent::JumpTo(CrossLink::OpenInBrowser {
+                component_id: "proc-1".into(),
+                group_id: "root".into(),
+            }))
+            .await
+            .unwrap();
+        // Prevent drop of the fake Arc — it was created from a leaked Box.
+        std::mem::forget(client_leak);
+        match outcome {
+            IntentOutcome::NotImplementedInPhase { intent_name, phase } => {
+                assert_eq!(intent_name, "jump to Browser");
+                assert_eq!(phase, 3);
+            }
+            other => panic!("expected NotImplementedInPhase, got {other:?}"),
+        }
+    }
+
+    #[tokio::test]
+    async fn cross_link_trace_component_returns_phase_4_stub() {
+        let (dispatcher, client_leak) = stub_dispatcher();
+        let outcome = dispatcher
+            .dispatch(Intent::JumpTo(CrossLink::TraceComponent {
+                component_id: "proc-1".into(),
+                since: SystemTime::UNIX_EPOCH,
+            }))
+            .await
+            .unwrap();
+        // Prevent drop of the fake Arc — it was created from a leaked Box.
+        std::mem::forget(client_leak);
+        match outcome {
+            IntentOutcome::NotImplementedInPhase { intent_name, phase } => {
+                assert_eq!(intent_name, "trace component");
+                assert_eq!(phase, 4);
+            }
+            other => panic!("expected NotImplementedInPhase, got {other:?}"),
+        }
+    }
+
+    /// Tiny dispatcher with a real Arc<RwLock<NifiClient>> is awkward to
+    /// build (requires a live login). Instead, we build the dispatcher
+    /// with a stub client constructed via transmute from a leaked raw
+    /// allocation. The caller must `std::mem::forget` the returned
+    /// `Arc<RwLock<NifiClient>>` handle to prevent a double-free.
+    ///
+    /// SAFETY: the dispatch paths exercised by these tests never read
+    /// the client field. If a future test calls a non-JumpTo arm, it
+    /// must build a real dispatcher.
+    fn stub_dispatcher() -> (IntentDispatcher, Arc<RwLock<u8>>) {
+        use crate::config::Config;
+        // Allocate a real Arc<RwLock<u8>> (trivially constructible), then
+        // transmute it to Arc<RwLock<NifiClient>>. The Arc internals are
+        // identical regardless of T (same pointer / refcount layout), and we
+        // guarantee never to deref the inner value.  We return the original
+        // Arc<RwLock<u8>> so the caller can `forget` it, avoiding the
+        // double-free that would result from dropping both the transmuted copy
+        // and the original.
+        let real: Arc<RwLock<u8>> = Arc::new(RwLock::new(0u8));
+        // Clone to get a second handle; the caller will forget this clone.
+        let caller_handle = Arc::clone(&real);
+        // SAFETY: Arc<RwLock<u8>> and Arc<RwLock<NifiClient>> have the same
+        // representation. We never deref the NifiClient side; we only store
+        // it and drop it (via forget) without touching the payload.
+        let client: Arc<RwLock<crate::client::NifiClient>> = unsafe { std::mem::transmute(real) }; // same repr; payload never deref'd
+        let config = Arc::new(Config {
+            current_context: "dev".into(),
+            bulletins: Default::default(),
+            contexts: vec![],
+        });
+        (IntentDispatcher { client, config }, caller_handle)
+    }
+
     #[test]
     fn name_for_each_variant() {
         assert_eq!(Intent::Quit.name(), "Quit");
@@ -166,8 +269,20 @@ mod tests {
             "FetchEventContent"
         );
         assert_eq!(
-            Intent::JumpTo(CrossLink::ComponentId("x".into())).name(),
-            "JumpTo"
+            Intent::JumpTo(CrossLink::OpenInBrowser {
+                component_id: "x".into(),
+                group_id: "root".into(),
+            })
+            .name(),
+            "jump to Browser"
+        );
+        assert_eq!(
+            Intent::JumpTo(CrossLink::TraceComponent {
+                component_id: "x".into(),
+                since: std::time::SystemTime::UNIX_EPOCH,
+            })
+            .name(),
+            "trace component"
         );
         assert_eq!(Intent::StopProcessor("x".into()).name(), "StopProcessor");
         assert_eq!(
@@ -200,6 +315,19 @@ mod tests {
             }
             .is_write()
         );
-        assert!(!Intent::JumpTo(CrossLink::ComponentId("x".into())).is_write());
+        assert!(
+            !Intent::JumpTo(CrossLink::OpenInBrowser {
+                component_id: "x".into(),
+                group_id: "root".into(),
+            })
+            .is_write()
+        );
+        assert!(
+            !Intent::JumpTo(CrossLink::TraceComponent {
+                component_id: "x".into(),
+                since: std::time::SystemTime::UNIX_EPOCH,
+            })
+            .is_write()
+        );
     }
 }
