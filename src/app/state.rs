@@ -10,7 +10,8 @@ use semver::Version;
 
 use crate::NifiLensError;
 use crate::config::Config;
-use crate::event::{AppEvent, IntentOutcome};
+use crate::event::{AppEvent, IntentOutcome, ViewPayload};
+use crate::view::overview::{OverviewState, apply_payload as apply_overview_payload};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum ViewId {
@@ -47,6 +48,7 @@ pub struct AppState {
     pub detected_version: Version,
     pub last_refresh: Instant,
     pub modal: Option<Modal>,
+    pub overview: OverviewState,
     pub status: StatusLine,
     pub error_detail: Option<String>,
     pub should_quit: bool,
@@ -60,6 +62,7 @@ impl AppState {
             detected_version,
             last_refresh: Instant::now(),
             modal: None,
+            overview: OverviewState::new(),
             status: StatusLine::default(),
             error_detail: None,
             should_quit: false,
@@ -180,7 +183,14 @@ pub fn update(state: &mut AppState, event: AppEvent, config: &Config) -> UpdateR
             redraw: false,
             intent: None,
         },
-        AppEvent::Data(_) => UpdateResult::default(),
+        AppEvent::Data(ViewPayload::Overview(payload)) => {
+            apply_overview_payload(&mut state.overview, payload);
+            state.last_refresh = Instant::now();
+            UpdateResult {
+                redraw: true,
+                intent: None,
+            }
+        }
         AppEvent::IntentOutcome(outcome) => handle_intent_outcome(state, outcome),
         AppEvent::Quit => {
             state.should_quit = true;
@@ -592,5 +602,39 @@ mod tests {
             s.status.banner.as_ref().unwrap().severity,
             BannerSeverity::Error
         );
+    }
+
+    #[test]
+    fn overview_data_event_updates_state_and_triggers_redraw() {
+        use crate::client::{
+            AboutSnapshot, BulletinBoardSnapshot, ControllerStatusSnapshot, RootPgStatusSnapshot,
+        };
+        use crate::event::{OverviewPayload, ViewPayload};
+        use std::time::SystemTime;
+
+        let mut s = fresh_state();
+        let c = tiny_config();
+        let payload = OverviewPayload {
+            about: AboutSnapshot {
+                version: "2.8.0".into(),
+                title: "NiFi".into(),
+            },
+            controller: ControllerStatusSnapshot {
+                running: 7,
+                stopped: 3,
+                invalid: 0,
+                disabled: 1,
+                active_threads: 0,
+                flow_files_queued: 0,
+                bytes_queued: 0,
+            },
+            root_pg: RootPgStatusSnapshot::default(),
+            bulletin_board: BulletinBoardSnapshot::default(),
+            fetched_at: SystemTime::now(),
+        };
+        let r = update(&mut s, AppEvent::Data(ViewPayload::Overview(payload)), &c);
+        assert!(r.redraw);
+        let snap = s.overview.snapshot.as_ref().unwrap();
+        assert_eq!(snap.controller.running, 7);
     }
 }

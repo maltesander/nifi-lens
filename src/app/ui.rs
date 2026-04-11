@@ -56,7 +56,7 @@ fn render_tab_bar(frame: &mut Frame, area: Rect, state: &AppState) {
 
 fn render_content(frame: &mut Frame, area: Rect, state: &AppState) {
     match state.current_tab {
-        ViewId::Overview => overview::render(frame, area),
+        ViewId::Overview => overview::render(frame, area, &state.overview),
         ViewId::Bulletins => bulletins::render(frame, area),
         ViewId::Browser => browser::render(frame, area),
         ViewId::Tracer => tracer::render(frame, area),

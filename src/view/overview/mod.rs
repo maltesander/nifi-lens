@@ -11,7 +11,7 @@ use ratatui::layout::Rect;
 
 pub use state::{OverviewState, apply_payload};
 
-pub fn render(frame: &mut Frame, area: Rect) {
+pub fn render(frame: &mut Frame, area: Rect, _state: &OverviewState) {
     // Placeholder until Task 8 wires the real renderer.
     super::render_placeholder(frame, area, "Overview", "Phase 1");
 }
