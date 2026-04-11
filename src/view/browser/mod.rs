@@ -9,6 +9,7 @@
 
 pub mod render;
 pub mod state;
+pub mod worker;
 
 use ratatui::Frame;
 use ratatui::layout::Rect;
