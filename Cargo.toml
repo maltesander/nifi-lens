@@ -45,6 +45,9 @@ serde_json = "1"
 tempfile = "3"
 wiremock = "0.6"
 
+[build-dependencies]
+toml = "0.8"
+
 # Development-only override: uncomment locally when iterating against an
 # unreleased change in ../nifi-rust-client. Must remain commented on `main`
 # so CI and crates.io releases build against the published version.
