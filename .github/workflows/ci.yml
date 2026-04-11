@@ -88,3 +88,34 @@ jobs:
       - uses: Swatinem/rust-cache@v2
       - run: cargo install cargo-deny --locked
       - uses: pre-commit/action@v3.0.1
+
+  fixture-version-drift:
+    name: Fixture version drift check
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - name: Check versions.toml / docker-compose.yml / nifilens-config.toml consistency
+        run: |
+          set -euo pipefail
+          VERSIONS=$(grep -oP '"\K[0-9]+\.[0-9]+\.[0-9]+(?=")' integration-tests/versions.toml | sort -u)
+          COMPOSE=$(grep -oP 'apache/nifi:\K[0-9]+\.[0-9]+\.[0-9]+' integration-tests/docker-compose.yml | sort -u)
+          CONFIG=$(grep -oP 'dev-nifi-\K[0-9]+-[0-9]+-[0-9]+' integration-tests/nifilens-config.toml | tr '-' '.' | sort -u)
+          if [ "$VERSIONS" != "$COMPOSE" ] || [ "$VERSIONS" != "$CONFIG" ]; then
+            echo "ERROR: fixture version drift detected" >&2
+            echo "versions.toml: $VERSIONS" >&2
+            echo "docker-compose.yml: $COMPOSE" >&2
+            echo "nifilens-config.toml: $CONFIG" >&2
+            exit 1
+          fi
+          echo "Fixture versions consistent: $VERSIONS"
+
+  integration:
+    name: Integration (Docker + NiFi fixture)
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions-rust-lang/setup-rust-toolchain@v1
+      - uses: Swatinem/rust-cache@v2
+      - name: Run integration harness
+        run: ./integration-tests/run.sh
