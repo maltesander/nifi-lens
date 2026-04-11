@@ -335,6 +335,69 @@ fn push_visible_subtree(state: &mut BrowserState, idx: usize) {
     }
 }
 
+/// Fuzzy-find haystack shared between Browser and the Ctrl+F modal.
+/// Rebuilt on every tree snapshot.
+#[derive(Debug, Clone)]
+pub struct FlowIndex {
+    pub entries: Vec<FlowIndexEntry>,
+}
+
+#[derive(Debug, Clone)]
+pub struct FlowIndexEntry {
+    pub id: String,
+    pub group_id: String,
+    pub kind: NodeKind,
+    /// Display form shown in modal rows: `"{name}   {kind}   {group_path}"`.
+    pub display: String,
+    /// Lowercased display form, the haystack nucleo searches against.
+    pub haystack: String,
+}
+
+/// Build a fresh `FlowIndex` from the arena. Walks parent pointers to
+/// produce each node's group path (e.g. `"root/ingest/enrich"`). PGs,
+/// processors, connections, ports, and controller services are all
+/// included.
+pub fn build_flow_index(state: &BrowserState) -> FlowIndex {
+    fn path_to_root(nodes: &[TreeNode], idx: usize) -> String {
+        let mut names: Vec<&str> = Vec::new();
+        let mut cursor = Some(idx);
+        while let Some(i) = cursor {
+            names.push(&nodes[i].name);
+            cursor = nodes[i].parent;
+        }
+        names.reverse();
+        names.join("/")
+    }
+    let entries = state
+        .nodes
+        .iter()
+        .map(|n| {
+            let kind_label = match n.kind {
+                NodeKind::ProcessGroup => "PG",
+                NodeKind::Processor => "Processor",
+                NodeKind::Connection => "Connection",
+                NodeKind::InputPort => "InputPort",
+                NodeKind::OutputPort => "OutputPort",
+                NodeKind::ControllerService => "CS",
+            };
+            let group_path = match n.parent {
+                Some(p) => path_to_root(&state.nodes, p),
+                None => "(root)".to_string(),
+            };
+            let display = format!("{}   {}   {}", n.name, kind_label, group_path);
+            let haystack = display.to_lowercase();
+            FlowIndexEntry {
+                id: n.id.clone(),
+                group_id: n.group_id.clone(),
+                kind: n.kind,
+                display,
+                haystack,
+            }
+        })
+        .collect();
+    FlowIndex { entries }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -723,6 +786,31 @@ mod tests {
         apply_node_detail(&mut s, payload);
         assert_eq!(s.pending_detail, Some(2));
         assert!(s.details.contains_key(&1));
+    }
+
+    #[test]
+    fn flow_index_is_rebuilt_fresh_on_every_snapshot() {
+        let mut s = BrowserState::new();
+        apply_tree_snapshot(&mut s, demo_snap());
+        let idx1 = build_flow_index(&s);
+        assert_eq!(idx1.entries.len(), 5);
+        let shifted = snap(vec![pg("root", None, 2), proc("only", 0, "Running")]);
+        apply_tree_snapshot(&mut s, shifted);
+        let idx2 = build_flow_index(&s);
+        assert_eq!(idx2.entries.len(), 2);
+    }
+
+    #[test]
+    fn flow_index_group_path_walks_parent_chain() {
+        let mut s = BrowserState::new();
+        apply_tree_snapshot(&mut s, demo_snap());
+        let idx = build_flow_index(&s);
+        // "upd" sits under root/ingest
+        let upd = idx.entries.iter().find(|e| e.id == "upd").unwrap();
+        assert!(upd.display.contains("Processor"));
+        assert!(upd.display.contains("root/ingest"));
+        // Haystack is lowercased.
+        assert_eq!(upd.haystack, upd.display.to_lowercase());
     }
 
     #[test]

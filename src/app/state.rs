@@ -14,6 +14,7 @@ use crate::NifiLensError;
 use crate::config::Config;
 use crate::event::{AppEvent, IntentOutcome, ViewPayload};
 use crate::intent::CrossLink;
+use crate::view::browser::state::{BrowserState, FlowIndex};
 use crate::view::bulletins::state::BulletinsState;
 use crate::view::overview::{OverviewState, apply_payload as apply_overview_payload};
 
@@ -54,6 +55,8 @@ pub struct AppState {
     pub modal: Option<Modal>,
     pub overview: OverviewState,
     pub bulletins: BulletinsState,
+    pub browser: BrowserState,
+    pub flow_index: Option<FlowIndex>,
     pub status: StatusLine,
     pub error_detail: Option<String>,
     pub should_quit: bool,
@@ -69,6 +72,8 @@ impl AppState {
             modal: None,
             overview: OverviewState::new(),
             bulletins: BulletinsState::with_capacity(config.bulletins.ring_size),
+            browser: BrowserState::new(),
+            flow_index: None,
             status: StatusLine::default(),
             error_detail: None,
             should_quit: false,
