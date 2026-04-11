@@ -309,39 +309,66 @@ fn truncate_left(s: &str, max: usize) -> String {
 }
 
 fn wrap_lines(s: &str, width: usize, max_lines: usize) -> Vec<String> {
-    if width == 0 {
+    if width == 0 || max_lines == 0 {
         return vec![];
     }
     let mut lines: Vec<String> = Vec::new();
     let mut current = String::new();
+    let mut current_chars: usize = 0;
     for word in s.split_whitespace() {
-        if current.is_empty() {
-            if word.len() > width {
-                lines.push(word.chars().take(width).collect());
-                continue;
-            }
-            current.push_str(word);
-        } else if current.len() + 1 + word.len() <= width {
-            current.push(' ');
-            current.push_str(word);
+        let word_chars = word.chars().count();
+        // If the word by itself is wider than the column, truncate it to fit.
+        let (fit_word, fit_chars) = if word_chars > width {
+            let truncated: String = word.chars().take(width.saturating_sub(1)).collect();
+            let mut t = truncated;
+            t.push('…');
+            let tc = t.chars().count();
+            (t, tc)
         } else {
+            (word.to_string(), word_chars)
+        };
+
+        let needs_space = !current.is_empty();
+        let next_len = current_chars + if needs_space { 1 } else { 0 } + fit_chars;
+
+        if next_len <= width {
+            if needs_space {
+                current.push(' ');
+                current_chars += 1;
+            }
+            current.push_str(&fit_word);
+            current_chars += fit_chars;
+            continue;
+        }
+
+        // Word doesn't fit on the current line — push current and start a new one.
+        if !current.is_empty() {
             lines.push(std::mem::take(&mut current));
-            current.push_str(word);
         }
+
+        // We're about to start a line that would push us over the ceiling.
+        // Truncate the already-pushed last line with an ellipsis and stop.
         if lines.len() >= max_lines {
-            break;
+            if let Some(last) = lines.last_mut() {
+                let last_chars = last.chars().count();
+                if last_chars > 0 {
+                    let keep = last_chars.saturating_sub(1);
+                    let mut truncated: String = last.chars().take(keep).collect();
+                    truncated.push('…');
+                    *last = truncated;
+                }
+            }
+            return lines;
         }
+
+        // Otherwise start the new line with this word.
+        current.push_str(&fit_word);
+        current_chars = fit_chars;
     }
-    if lines.len() < max_lines && !current.is_empty() {
+
+    if !current.is_empty() && lines.len() < max_lines {
         lines.push(current);
     }
-    if lines.len() > max_lines {
-        lines.truncate(max_lines);
-        if let Some(last) = lines.last_mut().filter(|l| l.chars().count() > 3) {
-            let mut trimmed: String = last.chars().take(last.chars().count() - 1).collect();
-            trimmed.push('…');
-            *last = trimmed;
-        }
-    }
+
     lines
 }
