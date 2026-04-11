@@ -22,3 +22,6 @@ target
 
 # Do not checkin plans and specs.
 docs
+
+# Isolated worktrees for in-session feature work.
+.worktrees
