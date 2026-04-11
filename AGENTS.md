@@ -49,9 +49,10 @@ nifi-lens/
     └── widget/             # status_bar, help_modal, context_switcher
 ```
 
-Phase 0 (see [Phase Roadmap](#phase-roadmap)) will grow the `src/` tree into
-modules for `app`, `config`, `client`, `intent`, `event`, `view`, `widget`,
-`fuzzy`, `theme`, and `util`.
+Phase 1+ will grow the existing modules with real per-view data workers
+and renderers, and add `fuzzy/` (nucleo-backed find) and `util/` when the
+first callers land. See [Phase Roadmap](#phase-roadmap) for the shipping
+order.
 
 ## Architecture
 
