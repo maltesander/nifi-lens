@@ -74,11 +74,12 @@ fn run_inner(args: cli::Args) -> Result<ExitCode, NifiLensError> {
                 .enable_all()
                 .build()
                 .map_err(|source| NifiLensError::Io { source })?;
-            rt.block_on(async move {
+            let local = tokio::task::LocalSet::new();
+            rt.block_on(local.run_until(async move {
                 let client = client::NifiClient::connect(&resolved).await?;
                 app::run(client, config, stderr_toggle.clone()).await?;
                 Ok::<(), NifiLensError>(())
-            })?;
+            }))?;
             Ok(ExitCode::SUCCESS)
         }
     }
