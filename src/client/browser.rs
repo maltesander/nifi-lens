@@ -410,19 +410,20 @@ impl NifiClient {
             })?;
 
         let component = entity.component.unwrap_or_default();
-        let config = component.config.clone().unwrap_or_default();
+        // Build bundle_str before moving config out so component.config can be moved.
         let bundle_str = component
             .bundle
             .as_ref()
             .map(|b| {
                 format!(
                     "{}:{}:{}",
-                    b.group.clone().unwrap_or_default(),
-                    b.artifact.clone().unwrap_or_default(),
-                    b.version.clone().unwrap_or_default(),
+                    b.group.as_deref().unwrap_or(""),
+                    b.artifact.as_deref().unwrap_or(""),
+                    b.version.as_deref().unwrap_or(""),
                 )
             })
             .unwrap_or_default();
+        let config = component.config.unwrap_or_default();
 
         // Library returns `Option<HashMap<String, Option<String>>>`. Flatten
         // into `Vec<(String, String)>`. HashMap ordering is non-deterministic;

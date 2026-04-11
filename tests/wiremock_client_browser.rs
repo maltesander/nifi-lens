@@ -168,6 +168,8 @@ async fn browser_processor_detail_carries_properties_and_validation_errors() {
     assert_eq!(d.scheduling_period, "1 sec");
     assert_eq!(d.concurrent_tasks, 2);
     assert_eq!(d.run_duration_ms, 25);
+    assert_eq!(d.penalty_duration, "30 sec");
+    assert_eq!(d.yield_duration, "1 sec");
     assert_eq!(d.bulletin_level, "WARN");
     assert_eq!(d.properties.len(), 6);
     assert_eq!(d.validation_errors.len(), 1);
