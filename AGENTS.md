@@ -45,7 +45,7 @@ nifi-lens/
     ├── client/             # mod, build — NifiClient wrapper (Deref) + TLS
     ├── app/                # mod (run loop), state (reducer), ui (frame render)
     ├── intent/             # Intent enum + IntentDispatcher
-    ├── view/               # per-tab placeholder renderers
+    ├── view/               # per-tab views; overview/ shipped Phase 1 with state/render/worker
     └── widget/             # status_bar, help_modal, context_switcher
 ```
 
@@ -65,7 +65,15 @@ order.
 - **Per-view data worker tasks** poll the relevant `NifiClient` endpoints
   and push `AppEvent::Data(view, payload)` into the channel. Workers are
   spawned on tab activation and cancelled on tab switch, so API load is
-  proportional to what the user is actually looking at.
+  proportional to what the user is actually looking at. The run loop owns
+  a `WorkerRegistry` (`src/app/worker.rs`) holding at most one
+  `JoinHandle<()>`: on every tab change it aborts the previous worker and
+  spawns the new view's worker (no-op when the view already matches).
+  Phase 1 only spawns the Overview worker; Bulletins / Browser / Tracer
+  workers land in their respective phases. Workers run via
+  `tokio::task::spawn_local` on the main-thread `LocalSet` (wired in
+  `src/lib.rs`) because `nifi-rust-client` dynamic traits return `!Send`
+  futures.
 - **Intent dispatcher** handles one-shot actions (trace a UUID, drill into
   a process group, fetch content for an event). It runs tasks off the
   runtime and pushes results back via the same channel.
@@ -240,7 +248,7 @@ usable state.
    placeholders, `Ctrl+K` context switcher, intent dispatcher stub,
    rotating-file logging with stderr toggle, panic-safe terminal guard,
    wiremock client tests, Docker-backed integration test harness.
-2. **Phase 1 — Overview tab.** Health dashboard: identity strip,
+2. **Phase 1 — Overview tab.** *(shipped)* Health dashboard: identity strip,
    component counts, bulletin-rate sparkline, unhealthy-queue leaderboard,
    top noisy components.
 3. **Phase 2 — Bulletins tab.** Cluster-wide bulletin tail with
