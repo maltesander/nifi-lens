@@ -103,12 +103,13 @@ impl BulletinsState {
 
     fn row_matches(&self, b: &BulletinSnapshot) -> bool {
         // Severity. `Unknown` rides with the Info chip by design.
-        let sev = crate::view::overview::state::Severity::parse(&b.level);
+        let sev = crate::client::Severity::parse(&b.level);
         let severity_ok = match sev {
-            crate::view::overview::state::Severity::Error => self.filters.show_error,
-            crate::view::overview::state::Severity::Warning => self.filters.show_warning,
-            crate::view::overview::state::Severity::Info
-            | crate::view::overview::state::Severity::Unknown => self.filters.show_info,
+            crate::client::Severity::Error => self.filters.show_error,
+            crate::client::Severity::Warning => self.filters.show_warning,
+            crate::client::Severity::Info | crate::client::Severity::Unknown => {
+                self.filters.show_info
+            }
         };
         if !severity_ok {
             return false;
