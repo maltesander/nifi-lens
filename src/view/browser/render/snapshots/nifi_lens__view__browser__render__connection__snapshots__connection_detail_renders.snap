@@ -1,0 +1,22 @@
+---
+source: src/view/browser/render/connection.rs
+expression: "format!(\"{}\", terminal.backend())"
+---
+"Connection — enrich → publish                                                                       "
+"From: EnrichAttribute (PROCESSOR)   To: PublishKafka (PROCESSOR)                                    "
+"Relationships: success                                                                              "
+"                                                                                                    "
+"Fill: 55%  (5500 ff / 5,500 / 50 MB)                                                                "
+"Back-pressure thresholds: count=10000, size=1 GB                                                    "
+"Expiration: 0 sec                                                                                   "
+"Load balance: DO_NOT_LOAD_BALANCE                                                                   "
+"                                                                                                    "
+"                                                                                                    "
+"                                                                                                    "
+"                                                                                                    "
+"                                                                                                    "
+"                                                                                                    "
+"                                                                                                    "
+"                                                                                                    "
+"                                                                                                    "
+"                                                                                                    "

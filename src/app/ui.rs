@@ -30,10 +30,22 @@ pub fn render(frame: &mut Frame, state: &AppState) {
             Modal::Help => help_modal::render(frame, root, state.current_tab),
             Modal::ContextSwitcher(cs) => context_switcher::render(frame, root, cs),
             Modal::ErrorDetail => render_error_detail(frame, root, state),
-            // FuzzyFind render overlay lands in Task 18.
-            Modal::FuzzyFind(_) => {}
-            // Properties render overlay lands in Task 18.
-            Modal::Properties(_) => {}
+            Modal::FuzzyFind(fs) => {
+                crate::view::browser::render::render_fuzzy_find_modal(
+                    frame,
+                    frame.area(),
+                    fs,
+                    &state.flow_index,
+                );
+            }
+            Modal::Properties(ps) => {
+                crate::view::browser::render::render_properties_modal(
+                    frame,
+                    frame.area(),
+                    ps,
+                    &state.browser,
+                );
+            }
         }
     }
 }
@@ -62,7 +74,7 @@ fn render_content(frame: &mut Frame, area: Rect, state: &AppState) {
     match state.current_tab {
         ViewId::Overview => overview::render(frame, area, &state.overview),
         ViewId::Bulletins => bulletins::render(frame, area, &state.bulletins),
-        ViewId::Browser => browser::render(frame, area),
+        ViewId::Browser => browser::render(frame, area, &state.browser, &state.flow_index),
         ViewId::Tracer => tracer::render(frame, area),
     }
 }
