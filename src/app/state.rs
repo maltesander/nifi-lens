@@ -286,8 +286,14 @@ fn handle_key(state: &mut AppState, key: KeyEvent, config: &Config) -> UpdateRes
         }
     }
 
-    // Text-input mode captures every key except Esc/Enter/Backspace.
-    if state.current_tab == ViewId::Bulletins && state.bulletins.text_input.is_some() {
+    // Text-input mode captures character-level keys and edit keys (Esc,
+    // Enter, Backspace). Keys with CONTROL modifiers (Ctrl+C, Ctrl+K, etc.)
+    // skip this block so they reach the global handlers. Tab and other
+    // unmodified keys are still suppressed to keep focus on text input.
+    if state.current_tab == ViewId::Bulletins
+        && state.bulletins.text_input.is_some()
+        && matches!(key.modifiers, KeyModifiers::NONE | KeyModifiers::SHIFT)
+    {
         match key.code {
             KeyCode::Esc => {
                 let prev = state.bulletins.selected_ring_index();
@@ -918,5 +924,48 @@ mod tests {
         assert!(r.redraw);
         let snap = s.overview.snapshot.as_ref().unwrap();
         assert_eq!(snap.controller.running, 7);
+    }
+
+    #[test]
+    fn text_input_mode_does_not_swallow_ctrl_c_quit() {
+        let mut s = fresh_state();
+        let c = tiny_config();
+        s.current_tab = ViewId::Bulletins;
+        // Enter text-input mode.
+        update(&mut s, key(KeyCode::Char('/'), KeyModifiers::NONE), &c);
+        assert!(s.bulletins.text_input.is_some());
+        // Type a character to verify normal input still works.
+        update(&mut s, key(KeyCode::Char('f'), KeyModifiers::NONE), &c);
+        assert_eq!(s.bulletins.text_input.as_deref(), Some("f"));
+        // Ctrl+C should quit, NOT push 'c' into the buffer.
+        let r = update(&mut s, key(KeyCode::Char('c'), KeyModifiers::CONTROL), &c);
+        assert!(s.should_quit, "Ctrl+C should trigger quit");
+        assert!(matches!(r.intent, Some(PendingIntent::Quit)));
+        // The text buffer must not have been modified by the Ctrl+C keystroke.
+        assert_eq!(
+            s.bulletins.text_input.as_deref(),
+            Some("f"),
+            "Ctrl+C must not append 'c' to the filter buffer"
+        );
+    }
+
+    #[test]
+    fn text_input_mode_does_not_swallow_ctrl_k_context_switcher() {
+        let mut s = fresh_state();
+        let c = tiny_config();
+        s.current_tab = ViewId::Bulletins;
+        update(&mut s, key(KeyCode::Char('/'), KeyModifiers::NONE), &c);
+        update(&mut s, key(KeyCode::Char('f'), KeyModifiers::NONE), &c);
+        // Ctrl+K should open the context switcher modal.
+        update(&mut s, key(KeyCode::Char('k'), KeyModifiers::CONTROL), &c);
+        assert!(
+            matches!(s.modal, Some(Modal::ContextSwitcher(_))),
+            "Ctrl+K should open the context switcher"
+        );
+        assert_eq!(
+            s.bulletins.text_input.as_deref(),
+            Some("f"),
+            "Ctrl+K must not append 'k' to the filter buffer"
+        );
     }
 }
