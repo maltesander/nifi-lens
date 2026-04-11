@@ -8,6 +8,7 @@
 //! the directory move is a no-op from the user's view.
 
 pub mod render;
+pub mod state;
 
 use ratatui::Frame;
 use ratatui::layout::Rect;
