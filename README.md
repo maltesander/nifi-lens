@@ -24,8 +24,9 @@ Pre-release. The tool is being built in phases; see the roadmap in
   lineage with attribute diffs and on-demand content previews.
 - **Cluster-wide bulletin tail** — live, filterable, with auto-scroll pause
   and severity / component / free-text filters.
-- **Health overview** — unhealthy queue leaderboard, component counts,
-  bulletin rate sparkline, top noisy components.
+- **Health overview** *(shipped)* — cluster identity, component counts,
+  15-minute bulletin-rate sparkline, unhealthy-queue leaderboard, and
+  top noisy components on one screen, refreshed every 10 seconds.
 - **Flow browser** — walk the process-group tree, see every detail of a
   selected processor / connection / controller service on one screen,
   jump between related components.

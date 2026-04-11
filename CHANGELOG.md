@@ -9,6 +9,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Overview tab** — live health dashboard with cluster identity strip,
+  global component counts (running / stopped / invalid / disabled),
+  15-minute bulletin-rate sparkline (colored by worst severity per
+  minute), top-10 unhealthy queue leaderboard sorted by back-pressure
+  fill percentage, and top-5 noisy-component leaderboard. Polls every
+  10 seconds while the tab is active; the polling task is cancelled on
+  tab switch so API load is proportional to what the user is looking at.
+- **`NifiClient` wrappers** — `controller_status`, `root_pg_status`,
+  `bulletin_board`, and extended `about` covering the four endpoints the
+  Overview tab needs. Each returns an owned snapshot struct so the
+  reducer stays decoupled from `nifi-rust-client` types.
+- **Per-tab `WorkerRegistry`** — app run loop now owns a registry that
+  swaps the currently-active per-view worker on tab change. Phase 1
+  only spawns for Overview; other tabs get no worker until their own
+  phase lands.
 - **CLI** — `clap` derive with global flags `--config`, `--context`, `--debug`,
   `--log-level`, `--no-color`, `--allow-writes` (reserved for v2, errors on
   use). Subcommands: `config init`, `config validate`, `version`.

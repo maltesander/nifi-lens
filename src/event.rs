@@ -15,9 +15,26 @@ pub enum AppEvent {
     Quit,
 }
 
-/// Phase 0: placeholder. Phase 1+ will add variants per view.
+/// Data delivered from a view's worker task back into the UI loop.
 #[derive(Debug, Clone)]
-pub enum ViewPayload {}
+pub enum ViewPayload {
+    Overview(OverviewPayload),
+}
+
+/// One poll cycle's worth of data for the Overview tab. Composed inside the
+/// worker from three parallel client calls, then pushed as a single event
+/// so the reducer treats the refresh as atomic.
+#[derive(Debug, Clone)]
+pub struct OverviewPayload {
+    pub about: crate::client::AboutSnapshot,
+    pub controller: crate::client::ControllerStatusSnapshot,
+    pub root_pg: crate::client::RootPgStatusSnapshot,
+    pub bulletin_board: crate::client::BulletinBoardSnapshot,
+    /// Wall-clock time (from `std::time::SystemTime`) when the worker
+    /// assembled this payload. Used by the reducer to anchor the sparkline
+    /// and the "last refresh" label.
+    pub fetched_at: std::time::SystemTime,
+}
 
 /// Result of a successful intent dispatch.
 #[derive(Debug, Clone)]

@@ -120,6 +120,30 @@ pub enum NifiLensError {
         source: Box<dyn std::error::Error + Send + Sync>,
     },
 
+    /// See `ClientBuildFailed` for the boxed-source rationale; callers must
+    /// box explicitly.
+    #[snafu(display("failed to fetch controller status for context {context:?}: {source}"))]
+    ControllerStatusFailed {
+        context: String,
+        source: Box<dyn std::error::Error + Send + Sync>,
+    },
+
+    /// See `ClientBuildFailed` for the boxed-source rationale; callers must
+    /// box explicitly.
+    #[snafu(display("failed to fetch process-group status for context {context:?}: {source}"))]
+    ProcessGroupStatusFailed {
+        context: String,
+        source: Box<dyn std::error::Error + Send + Sync>,
+    },
+
+    /// See `ClientBuildFailed` for the boxed-source rationale; callers must
+    /// box explicitly.
+    #[snafu(display("failed to fetch bulletin board for context {context:?}: {source}"))]
+    BulletinBoardFailed {
+        context: String,
+        source: Box<dyn std::error::Error + Send + Sync>,
+    },
+
     #[snafu(display("write intents are disabled in Phase 0 (intent: {intent_name})"))]
     WriteIntentRefused { intent_name: &'static str },
 
