@@ -132,10 +132,13 @@ impl BulletinsState {
 
     // ---- filter mutations ----
     //
-    // Each mutator captures the ring index of the currently-selected row
-    // *before* mutating filters, then passes it into `reconcile_selection`.
-    // That lets the snap logic find the nearest-older-then-newer visible
-    // row even when the previously-selected row is filtered out.
+    // Every mutator that changes filter visibility accepts or captures a
+    // `prev_ring_index` — the ring index the user's selection pointed at
+    // BEFORE the mutation. Callers that construct intents from key events
+    // must capture this value (via `self.selected_ring_index()`) *before*
+    // they invoke the mutator, not after. `reconcile_selection` uses it
+    // to snap the visible-list selection to the nearest still-visible row
+    // when the previously selected row has been filtered out.
 
     pub fn toggle_error(&mut self) {
         let prev = self.selected_ring_index();
@@ -175,6 +178,13 @@ impl BulletinsState {
         self.pre_input_text = Some(self.filters.text.clone());
         self.text_input = Some(self.filters.text.clone());
     }
+    /// Append `ch` to the text-input buffer, live-updating `filters.text`
+    /// and snapping `selected` via `reconcile_selection`.
+    ///
+    /// # Preconditions
+    /// `prev_ring_index` must be captured from `selected_ring_index()`
+    /// BEFORE this call. Passing a value computed after mutation will
+    /// snap to the wrong row.
     pub fn push_text_input(&mut self, ch: char, prev_ring_index: Option<usize>) {
         if let Some(buf) = self.text_input.as_mut() {
             buf.push(ch);
@@ -182,6 +192,13 @@ impl BulletinsState {
             self.reconcile_selection(prev_ring_index);
         }
     }
+    /// Remove the last character from the text-input buffer, live-updating
+    /// `filters.text` and snapping `selected` via `reconcile_selection`.
+    ///
+    /// # Preconditions
+    /// `prev_ring_index` must be captured from `selected_ring_index()`
+    /// BEFORE this call. Passing a value computed after mutation will
+    /// snap to the wrong row.
     pub fn pop_text_input(&mut self, prev_ring_index: Option<usize>) {
         if let Some(buf) = self.text_input.as_mut() {
             buf.pop();
@@ -189,6 +206,12 @@ impl BulletinsState {
             self.reconcile_selection(prev_ring_index);
         }
     }
+    /// Commit the text-input buffer as the active filter and exit input mode.
+    ///
+    /// # Preconditions
+    /// `prev_ring_index` must be captured from `selected_ring_index()`
+    /// BEFORE this call. Passing a value computed after mutation will
+    /// snap to the wrong row.
     pub fn commit_text_input(&mut self, prev_ring_index: Option<usize>) {
         if let Some(buf) = self.text_input.take() {
             self.pre_input_text = None;
@@ -196,6 +219,12 @@ impl BulletinsState {
             self.reconcile_selection(prev_ring_index);
         }
     }
+    /// Discard the text-input buffer and restore the pre-input filter text.
+    ///
+    /// # Preconditions
+    /// `prev_ring_index` must be captured from `selected_ring_index()`
+    /// BEFORE this call. Passing a value computed after mutation will
+    /// snap to the wrong row.
     pub fn cancel_text_input(&mut self, prev_ring_index: Option<usize>) {
         if self.text_input.take().is_some() {
             let restored = self.pre_input_text.take().unwrap_or_default();
