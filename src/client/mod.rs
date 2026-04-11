@@ -21,6 +21,16 @@ pub struct NifiClient {
     detected_version: Version,
 }
 
+impl std::fmt::Debug for NifiClient {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        // DynamicClient does not implement Debug; we emit just the fields we own.
+        f.debug_struct("NifiClient")
+            .field("context_name", &self.context_name)
+            .field("detected_version", &self.detected_version)
+            .finish_non_exhaustive()
+    }
+}
+
 impl Deref for NifiClient {
     type Target = DynamicClient;
     fn deref(&self) -> &Self::Target {
