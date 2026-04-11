@@ -45,7 +45,14 @@ pub async fn run(
 
     let mut state = AppState::new(context_name, detected_version, &config);
     let mut workers = WorkerRegistry::new();
-    workers.ensure(state.current_tab, &client, &tx, state.bulletins.last_id);
+    let bulletins_last_id = state.bulletins.last_id;
+    workers.ensure(
+        state.current_tab,
+        &client,
+        &tx,
+        bulletins_last_id,
+        &mut state.browser,
+    );
 
     let dispatcher = Arc::new(IntentDispatcher {
         client: client.clone(),
@@ -91,7 +98,14 @@ pub async fn run(
                 .map_err(|source| NifiLensError::TerminalInit { source })?;
         }
 
-        workers.ensure(state.current_tab, &client, &tx, state.bulletins.last_id);
+        let bulletins_last_id = state.bulletins.last_id;
+        workers.ensure(
+            state.current_tab,
+            &client,
+            &tx,
+            bulletins_last_id,
+            &mut state.browser,
+        );
     }
 
     workers.shutdown();

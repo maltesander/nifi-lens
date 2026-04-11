@@ -34,6 +34,7 @@ impl WorkerRegistry {
         client: &Arc<RwLock<NifiClient>>,
         tx: &mpsc::Sender<AppEvent>,
         bulletins_last_id: Option<i64>,
+        browser: &mut crate::view::browser::state::BrowserState,
     ) {
         if matches!(&self.current, Some((existing, _)) if *existing == view) {
             return;
@@ -45,6 +46,10 @@ impl WorkerRegistry {
                 "worker registry: swapping view worker"
             );
             handle.abort();
+            if existing_view == ViewId::Browser {
+                browser.detail_tx = None;
+                browser.force_tick_tx = None;
+            }
         }
         let handle = match view {
             ViewId::Overview => {
@@ -62,7 +67,20 @@ impl WorkerRegistry {
                     bulletins_last_id,
                 ))
             }
-            ViewId::Browser | ViewId::Tracer => {
+            ViewId::Browser => {
+                tracing::debug!(?view, "worker registry: spawning browser worker");
+                let (detail_tx, detail_rx) = mpsc::unbounded_channel();
+                let (force_tx, force_rx) = tokio::sync::oneshot::channel();
+                browser.detail_tx = Some(detail_tx);
+                browser.force_tick_tx = Some(force_tx);
+                Some(crate::view::browser::worker::spawn(
+                    client.clone(),
+                    tx.clone(),
+                    detail_rx,
+                    force_rx,
+                ))
+            }
+            ViewId::Tracer => {
                 tracing::debug!(?view, "worker registry: no worker for this view");
                 None
             }
