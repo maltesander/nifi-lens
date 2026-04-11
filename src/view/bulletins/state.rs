@@ -213,7 +213,11 @@ impl BulletinsState {
         }
     }
     pub fn move_selection_down(&mut self) {
-        let max = self.filtered_indices().len().saturating_sub(1);
+        let vis_len = self.filtered_indices().len();
+        if vis_len == 0 {
+            return;
+        }
+        let max = vis_len - 1;
         if self.selected < max {
             self.selected += 1;
         }
@@ -713,5 +717,20 @@ mod tests {
         s.move_selection_up();
         assert_eq!(s.selected, 1);
         assert!(!s.auto_scroll);
+    }
+
+    #[test]
+    fn move_selection_down_on_empty_filtered_list_is_noop() {
+        // Paused, `+N new` showing, empty filtered view — pressing down
+        // must not silently resume auto-scroll or clear the badge.
+        let mut s = seed(100, vec![b_full(1, "INFO", "PROCESSOR", "A", "m")]);
+        s.auto_scroll = false;
+        s.new_since_pause = 5;
+        s.filters.text = "nomatch".into();
+        s.reconcile_selection(None);
+        assert!(s.filtered_indices().is_empty());
+        s.move_selection_down();
+        assert!(!s.auto_scroll, "auto_scroll must stay paused");
+        assert_eq!(s.new_since_pause, 5, "badge count must not be cleared");
     }
 }
