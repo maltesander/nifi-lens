@@ -204,7 +204,14 @@ async fn browser_connection_detail_carries_source_dest_relationships_thresholds(
     assert_eq!(d.destination_type, "PROCESSOR");
     assert_eq!(d.destination_group_id, "publish");
     assert_eq!(d.selected_relationships, vec!["success".to_string()]);
-    assert_eq!(d.available_relationships.len(), 3);
+    assert_eq!(
+        d.available_relationships,
+        vec![
+            "success".to_string(),
+            "failure".to_string(),
+            "retry".to_string(),
+        ]
+    );
     assert_eq!(d.back_pressure_object_threshold, 10000);
     assert_eq!(d.back_pressure_data_size_threshold, "1 GB");
     assert_eq!(d.flow_file_expiration, "0 sec");

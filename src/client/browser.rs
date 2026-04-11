@@ -545,7 +545,10 @@ impl NifiClient {
         let by_bytes = agg.and_then(|a| a.percent_use_bytes).unwrap_or(0).max(0) as u32;
         let flow_files_queued = agg.and_then(|a| a.flow_files_queued).unwrap_or(0).max(0) as u32;
         let bytes_queued = agg.and_then(|a| a.bytes_queued).unwrap_or(0).max(0) as u64;
-        let queued_display = agg.and_then(|a| a.queued.clone()).unwrap_or_default();
+        let queued_display = agg
+            .and_then(|a| a.queued.as_deref())
+            .unwrap_or("")
+            .to_owned();
 
         // Move source/destination out of component before consuming other fields.
         let source = component.source.unwrap_or_default();
