@@ -191,6 +191,7 @@ pub fn update(state: &mut AppState, event: AppEvent, config: &Config) -> UpdateR
                 intent: None,
             }
         }
+        AppEvent::Data(ViewPayload::Bulletins(_)) => UpdateResult::default(),
         AppEvent::IntentOutcome(outcome) => handle_intent_outcome(state, outcome),
         AppEvent::Quit => {
             state.should_quit = true;

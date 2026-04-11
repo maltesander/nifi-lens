@@ -19,6 +19,7 @@ pub enum AppEvent {
 #[derive(Debug, Clone)]
 pub enum ViewPayload {
     Overview(OverviewPayload),
+    Bulletins(BulletinsPayload),
 }
 
 /// One poll cycle's worth of data for the Overview tab. Composed inside the
@@ -33,6 +34,16 @@ pub struct OverviewPayload {
     /// Wall-clock time (from `std::time::SystemTime`) when the worker
     /// assembled this payload. Used by the reducer to anchor the sparkline
     /// and the "last refresh" label.
+    pub fetched_at: std::time::SystemTime,
+}
+
+/// One poll cycle's worth of data for the Bulletins tab. Composed inside
+/// the worker from a single `bulletin_board(after_id, limit)` call.
+#[derive(Debug, Clone)]
+pub struct BulletinsPayload {
+    pub bulletins: Vec<crate::client::BulletinSnapshot>,
+    /// Wall-clock time when the worker assembled this payload. Used by
+    /// the renderer for the "last Ns ago" label.
     pub fetched_at: std::time::SystemTime,
 }
 

@@ -6,6 +6,10 @@
 //! entry point delegates to the Phase 0 placeholder so the directory
 //! move is a no-op from the user's view.
 
+pub mod state;
+
+pub use state::{BulletinsState, apply_payload};
+
 use ratatui::Frame;
 use ratatui::layout::Rect;
 
