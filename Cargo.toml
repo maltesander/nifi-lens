@@ -12,6 +12,10 @@ readme = "README.md"
 keywords = ["nifi", "tui", "observability", "ratatui", "terminal"]
 categories = ["command-line-utilities"]
 
+[workspace]
+members = [".", "integration-tests/seeder"]
+resolver = "2"
+
 [[bin]]
 name = "nifilens"
 path = "src/main.rs"

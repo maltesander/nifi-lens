@@ -1418,6 +1418,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "nifilens-fixture-seeder"
+version = "0.0.0"
+dependencies = [
+ "clap",
+ "nifi-lens",
+ "nifi-rust-client",
+ "snafu 0.8.9",
+ "tempfile",
+ "tokio",
+ "tracing",
+ "tracing-subscriber",
+]
+
+[[package]]
 name = "nu-ansi-term"
 version = "0.50.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
