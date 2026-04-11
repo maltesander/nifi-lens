@@ -373,7 +373,7 @@ mod tests {
     use crate::view::bulletins::state::{BulletinsState, apply_payload};
     use ratatui::Terminal;
     use ratatui::backend::TestBackend;
-    use std::time::{Duration, UNIX_EPOCH};
+    use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
     // 2026-04-11T10:14:22Z in unix seconds.
     const T0: u64 = 1_775_902_462;
@@ -407,6 +407,14 @@ mod tests {
                 fetched_at: UNIX_EPOCH + Duration::from_secs(T0),
             },
         );
+        // Pin last_fetched_at to a fixed offset from SystemTime::now() so
+        // the rendered "last Ns ago" label is width-stable across test
+        // runs. Without this, apply_payload copies the UNIX_EPOCH + T0
+        // timestamp above into last_fetched_at, and the renderer computes
+        // `now - last_fetched_at` which yields a duration whose length
+        // varies with real wall-clock time — shifting the title bar's
+        // trailing-dash count by a character and breaking the snapshot.
+        s.last_fetched_at = Some(SystemTime::now() - Duration::from_secs(3));
         s
     }
 
