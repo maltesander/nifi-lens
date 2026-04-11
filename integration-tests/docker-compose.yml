@@ -14,6 +14,11 @@ services:
       - TRUSTSTORE_PATH=/opt/nifi/nifi-current/conf/truststore.p12
       - TRUSTSTORE_TYPE=PKCS12
       - TRUSTSTORE_PASSWORD=testpassword
+      # NiFi 2.x strictly validates Host headers against nifi.web.proxy.host.
+      # External port 8444 doesn't match the internal 8443, so we must
+      # explicitly whitelist all host:port pairs the seeder / nifi-lens
+      # will use.
+      - NIFI_WEB_PROXY_HOST=localhost:8443,localhost:8444
     volumes:
       - ./scripts/nifi-entrypoint.sh:/opt/nifi/scripts/nifi-entrypoint.sh:ro
       - ./scripts/certs/keystore.p12:/opt/nifi/nifi-current/conf/keystore.p12:ro
@@ -41,6 +46,11 @@ services:
       - TRUSTSTORE_PATH=/opt/nifi/nifi-current/conf/truststore.p12
       - TRUSTSTORE_TYPE=PKCS12
       - TRUSTSTORE_PASSWORD=testpassword
+      # NiFi 2.x strictly validates Host headers against nifi.web.proxy.host.
+      # External port 8444 doesn't match the internal 8443, so we must
+      # explicitly whitelist all host:port pairs the seeder / nifi-lens
+      # will use.
+      - NIFI_WEB_PROXY_HOST=localhost:8443,localhost:8444
     volumes:
       - ./scripts/nifi-entrypoint.sh:/opt/nifi/scripts/nifi-entrypoint.sh:ro
       - ./scripts/certs/keystore.p12:/opt/nifi/nifi-current/conf/keystore.p12:ro

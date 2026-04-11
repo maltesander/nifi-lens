@@ -67,9 +67,13 @@ pub fn make_processor(
     entity
 }
 
-/// Build a `ConnectionEntity` between two endpoints in the same PG.
+/// Build a `ConnectionEntity` between two endpoints.
 ///
-/// * `group_id` is the UUID of the parent PG.
+/// * `source_group_id` is the UUID of the PG that **contains the source
+///   component**. For same-PG connections this equals the connection's
+///   parent PG; for cross-PG connections via ports, it's the child PG
+///   that owns the port.
+/// * `destination_group_id` is the same for the destination.
 /// * `source_id` / `destination_id` are UUIDs from previously-created
 ///   processors or ports.
 /// * `source_type` / `destination_type` are one of `"PROCESSOR"`,
@@ -77,9 +81,10 @@ pub fn make_processor(
 /// * `relationships` are the selected relationship names on the source
 ///   side of the connection.
 pub fn make_connection(
-    group_id: &str,
+    source_group_id: &str,
     source_id: &str,
     source_type: &str,
+    destination_group_id: &str,
     destination_id: &str,
     destination_type: &str,
     relationships: Vec<&str>,
@@ -88,12 +93,12 @@ pub fn make_connection(
     // fields. Since the DTO is `#[non_exhaustive]` we can't use a struct
     // literal — start from `default()` and overwrite.
     let mut source = types::ConnectableDto::default();
-    source.group_id = group_id.to_string();
+    source.group_id = source_group_id.to_string();
     source.id = source_id.to_string();
     source.r#type = source_type.to_string();
 
     let mut destination = types::ConnectableDto::default();
-    destination.group_id = group_id.to_string();
+    destination.group_id = destination_group_id.to_string();
     destination.id = destination_id.to_string();
     destination.r#type = destination_type.to_string();
 
@@ -185,5 +190,21 @@ mod tests {
             pg.component.and_then(|c| c.name),
             Some("healthy-pipeline".into())
         );
+    }
+
+    #[test]
+    fn make_connection_cross_pg_uses_separate_group_ids() {
+        let conn = make_connection(
+            "ingest-pg-id",
+            "out-port-id",
+            "OUTPUT_PORT",
+            "enrich-pg-id",
+            "in-port-id",
+            "INPUT_PORT",
+            vec![],
+        );
+        let component = conn.component.unwrap();
+        assert_eq!(component.source.unwrap().group_id, "ingest-pg-id");
+        assert_eq!(component.destination.unwrap().group_id, "enrich-pg-id");
     }
 }

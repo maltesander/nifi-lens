@@ -38,8 +38,11 @@ pub async fn find_marker(client: &DynamicClient) -> Result<Option<String>> {
             .as_ref()
             .and_then(|c| c.name.as_ref())
             .is_some_and(|n| n == FIXTURE_MARKER_NAME);
-        if matches_name && let Some(id) = pg.id {
-            return Ok(Some(id));
+        if matches_name {
+            let id = pg.component.and_then(|c| c.id).or(pg.id);
+            if let Some(id) = id {
+                return Ok(Some(id));
+            }
         }
     }
     Ok(None)

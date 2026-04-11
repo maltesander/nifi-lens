@@ -34,9 +34,13 @@ pub async fn seed(client: &DynamicClient) -> Result<()> {
             message: "create fixture marker PG".into(),
             source: Box::new(e),
         })?;
-    let marker_pg_id = created.id.ok_or_else(|| SeederError::Invariant {
-        message: "fixture marker PG has no id".into(),
-    })?;
+    let marker_pg_id = created
+        .component
+        .and_then(|c| c.id)
+        .or(created.id)
+        .ok_or_else(|| SeederError::Invariant {
+            message: "fixture marker PG has no id".into(),
+        })?;
 
     healthy::seed(client, &marker_pg_id).await?;
     noisy::seed(client, &marker_pg_id).await?;

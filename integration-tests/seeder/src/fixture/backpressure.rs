@@ -60,6 +60,7 @@ pub async fn seed(client: &DynamicClient, parent_pg_id: &str) -> Result<()> {
         &pg_id,
         &gen_id,
         "PROCESSOR",
+        &pg_id,
         &ctrl_id,
         "PROCESSOR",
         vec!["success"],

@@ -22,7 +22,8 @@ use nifi_rust_client::dynamic::{
     DynamicClient,
     traits::{
         ControllerServicesApi as _, ControllerServicesRunStatusApi as _, FlowApi as _,
-        FlowControllerServicesApi as _, ProcessGroupsApi as _, ProcessGroupsProcessGroupsApi as _,
+        FlowControllerServicesApi as _, ProcessGroupsApi as _,
+        ProcessGroupsEmptyAllConnectionsRequestsApi as _, ProcessGroupsProcessGroupsApi as _,
     },
     types,
 };
@@ -155,7 +156,29 @@ async fn delete_all_child_pgs(client: &DynamicClient) -> Result<()> {
 
     let pgs = entity.process_groups.unwrap_or_default();
     for pg in pgs {
-        let Some(id) = pg.id.clone() else { continue };
+        let Some(id) = pg
+            .component
+            .as_ref()
+            .and_then(|c| c.id.clone())
+            .or_else(|| pg.id.clone())
+        else {
+            continue;
+        };
+
+        // Empty all connections under this PG before deleting — NiFi
+        // refuses to delete PGs whose connections still have queued
+        // flowfiles (e.g. the backpressure fixture queue). The
+        // empty-all-connections request is fire-and-forget; flowfiles
+        // drop within ~100ms.
+        if let Err(e) = client
+            .processgroups_api()
+            .empty_all_connections_requests(&id)
+            .create_empty_all_connections_request()
+            .await
+        {
+            tracing::debug!(%id, error = %e, "empty-all-connections request failed; continuing");
+        }
+
         let version = pg
             .revision
             .as_ref()

@@ -4,10 +4,14 @@
 //! ```text
 //! noisy-pipeline/
 //! ├── GenerateFlowFile (2 sec, Batch Size 3)
-//! ├── LogMessage-WARN (Log Level=warn, Log Message=fixture-warn)
-//! └── LogMessage-ERROR (Log Level=error, Log Message=fixture-error,
-//!                       auto-terminate "success")
+//! ├── LogAttribute-WARN (Log Level=warn)
+//! └── LogAttribute-ERROR (Log Level=error, auto-terminate "success")
 //! ```
+//!
+//! We use LogAttribute (not LogMessage) because its property keys
+//! (`Log Level`, `Log Payload`) are stable across NiFi 2.6.0 and
+//! 2.8.0, whereas LogMessage has flipped between kebab-case and
+//! display-name keys between those two versions.
 
 use nifi_rust_client::dynamic::DynamicClient;
 
@@ -40,13 +44,13 @@ pub async fn seed(client: &DynamicClient, parent_pg_id: &str) -> Result<()> {
         client,
         &pg_id,
         make_processor(
-            "LogMessage-WARN",
-            "org.apache.nifi.processors.standard.LogMessage",
-            props(&[("Log Level", "warn"), ("Log Message", "fixture-warn")]),
+            "LogAttribute-WARN",
+            "org.apache.nifi.processors.standard.LogAttribute",
+            props(&[("Log Level", "warn"), ("Log Payload", "false")]),
             None,
             vec![],
         ),
-        "LogMessage-WARN",
+        "LogAttribute-WARN",
     )
     .await?;
 
@@ -54,13 +58,13 @@ pub async fn seed(client: &DynamicClient, parent_pg_id: &str) -> Result<()> {
         client,
         &pg_id,
         make_processor(
-            "LogMessage-ERROR",
-            "org.apache.nifi.processors.standard.LogMessage",
-            props(&[("Log Level", "error"), ("Log Message", "fixture-error")]),
+            "LogAttribute-ERROR",
+            "org.apache.nifi.processors.standard.LogAttribute",
+            props(&[("Log Level", "error"), ("Log Payload", "false")]),
             None,
             vec!["success"],
         ),
-        "LogMessage-ERROR",
+        "LogAttribute-ERROR",
     )
     .await?;
 
@@ -86,9 +90,9 @@ pub async fn seed(client: &DynamicClient, parent_pg_id: &str) -> Result<()> {
     .await?;
 
     // Start downstream first.
-    wait_for_valid(client, &error_id, "LogMessage-ERROR").await?;
+    wait_for_valid(client, &error_id, "LogAttribute-ERROR").await?;
     start_processor(client, &error_id).await?;
-    wait_for_valid(client, &warn_id, "LogMessage-WARN").await?;
+    wait_for_valid(client, &warn_id, "LogAttribute-WARN").await?;
     start_processor(client, &warn_id).await?;
     wait_for_valid(client, &gen_id, "GenerateFlowFile").await?;
     start_processor(client, &gen_id).await?;

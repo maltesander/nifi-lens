@@ -58,10 +58,13 @@ pub async fn seed(client: &DynamicClient, parent_pg_id: &str) -> Result<()> {
         make_processor(
             "GenerateFlowFile",
             "org.apache.nifi.processors.standard.GenerateFlowFile",
+            // NiFi 2.8.0 added a validation rule that rejects
+            // (Custom Text + Unique FlowFiles=true). Setting it to
+            // false satisfies both 2.6.0 and 2.8.0.
             props(&[
                 ("Custom Text", HEALTHY_INGEST_CUSTOM_TEXT),
                 ("Data Format", "Text"),
-                ("Unique FlowFiles", "true"),
+                ("Unique FlowFiles", "false"),
                 ("Batch Size", "1"),
             ]),
             Some("1 sec"),
@@ -139,11 +142,11 @@ pub async fn seed(client: &DynamicClient, parent_pg_id: &str) -> Result<()> {
         make_processor(
             "LogAttribute-INFO",
             "org.apache.nifi.processors.standard.LogAttribute",
-            props(&[
-                ("Log Level", "info"),
-                ("Log Payload", "true"),
-                ("Log prefix", "healthy-enrich"),
-            ]),
+            // LogAttribute uses legacy display-name property keys in
+            // NiFi 2.x. "Log Prefix" differs in capitalization between
+            // 2.6.0 (`Log prefix`) and 2.8.0 (`Log Prefix`), so we omit
+            // it — the default (empty prefix) is fine for the fixture.
+            props(&[("Log Level", "info"), ("Log Payload", "true")]),
             None,
             vec!["success"],
         ),
@@ -172,12 +175,16 @@ pub async fn seed(client: &DynamicClient, parent_pg_id: &str) -> Result<()> {
     )
     .await?;
 
-    // Parent-level cross-PG connection from ingest-out -> enrich-in.
-    create_connection_in_pg(
+    // Parent-level cross-PG connection from ingest-out -> enrich-in. The
+    // connection lives on the healthy-pipeline PG, but each port's
+    // `group_id` must point to the child PG that owns it.
+    create_connection_between(
         client,
         &healthy_pg_id,
+        &ingest_pg_id,
         &ingest_out_id,
         "OUTPUT_PORT",
+        &enrich_pg_id,
         &enrich_in_id,
         "INPUT_PORT",
         vec![],
@@ -222,9 +229,13 @@ pub(crate) async fn create_child_pg(
             message: format!("create child PG {name}"),
             source: Box::new(e),
         })?;
-    created.id.ok_or_else(|| SeederError::Invariant {
-        message: format!("child PG {name} has no id after create"),
-    })
+    created
+        .component
+        .and_then(|c| c.id)
+        .or(created.id)
+        .ok_or_else(|| SeederError::Invariant {
+            message: format!("child PG {name} has no id after create"),
+        })
 }
 
 pub(crate) async fn create_processor(
@@ -242,9 +253,13 @@ pub(crate) async fn create_processor(
             message: format!("create processor {name}"),
             source: Box::new(e),
         })?;
-    created.id.ok_or_else(|| SeederError::Invariant {
-        message: format!("processor {name} has no id after create"),
-    })
+    created
+        .component
+        .and_then(|c| c.id)
+        .or(created.id)
+        .ok_or_else(|| SeederError::Invariant {
+            message: format!("processor {name} has no id after create"),
+        })
 }
 
 pub(crate) async fn create_input_port(
@@ -262,9 +277,13 @@ pub(crate) async fn create_input_port(
             message: format!("create input port {name}"),
             source: Box::new(e),
         })?;
-    created.id.ok_or_else(|| SeederError::Invariant {
-        message: format!("input port {name} has no id"),
-    })
+    created
+        .component
+        .and_then(|c| c.id)
+        .or(created.id)
+        .ok_or_else(|| SeederError::Invariant {
+            message: format!("input port {name} has no id"),
+        })
 }
 
 pub(crate) async fn create_output_port(
@@ -282,11 +301,17 @@ pub(crate) async fn create_output_port(
             message: format!("create output port {name}"),
             source: Box::new(e),
         })?;
-    created.id.ok_or_else(|| SeederError::Invariant {
-        message: format!("output port {name} has no id"),
-    })
+    created
+        .component
+        .and_then(|c| c.id)
+        .or(created.id)
+        .ok_or_else(|| SeederError::Invariant {
+            message: format!("output port {name} has no id"),
+        })
 }
 
+/// Create a connection where source and destination live in the same PG
+/// (the typical intra-PG case).
 pub(crate) async fn create_connection_in_pg(
     client: &DynamicClient,
     pg_id: &str,
@@ -296,26 +321,73 @@ pub(crate) async fn create_connection_in_pg(
     destination_type: &str,
     relationships: Vec<&str>,
 ) -> Result<String> {
-    let body = make_connection(
+    create_connection_between(
+        client,
+        pg_id,
         pg_id,
         source_id,
         source_type,
+        pg_id,
+        destination_id,
+        destination_type,
+        relationships,
+    )
+    .await
+}
+
+/// Create a connection where source and destination may live in different
+/// child PGs (used for cross-PG connections via ports).
+///
+/// * `container_pg_id` — PG that owns the connection itself
+/// * `source_group_id` — PG that contains the source component
+/// * `destination_group_id` — PG that contains the destination component
+#[allow(clippy::too_many_arguments)]
+pub(crate) async fn create_connection_between(
+    client: &DynamicClient,
+    container_pg_id: &str,
+    source_group_id: &str,
+    source_id: &str,
+    source_type: &str,
+    destination_group_id: &str,
+    destination_id: &str,
+    destination_type: &str,
+    relationships: Vec<&str>,
+) -> Result<String> {
+    tracing::debug!(
+        %container_pg_id,
+        %source_group_id,
+        %source_id,
+        %source_type,
+        %destination_group_id,
+        %destination_id,
+        %destination_type,
+        "creating connection"
+    );
+    let body = make_connection(
+        source_group_id,
+        source_id,
+        source_type,
+        destination_group_id,
         destination_id,
         destination_type,
         relationships,
     );
     let created = client
         .processgroups_api()
-        .connections(pg_id)
+        .connections(container_pg_id)
         .create_connection(&body)
         .await
         .map_err(|e| SeederError::Api {
-            message: format!("create connection in pg {pg_id}"),
+            message: format!("create connection in pg {container_pg_id}"),
             source: Box::new(e),
         })?;
-    created.id.ok_or_else(|| SeederError::Invariant {
-        message: format!("connection in pg {pg_id} has no id"),
-    })
+    created
+        .component
+        .and_then(|c| c.id)
+        .or(created.id)
+        .ok_or_else(|| SeederError::Invariant {
+            message: format!("connection in pg {container_pg_id} has no id"),
+        })
 }
 
 /// Poll until the processor has `component.state == "STOPPED"` and no
@@ -354,11 +426,23 @@ pub(crate) async fn wait_for_valid(
 }
 
 pub(crate) async fn start_processor(client: &DynamicClient, id: &str) -> Result<()> {
+    // NiFi uses optimistic concurrency — we must send the current revision,
+    // not a hardcoded 0. Fetch it just before the PUT.
+    let current = client
+        .processors_api()
+        .get_processor(id)
+        .await
+        .map_err(|e| SeederError::Api {
+            message: format!("fetch revision for processor {id}"),
+            source: Box::new(e),
+        })?;
+    let revision = current.revision.ok_or_else(|| SeederError::Invariant {
+        message: format!("processor {id} has no revision"),
+    })?;
+
     let mut body = types::ProcessorRunStatusEntity::default();
     body.state = Some("RUNNING".to_string());
-    let mut rev = types::RevisionDto::default();
-    rev.version = Some(0);
-    body.revision = Some(rev);
+    body.revision = Some(revision);
 
     client
         .processors_api()
@@ -407,11 +491,39 @@ pub(crate) async fn start_output_port(client: &DynamicClient, id: &str) -> Resul
 }
 
 async fn start_port(client: &DynamicClient, id: &str, kind: PortKind) -> Result<()> {
+    // Fetch current revision — NiFi rejects stale revisions on PUT.
+    let revision = match kind {
+        PortKind::Input => {
+            let current = client
+                .inputports_api()
+                .get_input_port(id)
+                .await
+                .map_err(|e| SeederError::Api {
+                    message: format!("fetch revision for input port {id}"),
+                    source: Box::new(e),
+                })?;
+            current.revision.ok_or_else(|| SeederError::Invariant {
+                message: format!("input port {id} has no revision"),
+            })?
+        }
+        PortKind::Output => {
+            let current = client
+                .outputports_api()
+                .get_output_port(id)
+                .await
+                .map_err(|e| SeederError::Api {
+                    message: format!("fetch revision for output port {id}"),
+                    source: Box::new(e),
+                })?;
+            current.revision.ok_or_else(|| SeederError::Invariant {
+                message: format!("output port {id} has no revision"),
+            })?
+        }
+    };
+
     let mut body = types::PortRunStatusEntity::default();
     body.state = Some("RUNNING".to_string());
-    let mut rev = types::RevisionDto::default();
-    rev.version = Some(0);
-    body.revision = Some(rev);
+    body.revision = Some(revision);
 
     match kind {
         PortKind::Input => {
