@@ -88,6 +88,7 @@ pub enum Modal {
     Help,
     ContextSwitcher(ContextSwitcherState),
     ErrorDetail,
+    FuzzyFind(crate::widget::fuzzy_find::FuzzyFindState),
 }
 
 #[derive(Debug)]
@@ -294,6 +295,75 @@ fn handle_key(state: &mut AppState, key: KeyEvent, config: &Config) -> UpdateRes
                             };
                         }
                         return UpdateResult::default();
+                    }
+                    _ => return UpdateResult::default(),
+                }
+            }
+            Modal::FuzzyFind(fs) => {
+                match (key.code, key.modifiers) {
+                    (KeyCode::Esc, _) | (KeyCode::Char('f'), KeyModifiers::CONTROL) => {
+                        state.modal = None;
+                        return UpdateResult {
+                            redraw: true,
+                            intent: None,
+                        };
+                    }
+                    (KeyCode::Up, _) | (KeyCode::Char('p'), KeyModifiers::CONTROL) => {
+                        fs.move_up();
+                        return UpdateResult {
+                            redraw: true,
+                            intent: None,
+                        };
+                    }
+                    (KeyCode::Down, _) | (KeyCode::Char('n'), KeyModifiers::CONTROL) => {
+                        fs.move_down();
+                        return UpdateResult {
+                            redraw: true,
+                            intent: None,
+                        };
+                    }
+                    (KeyCode::Backspace, KeyModifiers::NONE) => {
+                        fs.pop_char();
+                        if let Some(idx) = state.flow_index.as_ref() {
+                            fs.rebuild_matches(idx);
+                        }
+                        return UpdateResult {
+                            redraw: true,
+                            intent: None,
+                        };
+                    }
+                    (KeyCode::Char(ch), KeyModifiers::NONE)
+                    | (KeyCode::Char(ch), KeyModifiers::SHIFT) => {
+                        fs.push_char(ch);
+                        if let Some(idx) = state.flow_index.as_ref() {
+                            fs.rebuild_matches(idx);
+                        }
+                        return UpdateResult {
+                            redraw: true,
+                            intent: None,
+                        };
+                    }
+                    (KeyCode::Enter, _) => {
+                        // Build the CrossLink from the selected match, if any.
+                        let link = state
+                            .flow_index
+                            .as_ref()
+                            .and_then(|idx| fs.selected_entry(idx))
+                            .map(|entry| crate::intent::CrossLink::OpenInBrowser {
+                                component_id: entry.id.clone(),
+                                group_id: entry.group_id.clone(),
+                            });
+                        state.modal = None;
+                        if let Some(link) = link {
+                            return UpdateResult {
+                                redraw: true,
+                                intent: Some(PendingIntent::JumpTo(link)),
+                            };
+                        }
+                        return UpdateResult {
+                            redraw: true,
+                            intent: None,
+                        };
                     }
                     _ => return UpdateResult::default(),
                 }
@@ -640,11 +710,22 @@ fn handle_key(state: &mut AppState, key: KeyEvent, config: &Config) -> UpdateRes
             }
         }
         (KeyCode::Char('f'), KeyModifiers::CONTROL) => {
-            state.status.banner = Some(Banner {
-                severity: BannerSeverity::Info,
-                message: "fuzzy find: not yet implemented".into(),
-                detail: None,
-            });
+            if state.flow_index.is_none() {
+                state.status.banner = Some(Banner {
+                    severity: BannerSeverity::Warning,
+                    message: "fuzzy find: flow not indexed yet, open Browser to seed".into(),
+                    detail: None,
+                });
+                return UpdateResult {
+                    redraw: true,
+                    intent: None,
+                };
+            }
+            let mut fs = crate::widget::fuzzy_find::FuzzyFindState::new();
+            if let Some(idx) = state.flow_index.as_ref() {
+                fs.rebuild_matches(idx);
+            }
+            state.modal = Some(Modal::FuzzyFind(fs));
             UpdateResult {
                 redraw: true,
                 intent: None,
@@ -1353,5 +1434,90 @@ mod tests {
         update(&mut s, key(KeyCode::Char('r'), KeyModifiers::NONE), &c);
         // Sender consumed; force_tick_tx is cleared.
         assert!(s.browser.force_tick_tx.is_none());
+    }
+
+    #[test]
+    fn ctrl_f_with_no_index_shows_warning_banner_and_does_not_open_modal() {
+        let mut s = fresh_state();
+        let c = tiny_config();
+        update(&mut s, key(KeyCode::Char('f'), KeyModifiers::CONTROL), &c);
+        assert!(s.modal.is_none());
+        assert!(
+            s.status
+                .banner
+                .as_ref()
+                .map(|b| b.severity == BannerSeverity::Warning)
+                .unwrap_or(false)
+        );
+    }
+
+    #[test]
+    fn ctrl_f_with_index_opens_fuzzy_find_modal() {
+        use crate::client::NodeKind;
+        use crate::view::browser::state::{FlowIndex, FlowIndexEntry};
+        let mut s = fresh_state();
+        let c = tiny_config();
+        s.flow_index = Some(FlowIndex {
+            entries: vec![FlowIndexEntry {
+                id: "p".into(),
+                group_id: "root".into(),
+                kind: NodeKind::Processor,
+                display: "P   Processor   root".into(),
+                haystack: "p   processor   root".into(),
+            }],
+        });
+        update(&mut s, key(KeyCode::Char('f'), KeyModifiers::CONTROL), &c);
+        assert!(matches!(s.modal, Some(Modal::FuzzyFind(_))));
+    }
+
+    #[test]
+    fn fuzzy_find_modal_enter_emits_open_in_browser_intent() {
+        use crate::client::NodeKind;
+        use crate::intent::CrossLink;
+        use crate::view::browser::state::{FlowIndex, FlowIndexEntry};
+
+        let mut s = fresh_state();
+        let c = tiny_config();
+        s.flow_index = Some(FlowIndex {
+            entries: vec![FlowIndexEntry {
+                id: "target".into(),
+                group_id: "g".into(),
+                kind: NodeKind::Processor,
+                display: "PutKafka   Processor   root".into(),
+                haystack: "putkafka   processor   root".into(),
+            }],
+        });
+        update(&mut s, key(KeyCode::Char('f'), KeyModifiers::CONTROL), &c);
+        update(&mut s, key(KeyCode::Char('p'), KeyModifiers::NONE), &c);
+        let r = update(&mut s, key(KeyCode::Enter, KeyModifiers::NONE), &c);
+        match r.intent {
+            Some(PendingIntent::JumpTo(CrossLink::OpenInBrowser { component_id, .. })) => {
+                assert_eq!(component_id, "target");
+            }
+            other => panic!("expected JumpTo(OpenInBrowser), got {other:?}"),
+        }
+        assert!(s.modal.is_none());
+    }
+
+    #[test]
+    fn fuzzy_find_modal_esc_closes_without_jumping() {
+        use crate::client::NodeKind;
+        use crate::view::browser::state::{FlowIndex, FlowIndexEntry};
+
+        let mut s = fresh_state();
+        let c = tiny_config();
+        s.flow_index = Some(FlowIndex {
+            entries: vec![FlowIndexEntry {
+                id: "x".into(),
+                group_id: "g".into(),
+                kind: NodeKind::Processor,
+                display: "X   Processor   root".into(),
+                haystack: "x   processor   root".into(),
+            }],
+        });
+        update(&mut s, key(KeyCode::Char('f'), KeyModifiers::CONTROL), &c);
+        let r = update(&mut s, key(KeyCode::Esc, KeyModifiers::NONE), &c);
+        assert!(s.modal.is_none());
+        assert!(r.intent.is_none());
     }
 }

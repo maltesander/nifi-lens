@@ -30,6 +30,8 @@ pub fn render(frame: &mut Frame, state: &AppState) {
             Modal::Help => help_modal::render(frame, root, state.current_tab),
             Modal::ContextSwitcher(cs) => context_switcher::render(frame, root, cs),
             Modal::ErrorDetail => render_error_detail(frame, root, state),
+            // FuzzyFind render overlay lands in Task 18.
+            Modal::FuzzyFind(_) => {}
         }
     }
 }
