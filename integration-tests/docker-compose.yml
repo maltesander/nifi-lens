@@ -18,7 +18,6 @@ services:
       - ./scripts/nifi-entrypoint.sh:/opt/nifi/scripts/nifi-entrypoint.sh:ro
       - ./scripts/certs/keystore.p12:/opt/nifi/nifi-current/conf/keystore.p12:ro
       - ./scripts/certs/truststore.p12:/opt/nifi/nifi-current/conf/truststore.p12:ro
-      - ./scripts/authorizers.xml:/opt/nifi/nifi-current/conf/authorizers.xml:ro
     healthcheck:
       test:
         ["CMD-SHELL", "grep -q 'Started Server on https://' /opt/nifi/nifi-current/logs/nifi-app.log 2>/dev/null"]
