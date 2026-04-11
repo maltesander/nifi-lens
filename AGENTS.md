@@ -58,7 +58,7 @@ order.
 
 `nifi-lens` follows a standard "ratatui + tokio" split:
 
-- **Single `tokio` multi-thread runtime** owns everything.
+- **Single `tokio` multi-thread runtime with a main-thread `LocalSet`** owns everything.
 - **UI loop** runs on the main task. It drains an internal `AppEvent`
   channel, mutates state, and redraws (60 fps cap, only when state changed).
 - **Terminal event task** converts `crossterm::Event` → `AppEvent::Input`.

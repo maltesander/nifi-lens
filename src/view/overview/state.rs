@@ -102,8 +102,6 @@ pub struct OverviewState {
     /// Highest bulletin id we've seen so the sparkline does not double-count
     /// across polls. The reducer keeps this updated whenever a poll arrives.
     pub last_bulletin_id: Option<i64>,
-    /// Set true by `apply_payload` whenever state changed.
-    pub dirty: bool,
 }
 
 impl OverviewState {
@@ -214,7 +212,6 @@ pub fn apply_payload(state: &mut OverviewState, payload: OverviewPayload) {
         root_pg,
         fetched_at: Some(fetched_at),
     });
-    state.dirty = true;
 }
 
 /// Parse an ISO-8601 / RFC-3339 timestamp into seconds since the UNIX epoch.
@@ -293,13 +290,12 @@ mod tests {
     }
 
     #[test]
-    fn apply_populates_snapshot_and_marks_dirty() {
+    fn apply_populates_snapshot() {
         let mut state = OverviewState::new();
         apply_payload(
             &mut state,
             payload(ControllerStatusSnapshot::default(), vec![], vec![]),
         );
-        assert!(state.dirty);
         let snap = state.snapshot.as_ref().unwrap();
         assert_eq!(snap.about.version, "2.8.0");
         assert!(snap.fetched_at.is_some());
