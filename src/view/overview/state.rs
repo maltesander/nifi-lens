@@ -133,9 +133,11 @@ pub fn apply_payload(state: &mut OverviewState, payload: OverviewPayload) {
         .collect();
 
     // Sparkline: assign each bulletin to a minute bucket relative to
-    // fetched_at. Bucket 0 is the minute containing fetched_at; bucket
-    // SPARKLINE_MINUTES-1 is the oldest. Bulletins older than the window
-    // are discarded for the sparkline but still count toward "noisy".
+    // fetched_at. sparkline[0] is the OLDEST minute (SPARKLINE_MINUTES-1
+    // minutes before fetched_at); sparkline[SPARKLINE_MINUTES-1] is the
+    // NEWEST minute (the one containing fetched_at). Bulletins older than
+    // the window are discarded for the sparkline but still count toward
+    // "noisy".
     let mut sparkline = [BulletinBucket::default(); SPARKLINE_MINUTES];
     let fetched_secs = fetched_at
         .duration_since(std::time::UNIX_EPOCH)
@@ -341,6 +343,39 @@ mod tests {
         let four_minutes_old = state.sparkline[SPARKLINE_MINUTES - 1 - 4];
         assert_eq!(four_minutes_old.count, 1);
         assert_eq!(four_minutes_old.max_severity, Severity::Error);
+    }
+
+    #[test]
+    fn sparkline_pins_absolute_index_orientation() {
+        // Pin the absolute index orientation: a bulletin aged 0s goes to
+        // index SPARKLINE_MINUTES-1, nothing else. A bulletin aged
+        // ~14 minutes lands at index 0 (the oldest visible bucket).
+        let mut orientation_state = OverviewState::new();
+        let orientation_bulletins = vec![bulletin(
+            10,
+            "INFO",
+            "z",
+            "2026-04-11T10:14:22Z", // age 0s, exactly fetched_at
+        )];
+        apply_payload(
+            &mut orientation_state,
+            payload(
+                ControllerStatusSnapshot::default(),
+                vec![],
+                orientation_bulletins,
+            ),
+        );
+        assert_eq!(
+            orientation_state.sparkline[SPARKLINE_MINUTES - 1].count,
+            1,
+            "age 0s bulletin must land in the newest bucket (last index)"
+        );
+        for i in 0..(SPARKLINE_MINUTES - 1) {
+            assert_eq!(
+                orientation_state.sparkline[i].count, 0,
+                "non-newest buckets must be empty"
+            );
+        }
     }
 
     #[test]
