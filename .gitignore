@@ -25,3 +25,6 @@ docs
 
 # Isolated worktrees for in-session feature work.
 .worktrees
+
+# cTags index
+tags
