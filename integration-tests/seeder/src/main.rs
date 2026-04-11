@@ -1,6 +1,7 @@
 //! nifilens-fixture-seeder entry point.
 
 mod cli;
+mod entities;
 mod error;
 mod fixture;
 mod state;
