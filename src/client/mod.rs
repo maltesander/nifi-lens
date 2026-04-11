@@ -9,11 +9,49 @@ pub mod build;
 
 use std::ops::{Deref, DerefMut};
 
+use nifi_rust_client::NifiError;
 use nifi_rust_client::dynamic::{DynamicClient, traits::FlowApi as _};
 use semver::Version;
 
 use crate::config::ResolvedContext;
 use crate::error::NifiLensError;
+
+/// Try to classify a boxed library error into a specific `NifiLensError`
+/// variant with a targeted hint, falling back to a caller-provided
+/// generic constructor when no specific match is found.
+///
+/// Downcasts the boxed source to `nifi_rust_client::NifiError` and matches
+/// on the variant. Unclassified variants (network errors, 5xx responses,
+/// etc.) pass through to `fallback`.
+pub(crate) fn classify_or_fallback(
+    context: &str,
+    source: Box<dyn std::error::Error + Send + Sync>,
+    fallback: impl FnOnce(Box<dyn std::error::Error + Send + Sync>) -> NifiLensError,
+) -> NifiLensError {
+    if let Some(nifi_err) = source.downcast_ref::<NifiError>() {
+        match nifi_err {
+            NifiError::UnsupportedVersion { detected } => {
+                return NifiLensError::UnsupportedNifiVersion {
+                    context: context.to_string(),
+                    detected: detected.clone(),
+                };
+            }
+            NifiError::InvalidCertificate { .. } => {
+                return NifiLensError::TlsCertInvalid {
+                    context: context.to_string(),
+                    source,
+                };
+            }
+            NifiError::Unauthorized { .. } | NifiError::Auth { .. } => {
+                return NifiLensError::NifiUnauthorized {
+                    context: context.to_string(),
+                };
+            }
+            _ => {}
+        }
+    }
+    fallback(source)
+}
 
 pub struct NifiClient {
     inner: DynamicClient,
@@ -56,9 +94,13 @@ impl NifiClient {
         inner
             .login(&ctx.username, &ctx.password)
             .await
-            .map_err(|err| NifiLensError::LoginFailed {
-                context: ctx.name.clone(),
-                source: Box::new(err),
+            .map_err(|err| {
+                classify_or_fallback(&ctx.name, Box::new(err), |source| {
+                    NifiLensError::LoginFailed {
+                        context: ctx.name.clone(),
+                        source,
+                    }
+                })
             })?;
 
         // detected_version() returns DetectedVersion (an enum), not a String.
@@ -94,9 +136,13 @@ impl NifiClient {
             .flow_api()
             .get_about_info()
             .await
-            .map_err(|err| NifiLensError::AboutFailed {
-                context: self.context_name.clone(),
-                source: Box::new(err),
+            .map_err(|err| {
+                classify_or_fallback(&self.context_name, Box::new(err), |source| {
+                    NifiLensError::AboutFailed {
+                        context: self.context_name.clone(),
+                        source,
+                    }
+                })
             })?;
 
         Ok(AboutSnapshot {

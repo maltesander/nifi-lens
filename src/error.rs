@@ -58,6 +58,42 @@ pub enum NifiLensError {
         source: std::io::Error,
     },
 
+    /// The detected NiFi version is not supported by the current
+    /// `nifi-rust-client` build, and `version_strategy = "strict"` refuses
+    /// to fall back.
+    #[snafu(display(
+        "context {context:?}: NiFi {detected} is not supported by nifi-rust-client\n\
+         \n\
+         hint: set `version_strategy = \"closest\"` (or `\"latest\"`) in the context\n\
+         config to fall back to the nearest supported version."
+    ))]
+    UnsupportedNifiVersion { context: String, detected: String },
+
+    /// TLS certificate verification failed — usually a self-signed cluster
+    /// without a trust anchor configured.
+    #[snafu(display(
+        "context {context:?}: TLS certificate verification failed: {source}\n\
+         \n\
+         hints:\n\
+         - set `ca_cert_path = \"/path/to/ca.crt\"` to a PEM containing the cluster's CA\n\
+         - or set `insecure_tls = true` to skip verification entirely (dev only)"
+    ))]
+    TlsCertInvalid {
+        context: String,
+        source: Box<dyn std::error::Error + Send + Sync>,
+    },
+
+    /// NiFi rejected the credentials (401 / auth failure).
+    #[snafu(display(
+        "context {context:?}: NiFi rejected the credentials\n\
+         \n\
+         hints:\n\
+         - double-check `username` in the config\n\
+         - verify the password: either the `password` field, or the environment\n\
+           variable named by `password_env`"
+    ))]
+    NifiUnauthorized { context: String },
+
     /// `nifi-rust-client` 0.5.0's error type is not yet audited (see Phase 0
     /// Task 7). We box the source as a trait object so this variant compiles
     /// before that audit, at the cost of losing snafu's automatic `From`

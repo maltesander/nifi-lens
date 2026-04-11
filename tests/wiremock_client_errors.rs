@@ -19,7 +19,7 @@ fn ctx_for(url: String) -> ResolvedContext {
 }
 
 #[tokio::test]
-async fn login_401_surfaces_login_failed() {
+async fn login_401_surfaces_unauthorized_with_hint() {
     let server = MockServer::start().await;
 
     Mock::given(method("POST"))
@@ -32,8 +32,14 @@ async fn login_401_surfaces_login_failed() {
         .await
         .expect_err("connect should fail");
     assert!(
-        matches!(err, NifiLensError::LoginFailed { .. }),
-        "expected LoginFailed, got {err:?}"
+        matches!(err, NifiLensError::NifiUnauthorized { .. }),
+        "expected NifiUnauthorized, got {err:?}"
+    );
+    // Spot-check the hint is present in the user-visible display string.
+    let msg = err.to_string();
+    assert!(
+        msg.contains("rejected the credentials") && msg.contains("password_env"),
+        "expected hint about credentials in display message, got: {msg}"
     );
 }
 
