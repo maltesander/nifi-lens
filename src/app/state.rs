@@ -471,6 +471,95 @@ fn handle_key(state: &mut AppState, key: KeyEvent, config: &Config) -> UpdateRes
         }
     }
 
+    // Browser view-local keys. Active only when no modal is open and we
+    // are on the Browser tab. Global keys (Tab, Ctrl+K, Ctrl+C, etc.)
+    // continue to fall through to the global block. The `e`, `c`, `t`
+    // keys land in Task 17.
+    if state.current_tab == ViewId::Browser
+        && state.modal.is_none()
+        && matches!(key.modifiers, KeyModifiers::NONE | KeyModifiers::SHIFT)
+    {
+        match key.code {
+            KeyCode::Up | KeyCode::Char('k') => {
+                state.browser.move_up();
+                state.browser.emit_detail_request_for_current_selection();
+                return UpdateResult {
+                    redraw: true,
+                    intent: None,
+                };
+            }
+            KeyCode::Down | KeyCode::Char('j') => {
+                state.browser.move_down();
+                state.browser.emit_detail_request_for_current_selection();
+                return UpdateResult {
+                    redraw: true,
+                    intent: None,
+                };
+            }
+            KeyCode::PageDown => {
+                state.browser.page_down(10);
+                state.browser.emit_detail_request_for_current_selection();
+                return UpdateResult {
+                    redraw: true,
+                    intent: None,
+                };
+            }
+            KeyCode::PageUp => {
+                state.browser.page_up(10);
+                state.browser.emit_detail_request_for_current_selection();
+                return UpdateResult {
+                    redraw: true,
+                    intent: None,
+                };
+            }
+            KeyCode::Home => {
+                state.browser.jump_home();
+                state.browser.emit_detail_request_for_current_selection();
+                return UpdateResult {
+                    redraw: true,
+                    intent: None,
+                };
+            }
+            KeyCode::End => {
+                state.browser.jump_end();
+                state.browser.emit_detail_request_for_current_selection();
+                return UpdateResult {
+                    redraw: true,
+                    intent: None,
+                };
+            }
+            KeyCode::Enter | KeyCode::Right | KeyCode::Char('l') => {
+                state.browser.enter_selection();
+                state.browser.emit_detail_request_for_current_selection();
+                return UpdateResult {
+                    redraw: true,
+                    intent: None,
+                };
+            }
+            KeyCode::Backspace | KeyCode::Left | KeyCode::Char('h') => {
+                state.browser.backspace_selection();
+                state.browser.emit_detail_request_for_current_selection();
+                return UpdateResult {
+                    redraw: true,
+                    intent: None,
+                };
+            }
+            KeyCode::Char('r') => {
+                // Consume the force-tick oneshot. The worker is listening
+                // and will fire an immediate tree fetch. Clearing the
+                // sender prevents a second press from panicking.
+                if let Some(tx) = state.browser.force_tick_tx.take() {
+                    let _ = tx.send(());
+                }
+                return UpdateResult {
+                    redraw: true,
+                    intent: None,
+                };
+            }
+            _ => {}
+        }
+    }
+
     // Global key handling.
     match (key.code, key.modifiers) {
         (KeyCode::Char('q'), KeyModifiers::NONE)
@@ -1169,5 +1258,100 @@ mod tests {
         let banner = s.status.banner.as_ref().unwrap();
         assert_eq!(banner.severity, BannerSeverity::Warning);
         assert!(banner.message.contains("ghost"));
+    }
+
+    fn seeded_browser_state() -> (AppState, Config) {
+        use crate::client::{NodeKind, NodeStatusSummary, RawNode, RecursiveSnapshot};
+        use crate::event::{BrowserPayload, ViewPayload};
+        use std::time::SystemTime;
+
+        let mut s = fresh_state();
+        let c = tiny_config();
+        let snap = RecursiveSnapshot {
+            nodes: vec![
+                RawNode {
+                    parent_idx: None,
+                    kind: NodeKind::ProcessGroup,
+                    id: "root".into(),
+                    group_id: "root".into(),
+                    name: "root".into(),
+                    status_summary: NodeStatusSummary::ProcessGroup {
+                        running: 0,
+                        stopped: 0,
+                        invalid: 0,
+                        disabled: 0,
+                    },
+                },
+                RawNode {
+                    parent_idx: Some(0),
+                    kind: NodeKind::Processor,
+                    id: "gen".into(),
+                    group_id: "root".into(),
+                    name: "Gen".into(),
+                    status_summary: NodeStatusSummary::Processor {
+                        run_status: "Running".into(),
+                    },
+                },
+                RawNode {
+                    parent_idx: Some(0),
+                    kind: NodeKind::ProcessGroup,
+                    id: "ingest".into(),
+                    group_id: "root".into(),
+                    name: "ingest".into(),
+                    status_summary: NodeStatusSummary::ProcessGroup {
+                        running: 0,
+                        stopped: 0,
+                        invalid: 0,
+                        disabled: 0,
+                    },
+                },
+            ],
+            fetched_at: SystemTime::now(),
+        };
+        update(
+            &mut s,
+            AppEvent::Data(ViewPayload::Browser(BrowserPayload::Tree(snap))),
+            &c,
+        );
+        s.current_tab = ViewId::Browser;
+        (s, c)
+    }
+
+    #[test]
+    fn on_browser_tab_j_moves_selection_down() {
+        let (mut s, c) = seeded_browser_state();
+        assert_eq!(s.browser.selected, 0);
+        update(&mut s, key(KeyCode::Char('j'), KeyModifiers::NONE), &c);
+        assert_eq!(s.browser.selected, 1);
+    }
+
+    #[test]
+    fn on_browser_tab_enter_on_collapsed_pg_drills_in() {
+        let (mut s, c) = seeded_browser_state();
+        // Move selection to "ingest" (visible row 2 in a seeded tree with
+        // root expanded and "gen" as first child).
+        s.browser.selected = 2;
+        update(&mut s, key(KeyCode::Enter, KeyModifiers::NONE), &c);
+        assert!(s.browser.expanded.contains(&2));
+    }
+
+    #[test]
+    fn on_browser_tab_backspace_on_expanded_pg_collapses() {
+        let (mut s, c) = seeded_browser_state();
+        s.browser.expanded.insert(2);
+        crate::view::browser::state::rebuild_visible(&mut s.browser);
+        s.browser.selected = 2;
+        update(&mut s, key(KeyCode::Backspace, KeyModifiers::NONE), &c);
+        assert!(!s.browser.expanded.contains(&2));
+    }
+
+    #[test]
+    fn on_browser_tab_r_fires_force_tick() {
+        let (mut s, c) = seeded_browser_state();
+        let (tx, _rx) = tokio::sync::oneshot::channel::<()>();
+        s.browser.force_tick_tx = Some(tx);
+        update(&mut s, key(KeyCode::Char('r'), KeyModifiers::NONE), &c);
+        // Sender consumed; force_tick_tx is cleared.
+        assert!(s.browser.force_tick_tx.is_none());
     }
 }
