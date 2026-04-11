@@ -460,6 +460,127 @@ impl NifiClient {
     }
 }
 
+/// Detail snapshot for a Connection node in the Browser tab's detail
+/// pane. Flattens the library's `ConnectionEntity` into the fields the
+/// renderer actually uses.
+#[derive(Debug, Clone)]
+pub struct ConnectionDetail {
+    /// The connection's stable UUID.
+    pub id: String,
+    /// Human-readable display name configured by the user.
+    pub name: String,
+    /// UUID of the source connectable component.
+    pub source_id: String,
+    /// Display name of the source connectable component.
+    pub source_name: String,
+    /// Component kind of the source (e.g. `"PROCESSOR"`).
+    pub source_type: String,
+    /// Process-group UUID that contains the source component.
+    pub source_group_id: String,
+    /// UUID of the destination connectable component.
+    pub destination_id: String,
+    /// Display name of the destination connectable component.
+    pub destination_name: String,
+    /// Component kind of the destination (e.g. `"PROCESSOR"`).
+    pub destination_type: String,
+    /// Process-group UUID that contains the destination component.
+    pub destination_group_id: String,
+    /// Relationships from the source that are routed into this connection.
+    pub selected_relationships: Vec<String>,
+    /// All relationships the source currently exposes.
+    pub available_relationships: Vec<String>,
+    /// Object-count threshold at which back-pressure is applied.
+    pub back_pressure_object_threshold: u64,
+    /// Data-size threshold string at which back-pressure is applied (e.g. `"1 GB"`).
+    pub back_pressure_data_size_threshold: String,
+    /// Maximum age a FlowFile may sit in the queue before it is expired (e.g. `"0 sec"`).
+    pub flow_file_expiration: String,
+    /// Load-balance strategy string (e.g. `"DO_NOT_LOAD_BALANCE"`).
+    pub load_balance_strategy: String,
+    /// Queue fill percentage: `max(percent_use_count, percent_use_bytes)`.
+    pub fill_percent: u32,
+    /// Number of FlowFiles currently queued.
+    pub flow_files_queued: u32,
+    /// Total bytes currently queued.
+    pub bytes_queued: u64,
+    /// Human-readable queue size string (e.g. `"5,500 / 50 MB"`).
+    pub queued_display: String,
+}
+
+impl NifiClient {
+    /// Single-endpoint detail fetch for a connection. Returns the
+    /// source/destination identities, selected and available
+    /// relationships, back-pressure thresholds, expiration settings,
+    /// and the live fill percentage (same `max(percent_use_count,
+    /// percent_use_bytes)` derivation as `QueueSnapshot`).
+    pub async fn browser_connection_detail(
+        &self,
+        conn_id: &str,
+    ) -> Result<ConnectionDetail, NifiLensError> {
+        use nifi_rust_client::dynamic::traits::ConnectionsApi as _;
+
+        tracing::debug!(context = %self.context_name(), %conn_id, "fetching connection detail");
+        let entity = self
+            .connections_api()
+            .get_connection(conn_id)
+            .await
+            .map_err(|err| {
+                classify_or_fallback(self.context_name(), Box::new(err), |source| {
+                    NifiLensError::ConnectionDetailFailed {
+                        context: self.context_name().to_string(),
+                        id: conn_id.to_string(),
+                        source,
+                    }
+                })
+            })?;
+
+        let component = entity.component.unwrap_or_default();
+        let agg = entity
+            .status
+            .as_ref()
+            .and_then(|s| s.aggregate_snapshot.as_ref());
+
+        // Read queue stats before moving fields out of component.
+        let by_count = agg.and_then(|a| a.percent_use_count).unwrap_or(0).max(0) as u32;
+        let by_bytes = agg.and_then(|a| a.percent_use_bytes).unwrap_or(0).max(0) as u32;
+        let flow_files_queued = agg.and_then(|a| a.flow_files_queued).unwrap_or(0).max(0) as u32;
+        let bytes_queued = agg.and_then(|a| a.bytes_queued).unwrap_or(0).max(0) as u64;
+        let queued_display = agg.and_then(|a| a.queued.clone()).unwrap_or_default();
+
+        // Move source/destination out of component before consuming other fields.
+        let source = component.source.unwrap_or_default();
+        let dest = component.destination.unwrap_or_default();
+
+        Ok(ConnectionDetail {
+            id: conn_id.to_string(),
+            name: component.name.unwrap_or_default(),
+            source_id: source.id,
+            source_name: source.name.unwrap_or_default(),
+            source_type: source.r#type,
+            source_group_id: source.group_id,
+            destination_id: dest.id,
+            destination_name: dest.name.unwrap_or_default(),
+            destination_type: dest.r#type,
+            destination_group_id: dest.group_id,
+            selected_relationships: component.selected_relationships.unwrap_or_default(),
+            available_relationships: component.available_relationships.unwrap_or_default(),
+            back_pressure_object_threshold: component
+                .back_pressure_object_threshold
+                .unwrap_or(0)
+                .max(0) as u64,
+            back_pressure_data_size_threshold: component
+                .back_pressure_data_size_threshold
+                .unwrap_or_default(),
+            flow_file_expiration: component.flow_file_expiration.unwrap_or_default(),
+            load_balance_strategy: component.load_balance_strategy.unwrap_or_default(),
+            fill_percent: by_count.max(by_bytes),
+            flow_files_queued,
+            bytes_queued,
+            queued_display,
+        })
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::short_type;

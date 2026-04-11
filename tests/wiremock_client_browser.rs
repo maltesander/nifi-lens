@@ -1,7 +1,7 @@
 //! Wiremock tests: Phase 3 browser client wrappers.
 
 use nifi_lens::client::{
-    NifiClient, NodeKind, ProcessGroupDetail, ProcessorDetail, RecursiveSnapshot,
+    ConnectionDetail, NifiClient, NodeKind, ProcessGroupDetail, ProcessorDetail, RecursiveSnapshot,
 };
 use nifi_lens::config::{ResolvedContext, VersionStrategy};
 use wiremock::matchers::{method, path, query_param};
@@ -174,4 +174,43 @@ async fn browser_processor_detail_carries_properties_and_validation_errors() {
     assert_eq!(d.properties.len(), 6);
     assert_eq!(d.validation_errors.len(), 1);
     assert!(d.validation_errors[0].contains("Kafka Key"));
+}
+
+#[tokio::test]
+async fn browser_connection_detail_carries_source_dest_relationships_thresholds() {
+    let server = MockServer::start().await;
+    stub_login_and_about(&server).await;
+
+    let body = load_fixture("connection.json");
+    Mock::given(method("GET"))
+        .and(path("/nifi-api/connections/conn-enrich"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(body))
+        .mount(&server)
+        .await;
+
+    let client = NifiClient::connect(&ctx(server.uri())).await.unwrap();
+    let d: ConnectionDetail = client
+        .browser_connection_detail("conn-enrich")
+        .await
+        .expect("ok");
+    assert_eq!(d.id, "conn-enrich");
+    assert_eq!(d.name, "enrich → publish");
+    assert_eq!(d.source_id, "proc-enrich");
+    assert_eq!(d.source_name, "EnrichAttribute");
+    assert_eq!(d.source_type, "PROCESSOR");
+    assert_eq!(d.source_group_id, "ingest");
+    assert_eq!(d.destination_id, "proc-publish");
+    assert_eq!(d.destination_name, "PublishKafka");
+    assert_eq!(d.destination_type, "PROCESSOR");
+    assert_eq!(d.destination_group_id, "publish");
+    assert_eq!(d.selected_relationships, vec!["success".to_string()]);
+    assert_eq!(d.available_relationships.len(), 3);
+    assert_eq!(d.back_pressure_object_threshold, 10000);
+    assert_eq!(d.back_pressure_data_size_threshold, "1 GB");
+    assert_eq!(d.flow_file_expiration, "0 sec");
+    assert_eq!(d.load_balance_strategy, "DO_NOT_LOAD_BALANCE");
+    assert_eq!(d.fill_percent, 55);
+    assert_eq!(d.flow_files_queued, 5500);
+    assert_eq!(d.bytes_queued, 52_428_800);
+    assert_eq!(d.queued_display, "5,500 / 50 MB");
 }

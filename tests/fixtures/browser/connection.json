@@ -1,0 +1,36 @@
+{
+  "id": "conn-enrich",
+  "component": {
+    "id": "conn-enrich",
+    "name": "enrich → publish",
+    "source": {
+      "id": "proc-enrich",
+      "name": "EnrichAttribute",
+      "type": "PROCESSOR",
+      "groupId": "ingest"
+    },
+    "destination": {
+      "id": "proc-publish",
+      "name": "PublishKafka",
+      "type": "PROCESSOR",
+      "groupId": "publish"
+    },
+    "selectedRelationships": ["success"],
+    "availableRelationships": ["success", "failure", "retry"],
+    "backPressureObjectThreshold": 10000,
+    "backPressureDataSizeThreshold": "1 GB",
+    "flowFileExpiration": "0 sec",
+    "loadBalanceStrategy": "DO_NOT_LOAD_BALANCE"
+  },
+  "status": {
+    "aggregateSnapshot": {
+      "percentUseCount": 55,
+      "percentUseBytes": 42,
+      "flowFilesQueued": 5500,
+      "bytesQueued": 52428800,
+      "queued": "5,500 / 50 MB"
+    }
+  },
+  "sourceType": "PROCESSOR",
+  "destinationType": "PROCESSOR"
+}
