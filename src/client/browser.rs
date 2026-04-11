@@ -347,6 +347,118 @@ pub(crate) fn short_type(fqn: &str) -> String {
     fqn.rsplit('.').next().unwrap_or(fqn).to_string()
 }
 
+/// Flat snapshot of a single processor's identity, scheduling configuration,
+/// properties, and validation errors. Consumed directly by the Browser detail
+/// render pane.
+#[derive(Debug, Clone)]
+pub struct ProcessorDetail {
+    /// The processor's stable UUID.
+    pub id: String,
+    /// Human-readable display name configured by the user.
+    pub name: String,
+    /// Fully-qualified Java class name of the processor implementation.
+    pub type_name: String,
+    /// NAR bundle coordinates formatted as `group:artifact:version`.
+    pub bundle: String,
+    /// Scheduler run-state string (e.g. `"RUNNING"`, `"STOPPED"`).
+    pub run_status: String,
+    /// Scheduling strategy (e.g. `"TIMER_DRIVEN"`, `"EVENT_DRIVEN"`).
+    pub scheduling_strategy: String,
+    /// Scheduling period string (e.g. `"1 sec"`, `"0 sec"`).
+    pub scheduling_period: String,
+    /// Number of concurrently schedulable tasks.
+    pub concurrent_tasks: u32,
+    /// Run duration in milliseconds (batch mode hint).
+    pub run_duration_ms: u64,
+    /// FlowFile penalty duration string (e.g. `"30 sec"`).
+    pub penalty_duration: String,
+    /// Yield duration string (e.g. `"1 sec"`).
+    pub yield_duration: String,
+    /// Minimum severity level for bulletins (e.g. `"WARN"`, `"INFO"`).
+    pub bulletin_level: String,
+    /// Processor properties as ordered key-value pairs. HashMap iteration
+    /// order is non-deterministic; stable display ordering is Phase 5 polish.
+    pub properties: Vec<(String, String)>,
+    /// Validation error messages that must be resolved before the processor
+    /// can be started.
+    pub validation_errors: Vec<String>,
+}
+
+impl NifiClient {
+    /// Single-endpoint detail fetch for a processor node. Returns the
+    /// full identity, scheduling config, properties, and validation
+    /// errors as a flat snapshot the render pane can consume directly.
+    pub async fn browser_processor_detail(
+        &self,
+        proc_id: &str,
+    ) -> Result<ProcessorDetail, NifiLensError> {
+        use nifi_rust_client::dynamic::traits::ProcessorsApi as _;
+
+        tracing::debug!(context = %self.context_name(), %proc_id, "fetching processor detail");
+        let entity = self
+            .processors_api()
+            .get_processor(proc_id)
+            .await
+            .map_err(|err| {
+                classify_or_fallback(self.context_name(), Box::new(err), |source| {
+                    NifiLensError::ProcessorDetailFailed {
+                        context: self.context_name().to_string(),
+                        id: proc_id.to_string(),
+                        source,
+                    }
+                })
+            })?;
+
+        let component = entity.component.unwrap_or_default();
+        let config = component.config.clone().unwrap_or_default();
+        let bundle_str = component
+            .bundle
+            .as_ref()
+            .map(|b| {
+                format!(
+                    "{}:{}:{}",
+                    b.group.clone().unwrap_or_default(),
+                    b.artifact.clone().unwrap_or_default(),
+                    b.version.clone().unwrap_or_default(),
+                )
+            })
+            .unwrap_or_default();
+
+        // Library returns `Option<HashMap<String, Option<String>>>`. Flatten
+        // into `Vec<(String, String)>`. HashMap ordering is non-deterministic;
+        // the UI displays whatever order iteration returns. Stable property
+        // ordering is a Phase 5 polish item.
+        let properties: Vec<(String, String)> = config
+            .properties
+            .unwrap_or_default()
+            .into_iter()
+            .map(|(k, v)| (k, v.unwrap_or_default()))
+            .collect();
+
+        let validation_errors = component.validation_errors.unwrap_or_default();
+
+        Ok(ProcessorDetail {
+            id: proc_id.to_string(),
+            name: component.name.unwrap_or_default(),
+            type_name: component.r#type.unwrap_or_default(),
+            bundle: bundle_str,
+            run_status: component.state.unwrap_or_default(),
+            scheduling_strategy: config.scheduling_strategy.unwrap_or_default(),
+            scheduling_period: config.scheduling_period.unwrap_or_default(),
+            concurrent_tasks: config
+                .concurrently_schedulable_task_count
+                .unwrap_or(0)
+                .max(0) as u32,
+            run_duration_ms: config.run_duration_millis.unwrap_or(0).max(0) as u64,
+            penalty_duration: config.penalty_duration.unwrap_or_default(),
+            yield_duration: config.yield_duration.unwrap_or_default(),
+            bulletin_level: config.bulletin_level.unwrap_or_default(),
+            properties,
+            validation_errors,
+        })
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::short_type;

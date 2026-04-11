@@ -1,6 +1,8 @@
 //! Wiremock tests: Phase 3 browser client wrappers.
 
-use nifi_lens::client::{NifiClient, NodeKind, ProcessGroupDetail, RecursiveSnapshot};
+use nifi_lens::client::{
+    NifiClient, NodeKind, ProcessGroupDetail, ProcessorDetail, RecursiveSnapshot,
+};
 use nifi_lens::config::{ResolvedContext, VersionStrategy};
 use wiremock::matchers::{method, path, query_param};
 use wiremock::{Mock, MockServer, ResponseTemplate};
@@ -138,4 +140,36 @@ async fn browser_pg_detail_combines_pg_and_cs_list() {
     );
     assert_eq!(detail.controller_services[1].name, "kafka-brokers");
     assert_eq!(detail.controller_services[1].state, "DISABLED");
+}
+
+#[tokio::test]
+async fn browser_processor_detail_carries_properties_and_validation_errors() {
+    let server = MockServer::start().await;
+    stub_login_and_about(&server).await;
+
+    let body = load_fixture("processor.json");
+    Mock::given(method("GET"))
+        .and(path("/nifi-api/processors/put-kafka-1"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(body))
+        .mount(&server)
+        .await;
+
+    let client = NifiClient::connect(&ctx(server.uri())).await.unwrap();
+    let d: ProcessorDetail = client
+        .browser_processor_detail("put-kafka-1")
+        .await
+        .expect("ok");
+    assert_eq!(d.id, "put-kafka-1");
+    assert_eq!(d.name, "PutKafka");
+    assert!(d.type_name.contains("PublishKafka_2_6"));
+    assert!(d.bundle.contains("nifi-kafka-2-6-nar"));
+    assert_eq!(d.run_status, "RUNNING");
+    assert_eq!(d.scheduling_strategy, "TIMER_DRIVEN");
+    assert_eq!(d.scheduling_period, "1 sec");
+    assert_eq!(d.concurrent_tasks, 2);
+    assert_eq!(d.run_duration_ms, 25);
+    assert_eq!(d.bulletin_level, "WARN");
+    assert_eq!(d.properties.len(), 6);
+    assert_eq!(d.validation_errors.len(), 1);
+    assert!(d.validation_errors[0].contains("Kafka Key"));
 }

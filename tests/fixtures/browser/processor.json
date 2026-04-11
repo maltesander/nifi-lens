@@ -1,0 +1,34 @@
+{
+  "id": "put-kafka-1",
+  "component": {
+    "id": "put-kafka-1",
+    "name": "PutKafka",
+    "type": "org.apache.nifi.processors.kafka.pubsub.PublishKafka_2_6",
+    "bundle": {
+      "group": "org.apache.nifi",
+      "artifact": "nifi-kafka-2-6-nar",
+      "version": "2.8.0"
+    },
+    "state": "RUNNING",
+    "config": {
+      "schedulingStrategy": "TIMER_DRIVEN",
+      "schedulingPeriod": "1 sec",
+      "concurrentlySchedulableTaskCount": 2,
+      "runDurationMillis": 25,
+      "penaltyDuration": "30 sec",
+      "yieldDuration": "1 sec",
+      "bulletinLevel": "WARN",
+      "properties": {
+        "Topic Name": "my-events",
+        "Known Brokers": "kafka.internal:9092",
+        "Kafka Key": "${uuid}",
+        "Delivery Guarantee": "Guarantee Replicated Delivery",
+        "Compression Type": "none",
+        "Max Request Size": "1 MB"
+      }
+    },
+    "validationErrors": [
+      "'Kafka Key' is invalid because expression language is not supported"
+    ]
+  }
+}
