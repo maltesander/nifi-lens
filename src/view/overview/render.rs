@@ -124,10 +124,12 @@ fn render_sparkline(frame: &mut Frame, area: Rect, buckets: &[BulletinBucket]) {
 
 fn render_unhealthy(frame: &mut Frame, area: Rect, queues: &[UnhealthyQueue]) {
     let rows: Vec<Row> = if queues.is_empty() {
-        vec![Row::new(vec![Cell::from(Span::styled(
-            "no queues reported yet",
-            theme::muted(),
-        ))])]
+        vec![Row::new(vec![
+            Cell::from(""),
+            Cell::from(""),
+            Cell::from(Span::styled("no queues reported yet", theme::muted())),
+            Cell::from(""),
+        ])]
     } else {
         queues
             .iter()
@@ -165,10 +167,11 @@ fn render_unhealthy(frame: &mut Frame, area: Rect, queues: &[UnhealthyQueue]) {
 
 fn render_noisy(frame: &mut Frame, area: Rect, noisy: &[NoisyComponent]) {
     let rows: Vec<Row> = if noisy.is_empty() {
-        vec![Row::new(vec![Cell::from(Span::styled(
-            "no bulletins yet",
-            theme::muted(),
-        ))])]
+        vec![Row::new(vec![
+            Cell::from(""),
+            Cell::from(Span::styled("no bulletins yet", theme::muted())),
+            Cell::from(""),
+        ])]
     } else {
         noisy
             .iter()

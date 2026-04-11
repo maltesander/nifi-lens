@@ -11,7 +11,7 @@ expression: render_to_string(&state)
 "│                                                                                                  │"
 "│┌ Unhealthy queues ───────────────────────────────────────┐┌ Noisy components ───────────────────┐│"
 "││fill  queue            src → dst                 ffiles  ││count  source                worst   ││"
-"││no qu                                                    ││no bul                               ││"
+"││                       no queues reported yet            ││       no bulletins yet              ││"
 "││                                                         ││                                     ││"
 "││                                                         ││                                     ││"
 "││                                                         ││                                     ││"
