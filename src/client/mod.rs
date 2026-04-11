@@ -147,13 +147,14 @@ impl NifiClient {
 
         Ok(AboutSnapshot {
             version: about.version.clone().unwrap_or_default(),
+            title: about.title.clone().unwrap_or_default(),
         })
     }
 }
 
-/// Phase 0 snapshot of /flow/about; richer fields arrive with Phase 1's
-/// overview tab.
-#[derive(Debug, Clone)]
+/// Snapshot of the `/flow/about` endpoint used by the identity strip.
+#[derive(Debug, Clone, Default)]
 pub struct AboutSnapshot {
     pub version: String,
+    pub title: String,
 }
