@@ -34,7 +34,19 @@ nifi-lens/
 ├── release/
 │   └── release.sh            # cargo-release wrapper, dry-run by default
 └── src/
-    └── main.rs               # binary entry point
+    ├── lib.rs              # public entry: pub fn run() -> ExitCode
+    ├── main.rs             # thin wrapper: std::process::exit(nifi_lens::run())
+    ├── cli.rs              # clap derive: Args, Command, ConfigAction, LogLevel
+    ├── error.rs            # NifiLensError (snafu, full variant set)
+    ├── logging.rs          # tracing-subscriber + rotating file + StderrToggle
+    ├── theme.rs            # color / style constants
+    ├── event.rs            # AppEvent, IntentOutcome, ViewPayload
+    ├── config/             # mod, loader, init — schema, load, config init
+    ├── client/             # mod, build — NifiClient wrapper (Deref) + TLS
+    ├── app/                # mod (run loop), state (reducer), ui (frame render)
+    ├── intent/             # Intent enum + IntentDispatcher
+    ├── view/               # per-tab placeholder renderers
+    └── widget/             # status_bar, help_modal, context_switcher
 ```
 
 Phase 0 (see [Phase Roadmap](#phase-roadmap)) will grow the `src/` tree into
@@ -222,10 +234,11 @@ cargo install cargo-release --locked
 `nifi-lens` ships in discrete phases, each leaving the tool in a runnable,
 usable state.
 
-1. **Phase 0 — Foundations.** Config loader, `DynamicClient` wrapper,
-   render loop, four empty tab scaffolds, context switcher, intent
-   dispatcher stub, logging. Exit: `nifilens` connects to a cluster,
-   shows its version, switches contexts, quits cleanly.
+1. **Phase 0 — Foundations** *(shipped)*. Config loader, `NifiClient`
+   wrapper with `Deref`, ratatui + crossterm render loop, four empty tab
+   placeholders, `Ctrl+K` context switcher, intent dispatcher stub,
+   rotating-file logging with stderr toggle, panic-safe terminal guard,
+   wiremock client tests, Docker-backed integration test harness.
 2. **Phase 1 — Overview tab.** Health dashboard: identity strip,
    component counts, bulletin-rate sparkline, unhealthy-queue leaderboard,
    top noisy components.
