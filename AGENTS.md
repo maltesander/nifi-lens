@@ -174,6 +174,60 @@ raised from 1.85 to 1.88 to pull in `time >= 0.3.47`, which fixes
 Create `~/.config/nifilens/config.toml` as shown in `README.md`, export the
 referenced `password_env` variable, and run `cargo run -- --context dev`.
 
+### Integration test fixture
+
+The integration harness at `integration-tests/` brings up two simultaneous
+NiFi containers (2.6.0 floor + 2.8.0 ceiling), seeds each with a rich
+fixture via `nifilens-fixture-seeder`, and runs `cargo test --test
+'integration_*' -- --ignored` against both. One command does it all:
+
+```bash
+./integration-tests/run.sh
+```
+
+**Live-dev workflow** — the fixture stays up, point the TUI at it, and
+iterate without re-seeding:
+
+```bash
+docker compose -f integration-tests/docker-compose.yml up -d
+export NIFILENS_IT_PASSWORD=adminpassword123
+cargo run -p nifilens-fixture-seeder -- \
+    --config integration-tests/nifilens-config.toml \
+    --context dev-nifi-2-6-0 --skip-if-seeded
+cargo run -p nifilens-fixture-seeder -- \
+    --config integration-tests/nifilens-config.toml \
+    --context dev-nifi-2-8-0 --skip-if-seeded
+cargo run -- --config integration-tests/nifilens-config.toml \
+    --context dev-nifi-2-8-0
+```
+
+`--skip-if-seeded` makes re-runs of the seeder a no-op when the fixture
+marker PG (`nifilens-fixture-v1`) is already present, so iterating on
+`nifi-lens` itself doesn't reset the fixture state.
+
+The fixture is four process groups (`healthy-pipeline` with nested
+`ingest` / `enrich` children, `noisy-pipeline`, `backpressure-pipeline`,
+`invalid-pipeline`) plus three controller services, all under a top-level
+marker PG named `nifilens-fixture-v1`. Bumping the marker name
+invalidates stale fixtures automatically on the next seed pass.
+
+### Bumping the NiFi ceiling version
+
+When `nifi-rust-client` adds support for a new NiFi version (e.g. 2.9.0):
+
+1. Update `nifi-rust-client` in the root `Cargo.toml`.
+2. Edit `integration-tests/versions.toml` — replace or append the new
+   version.
+3. Edit `integration-tests/docker-compose.yml` — add/replace the service
+   block.
+4. Edit `integration-tests/nifilens-config.toml` — add/replace the context.
+5. Edit `tests/common/versions.rs` — add/replace the `port_for` match arm.
+6. Run `./integration-tests/run.sh` locally to verify.
+7. Push. CI's drift check enforces steps 2–4 consistency.
+
+The **floor version 2.6.0 never drops** — it stays pinned forever so the
+dynamic client is always tested against the oldest supported NiFi.
+
 ## Release
 
 Releases are driven by [`cargo-release`](https://crates.io/crates/cargo-release)

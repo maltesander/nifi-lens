@@ -9,6 +9,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Multi-version integration test fixture.** `integration-tests/run.sh`
+  now boots NiFi 2.6.0 and 2.8.0 simultaneously and seeds both via a new
+  `nifilens-fixture-seeder` workspace binary, producing a realistic flow
+  with running pipelines, back-pressured queues, multi-severity bulletins,
+  nested process groups, and varied controller services. The harness now
+  drives the fixture so local development and CI see identical state.
+  Integration tests loop over every supported NiFi version from a single
+  `integration-tests/versions.toml` source of truth, generated into a
+  compile-time `FIXTURE_VERSIONS` const by a new root `build.rs`. CI
+  gains a drift check and a dedicated integration job. See `AGENTS.md`
+  for the live-dev workflow and the ceiling-version bump procedure.
 - **Overview tab** — live health dashboard with cluster identity strip,
   global component counts (running / stopped / invalid / disabled),
   15-minute bulletin-rate sparkline (colored by worst severity per
