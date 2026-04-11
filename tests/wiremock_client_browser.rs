@@ -1,7 +1,8 @@
 //! Wiremock tests: Phase 3 browser client wrappers.
 
 use nifi_lens::client::{
-    ConnectionDetail, NifiClient, NodeKind, ProcessGroupDetail, ProcessorDetail, RecursiveSnapshot,
+    ConnectionDetail, ControllerServiceDetail, NifiClient, NodeKind, ProcessGroupDetail,
+    ProcessorDetail, RecursiveSnapshot,
 };
 use nifi_lens::config::{ResolvedContext, VersionStrategy};
 use wiremock::matchers::{method, path, query_param};
@@ -220,4 +221,72 @@ async fn browser_connection_detail_carries_source_dest_relationships_thresholds(
     assert_eq!(d.flow_files_queued, 5500);
     assert_eq!(d.bytes_queued, 52_428_800);
     assert_eq!(d.queued_display, "5,500 / 50 MB");
+}
+
+#[tokio::test]
+async fn browser_cs_detail_carries_state_and_properties() {
+    let server = MockServer::start().await;
+    stub_login_and_about(&server).await;
+
+    let body = load_fixture("controller_service.json");
+    Mock::given(method("GET"))
+        .and(path("/nifi-api/controller-services/cs-1"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(body))
+        .mount(&server)
+        .await;
+
+    let client = NifiClient::connect(&ctx(server.uri())).await.unwrap();
+    let d: ControllerServiceDetail = client.browser_cs_detail("cs-1").await.expect("ok");
+    assert_eq!(d.id, "cs-1");
+    assert_eq!(d.name, "http-pool");
+    assert!(d.type_name.contains("StandardRestrictedSSLContextService"));
+    assert!(d.bundle.contains("nifi-ssl-context-service-nar"));
+    assert_eq!(d.state, "ENABLED");
+    assert_eq!(d.parent_group_id.as_deref(), Some("ingest"));
+    assert_eq!(d.properties.len(), 4);
+    assert!(d.validation_errors.is_empty());
+}
+
+#[tokio::test]
+async fn browser_tree_error_is_mapped_to_typed_nifilens_error() {
+    let server = MockServer::start().await;
+    stub_login_and_about(&server).await;
+
+    Mock::given(method("GET"))
+        .and(path("/nifi-api/flow/process-groups/root/status"))
+        .respond_with(ResponseTemplate::new(500).set_body_string("boom"))
+        .mount(&server)
+        .await;
+
+    let client = NifiClient::connect(&ctx(server.uri())).await.unwrap();
+    let err = client.browser_tree().await.unwrap_err();
+    let msg = format!("{err}");
+    assert!(
+        msg.contains("browser tree"),
+        "expected BrowserTreeFailed, got: {msg}"
+    );
+}
+
+#[tokio::test]
+async fn browser_pg_detail_unauthorized_maps_to_typed_error() {
+    let server = MockServer::start().await;
+    stub_login_and_about(&server).await;
+
+    Mock::given(method("GET"))
+        .and(path("/nifi-api/process-groups/locked"))
+        .respond_with(ResponseTemplate::new(401).set_body_string("unauthorized"))
+        .mount(&server)
+        .await;
+
+    let client = NifiClient::connect(&ctx(server.uri())).await.unwrap();
+    let err = client.browser_pg_detail("locked").await.unwrap_err();
+    let msg = format!("{err}");
+    // `classify_or_fallback` downgrades library auth errors to
+    // `NifiUnauthorized`, so accept either message shape.
+    assert!(
+        msg.to_lowercase().contains("unauthorized")
+            || msg.contains("process-group")
+            || msg.contains("rejected"),
+        "expected unauthorized/PG detail error, got: {msg}"
+    );
 }

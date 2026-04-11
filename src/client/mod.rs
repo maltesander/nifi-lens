@@ -391,6 +391,6 @@ pub struct BulletinBoardSnapshot {
 }
 
 pub use browser::{
-    ConnectionDetail, ControllerServiceSummary, NodeKind, NodeStatusSummary, ProcessGroupDetail,
-    ProcessorDetail, RawNode, RecursiveSnapshot,
+    ConnectionDetail, ControllerServiceDetail, ControllerServiceSummary, NodeKind,
+    NodeStatusSummary, ProcessGroupDetail, ProcessorDetail, RawNode, RecursiveSnapshot,
 };

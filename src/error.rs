@@ -195,6 +195,17 @@ pub enum NifiLensError {
         source: Box<dyn std::error::Error + Send + Sync>,
     },
 
+    /// See `ClientBuildFailed` for the boxed-source rationale; callers
+    /// must box explicitly.
+    #[snafu(display(
+        "failed to fetch controller service {id:?} detail for context {context:?}: {source}"
+    ))]
+    ControllerServiceDetailFailed {
+        context: String,
+        id: String,
+        source: Box<dyn std::error::Error + Send + Sync>,
+    },
+
     #[snafu(display("write intents are disabled in Phase 0 (intent: {intent_name})"))]
     WriteIntentRefused { intent_name: &'static str },
 

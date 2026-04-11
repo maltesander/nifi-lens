@@ -1,0 +1,23 @@
+{
+  "id": "cs-1",
+  "component": {
+    "id": "cs-1",
+    "name": "http-pool",
+    "type": "org.apache.nifi.ssl.StandardRestrictedSSLContextService",
+    "bundle": {
+      "group": "org.apache.nifi",
+      "artifact": "nifi-ssl-context-service-nar",
+      "version": "2.8.0"
+    },
+    "state": "ENABLED",
+    "parentGroupId": "ingest",
+    "properties": {
+      "Keystore Filename": "/opt/nifi/keystore.jks",
+      "Keystore Type": "JKS",
+      "Truststore Filename": "/opt/nifi/truststore.jks",
+      "SSL Protocol": "TLSv1.2"
+    },
+    "validationErrors": []
+  },
+  "bulletins": []
+}

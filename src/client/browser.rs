@@ -584,6 +584,82 @@ impl NifiClient {
     }
 }
 
+/// Detail snapshot for a Controller Service node in the Browser tab's
+/// detail pane.
+#[derive(Debug, Clone)]
+pub struct ControllerServiceDetail {
+    pub id: String,
+    pub name: String,
+    pub type_name: String,
+    pub bundle: String,
+    pub state: String,
+    pub parent_group_id: Option<String>,
+    pub properties: Vec<(String, String)>,
+    pub validation_errors: Vec<String>,
+    pub bulletin_level: String,
+}
+
+impl NifiClient {
+    /// Single-endpoint detail fetch for a controller service. Returns
+    /// identity, state, parent scope, properties, and validation
+    /// errors.
+    pub async fn browser_cs_detail(
+        &self,
+        cs_id: &str,
+    ) -> Result<ControllerServiceDetail, NifiLensError> {
+        use nifi_rust_client::dynamic::traits::ControllerServicesApi as _;
+
+        tracing::debug!(context = %self.context_name(), %cs_id, "fetching CS detail");
+        let entity = self
+            .controller_services_api()
+            .get_controller_service(cs_id, None)
+            .await
+            .map_err(|err| {
+                classify_or_fallback(self.context_name(), Box::new(err), |source| {
+                    NifiLensError::ControllerServiceDetailFailed {
+                        context: self.context_name().to_string(),
+                        id: cs_id.to_string(),
+                        source,
+                    }
+                })
+            })?;
+
+        let component = entity.component.unwrap_or_default();
+        // Build bundle_str before moving out of component.
+        let bundle_str = component
+            .bundle
+            .as_ref()
+            .map(|b| {
+                format!(
+                    "{}:{}:{}",
+                    b.group.as_deref().unwrap_or(""),
+                    b.artifact.as_deref().unwrap_or(""),
+                    b.version.as_deref().unwrap_or(""),
+                )
+            })
+            .unwrap_or_default();
+
+        let properties: Vec<(String, String)> = component
+            .properties
+            .unwrap_or_default()
+            .into_iter()
+            .map(|(k, v)| (k, v.unwrap_or_default()))
+            .collect();
+
+        Ok(ControllerServiceDetail {
+            id: cs_id.to_string(),
+            name: component.name.unwrap_or_default(),
+            type_name: component.r#type.unwrap_or_default(),
+            bundle: bundle_str,
+            state: component.state.unwrap_or_default(),
+            parent_group_id: component.parent_group_id,
+            properties,
+            validation_errors: component.validation_errors.unwrap_or_default(),
+            bulletin_level: component.bulletin_level.unwrap_or_default(),
+        })
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::short_type;
