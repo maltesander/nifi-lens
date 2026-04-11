@@ -191,6 +191,7 @@ pub fn update(state: &mut AppState, event: AppEvent, config: &Config) -> UpdateR
                 intent: None,
             }
         }
+        // Stub: replaced by a real apply_payload call in Task 7.
         AppEvent::Data(ViewPayload::Bulletins(_)) => UpdateResult::default(),
         AppEvent::IntentOutcome(outcome) => handle_intent_outcome(state, outcome),
         AppEvent::Quit => {
