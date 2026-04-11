@@ -7,6 +7,7 @@
 //! move is a no-op from the user's view.
 
 pub mod state;
+pub mod worker;
 
 pub use state::{BulletinsState, apply_payload};
 
