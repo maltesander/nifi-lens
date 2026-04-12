@@ -1,0 +1,46 @@
+{
+  "lineage": {
+    "id": "lineage-query-0001",
+    "uri": "http://wiremock/nifi-api/provenance/lineage/lineage-query-0001",
+    "submissionTime": "04/12/2026 10:14:22.000 UTC",
+    "expiration": "04/12/2026 10:29:22.000 UTC",
+    "percentCompleted": 100,
+    "finished": true,
+    "request": {
+      "lineageRequestType": "FLOWFILE",
+      "uuid": "7a2e8b9c-1234-4abc-9def-0123456789ab"
+    },
+    "results": {
+      "nodes": [
+        {
+          "id": "node-1",
+          "flowFileUuid": "7a2e8b9c-1234-4abc-9def-0123456789ab",
+          "type": "EVENT",
+          "eventType": "CREATE",
+          "componentType": "GenerateFlowFile",
+          "millis": 1744452862001,
+          "timestamp": "04/12/2026 10:14:22.001 UTC"
+        },
+        {
+          "id": "node-2",
+          "flowFileUuid": "7a2e8b9c-1234-4abc-9def-0123456789ab",
+          "type": "EVENT",
+          "eventType": "ATTRIBUTES_MODIFIED",
+          "componentType": "UpdateAttribute",
+          "millis": 1744452862003,
+          "timestamp": "04/12/2026 10:14:22.003 UTC"
+        },
+        {
+          "id": "node-3",
+          "flowFileUuid": "7a2e8b9c-1234-4abc-9def-0123456789ab",
+          "type": "EVENT",
+          "eventType": "DROP",
+          "componentType": "PutDatabaseRecord",
+          "millis": 1744452862040,
+          "timestamp": "04/12/2026 10:14:22.040 UTC"
+        }
+      ],
+      "links": []
+    }
+  }
+}

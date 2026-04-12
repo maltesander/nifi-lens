@@ -10,7 +10,9 @@
 use std::sync::Arc;
 use std::time::SystemTime;
 
+use nifi_rust_client::dynamic::traits::ProvenanceApi as _;
 use nifi_rust_client::dynamic::traits::ProvenanceEventsApi as _;
+use nifi_rust_client::dynamic::types::{LineageDto, LineageEntity, LineageRequestDto};
 
 use crate::client::NifiClient;
 use crate::client::classify_or_fallback;
@@ -157,6 +159,153 @@ impl NifiClient {
             fetched_at: SystemTime::now(),
         })
     }
+
+    /// Submits a lineage query for the given flowfile UUID.
+    ///
+    /// Maps `POST /nifi-api/provenance/lineage` with a `FLOWFILE` request body
+    /// and returns the opaque `query_id` string needed to poll or delete the
+    /// query later. Errors are classified via `classify_or_fallback`.
+    pub async fn submit_lineage(&self, flow_file_uuid: &str) -> Result<String, NifiLensError> {
+        tracing::debug!(
+            context = %self.context_name(),
+            flow_file_uuid,
+            "submitting lineage query",
+        );
+
+        let mut request = LineageRequestDto::default();
+        request.lineage_request_type = Some("FLOWFILE".to_string());
+        request.uuid = Some(flow_file_uuid.to_string());
+
+        let mut lineage_dto = LineageDto::default();
+        lineage_dto.request = Some(request);
+
+        let body = LineageEntity {
+            lineage: Some(lineage_dto),
+        };
+
+        let dto = self
+            .inner
+            .provenance_api()
+            .submit_lineage_request(&body)
+            .await
+            .map_err(|err| {
+                classify_or_fallback(self.context_name(), Box::new(err), |source| {
+                    NifiLensError::LineageQuerySubmitFailed {
+                        context: self.context_name().to_string(),
+                        uuid: flow_file_uuid.to_string(),
+                        source,
+                    }
+                })
+            })?;
+
+        dto.id
+            .ok_or_else(|| NifiLensError::LineageQuerySubmitFailed {
+                context: self.context_name().to_string(),
+                uuid: flow_file_uuid.to_string(),
+                source: "server returned no query id".into(),
+            })
+    }
+
+    /// Polls a lineage query and returns [`LineagePoll::Running`] or
+    /// [`LineagePoll::Finished`].
+    ///
+    /// Maps `GET /nifi-api/provenance/lineage/{id}`. Errors are classified via
+    /// `classify_or_fallback`.
+    pub async fn poll_lineage(&self, query_id: &str) -> Result<LineagePoll, NifiLensError> {
+        tracing::debug!(
+            context = %self.context_name(),
+            query_id,
+            "polling lineage query",
+        );
+
+        let dto = self
+            .inner
+            .provenance_api()
+            .get_lineage(query_id, None)
+            .await
+            .map_err(|err| {
+                classify_or_fallback(self.context_name(), Box::new(err), |source| {
+                    NifiLensError::LineageQueryPollFailed {
+                        context: self.context_name().to_string(),
+                        query_id: query_id.to_string(),
+                        source,
+                    }
+                })
+            })?;
+
+        let percent = dto.percent_completed.unwrap_or(0).clamp(0, 100) as u8;
+        let finished = dto.finished.unwrap_or(false);
+
+        if finished {
+            let nodes = dto.results.and_then(|r| r.nodes).unwrap_or_default();
+            let events = nodes_to_events(nodes);
+            Ok(LineagePoll::Finished(LineageSnapshot {
+                events,
+                percent_completed: percent,
+                finished: true,
+            }))
+        } else {
+            Ok(LineagePoll::Running { percent })
+        }
+    }
+
+    /// Deletes a lineage query from the NiFi server.
+    ///
+    /// Maps `DELETE /nifi-api/provenance/lineage/{id}`. Errors are classified
+    /// via `classify_or_fallback`. Delete failures are typically logged at warn
+    /// level and never surfaced to the user.
+    pub async fn delete_lineage(&self, query_id: &str) -> Result<(), NifiLensError> {
+        tracing::debug!(
+            context = %self.context_name(),
+            query_id,
+            "deleting lineage query",
+        );
+
+        self.inner
+            .provenance_api()
+            .delete_lineage(query_id, None)
+            .await
+            .map_err(|err| {
+                classify_or_fallback(self.context_name(), Box::new(err), |source| {
+                    NifiLensError::LineageQueryDeleteFailed {
+                        context: self.context_name().to_string(),
+                        query_id: query_id.to_string(),
+                        source,
+                    }
+                })
+            })?;
+
+        Ok(())
+    }
+}
+
+/// Converts lineage graph nodes into a chronological list of event summaries.
+///
+/// Filters to nodes whose `type` field equals `"EVENT"`, sorts ascending by
+/// `millis`, and maps each to a [`ProvenanceEventSummary`].
+pub(crate) fn nodes_to_events(
+    nodes: Vec<nifi_rust_client::dynamic::types::ProvenanceNodeDto>,
+) -> Vec<ProvenanceEventSummary> {
+    let mut events: Vec<_> = nodes
+        .into_iter()
+        .filter(|n| n.r#type.as_deref() == Some("EVENT"))
+        .collect();
+    events.sort_by_key(|n| n.millis.unwrap_or(0));
+    events
+        .into_iter()
+        .map(|n| ProvenanceEventSummary {
+            event_id: 0,
+            event_time_iso: n.timestamp.unwrap_or_default(),
+            event_type: n.event_type.unwrap_or_default(),
+            component_id: n.id.unwrap_or_default(),
+            component_name: String::new(),
+            component_type: n.component_type.unwrap_or_default(),
+            group_id: String::new(),
+            flow_file_uuid: n.flow_file_uuid.unwrap_or_default(),
+            relationship: None,
+            details: None,
+        })
+        .collect()
 }
 
 pub(crate) fn summary_from_dto(

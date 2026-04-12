@@ -1,0 +1,14 @@
+{
+  "lineage": {
+    "id": "lineage-query-0001",
+    "uri": "http://wiremock/nifi-api/provenance/lineage/lineage-query-0001",
+    "submissionTime": "04/12/2026 10:14:22.000 UTC",
+    "expiration": "04/12/2026 10:29:22.000 UTC",
+    "percentCompleted": 40,
+    "finished": false,
+    "request": {
+      "lineageRequestType": "FLOWFILE",
+      "uuid": "7a2e8b9c-1234-4abc-9def-0123456789ab"
+    }
+  }
+}

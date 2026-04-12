@@ -115,3 +115,90 @@ async fn latest_events_not_found_maps_to_typed_error() {
         "expected LatestProvenanceEventsFailed, got: {err}"
     );
 }
+
+#[tokio::test]
+async fn submit_lineage_returns_query_id() {
+    let server = MockServer::start().await;
+    stub_login_and_about(&server).await;
+
+    let body = load_fixture("lineage_running.json");
+    Mock::given(method("POST"))
+        .and(path("/nifi-api/provenance/lineage"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(body))
+        .mount(&server)
+        .await;
+
+    let client = NifiClient::connect(&ctx(server.uri())).await.unwrap();
+    let query_id = client
+        .submit_lineage("7a2e8b9c-1234-4abc-9def-0123456789ab")
+        .await
+        .unwrap();
+
+    assert_eq!(query_id, "lineage-query-0001");
+}
+
+#[tokio::test]
+async fn poll_lineage_running_returns_percent() {
+    let server = MockServer::start().await;
+    stub_login_and_about(&server).await;
+
+    let body = load_fixture("lineage_running.json");
+    Mock::given(method("GET"))
+        .and(path("/nifi-api/provenance/lineage/lineage-query-0001"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(body))
+        .mount(&server)
+        .await;
+
+    let client = NifiClient::connect(&ctx(server.uri())).await.unwrap();
+    let poll = client.poll_lineage("lineage-query-0001").await.unwrap();
+
+    assert!(
+        matches!(poll, nifi_lens::client::tracer::LineagePoll::Running { percent } if percent == 40),
+        "expected Running(40), got: {poll:?}"
+    );
+}
+
+#[tokio::test]
+async fn poll_lineage_finished_returns_snapshot_in_chronological_order() {
+    let server = MockServer::start().await;
+    stub_login_and_about(&server).await;
+
+    let body = load_fixture("lineage_finished.json");
+    Mock::given(method("GET"))
+        .and(path("/nifi-api/provenance/lineage/lineage-query-0001"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(body))
+        .mount(&server)
+        .await;
+
+    let client = NifiClient::connect(&ctx(server.uri())).await.unwrap();
+    let poll = client.poll_lineage("lineage-query-0001").await.unwrap();
+
+    let snapshot = match poll {
+        nifi_lens::client::tracer::LineagePoll::Finished(s) => s,
+        other => panic!("expected Finished, got: {other:?}"),
+    };
+
+    assert!(snapshot.finished);
+    assert_eq!(snapshot.percent_completed, 100);
+    assert_eq!(snapshot.events.len(), 3);
+    assert_eq!(snapshot.events[0].event_type, "CREATE");
+    assert_eq!(snapshot.events[1].event_type, "ATTRIBUTES_MODIFIED");
+    assert_eq!(snapshot.events[2].event_type, "DROP");
+    assert_eq!(snapshot.events[0].component_type, "GenerateFlowFile");
+}
+
+#[tokio::test]
+async fn delete_lineage_returns_ok_on_200() {
+    let server = MockServer::start().await;
+    stub_login_and_about(&server).await;
+
+    let body = load_fixture("lineage_finished.json");
+    Mock::given(method("DELETE"))
+        .and(path("/nifi-api/provenance/lineage/lineage-query-0001"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(body))
+        .mount(&server)
+        .await;
+
+    let client = NifiClient::connect(&ctx(server.uri())).await.unwrap();
+    client.delete_lineage("lineage-query-0001").await.unwrap();
+}
