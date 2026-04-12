@@ -72,6 +72,26 @@ impl ComponentType {
     }
 }
 
+/// A row in the grouped display. Produced by
+/// [`BulletinsState::grouped_view`] when `group_consecutive` is true,
+/// or (implicitly, as a vec of `count = 1` singletons) when flat.
+///
+/// Ring indices are stable for the lifetime of the ring buffer — the
+/// render layer dereferences them via `state.ring[latest_ring_idx]`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct GroupedRow {
+    /// Ring index of the first bulletin in the run (oldest in the
+    /// group). Used by `toggle_grouping` to find which group contains
+    /// a given pre-toggle ring index.
+    pub first_ring_idx: usize,
+    /// Ring index of the most-recent bulletin in the run. Render uses
+    /// this to fetch the displayed timestamp, source, and message.
+    pub latest_ring_idx: usize,
+    /// Number of bulletins folded into this group. `1` means no
+    /// grouping occurred; render skips the `[×N]` prefix.
+    pub count: usize,
+}
+
 impl BulletinsState {
     pub fn with_capacity(ring_capacity: usize) -> Self {
         Self {
@@ -98,6 +118,44 @@ impl BulletinsState {
             .filter(|(_, b)| self.row_matches(b))
             .map(|(i, _)| i)
             .collect()
+    }
+
+    /// Fold consecutive bulletins sharing the same `source_id` in the
+    /// filtered list into `GroupedRow`s. In flat mode (`group_consecutive`
+    /// is `false`) every filtered row is its own singleton with `count = 1`.
+    /// In grouped mode, consecutive same-source runs are folded.
+    pub fn grouped_view(&self) -> Vec<GroupedRow> {
+        let filtered = self.filtered_indices();
+        if !self.group_consecutive {
+            // Flat mode: each filtered row is its own "group" with count=1.
+            return filtered
+                .iter()
+                .map(|&ring_idx| GroupedRow {
+                    first_ring_idx: ring_idx,
+                    latest_ring_idx: ring_idx,
+                    count: 1,
+                })
+                .collect();
+        }
+        // Grouped mode: fold consecutive same-source runs.
+        let mut out: Vec<GroupedRow> = Vec::with_capacity(filtered.len());
+        for &ring_idx in &filtered {
+            let source_id = &self.ring[ring_idx].source_id;
+            match out.last_mut() {
+                Some(group) if self.ring[group.latest_ring_idx].source_id == *source_id => {
+                    group.latest_ring_idx = ring_idx;
+                    group.count += 1;
+                }
+                _ => {
+                    out.push(GroupedRow {
+                        first_ring_idx: ring_idx,
+                        latest_ring_idx: ring_idx,
+                        count: 1,
+                    });
+                }
+            }
+        }
+        out
     }
 
     pub fn selected_ring_index(&self) -> Option<usize> {
@@ -778,5 +836,140 @@ mod tests {
         s.move_selection_down();
         assert!(!s.auto_scroll, "auto_scroll must stay paused");
         assert_eq!(s.new_since_pause, 5, "badge count must not be cleared");
+    }
+
+    #[test]
+    fn grouped_view_returns_empty_when_ring_empty() {
+        let s = BulletinsState::with_capacity(10);
+        assert!(s.grouped_view().is_empty());
+    }
+
+    #[test]
+    fn grouped_view_no_consecutive_duplicates() {
+        let mut s = seed(
+            100,
+            vec![
+                b_full(1, "INFO", "PROCESSOR", "A", "m"),
+                b_full(2, "INFO", "PROCESSOR", "B", "m"),
+                b_full(3, "INFO", "PROCESSOR", "C", "m"),
+            ],
+        );
+        s.group_consecutive = true;
+        // Each bulletin has a distinct source_id via `src-{id}` — no grouping.
+        let out = s.grouped_view();
+        assert_eq!(out.len(), 3);
+        assert!(out.iter().all(|g| g.count == 1));
+        assert_eq!(out[0].first_ring_idx, 0);
+        assert_eq!(out[0].latest_ring_idx, 0);
+        assert_eq!(out[2].first_ring_idx, 2);
+    }
+
+    #[test]
+    fn grouped_view_collapses_same_source_run() {
+        // Build a seed with three bulletins sharing source_id "src-same".
+        let mut s = BulletinsState::with_capacity(100);
+        apply_payload(
+            &mut s,
+            payload(vec![
+                BulletinSnapshot {
+                    id: 1,
+                    level: "ERROR".into(),
+                    message: "first".into(),
+                    source_id: "src-same".into(),
+                    source_name: "P".into(),
+                    source_type: "PROCESSOR".into(),
+                    group_id: "root".into(),
+                    timestamp_iso: "2026-04-11T10:14:22Z".into(),
+                    timestamp_human: String::new(),
+                },
+                BulletinSnapshot {
+                    id: 2,
+                    level: "ERROR".into(),
+                    message: "second".into(),
+                    source_id: "src-same".into(),
+                    source_name: "P".into(),
+                    source_type: "PROCESSOR".into(),
+                    group_id: "root".into(),
+                    timestamp_iso: "2026-04-11T10:14:23Z".into(),
+                    timestamp_human: String::new(),
+                },
+                BulletinSnapshot {
+                    id: 3,
+                    level: "ERROR".into(),
+                    message: "third".into(),
+                    source_id: "src-same".into(),
+                    source_name: "P".into(),
+                    source_type: "PROCESSOR".into(),
+                    group_id: "root".into(),
+                    timestamp_iso: "2026-04-11T10:14:24Z".into(),
+                    timestamp_human: String::new(),
+                },
+            ]),
+        );
+        s.group_consecutive = true;
+        let out = s.grouped_view();
+        assert_eq!(out.len(), 1);
+        assert_eq!(out[0].count, 3);
+        assert_eq!(out[0].first_ring_idx, 0);
+        assert_eq!(out[0].latest_ring_idx, 2);
+    }
+
+    #[test]
+    fn grouped_view_interleaved_keeps_runs_separate() {
+        // A, B, A pattern — three groups, each count = 1.
+        let mut s = BulletinsState::with_capacity(100);
+        let mk = |id: i64, src: &str| BulletinSnapshot {
+            id,
+            level: "ERROR".into(),
+            message: "m".into(),
+            source_id: src.into(),
+            source_name: src.into(),
+            source_type: "PROCESSOR".into(),
+            group_id: "root".into(),
+            timestamp_iso: "2026-04-11T10:14:22Z".into(),
+            timestamp_human: String::new(),
+        };
+        apply_payload(
+            &mut s,
+            payload(vec![mk(1, "src-a"), mk(2, "src-b"), mk(3, "src-a")]),
+        );
+        s.group_consecutive = true;
+        let out = s.grouped_view();
+        assert_eq!(out.len(), 3);
+        assert!(out.iter().all(|g| g.count == 1));
+    }
+
+    #[test]
+    fn grouped_view_respects_filters() {
+        // ERROR + INFO + ERROR all with same source_id. Toggling INFO off
+        // should collapse the two ERRORs into a single group (they are
+        // consecutive in the filtered list).
+        let mut s = BulletinsState::with_capacity(100);
+        let mk = |id: i64, level: &str| BulletinSnapshot {
+            id,
+            level: level.into(),
+            message: format!("msg-{id}"),
+            source_id: "src-same".into(),
+            source_name: "P".into(),
+            source_type: "PROCESSOR".into(),
+            group_id: "root".into(),
+            timestamp_iso: "2026-04-11T10:14:22Z".into(),
+            timestamp_human: String::new(),
+        };
+        apply_payload(
+            &mut s,
+            payload(vec![mk(1, "ERROR"), mk(2, "INFO"), mk(3, "ERROR")]),
+        );
+        s.group_consecutive = true;
+        // All three share source_id; grouping folds them to one.
+        assert_eq!(s.grouped_view().len(), 1);
+        // Toggle INFO off — still one group because filtered list is
+        // ring[0] and ring[2], both same source_id.
+        s.toggle_info();
+        let out = s.grouped_view();
+        assert_eq!(out.len(), 1);
+        assert_eq!(out[0].count, 2);
+        assert_eq!(out[0].first_ring_idx, 0);
+        assert_eq!(out[0].latest_ring_idx, 2);
     }
 }
