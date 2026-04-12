@@ -1167,6 +1167,7 @@ mod tests {
         Config {
             current_context: "dev".into(),
             bulletins: Default::default(),
+            ui: Default::default(),
             contexts: vec![
                 Context {
                     name: "dev".into(),
