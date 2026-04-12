@@ -1,0 +1,89 @@
+{
+  "processGroupStatus": {
+    "id": "root",
+    "name": "NiFi Flow",
+    "aggregateSnapshot": {
+      "id": "root",
+      "name": "NiFi Flow",
+      "flowFilesQueued": 1000,
+      "bytesQueued": 4096,
+      "connectionStatusSnapshots": [
+        {
+          "id": "conn-a",
+          "connectionStatusSnapshot": {
+            "id": "conn-a",
+            "name": "high-fill queue",
+            "groupId": "root",
+            "sourceName": "GenerateFlowFile",
+            "destinationName": "PutFile",
+            "percentUseCount": 75,
+            "percentUseBytes": 60,
+            "flowFilesQueued": 7500,
+            "bytesQueued": 10485760,
+            "queued": "7,500 / 10 MB",
+            "bytesIn": 2097152,
+            "bytesOut": 1048576,
+            "predictions": {
+              "predictedMillisUntilBytesBackpressure": 300000,
+              "predictedMillisUntilCountBackpressure": 120000
+            }
+          }
+        }
+      ],
+      "processorStatusSnapshots": [
+        {
+          "id": "proc-a",
+          "processorStatusSnapshot": {
+            "id": "proc-a",
+            "name": "GenerateFlowFile",
+            "groupId": "root",
+            "runStatus": "Running",
+            "activeThreadCount": 2,
+            "tasksDurationNanos": 500000000
+          }
+        }
+      ],
+      "processGroupStatusSnapshots": [
+        {
+          "id": "child-pg",
+          "processGroupStatusSnapshot": {
+            "id": "child-pg",
+            "name": "child-pipeline",
+            "connectionStatusSnapshots": [
+              {
+                "id": "conn-b",
+                "connectionStatusSnapshot": {
+                  "id": "conn-b",
+                  "name": "low-fill queue",
+                  "groupId": "child-pg",
+                  "sourceName": "RouteOnAttribute",
+                  "destinationName": "LogAttribute",
+                  "percentUseCount": 5,
+                  "percentUseBytes": 2,
+                  "flowFilesQueued": 50,
+                  "bytesQueued": 51200,
+                  "queued": "50 / 50 KB",
+                  "bytesIn": 102400,
+                  "bytesOut": 102400
+                }
+              }
+            ],
+            "processorStatusSnapshots": [
+              {
+                "id": "proc-b",
+                "processorStatusSnapshot": {
+                  "id": "proc-b",
+                  "name": "RouteOnAttribute",
+                  "groupId": "child-pg",
+                  "runStatus": "Running",
+                  "activeThreadCount": 5,
+                  "tasksDurationNanos": 1200000000
+                }
+              }
+            ]
+          }
+        }
+      ]
+    }
+  }
+}

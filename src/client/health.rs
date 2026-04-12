@@ -2,6 +2,12 @@
 
 use std::time::Instant;
 
+use nifi_rust_client::dynamic::traits::{FlowApi as _, FlowStatusApi as _};
+
+use crate::client::NifiClient;
+use crate::client::classify_or_fallback;
+use crate::error::NifiLensError;
+
 // ---------------------------------------------------------------------------
 // Raw data snapshots returned by the client helpers
 // ---------------------------------------------------------------------------
@@ -205,4 +211,136 @@ pub struct ProcessorThreadRow {
     pub active_threads: u32,
     pub run_status: String,
     pub tasks_duration_nanos: u64,
+}
+
+// ---------------------------------------------------------------------------
+// NifiClient methods
+// ---------------------------------------------------------------------------
+
+impl NifiClient {
+    /// Calls `flow_api().status("root").get_process_group_status(recursive=true)`
+    /// and walks the recursive snapshot to extract every connection's throughput
+    /// telemetry and every processor's thread count into a [`FullPgStatusSnapshot`].
+    pub async fn root_pg_status_full(&self) -> Result<FullPgStatusSnapshot, NifiLensError> {
+        tracing::debug!(
+            context = %self.context_name(),
+            "fetching /flow/process-groups/root/status (health full)"
+        );
+        let entity = self
+            .inner
+            .flow_api()
+            .status("root")
+            .get_process_group_status(Some(true), None, None)
+            .await
+            .map_err(|err| {
+                classify_or_fallback(self.context_name(), Box::new(err), |source| {
+                    NifiLensError::ProcessGroupStatusFailed {
+                        context: self.context_name().to_string(),
+                        source,
+                    }
+                })
+            })?;
+
+        let mut connections: Vec<ConnectionStatusRow> = Vec::new();
+        let mut processors: Vec<ProcessorStatusRow> = Vec::new();
+
+        if let Some(pg_dto) = entity.process_group_status
+            && let Some(agg) = pg_dto.aggregate_snapshot
+        {
+            walk_pg_for_health(&agg, "", &mut connections, &mut processors);
+        }
+
+        Ok(FullPgStatusSnapshot {
+            connections,
+            processors,
+            fetched_at: Instant::now(),
+        })
+    }
+}
+
+/// Threshold above which a prediction value is treated as "infinity" / not useful.
+/// NiFi emits `i64::MAX` when it cannot produce a meaningful prediction.
+const PREDICTION_INFINITY_THRESHOLD: i64 = i64::MAX / 2;
+
+/// Recursive walker that extracts connections and processors from a
+/// `ProcessGroupStatusSnapshotDto`. Mirrors `walk_pg_snapshot` in
+/// `src/client/browser.rs` but harvests throughput and thread-count fields
+/// instead of building an arena.
+fn walk_pg_for_health(
+    snap: &nifi_rust_client::dynamic::types::ProcessGroupStatusSnapshotDto,
+    parent_path: &str,
+    connections: &mut Vec<ConnectionStatusRow>,
+    processors: &mut Vec<ProcessorStatusRow>,
+) {
+    let pg_name = snap.name.as_deref().unwrap_or_default();
+    let group_path = if parent_path.is_empty() {
+        pg_name.to_string()
+    } else {
+        format!("{parent_path} / {pg_name}")
+    };
+
+    // Extract connections.
+    if let Some(conns) = snap.connection_status_snapshots.as_ref() {
+        for entity in conns {
+            let Some(c) = entity.connection_status_snapshot.as_ref() else {
+                continue;
+            };
+            let predicted = c.predictions.as_ref().and_then(|p| {
+                let by_bytes = p
+                    .predicted_millis_until_bytes_backpressure
+                    .filter(|&v| v < PREDICTION_INFINITY_THRESHOLD);
+                let by_count = p
+                    .predicted_millis_until_count_backpressure
+                    .filter(|&v| v < PREDICTION_INFINITY_THRESHOLD);
+                match (by_bytes, by_count) {
+                    (None, None) => None,
+                    (Some(b), None) => Some(b),
+                    (None, Some(c)) => Some(c),
+                    (Some(b), Some(c)) => Some(b.min(c)),
+                }
+            });
+            connections.push(ConnectionStatusRow {
+                id: c.id.clone().unwrap_or_default(),
+                group_id: c.group_id.clone().unwrap_or_default(),
+                name: c.name.clone().unwrap_or_default(),
+                source_name: c.source_name.clone().unwrap_or_default(),
+                destination_name: c.destination_name.clone().unwrap_or_default(),
+                percent_use_count: c.percent_use_count.unwrap_or(0).max(0) as u32,
+                percent_use_bytes: c.percent_use_bytes.unwrap_or(0).max(0) as u32,
+                flow_files_queued: c.flow_files_queued.unwrap_or(0).max(0) as u32,
+                bytes_queued: c.bytes_queued.unwrap_or(0).max(0) as u64,
+                queued_display: c.queued.clone().unwrap_or_default(),
+                bytes_in: c.bytes_in.unwrap_or(0).max(0) as u64,
+                bytes_out: c.bytes_out.unwrap_or(0).max(0) as u64,
+                predicted_millis_until_backpressure: predicted,
+            });
+        }
+    }
+
+    // Extract processors.
+    if let Some(procs) = snap.processor_status_snapshots.as_ref() {
+        for entity in procs {
+            let Some(p) = entity.processor_status_snapshot.as_ref() else {
+                continue;
+            };
+            processors.push(ProcessorStatusRow {
+                id: p.id.clone().unwrap_or_default(),
+                group_id: p.group_id.clone().unwrap_or_default(),
+                name: p.name.clone().unwrap_or_default(),
+                group_path: group_path.clone(),
+                active_thread_count: p.active_thread_count.unwrap_or(0).max(0) as u32,
+                run_status: p.run_status.clone().unwrap_or_default(),
+                tasks_duration_nanos: p.tasks_duration_nanos.unwrap_or(0).max(0) as u64,
+            });
+        }
+    }
+
+    // Recurse into child PGs.
+    if let Some(children) = snap.process_group_status_snapshots.as_ref() {
+        for entity in children {
+            if let Some(child) = entity.process_group_status_snapshot.as_ref() {
+                walk_pg_for_health(child, &group_path, connections, processors);
+            }
+        }
+    }
 }
