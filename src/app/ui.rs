@@ -46,6 +46,9 @@ pub fn render(frame: &mut Frame, state: &AppState) {
                     &state.browser,
                 );
             }
+            Modal::SaveEventContent(save) => {
+                crate::widget::save_modal::render(frame, frame.area(), save);
+            }
         }
     }
 }

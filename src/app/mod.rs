@@ -84,21 +84,30 @@ pub async fn run(
         }
 
         if let Some(pending) = result.intent {
-            let dispatcher = dispatcher.clone();
-            let tx = tx.clone();
-            let intent = match pending {
-                PendingIntent::SwitchContext(name) => Intent::SwitchContext(name),
-                PendingIntent::JumpTo(link) => Intent::JumpTo(link),
-                PendingIntent::Quit => Intent::Quit,
-            };
-            // Intent dispatch runs on the main-thread `LocalSet` via
-            // `spawn_local` so that Phase 4 tracer workers (which also
-            // use `spawn_local` internally for `!Send` client futures)
-            // are spawned within the correct context.
-            tokio::task::spawn_local(async move {
-                let outcome = dispatcher.dispatch(intent).await;
-                let _ = tx.send(AppEvent::IntentOutcome(outcome)).await;
-            });
+            match pending {
+                PendingIntent::SaveEventContent(save) => {
+                    crate::view::tracer::worker::spawn_save(tx.clone(), save.path, save.raw);
+                }
+                other => {
+                    let dispatcher = dispatcher.clone();
+                    let tx = tx.clone();
+                    let intent = match other {
+                        PendingIntent::SwitchContext(name) => Intent::SwitchContext(name),
+                        PendingIntent::JumpTo(link) => Intent::JumpTo(link),
+                        PendingIntent::Dispatch(intent) => intent,
+                        PendingIntent::Quit => Intent::Quit,
+                        PendingIntent::SaveEventContent(_) => unreachable!(),
+                    };
+                    // Intent dispatch runs on the main-thread `LocalSet` via
+                    // `spawn_local` so that Phase 4 tracer workers (which also
+                    // use `spawn_local` internally for `!Send` client futures)
+                    // are spawned within the correct context.
+                    tokio::task::spawn_local(async move {
+                        let outcome = dispatcher.dispatch(intent).await;
+                        let _ = tx.send(AppEvent::IntentOutcome(outcome)).await;
+                    });
+                }
+            }
         }
 
         if state.should_quit {
