@@ -1,0 +1,29 @@
+{
+  "latestProvenanceEvents": {
+    "componentId": "proc-123",
+    "provenanceEvents": [
+      {
+        "eventId": 42,
+        "eventTime": "04/12/2026 10:14:22.040 UTC",
+        "eventType": "DROP",
+        "componentId": "proc-123",
+        "componentName": "PutDatabaseRecord",
+        "componentType": "PutDatabaseRecord",
+        "groupId": "root-persist",
+        "flowFileUuid": "a7f3b2c1-1111-4abc-9def-0000000000aa",
+        "relationship": "failure",
+        "details": "db connection refused"
+      },
+      {
+        "eventId": 41,
+        "eventTime": "04/12/2026 10:14:21.002 UTC",
+        "eventType": "ATTRIBUTES_MOD",
+        "componentId": "proc-123",
+        "componentName": "PutDatabaseRecord",
+        "componentType": "PutDatabaseRecord",
+        "groupId": "root-persist",
+        "flowFileUuid": "a7f3b2c1-1111-4abc-9def-0000000000aa"
+      }
+    ]
+  }
+}

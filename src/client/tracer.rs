@@ -10,6 +10,12 @@
 use std::sync::Arc;
 use std::time::SystemTime;
 
+use nifi_rust_client::dynamic::traits::ProvenanceEventsApi as _;
+
+use crate::client::NifiClient;
+use crate::client::classify_or_fallback;
+use crate::error::NifiLensError;
+
 /// Direction of a content claim on a provenance event.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ContentSide {
@@ -97,4 +103,75 @@ pub struct ContentSnapshot {
     pub render: ContentRender,
     pub total_bytes: usize,
     pub raw: Arc<[u8]>,
+}
+
+impl NifiClient {
+    /// Fetches the latest cached provenance events for a given component.
+    ///
+    /// Maps `GET /nifi-api/provenance-events/latest/{component_id}?limit={limit}`
+    /// into a [`LatestEventsSnapshot`]. Errors are classified via
+    /// `classify_or_fallback` so callers only see typed `NifiLensError` variants.
+    pub async fn latest_events(
+        &self,
+        component_id: &str,
+        limit: i32,
+    ) -> Result<LatestEventsSnapshot, NifiLensError> {
+        tracing::debug!(
+            context = %self.context_name(),
+            component_id,
+            limit,
+            "fetching /provenance-events/latest",
+        );
+
+        let dto = self
+            .inner
+            .provenanceevents_api()
+            .get_latest_provenance_events(component_id, Some(limit))
+            .await
+            .map_err(|err| {
+                classify_or_fallback(self.context_name(), Box::new(err), |source| {
+                    NifiLensError::LatestProvenanceEventsFailed {
+                        context: self.context_name().to_string(),
+                        component_id: component_id.to_string(),
+                        source,
+                    }
+                })
+            })?;
+
+        let events = dto
+            .provenance_events
+            .unwrap_or_default()
+            .into_iter()
+            .map(summary_from_dto)
+            .collect::<Vec<_>>();
+
+        let component_label = events
+            .first()
+            .map(|e| format!("{} \u{00b7} {}", e.component_name, e.group_id))
+            .unwrap_or_else(|| component_id.to_string());
+
+        Ok(LatestEventsSnapshot {
+            component_id: component_id.to_string(),
+            component_label,
+            events,
+            fetched_at: SystemTime::now(),
+        })
+    }
+}
+
+pub(crate) fn summary_from_dto(
+    dto: nifi_rust_client::dynamic::types::ProvenanceEventDto,
+) -> ProvenanceEventSummary {
+    ProvenanceEventSummary {
+        event_id: dto.event_id.unwrap_or(0),
+        event_time_iso: dto.event_time.unwrap_or_default(),
+        event_type: dto.event_type.unwrap_or_default(),
+        component_id: dto.component_id.unwrap_or_default(),
+        component_name: dto.component_name.unwrap_or_default(),
+        component_type: dto.component_type.unwrap_or_default(),
+        group_id: dto.group_id.unwrap_or_default(),
+        flow_file_uuid: dto.flow_file_uuid.unwrap_or_default(),
+        relationship: dto.relationship,
+        details: dto.details,
+    }
 }
