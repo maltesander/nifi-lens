@@ -115,6 +115,16 @@ pub enum NifiLensError {
         source: Box<dyn std::error::Error + Send + Sync>,
     },
 
+    /// `DynamicClient::detected_version()` returned `None` after a successful
+    /// `login()`. This is a library invariant violation in practice — the
+    /// `Option` exists because version detection is lazy — but nifi-lens
+    /// relies on the post-login guarantee that detection has already run.
+    #[snafu(display(
+        "context {context:?}: NiFi version was not detected after login; \
+         this indicates a nifi-rust-client invariant violation"
+    ))]
+    VersionDetectionMissing { context: String },
+
     /// See `ClientBuildFailed` for the boxed-source rationale; callers must
     /// box explicitly.
     #[snafu(display("failed to fetch /flow/about for context {context:?}: {source}"))]

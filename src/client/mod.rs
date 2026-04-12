@@ -137,9 +137,18 @@ impl NifiClient {
                 })
             })?;
 
-        // detected_version() returns DetectedVersion (an enum), not a String.
-        // DetectedVersion implements Display with semver format ("2.8.0" etc).
-        let version_str = inner.detected_version().to_string();
+        // detected_version() returns Option<DetectedVersion> under
+        // nifi-rust-client 0.7.0 (was DetectedVersion in 0.5.0). After a
+        // successful login(), the Option is guaranteed populated by the
+        // library's internal detect_version() call, but we still map the
+        // None case to a typed error rather than unwrap.
+        let detected =
+            inner
+                .detected_version()
+                .ok_or_else(|| NifiLensError::VersionDetectionMissing {
+                    context: ctx.name.clone(),
+                })?;
+        let version_str = detected.to_string();
         let detected_version =
             Version::parse(&version_str).map_err(|err| NifiLensError::LoginFailed {
                 context: ctx.name.clone(),

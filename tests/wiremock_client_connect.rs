@@ -46,12 +46,12 @@ async fn connect_happy_path_detects_version() {
         .await
         .expect("connect should succeed");
     assert_eq!(client.context_name(), "wiremock");
-    // The library only supports V2_6_0, V2_7_2, and V2_8_0. When the server
-    // reports "2.9.0" and VersionStrategy::Closest is used, the library maps
-    // to V2_8_0 (the highest supported minor). detected_version() therefore
-    // reflects the resolved client version (2.8.0), not the raw server version.
+    // nifi-rust-client 0.7.0 adds V2_9_0 to the dynamic set. When the server
+    // reports "2.9.0" and VersionStrategy::Closest is used, the library now
+    // maps to V2_9_0 exactly. detected_version() therefore reflects the
+    // resolved client version (2.9.0), matching the raw server version.
     assert_eq!(client.detected_version().major, 2);
-    assert_eq!(client.detected_version().minor, 8);
+    assert_eq!(client.detected_version().minor, 9);
     assert_eq!(client.detected_version().patch, 0);
 
     // about() returns the version string from the raw /flow/about response,
