@@ -1,5 +1,4 @@
 // Consumed by Tasks 10–13
-#![allow(dead_code)]
 //! TracerState — pure data skeleton for the Tracer tab.
 //!
 //! The sum type `TracerMode` drives which sub-view is rendered and which

@@ -1,5 +1,4 @@
 // Consumed by Tasks 5–8
-#![allow(dead_code)]
 //! Tracer-tab client wrappers and snapshot types.
 //!
 //! Phase 4 forensic flow: paste a flowfile UUID → submit a lineage

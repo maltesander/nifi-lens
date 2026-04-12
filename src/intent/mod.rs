@@ -20,7 +20,7 @@ pub enum Intent {
     // Declared for Phase 1+; dispatcher returns NotImplementedInPhase.
     OpenProcessGroup(String),
     TraceFlowfile(String), // UUID as string — Phase 4 introduces `uuid::Uuid`
-    FetchEventContent { event_id: u64, side: ContentSide },
+    FetchEventContent { event_id: i64, side: ContentSide },
     JumpTo(CrossLink),
 
     // Phase 4 intents.
@@ -196,7 +196,7 @@ impl IntentDispatcher {
                 crate::view::tracer::worker::spawn_content(
                     self.client.clone(),
                     self.tx.clone(),
-                    event_id as i64,
+                    event_id,
                     client_side,
                 );
                 Ok(IntentOutcome::ViewRefreshed {

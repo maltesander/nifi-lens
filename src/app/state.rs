@@ -1351,11 +1351,10 @@ fn handle_tracer_lineage(state: &mut AppState, key: KeyEvent) -> Option<UpdateRe
                     &mut state.tracer,
                     crate::client::ContentSide::Input,
                 );
-                #[allow(clippy::cast_sign_loss)]
                 Some(UpdateResult {
                     redraw: true,
                     intent: Some(PendingIntent::Dispatch(Intent::FetchEventContent {
-                        event_id: event_id as u64,
+                        event_id,
                         side: IntentSide::Input,
                     })),
                     tracer_followup: None,
@@ -1370,11 +1369,10 @@ fn handle_tracer_lineage(state: &mut AppState, key: KeyEvent) -> Option<UpdateRe
                     &mut state.tracer,
                     crate::client::ContentSide::Output,
                 );
-                #[allow(clippy::cast_sign_loss)]
                 Some(UpdateResult {
                     redraw: true,
                     intent: Some(PendingIntent::Dispatch(Intent::FetchEventContent {
-                        event_id: event_id as u64,
+                        event_id,
                         side: IntentSide::Output,
                     })),
                     tracer_followup: None,

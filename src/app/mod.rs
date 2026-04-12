@@ -89,23 +89,24 @@ pub async fn run(
                     crate::view::tracer::worker::spawn_save(tx.clone(), save.path, save.raw);
                 }
                 other => {
-                    let dispatcher = dispatcher.clone();
-                    let tx = tx.clone();
                     let intent = match other {
-                        PendingIntent::SwitchContext(name) => Intent::SwitchContext(name),
-                        PendingIntent::JumpTo(link) => Intent::JumpTo(link),
-                        PendingIntent::Dispatch(intent) => intent,
-                        PendingIntent::Quit => Intent::Quit,
-                        PendingIntent::SaveEventContent(_) => unreachable!(),
+                        PendingIntent::SwitchContext(name) => Some(Intent::SwitchContext(name)),
+                        PendingIntent::JumpTo(link) => Some(Intent::JumpTo(link)),
+                        PendingIntent::Dispatch(intent) => Some(intent),
+                        PendingIntent::Quit => Some(Intent::Quit),
+                        _ => {
+                            tracing::warn!("unhandled PendingIntent variant");
+                            None
+                        }
                     };
-                    // Intent dispatch runs on the main-thread `LocalSet` via
-                    // `spawn_local` so that Phase 4 tracer workers (which also
-                    // use `spawn_local` internally for `!Send` client futures)
-                    // are spawned within the correct context.
-                    tokio::task::spawn_local(async move {
-                        let outcome = dispatcher.dispatch(intent).await;
-                        let _ = tx.send(AppEvent::IntentOutcome(outcome)).await;
-                    });
+                    if let Some(intent) = intent {
+                        let dispatcher = dispatcher.clone();
+                        let tx = tx.clone();
+                        tokio::task::spawn_local(async move {
+                            let outcome = dispatcher.dispatch(intent).await;
+                            let _ = tx.send(AppEvent::IntentOutcome(outcome)).await;
+                        });
+                    }
                 }
             }
         }
