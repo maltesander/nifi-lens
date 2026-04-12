@@ -77,6 +77,14 @@ impl ViewKeyHandler for BulletinsHandler {
                     tracer_followup: None,
                 })
             }
+            KeyCode::Char('B') => {
+                state.bulletins.toggle_grouping();
+                Some(UpdateResult {
+                    redraw: true,
+                    intent: None,
+                    tracer_followup: None,
+                })
+            }
             KeyCode::Char('/') => {
                 state.bulletins.enter_text_input_mode();
                 Some(UpdateResult {
@@ -170,7 +178,7 @@ impl ViewKeyHandler for BulletinsHandler {
             ];
         }
 
-        vec![
+        let mut spans = vec![
             HintSpan {
                 key: "j/k",
                 action: "nav",
@@ -191,7 +199,19 @@ impl ViewKeyHandler for BulletinsHandler {
                 key: "Space",
                 action: "pause",
             },
-        ]
+        ];
+        if state.bulletins.group_consecutive {
+            spans.push(HintSpan {
+                key: "B",
+                action: "unbundle",
+            });
+        } else {
+            spans.push(HintSpan {
+                key: "B",
+                action: "bundle",
+            });
+        }
+        spans
     }
 }
 
@@ -364,6 +384,40 @@ mod tests {
             Some("f"),
             "Ctrl+C must not append 'c' to the filter buffer"
         );
+    }
+
+    #[test]
+    fn on_bulletins_tab_shift_b_toggles_grouping() {
+        let mut s = fresh_state();
+        let c = tiny_config();
+        s.current_tab = ViewId::Bulletins;
+        assert!(!s.bulletins.group_consecutive);
+        update(&mut s, key(KeyCode::Char('B'), KeyModifiers::SHIFT), &c);
+        assert!(s.bulletins.group_consecutive);
+        update(&mut s, key(KeyCode::Char('B'), KeyModifiers::SHIFT), &c);
+        assert!(!s.bulletins.group_consecutive);
+    }
+
+    #[test]
+    fn bulletins_hints_show_bundle_when_ungrouped() {
+        use super::super::ViewKeyHandler;
+        use super::BulletinsHandler;
+        let mut s = fresh_state();
+        s.current_tab = ViewId::Bulletins;
+        s.bulletins.group_consecutive = false;
+        let spans = BulletinsHandler::hints(&s);
+        assert!(spans.iter().any(|h| h.key == "B" && h.action == "bundle"));
+    }
+
+    #[test]
+    fn bulletins_hints_show_unbundle_when_grouped() {
+        use super::super::ViewKeyHandler;
+        use super::BulletinsHandler;
+        let mut s = fresh_state();
+        s.current_tab = ViewId::Bulletins;
+        s.bulletins.group_consecutive = true;
+        let spans = BulletinsHandler::hints(&s);
+        assert!(spans.iter().any(|h| h.key == "B" && h.action == "unbundle"));
     }
 
     #[test]
