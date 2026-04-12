@@ -448,7 +448,11 @@ usable state.
    `ListNavigation` trait, generic worker polling, theme consolidation),
    Health tab edge cases (aggregate fallback, stalled queue display,
    cross-link hints, per-node repository breakdown), help modal cleanup.
-8. **Phase 7 — Write-path scaffolding.** Dry-run mode, confirmation modal
+8. **UI Improvements — Navigation polish.** *(shipped)* Tab history
+   (`Alt+Left`/`Alt+Right`) for cross-link back/forward with selection
+   restore, interactive breadcrumb bar in Browser detail pane, context-
+   sensitive sticky footer hint line.
+9. **Phase 7 — Write-path scaffolding.** Dry-run mode, confirmation modal
    primitive, audit log, `--allow-writes` flag. No writes enabled yet —
    this just lays the rails for v2.
 

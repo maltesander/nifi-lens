@@ -79,7 +79,9 @@ export NIFILENS_DEV_PASSWORD=...
 nifilens
 ```
 
-Press `?` inside the tool for a context-aware help modal.
+Press `?` inside the tool for a context-aware help modal. A context-sensitive
+hint line at the bottom of the screen shows relevant keybindings for the
+current view and mode.
 
 ## Core Components
 
@@ -160,8 +162,10 @@ tool.
 | `F1`–`F5` | Jump to tab directly |
 | `Ctrl+K` | Switch cluster context |
 | `Ctrl+F` | Global component fuzzy find (available once the Browser tab has loaded at least once to seed the index) |
+| `Alt+Left` / `Alt+Right` | Cross-link back / forward |
 | `?` | Context-aware help modal |
 | `q` / `Ctrl+Q` | Quit |
+| `b` (Browser) | Enter breadcrumb navigation |
 
 ## Configuration
 

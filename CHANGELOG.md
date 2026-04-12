@@ -9,6 +9,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Tab history with `Alt+Left`/`Alt+Right` for cross-link back/forward
+  navigation, including selection restore (Browser remembers which
+  component was selected).
+- Interactive breadcrumb bar in Browser detail pane showing the path from
+  root to the selected node. Press `b` to enter, `h`/`l` to navigate
+  segments, `Enter` to jump to an ancestor, `Esc` to cancel.
+- Context-sensitive sticky footer hint line showing relevant keybindings
+  for the current view and mode. Always visible below the status bar.
 - **BREAKING:** config auth moved from top-level `username`/`password_env`
   to `[contexts.auth]` sub-table with `type` discriminator (`password`,
   `token`, `mtls`). See README for migration examples.

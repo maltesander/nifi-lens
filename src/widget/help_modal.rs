@@ -10,6 +10,8 @@ Global Keys:
   F1..F4            Jump to tab
   Ctrl+K            Switch context
   Ctrl+F            Global fuzzy find (requires Browser seed)
+  Alt+Left          Navigate back through cross-link history
+  Alt+Right         Navigate forward through cross-link history
   ?                 Toggle this help
   q / Ctrl+Q        Quit
   Esc               Close modal
@@ -46,6 +48,7 @@ Browser Tab:
   e                 Expand properties (Processor/CS with detail)
   c                 Copy selected node id to clipboard
   t                 Trace selected processor
+  b                 Enter breadcrumb navigation
   Ctrl+F            Open fuzzy find
 ";
 
@@ -100,7 +103,7 @@ pub fn render(frame: &mut Frame, area: Rect, current_tab: ViewId) {
         ViewId::Health => HEALTH_TEXT,
     };
     let text = format!("{GLOBAL_TEXT}\n{per_view}");
-    let modal = center(area, 70, 22);
+    let modal = center(area, 70, 25);
     frame.render_widget(Clear, modal);
     let block = Block::default().title(" Help ").borders(Borders::ALL);
     let p = Paragraph::new(text).alignment(Alignment::Left).block(block);
