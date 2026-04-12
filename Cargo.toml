@@ -24,17 +24,17 @@ path = "src/main.rs"
 arboard = "3"
 clap = { version = "4", features = ["derive"] }
 color-eyre = "0.6"
-crossterm = "0.28"
-nifi-rust-client = { version = "0.8.0", features = ["dynamic"] }
+crossterm = "0.29"
+nifi-rust-client = { version = "0.9", features = ["dynamic"] }
 nucleo = "0.5"
-ratatui = "0.29"
+ratatui = "0.30"
 semver = "1"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
-snafu = "0.8"
+snafu = "0.9"
 time = { version = "0.3", features = ["formatting", "local-offset", "macros", "parsing"] }
 tokio = { version = "1", features = ["full"] }
-toml = "0.8"
+toml = "1.1"
 tracing = "0.1"
 tracing-appender = "0.2"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
@@ -47,7 +47,7 @@ tempfile = "3"
 wiremock = "0.6"
 
 [build-dependencies]
-toml = "0.8"
+toml = "1.1"
 
 # Development-only override: uncomment locally when iterating against an
 # unreleased change in ../nifi-rust-client. Must remain commented on `main`

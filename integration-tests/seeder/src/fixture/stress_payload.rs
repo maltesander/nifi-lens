@@ -33,7 +33,7 @@ mod tests {
         let inner = &STRESS_PAYLOAD[1..STRESS_PAYLOAD.len() - 1];
         let has_bare_open_brace = inner
             .char_indices()
-            .any(|(i, c)| c == '{' && inner[..i].chars().last() != Some('$'));
+            .any(|(i, c)| c == '{' && !inner[..i].ends_with('$'));
         assert!(
             !has_bare_open_brace,
             "payload should be flat — no nested JSON objects"
