@@ -31,8 +31,8 @@ Bulletins Tab:
   T                 Cycle component-type chip
   /                 Enter text filter mode
   c                 Clear all filters
-  Enter             Jump to Browser (Phase 3 stub)
-  t                 Trace component (Phase 4 stub)
+  Enter             Jump to component in Browser
+  t                 Trace component (latest events)
 ";
 
 const BROWSER_TEXT: &str = "\
@@ -45,7 +45,7 @@ Browser Tab:
   r                 Force-refresh tree
   e                 Expand properties (Processor/CS with detail)
   c                 Copy selected node id to clipboard
-  t                 Trace selected processor (Phase 4 stub)
+  t                 Trace selected processor
   Ctrl+F            Open fuzzy find
 ";
 
@@ -144,7 +144,7 @@ mod tests {
         let out = render_with(ViewId::Bulletins);
         assert!(out.contains("e / w / i"));
         assert!(out.contains("Toggle auto-scroll pause"));
-        assert!(out.contains("Jump to Browser"));
+        assert!(out.contains("Jump to component in Browser"));
     }
 
     #[test]
