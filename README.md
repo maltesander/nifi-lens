@@ -153,7 +153,7 @@ tool.
 | Key | Action |
 |---|---|
 | `Tab` / `Shift+Tab` | Cycle tabs |
-| `F1`–`F4` | Jump to tab directly |
+| `F1`–`F5` | Jump to tab directly |
 | `Ctrl+K` | Switch cluster context |
 | `Ctrl+F` | Global component fuzzy find (available once the Browser tab has loaded at least once to seed the index) |
 | `?` | Context-aware help modal |
