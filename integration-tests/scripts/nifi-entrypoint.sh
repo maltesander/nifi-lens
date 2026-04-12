@@ -20,6 +20,10 @@ if [ "${NIFI_CLUSTER_IS_NODE}" = "true" ]; then
     prop_replace 'nifi.zookeeper.connect.string'              "${NIFI_ZOOKEEPER_CONNECT_STRING}"
     prop_replace 'nifi.cluster.flow.election.max.wait.time'   '30 secs'
     prop_replace 'nifi.state.management.embedded.zookeeper.start' 'false'
+    # Cluster nodes require an explicit sensitive props key — the same
+    # value on every node. Standalone mode auto-generates one, but
+    # cluster mode refuses to start without it.
+    prop_replace 'nifi.sensitive.props.key'                   "${NIFI_SENSITIVE_PROPS_KEY:-nifilens-fixture-key}"
 fi
 
 if [ -n "${SINGLE_USER_CREDENTIALS_USERNAME}" ] && [ -n "${SINGLE_USER_CREDENTIALS_PASSWORD}" ]; then
