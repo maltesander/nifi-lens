@@ -159,7 +159,9 @@ impl BulletinsState {
     }
 
     pub fn selected_ring_index(&self) -> Option<usize> {
-        self.filtered_indices().get(self.selected).copied()
+        self.grouped_view()
+            .get(self.selected)
+            .map(|g| g.latest_ring_idx)
     }
 
     fn row_matches(&self, b: &BulletinSnapshot) -> bool {
@@ -305,7 +307,7 @@ impl BulletinsState {
     }
     pub fn move_selection_down(&mut self) {
         ListNavigation::move_down(self);
-        let vis_len = self.filtered_indices().len();
+        let vis_len = self.grouped_view().len();
         if vis_len > 0 && self.selected == vis_len - 1 {
             self.auto_scroll = true;
             self.new_since_pause = 0;
@@ -323,51 +325,67 @@ impl BulletinsState {
     pub fn toggle_pause(&mut self) {
         self.auto_scroll = !self.auto_scroll;
         if self.auto_scroll {
-            let max = self.filtered_indices().len().saturating_sub(1);
+            let max = self.grouped_view().len().saturating_sub(1);
             self.selected = max;
             self.new_since_pause = 0;
         }
     }
 
-    /// Called whenever filters change. Snap `selected` to the nearest
-    /// still-visible filtered index based on its *previous* ring position.
-    /// Callers capture the ring index *before* mutating filters and pass
-    /// it in as `prev_ring_index`.
+    /// Called whenever filters or grouping change. Snap `selected` to
+    /// the group that contains `prev_ring_idx`, or the nearest surviving
+    /// group if that bulletin has been filtered out. Callers capture the
+    /// ring index *before* mutating filters/grouping and pass it in.
     pub fn reconcile_selection(&mut self, prev_ring_index: Option<usize>) {
-        let visible = self.filtered_indices();
-        if visible.is_empty() {
+        let groups = self.grouped_view();
+        if groups.is_empty() {
             self.selected = 0;
             return;
         }
         if let Some(prev) = prev_ring_index {
-            if let Some(pos) = visible.iter().position(|&i| i == prev) {
+            // Exact: any group whose run contains `prev`.
+            if let Some(pos) = groups
+                .iter()
+                .position(|g| g.first_ring_idx <= prev && prev <= g.latest_ring_idx)
+            {
                 self.selected = pos;
                 return;
             }
-            if let Some(pos) = visible.iter().rposition(|&i| i < prev) {
+            // Nearest older: last group entirely before `prev`.
+            if let Some(pos) = groups.iter().rposition(|g| g.latest_ring_idx < prev) {
                 self.selected = pos;
                 return;
             }
-            if let Some(pos) = visible.iter().position(|&i| i > prev) {
+            // Nearest newer: first group entirely after `prev`.
+            if let Some(pos) = groups.iter().position(|g| g.first_ring_idx > prev) {
                 self.selected = pos;
                 return;
             }
         }
         self.selected = if self.auto_scroll {
-            visible.len() - 1
+            groups.len() - 1
         } else {
             0
         };
+    }
+
+    /// Flip `group_consecutive` and remap `selected` so the user stays
+    /// on the same logical bulletin across the toggle. Spec reference:
+    /// `Feature 3 — Bulletins Grouping (Shift+B)` "Interactions with
+    /// existing features → Selection preservation on toggle".
+    pub fn toggle_grouping(&mut self) {
+        let prev = self.selected_ring_index();
+        self.group_consecutive = !self.group_consecutive;
+        self.reconcile_selection(prev);
     }
 }
 
 impl ListNavigation for BulletinsState {
     fn list_len(&self) -> usize {
-        self.filtered_indices().len()
+        self.grouped_view().len()
     }
 
     fn selected(&self) -> Option<usize> {
-        if self.filtered_indices().is_empty() {
+        if self.grouped_view().is_empty() {
             None
         } else {
             Some(self.selected)
@@ -415,7 +433,7 @@ pub fn apply_payload(state: &mut BulletinsState, payload: BulletinsPayload) {
     state.last_fetched_at = Some(payload.fetched_at);
 
     if state.auto_scroll {
-        let max = state.filtered_indices().len().saturating_sub(1);
+        let max = state.grouped_view().len().saturating_sub(1);
         state.selected = max;
         state.new_since_pause = 0;
     } else {
@@ -971,5 +989,95 @@ mod tests {
         assert_eq!(out[0].count, 2);
         assert_eq!(out[0].first_ring_idx, 0);
         assert_eq!(out[0].latest_ring_idx, 2);
+    }
+
+    fn seed_grouping_fixture() -> BulletinsState {
+        // Ring layout by ring_idx and source_id:
+        //   0: src-a   (count group #0)
+        //   1: src-a   (count group #0)
+        //   2: src-b   (count group #1)
+        //   3: src-c   (count group #2)
+        //   4: src-c   (count group #2)
+        //   5: src-c   (count group #2)
+        let mut s = BulletinsState::with_capacity(100);
+        let mk = |id: i64, src: &str| BulletinSnapshot {
+            id,
+            level: "ERROR".into(),
+            message: format!("msg-{id}"),
+            source_id: src.into(),
+            source_name: src.into(),
+            source_type: "PROCESSOR".into(),
+            group_id: "root".into(),
+            timestamp_iso: format!("2026-04-11T10:14:{:02}Z", id),
+            timestamp_human: String::new(),
+        };
+        apply_payload(
+            &mut s,
+            payload(vec![
+                mk(1, "src-a"),
+                mk(2, "src-a"),
+                mk(3, "src-b"),
+                mk(4, "src-c"),
+                mk(5, "src-c"),
+                mk(6, "src-c"),
+            ]),
+        );
+        s.auto_scroll = false;
+        s
+    }
+
+    #[test]
+    fn toggle_grouping_on_preserves_selection_to_enclosing_group() {
+        let mut s = seed_grouping_fixture();
+        // Flat mode: 6 visible rows. Select ring_idx 4 (second "src-c").
+        assert_eq!(s.grouped_view().len(), 6);
+        s.selected = 4; // Points at ring_idx 4 in flat mode.
+        assert_eq!(s.selected_ring_index(), Some(4));
+
+        s.toggle_grouping();
+
+        // Grouped mode: 3 visible groups. Group #2 holds ring_idx 3..=5.
+        assert!(s.group_consecutive);
+        assert_eq!(s.grouped_view().len(), 3);
+        assert_eq!(s.selected, 2);
+        // selected_ring_index should now resolve to the LATEST of group #2.
+        assert_eq!(s.selected_ring_index(), Some(5));
+    }
+
+    #[test]
+    fn toggle_grouping_off_preserves_selection_to_latest_bulletin() {
+        let mut s = seed_grouping_fixture();
+        s.group_consecutive = true;
+        // Grouped mode: 3 visible groups. Select group #2 (src-c run).
+        s.selected = 2;
+        assert_eq!(s.selected_ring_index(), Some(5));
+
+        s.toggle_grouping();
+
+        // Flat mode: 6 visible rows. Selection should land on the latest
+        // bulletin of the previously-selected group — ring_idx 5, flat
+        // position 5.
+        assert!(!s.group_consecutive);
+        assert_eq!(s.selected, 5);
+        assert_eq!(s.selected_ring_index(), Some(5));
+    }
+
+    #[test]
+    fn toggle_grouping_from_first_row_stays_on_first_row() {
+        let mut s = seed_grouping_fixture();
+        s.selected = 0; // src-a flat ring_idx 0
+        s.toggle_grouping();
+        assert!(s.group_consecutive);
+        // Group #0 contains ring_idx 0 and 1; position 0.
+        assert_eq!(s.selected, 0);
+    }
+
+    #[test]
+    fn toggle_grouping_with_no_visible_rows_is_safe() {
+        let mut s = BulletinsState::with_capacity(100);
+        // Empty ring — nothing to preserve.
+        s.toggle_grouping();
+        assert!(s.group_consecutive);
+        assert_eq!(s.selected, 0);
     }
 }
