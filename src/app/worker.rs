@@ -5,7 +5,9 @@
 //! the Bulletins worker (5s cadence). Browser (Phase 3) and Tracer
 //! (Phase 4) will plug into the same pattern.
 
+use std::future::Future;
 use std::sync::Arc;
+use std::time::Duration;
 
 use tokio::sync::{RwLock, mpsc};
 use tokio::task::JoinHandle;
@@ -13,7 +15,44 @@ use tracing;
 
 use crate::app::state::ViewId;
 use crate::client::NifiClient;
-use crate::event::AppEvent;
+use crate::error::NifiLensError;
+use crate::event::{AppEvent, ViewPayload};
+
+/// Spawn a polling worker on the current `LocalSet` that calls `poll_fn`
+/// every `interval`, sending successful payloads as `AppEvent::Data` and
+/// errors as `AppEvent::IntentOutcome(Err(...))`. The closure is `FnMut`
+/// so callers like Bulletins can capture mutable cursor state.
+pub(crate) fn spawn_polling_worker<F, Fut>(
+    interval: Duration,
+    mut poll_fn: F,
+    tx: mpsc::Sender<AppEvent>,
+) -> JoinHandle<()>
+where
+    F: FnMut() -> Fut + 'static,
+    Fut: Future<Output = Result<ViewPayload, NifiLensError>>,
+{
+    tokio::task::spawn_local(async move {
+        let mut ticker = tokio::time::interval(interval);
+        ticker.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+        loop {
+            ticker.tick().await;
+            match poll_fn().await {
+                Ok(payload) => {
+                    if tx.send(AppEvent::Data(payload)).await.is_err() {
+                        tracing::debug!("polling worker: channel closed, exiting");
+                        return;
+                    }
+                }
+                Err(err) => {
+                    tracing::warn!(error = %err, "polling worker: poll failed");
+                    if tx.send(AppEvent::IntentOutcome(Err(err))).await.is_err() {
+                        return;
+                    }
+                }
+            }
+        }
+    })
+}
 
 #[derive(Default)]
 pub struct WorkerRegistry {

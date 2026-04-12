@@ -20,6 +20,7 @@ use std::time::{Duration, SystemTime};
 use tokio::sync::{RwLock, mpsc};
 use tokio::task::JoinHandle;
 
+use crate::app::worker::spawn_polling_worker;
 use crate::client::NifiClient;
 use crate::event::{AppEvent, OverviewPayload, ViewPayload};
 
@@ -32,31 +33,14 @@ const POLL_INTERVAL: Duration = Duration::from_secs(10);
 /// Returns a `JoinHandle<()>`; the caller cancels the worker by calling
 /// `.abort()` on the handle.
 pub fn spawn(client: Arc<RwLock<NifiClient>>, tx: mpsc::Sender<AppEvent>) -> JoinHandle<()> {
-    tokio::task::spawn_local(async move {
-        let mut ticker = tokio::time::interval(POLL_INTERVAL);
-        ticker.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
-        loop {
-            ticker.tick().await;
-            match poll_once(&client).await {
-                Ok(payload) => {
-                    if tx
-                        .send(AppEvent::Data(ViewPayload::Overview(payload)))
-                        .await
-                        .is_err()
-                    {
-                        tracing::debug!("overview worker: channel closed, exiting");
-                        return;
-                    }
-                }
-                Err(err) => {
-                    tracing::warn!(error = %err, "overview worker: poll failed");
-                    if tx.send(AppEvent::IntentOutcome(Err(err))).await.is_err() {
-                        return;
-                    }
-                }
-            }
-        }
-    })
+    spawn_polling_worker(
+        POLL_INTERVAL,
+        move || {
+            let client = client.clone();
+            async move { poll_once(&client).await.map(ViewPayload::Overview) }
+        },
+        tx,
+    )
 }
 
 async fn poll_once(

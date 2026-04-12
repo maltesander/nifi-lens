@@ -12,12 +12,15 @@
 //! Runs under the main-thread `LocalSet` (see `lib::run_inner`) because
 //! `nifi-rust-client`'s dynamic dispatch traits return `!Send` futures.
 
+use std::cell::Cell;
+use std::rc::Rc;
 use std::sync::Arc;
 use std::time::{Duration, SystemTime};
 
 use tokio::sync::{RwLock, mpsc};
 use tokio::task::JoinHandle;
 
+use crate::app::worker::spawn_polling_worker;
 use crate::client::NifiClient;
 use crate::event::{AppEvent, BulletinsPayload, ViewPayload};
 
@@ -29,38 +32,28 @@ pub fn spawn(
     tx: mpsc::Sender<AppEvent>,
     initial_last_id: Option<i64>,
 ) -> JoinHandle<()> {
-    tokio::task::spawn_local(async move {
-        let mut ticker = tokio::time::interval(POLL_INTERVAL);
-        ticker.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
-        let mut last_id = initial_last_id;
-        loop {
-            ticker.tick().await;
-            match poll_once(&client, last_id).await {
-                Ok(payload) => {
-                    if let Some(max) = payload.bulletins.iter().map(|b| b.id).max() {
-                        last_id = Some(match last_id {
-                            Some(existing) => existing.max(max),
-                            None => max,
-                        });
-                    }
-                    if tx
-                        .send(AppEvent::Data(ViewPayload::Bulletins(payload)))
-                        .await
-                        .is_err()
-                    {
-                        tracing::debug!("bulletins worker: channel closed, exiting");
-                        return;
-                    }
+    // Rc<Cell> is safe here: the worker runs on a single-threaded LocalSet
+    // and only one poll is in flight at a time.
+    let last_id = Rc::new(Cell::new(initial_last_id));
+    spawn_polling_worker(
+        POLL_INTERVAL,
+        move || {
+            let client = client.clone();
+            let last_id = Rc::clone(&last_id);
+            async move {
+                let payload = poll_once(&client, last_id.get()).await?;
+                if let Some(max) = payload.bulletins.iter().map(|b| b.id).max() {
+                    let updated = match last_id.get() {
+                        Some(existing) => existing.max(max),
+                        None => max,
+                    };
+                    last_id.set(Some(updated));
                 }
-                Err(err) => {
-                    tracing::warn!(error = %err, "bulletins worker: poll failed");
-                    if tx.send(AppEvent::IntentOutcome(Err(err))).await.is_err() {
-                        return;
-                    }
-                }
+                Ok(ViewPayload::Bulletins(payload))
             }
-        }
-    })
+        },
+        tx,
+    )
 }
 
 async fn poll_once(
