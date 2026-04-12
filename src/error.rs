@@ -165,6 +165,74 @@ pub enum NifiLensError {
         source: Box<dyn std::error::Error + Send + Sync>,
     },
 
+    /// See `ClientBuildFailed` for the boxed-source rationale.
+    #[snafu(display(
+        "failed to fetch latest provenance events for component {component_id:?} \
+         in context {context:?}: {source}"
+    ))]
+    LatestProvenanceEventsFailed {
+        context: String,
+        component_id: String,
+        source: Box<dyn std::error::Error + Send + Sync>,
+    },
+
+    /// See `ClientBuildFailed` for the boxed-source rationale.
+    #[snafu(display(
+        "failed to submit lineage query for flowfile {uuid:?} in context {context:?}: {source}"
+    ))]
+    LineageQuerySubmitFailed {
+        context: String,
+        uuid: String,
+        source: Box<dyn std::error::Error + Send + Sync>,
+    },
+
+    /// See `ClientBuildFailed` for the boxed-source rationale.
+    #[snafu(display("failed to poll lineage query {query_id:?} in context {context:?}: {source}"))]
+    LineageQueryPollFailed {
+        context: String,
+        query_id: String,
+        source: Box<dyn std::error::Error + Send + Sync>,
+    },
+
+    /// See `ClientBuildFailed` for the boxed-source rationale. Delete
+    /// failures are logged at warn level and never surfaced to the user.
+    #[snafu(display(
+        "failed to delete lineage query {query_id:?} in context {context:?}: {source}"
+    ))]
+    LineageQueryDeleteFailed {
+        context: String,
+        query_id: String,
+        source: Box<dyn std::error::Error + Send + Sync>,
+    },
+
+    /// See `ClientBuildFailed` for the boxed-source rationale.
+    #[snafu(display(
+        "failed to fetch provenance event {event_id} in context {context:?}: {source}"
+    ))]
+    ProvenanceEventFetchFailed {
+        context: String,
+        event_id: i64,
+        source: Box<dyn std::error::Error + Send + Sync>,
+    },
+
+    /// See `ClientBuildFailed` for the boxed-source rationale.
+    #[snafu(display(
+        "failed to fetch {side} content for provenance event {event_id} \
+         in context {context:?}: {source}"
+    ))]
+    ProvenanceContentFetchFailed {
+        context: String,
+        event_id: i64,
+        side: &'static str,
+        source: Box<dyn std::error::Error + Send + Sync>,
+    },
+
+    #[snafu(display("failed to write provenance content to {}: {source}", path.display()))]
+    ContentSaveFailed {
+        path: PathBuf,
+        source: std::io::Error,
+    },
+
     /// See `ClientBuildFailed` for the boxed-source rationale; callers
     /// must box explicitly.
     #[snafu(display(
