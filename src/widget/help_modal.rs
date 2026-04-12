@@ -51,7 +51,31 @@ Browser Tab:
 
 const TRACER_TEXT: &str = "\
 Tracer Tab:
-  (coming in Phase 4)
+
+Entry mode (empty paste form):
+  Enter       submit UUID
+  Esc / Ctrl+U   clear input
+
+Latest events mode (from Bulletins/Browser):
+  j / k          move selection
+  Enter          trace selected flowfile
+  r              refresh list
+  c              copy selected uuid
+  Esc            back to Entry
+
+Lineage running mode:
+  Esc            cancel query
+
+Lineage view mode:
+  j / k          move selection (resets event detail)
+  Enter          load event detail
+  i              load input content
+  o              load output content
+  s              save content to file
+  a              toggle attribute diff mode (All / Changed)
+  r              re-run lineage query
+  c              copy selected event's flowfile uuid
+  Esc / /        back to Entry
 ";
 
 pub fn render(frame: &mut Frame, area: Rect, current_tab: ViewId) {
