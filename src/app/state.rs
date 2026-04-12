@@ -16,6 +16,7 @@ use crate::view::browser::state::{
     BrowserState, FlowIndex, apply_tree_snapshot, build_flow_index, rebuild_visible,
 };
 use crate::view::bulletins::state::BulletinsState;
+use crate::view::health::state::HealthState;
 use crate::view::overview::{OverviewState, apply_payload as apply_overview_payload};
 use crate::view::tracer::state::TracerState;
 
@@ -60,6 +61,7 @@ pub struct AppState {
     pub overview: OverviewState,
     pub bulletins: BulletinsState,
     pub browser: BrowserState,
+    pub health: HealthState,
     pub tracer: TracerState,
     pub flow_index: Option<FlowIndex>,
     pub status: StatusLine,
@@ -78,6 +80,7 @@ impl AppState {
             overview: OverviewState::new(),
             bulletins: BulletinsState::with_capacity(config.bulletins.ring_size),
             browser: BrowserState::new(),
+            health: HealthState::new(),
             tracer: TracerState::new(),
             flow_index: None,
             status: StatusLine::default(),

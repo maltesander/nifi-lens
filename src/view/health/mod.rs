@@ -3,6 +3,9 @@
 use ratatui::Frame;
 use ratatui::layout::Rect;
 
+pub mod state;
+pub use state::HealthState;
+
 pub fn render(frame: &mut Frame, area: Rect) {
     super::render_placeholder(frame, area, "Health", "Phase 5");
 }
