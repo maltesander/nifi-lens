@@ -12,6 +12,10 @@ impl ViewKeyHandler for OverviewHandler {
         // Overview has no tab-local keys; everything falls through to globals.
         None
     }
+
+    fn hints(_state: &AppState) -> Vec<crate::widget::hint_bar::HintSpan> {
+        Vec::new() // Overview has no view-specific keys
+    }
 }
 
 #[cfg(test)]

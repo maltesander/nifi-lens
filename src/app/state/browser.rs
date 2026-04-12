@@ -169,6 +169,58 @@ impl ViewKeyHandler for BrowserHandler {
             _ => None,
         }
     }
+
+    fn hints(state: &AppState) -> Vec<crate::widget::hint_bar::HintSpan> {
+        use crate::widget::hint_bar::HintSpan;
+
+        if state.browser.breadcrumb_focus.is_some() {
+            return vec![
+                HintSpan {
+                    key: "h/l",
+                    action: "nav",
+                },
+                HintSpan {
+                    key: "Enter",
+                    action: "jump",
+                },
+                HintSpan {
+                    key: "Esc",
+                    action: "cancel",
+                },
+            ];
+        }
+
+        vec![
+            HintSpan {
+                key: "j/k",
+                action: "nav",
+            },
+            HintSpan {
+                key: "Enter",
+                action: "expand",
+            },
+            HintSpan {
+                key: "h",
+                action: "back",
+            },
+            HintSpan {
+                key: "e",
+                action: "props",
+            },
+            HintSpan {
+                key: "c",
+                action: "copy",
+            },
+            HintSpan {
+                key: "b",
+                action: "crumb",
+            },
+            HintSpan {
+                key: "t",
+                action: "trace",
+            },
+        ]
+    }
 }
 
 #[cfg(test)]

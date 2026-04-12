@@ -18,6 +18,68 @@ impl ViewKeyHandler for TracerHandler {
             TracerMode::Lineage(_) => handle_lineage(state, key),
         }
     }
+
+    fn hints(state: &AppState) -> Vec<crate::widget::hint_bar::HintSpan> {
+        use crate::view::tracer::state::TracerMode;
+        use crate::widget::hint_bar::HintSpan;
+
+        match &state.tracer.mode {
+            TracerMode::Entry(_) => vec![
+                HintSpan {
+                    key: "type",
+                    action: "uuid",
+                },
+                HintSpan {
+                    key: "Enter",
+                    action: "submit",
+                },
+                HintSpan {
+                    key: "Esc",
+                    action: "clear",
+                },
+            ],
+            TracerMode::LatestEvents(_) => vec![
+                HintSpan {
+                    key: "j/k",
+                    action: "nav",
+                },
+                HintSpan {
+                    key: "Enter",
+                    action: "detail",
+                },
+                HintSpan {
+                    key: "Esc",
+                    action: "back",
+                },
+            ],
+            TracerMode::LineageRunning(_) => vec![HintSpan {
+                key: "Esc",
+                action: "cancel",
+            }],
+            TracerMode::Lineage(_) => vec![
+                HintSpan {
+                    key: "j/k",
+                    action: "nav",
+                },
+                HintSpan {
+                    key: "Enter",
+                    action: "detail",
+                },
+                HintSpan {
+                    key: "Tab",
+                    action: "content",
+                },
+                HintSpan {
+                    key: "s",
+                    action: "save",
+                },
+                HintSpan {
+                    key: "Esc",
+                    action: "back",
+                },
+            ],
+        }
+    }
 }
 
 fn handle_entry(state: &mut AppState, key: KeyEvent) -> Option<UpdateResult> {

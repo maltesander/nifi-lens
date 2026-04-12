@@ -37,6 +37,9 @@ pub(crate) trait ViewKeyHandler {
     /// the key was consumed, `None` to let it fall through to global
     /// handlers.
     fn handle_key(state: &mut AppState, key: KeyEvent) -> Option<UpdateResult>;
+
+    /// Return context-sensitive hint spans for this view's current state.
+    fn hints(state: &AppState) -> Vec<crate::widget::hint_bar::HintSpan>;
 }
 
 // ---------------------------------------------------------------------------
@@ -231,6 +234,101 @@ pub enum PendingIntent {
 pub struct PendingSave {
     pub path: std::path::PathBuf,
     pub raw: std::sync::Arc<[u8]>,
+}
+
+// ---------------------------------------------------------------------------
+// Hint collection
+// ---------------------------------------------------------------------------
+
+/// Collect the hint spans for the current state, respecting modal priority.
+pub fn collect_hints(state: &AppState) -> Vec<crate::widget::hint_bar::HintSpan> {
+    use crate::widget::hint_bar::HintSpan;
+
+    // Modal hints take full priority — no global hints appended.
+    if let Some(ref modal) = state.modal {
+        return match modal {
+            Modal::Help => vec![HintSpan {
+                key: "Esc",
+                action: "close",
+            }],
+            Modal::ContextSwitcher(_) => vec![
+                HintSpan {
+                    key: "j/k",
+                    action: "nav",
+                },
+                HintSpan {
+                    key: "Enter",
+                    action: "switch",
+                },
+                HintSpan {
+                    key: "Esc",
+                    action: "cancel",
+                },
+            ],
+            Modal::FuzzyFind(_) => vec![
+                HintSpan {
+                    key: "type",
+                    action: "filter",
+                },
+                HintSpan {
+                    key: "Enter",
+                    action: "select",
+                },
+                HintSpan {
+                    key: "Esc",
+                    action: "cancel",
+                },
+            ],
+            Modal::Properties(_) => vec![
+                HintSpan {
+                    key: "j/k",
+                    action: "scroll",
+                },
+                HintSpan {
+                    key: "Esc",
+                    action: "close",
+                },
+            ],
+            Modal::ErrorDetail => vec![HintSpan {
+                key: "Esc",
+                action: "close",
+            }],
+            Modal::SaveEventContent(_) => vec![
+                HintSpan {
+                    key: "Enter",
+                    action: "confirm",
+                },
+                HintSpan {
+                    key: "Esc",
+                    action: "cancel",
+                },
+            ],
+        };
+    }
+
+    // Per-view hints
+    let mut hints = match state.current_tab {
+        ViewId::Overview => overview::OverviewHandler::hints(state),
+        ViewId::Bulletins => bulletins::BulletinsHandler::hints(state),
+        ViewId::Health => health::HealthHandler::hints(state),
+        ViewId::Browser => browser::BrowserHandler::hints(state),
+        ViewId::Tracer => tracer::TracerHandler::hints(state),
+    };
+
+    // Global hints appended
+    // TODO: wire history in Task 5
+    // if state.history.can_go_back() {
+    //     hints.push(HintSpan { key: "Alt+\u{2190}", action: "back" });
+    // }
+    // if state.history.can_go_forward() {
+    //     hints.push(HintSpan { key: "Alt+\u{2192}", action: "fwd" });
+    // }
+    hints.push(HintSpan {
+        key: "?",
+        action: "help",
+    });
+
+    hints
 }
 
 // ---------------------------------------------------------------------------

@@ -135,6 +135,36 @@ impl ViewKeyHandler for HealthHandler {
             tracer_followup: None,
         })
     }
+
+    fn hints(state: &AppState) -> Vec<crate::widget::hint_bar::HintSpan> {
+        use crate::view::health::state::HealthCategory;
+        use crate::widget::hint_bar::HintSpan;
+
+        let mut hints = vec![
+            HintSpan {
+                key: "j/k",
+                action: "nav",
+            },
+            HintSpan {
+                key: "1-4",
+                action: "category",
+            },
+        ];
+        match state.health.selected_category {
+            HealthCategory::Queues | HealthCategory::Processors => {
+                hints.push(HintSpan {
+                    key: "Enter",
+                    action: "browser",
+                });
+            }
+            _ => {}
+        }
+        hints.push(HintSpan {
+            key: "r",
+            action: "refresh",
+        });
+        hints
+    }
 }
 
 #[cfg(test)]

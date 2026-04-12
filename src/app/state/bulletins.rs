@@ -149,6 +149,50 @@ impl ViewKeyHandler for BulletinsHandler {
             _ => None,
         }
     }
+
+    fn hints(state: &AppState) -> Vec<crate::widget::hint_bar::HintSpan> {
+        use crate::widget::hint_bar::HintSpan;
+
+        if state.bulletins.text_input.is_some() {
+            return vec![
+                HintSpan {
+                    key: "type",
+                    action: "filter",
+                },
+                HintSpan {
+                    key: "Enter",
+                    action: "apply",
+                },
+                HintSpan {
+                    key: "Esc",
+                    action: "cancel",
+                },
+            ];
+        }
+
+        vec![
+            HintSpan {
+                key: "j/k",
+                action: "nav",
+            },
+            HintSpan {
+                key: "Enter",
+                action: "browser",
+            },
+            HintSpan {
+                key: "t",
+                action: "trace",
+            },
+            HintSpan {
+                key: "/",
+                action: "filter",
+            },
+            HintSpan {
+                key: "Space",
+                action: "pause",
+            },
+        ]
+    }
 }
 
 /// Handles keypresses while the Bulletins text-input mode is active.
