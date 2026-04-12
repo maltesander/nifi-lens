@@ -87,9 +87,77 @@ pub fn format(
     cfg: &TimestampConfig,
     with_ms: bool,
 ) -> String {
-    // Implemented in Task 4.
-    let _ = (dt, now, cfg, with_ms);
-    String::new()
+    // Re-project both `dt` and `now` into the configured tz so that
+    // date comparisons, hour displays, and offsets all agree.
+    let offset = match cfg.tz {
+        TimestampTz::Utc => time::UtcOffset::UTC,
+        TimestampTz::Local => {
+            time::UtcOffset::current_local_offset().unwrap_or(time::UtcOffset::UTC)
+        }
+    };
+    let dt_local = dt.to_offset(offset);
+    let now_local = now.to_offset(offset);
+
+    match cfg.format {
+        TimestampFormat::Short => {
+            if dt_local.date() == now_local.date() {
+                if with_ms {
+                    let desc = format_description!("[hour]:[minute]:[second].[subsecond digits:3]");
+                    dt_local.format(desc).unwrap_or_default()
+                } else {
+                    let desc = format_description!("[hour]:[minute]:[second]");
+                    dt_local.format(desc).unwrap_or_default()
+                }
+            } else if with_ms {
+                let desc = format_description!(
+                    "[month repr:short] [day padding:zero] [hour]:[minute]:[second].[subsecond digits:3]"
+                );
+                dt_local.format(desc).unwrap_or_default()
+            } else {
+                let desc = format_description!(
+                    "[month repr:short] [day padding:zero] [hour]:[minute]:[second]"
+                );
+                dt_local.format(desc).unwrap_or_default()
+            }
+        }
+        TimestampFormat::Iso => {
+            if with_ms {
+                let desc = format_description!(
+                    "[year]-[month]-[day]T[hour]:[minute]:[second].[subsecond digits:3][offset_hour sign:mandatory]:[offset_minute]"
+                );
+                let mut out = dt_local.format(desc).unwrap_or_default();
+                // Collapse "+00:00" to "Z" for UTC to match conventional ISO output.
+                if matches!(cfg.tz, TimestampTz::Utc) && out.ends_with("+00:00") {
+                    out.truncate(out.len() - 6);
+                    out.push('Z');
+                }
+                out
+            } else {
+                let desc = format_description!(
+                    "[year]-[month]-[day]T[hour]:[minute]:[second][offset_hour sign:mandatory]:[offset_minute]"
+                );
+                let mut out = dt_local.format(desc).unwrap_or_default();
+                if matches!(cfg.tz, TimestampTz::Utc) && out.ends_with("+00:00") {
+                    out.truncate(out.len() - 6);
+                    out.push('Z');
+                }
+                out
+            }
+        }
+        TimestampFormat::Human => {
+            if with_ms {
+                let desc = format_description!(
+                    "[month repr:short] [day padding:zero] [hour]:[minute]:[second].[subsecond digits:3]"
+                );
+                dt_local.format(desc).unwrap_or_default()
+            } else {
+                let desc = format_description!(
+                    "[month repr:short] [day padding:zero] [hour]:[minute]:[second]"
+                );
+                dt_local.format(desc).unwrap_or_default()
+            }
+        }
+    }
 }
 
 #[cfg(test)]
@@ -135,5 +203,82 @@ mod tests {
     fn parse_trims_whitespace_around_valid_input() {
         let got = parse_nifi_timestamp("  2026-04-12T14:32:18Z  ").unwrap();
         assert_eq!(got, datetime!(2026-04-12 14:32:18 UTC));
+    }
+
+    fn utc_cfg(fmt: TimestampFormat) -> TimestampConfig {
+        TimestampConfig {
+            format: fmt,
+            tz: TimestampTz::Utc,
+        }
+    }
+
+    #[test]
+    fn format_short_same_day() {
+        let dt = datetime!(2026-04-12 14:32:18 UTC);
+        let now = datetime!(2026-04-12 20:00:00 UTC);
+        assert_eq!(
+            format(dt, now, &utc_cfg(TimestampFormat::Short), false),
+            "14:32:18"
+        );
+    }
+
+    #[test]
+    fn format_short_different_day() {
+        let dt = datetime!(2026-04-11 14:32:18 UTC);
+        let now = datetime!(2026-04-12 20:00:00 UTC);
+        assert_eq!(
+            format(dt, now, &utc_cfg(TimestampFormat::Short), false),
+            "Apr 11 14:32:18"
+        );
+    }
+
+    #[test]
+    fn format_short_with_ms() {
+        let dt = datetime!(2026-04-12 14:32:18.456 UTC);
+        let now = datetime!(2026-04-12 20:00:00 UTC);
+        assert_eq!(
+            format(dt, now, &utc_cfg(TimestampFormat::Short), true),
+            "14:32:18.456"
+        );
+    }
+
+    #[test]
+    fn format_iso_utc() {
+        let dt = datetime!(2026-04-12 14:32:18 UTC);
+        let now = datetime!(2026-04-12 20:00:00 UTC);
+        assert_eq!(
+            format(dt, now, &utc_cfg(TimestampFormat::Iso), false),
+            "2026-04-12T14:32:18Z"
+        );
+    }
+
+    #[test]
+    fn format_iso_with_ms() {
+        let dt = datetime!(2026-04-12 14:32:18.456 UTC);
+        let now = datetime!(2026-04-12 20:00:00 UTC);
+        assert_eq!(
+            format(dt, now, &utc_cfg(TimestampFormat::Iso), true),
+            "2026-04-12T14:32:18.456Z"
+        );
+    }
+
+    #[test]
+    fn format_human() {
+        let dt = datetime!(2026-04-12 14:32:18 UTC);
+        let now = datetime!(2026-04-12 20:00:00 UTC);
+        assert_eq!(
+            format(dt, now, &utc_cfg(TimestampFormat::Human), false),
+            "Apr 12 14:32:18"
+        );
+    }
+
+    #[test]
+    fn format_human_with_ms() {
+        let dt = datetime!(2026-04-12 14:32:18.456 UTC);
+        let now = datetime!(2026-04-12 20:00:00 UTC);
+        assert_eq!(
+            format(dt, now, &utc_cfg(TimestampFormat::Human), true),
+            "Apr 12 14:32:18.456"
+        );
     }
 }
