@@ -132,6 +132,8 @@ pub enum TimeToFull {
     Seconds(u64),
     /// Already at or above backpressure threshold (fill ≥ 100 %).
     Overflowing,
+    /// Queue has items but zero throughput — not draining.
+    Stalled,
 }
 
 /// Traffic-light severity applied to queues, repositories, and heap.
@@ -313,6 +315,10 @@ fn compute_time_to_full(c: &ConnectionStatusRow, fill_percent: u32) -> TimeToFul
     // bytes_in / bytes_out are 5-minute totals.
     let net_rate = c.bytes_in as i64 - c.bytes_out as i64;
     if net_rate <= 0 {
+        // Distinguish truly idle (empty queue) from stalled (items but no throughput).
+        if c.bytes_queued > 0 || c.flow_files_queued > 0 {
+            return TimeToFull::Stalled;
+        }
         return TimeToFull::Stable;
     }
 
@@ -874,11 +880,11 @@ mod tests {
 
     #[test]
     fn queue_pressure_fallback_draining_queue() {
-        // bytes_out > bytes_in → net_rate ≤ 0 → Stable
+        // bytes_out > bytes_in with items queued → net_rate ≤ 0 → Stalled
         let conns = vec![conn("a", 50, 0, 100, 500, 5000, None)];
         let snap = snap_with_conns(conns);
         let rows = compute_queue_pressure(&snap, TOP_N);
-        assert!(matches!(rows[0].time_to_full, TimeToFull::Stable));
+        assert!(matches!(rows[0].time_to_full, TimeToFull::Stalled));
     }
 
     #[test]
@@ -887,6 +893,27 @@ mod tests {
         let snap = snap_with_conns(conns);
         let rows = compute_queue_pressure(&snap, TOP_N);
         assert!(matches!(rows[0].time_to_full, TimeToFull::Overflowing));
+    }
+
+    #[test]
+    fn queue_pressure_stalled_zero_throughput_with_items() {
+        // Zero bytes_in and bytes_out, but queue has items → Stalled
+        let mut c = conn("a", 30, 0, 0, 0, 3000, None);
+        c.flow_files_queued = 10;
+        let snap = snap_with_conns(vec![c]);
+        let rows = compute_queue_pressure(&snap, TOP_N);
+        assert!(matches!(rows[0].time_to_full, TimeToFull::Stalled));
+    }
+
+    #[test]
+    fn queue_pressure_stable_empty_queue_zero_throughput() {
+        // Zero throughput AND zero queued bytes/flowfiles → Stable (truly idle).
+        // fill_percent must be >0 for the row to pass the filter, so use
+        // percent_use_count with zero bytes.
+        let conns = vec![conn("a", 0, 1, 0, 0, 0, None)];
+        let snap = snap_with_conns(conns);
+        let rows = compute_queue_pressure(&snap, TOP_N);
+        assert!(matches!(rows[0].time_to_full, TimeToFull::Stable));
     }
 
     #[test]

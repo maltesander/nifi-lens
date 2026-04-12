@@ -291,7 +291,13 @@ fn render_queue_row(frame: &mut Frame, area: Rect, y: u16, row: &QueuePressureRo
         Span::raw(" "),
         Span::styled(pct, Style::default().fg(severity_color(&row.severity))),
         Span::raw("     "),
-        Span::styled(ttf, theme::muted()),
+        Span::styled(
+            ttf,
+            match row.time_to_full {
+                TimeToFull::Stalled | TimeToFull::Overflowing => theme::error(),
+                _ => theme::muted(),
+            },
+        ),
     ]);
 
     // Line 2: indented queued display + rates
@@ -650,6 +656,7 @@ fn format_time_to_full(ttf: &TimeToFull) -> String {
         TimeToFull::Seconds(s) => format!("~{}h", s / 3600),
         TimeToFull::Stable => "stable".to_string(),
         TimeToFull::Overflowing => "overflowing".to_string(),
+        TimeToFull::Stalled => "\u{221E} (stalled)".to_string(),
     }
 }
 
