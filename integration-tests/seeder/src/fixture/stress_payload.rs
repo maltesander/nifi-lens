@@ -29,11 +29,14 @@ mod tests {
 
     #[test]
     fn payload_is_flat_json() {
-        // No nested braces beyond the top-level object.
+        // No nested JSON objects — only NiFi EL `${...}` expressions are allowed.
         let inner = &STRESS_PAYLOAD[1..STRESS_PAYLOAD.len() - 1];
+        let has_bare_open_brace = inner
+            .char_indices()
+            .any(|(i, c)| c == '{' && inner[..i].chars().last() != Some('$'));
         assert!(
-            !inner.contains('{'),
-            "payload should be flat — no nested objects"
+            !has_bare_open_brace,
+            "payload should be flat — no nested JSON objects"
         );
     }
 }
