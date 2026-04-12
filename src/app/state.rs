@@ -1086,9 +1086,9 @@ fn handle_intent_outcome(
                 tracer_followup: None,
             }
         }
-        Ok(IntentOutcome::TracerLandingOn { component_id: _ }) => {
-            // Task 12 wires the full cross-link handler; for now just switch
-            // to the Tracer tab so the user can see it is the target.
+        Ok(IntentOutcome::TracerLandingOn { component_id }) => {
+            use crate::view::tracer::state::start_latest_events;
+            start_latest_events(&mut state.tracer, component_id);
             state.current_tab = ViewId::Tracer;
             UpdateResult {
                 redraw: true,
@@ -1096,8 +1096,9 @@ fn handle_intent_outcome(
                 tracer_followup: None,
             }
         }
-        Ok(IntentOutcome::TracerLineageStarted { .. }) => {
-            // Task 11 wires the LineageRunning reducer.
+        Ok(IntentOutcome::TracerLineageStarted { uuid, abort }) => {
+            use crate::view::tracer::state::start_lineage;
+            start_lineage(&mut state.tracer, uuid, Some(abort));
             UpdateResult {
                 redraw: true,
                 intent: None,
