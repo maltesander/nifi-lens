@@ -23,8 +23,12 @@ pub enum Intent {
     FetchEventContent { event_id: u64, side: ContentSide },
     JumpTo(CrossLink),
 
-    // Phase 4: delete a consumed lineage query on the server.
+    // Phase 4 intents.
+    CancelLineageQuery,
     DeleteLineageQuery { query_id: String },
+    LoadEventDetail { event_id: i64 },
+    RefreshLatestEvents { component_id: String },
+    RefreshLineage { uuid: String },
 
     // Write intents — declared; dispatcher refuses unconditionally in Phase 0.
     StartProcessor(String),
@@ -49,12 +53,8 @@ pub enum CrossLink {
         group_id: String,
     },
     /// From Bulletins `t`: open Tracer with a component-filtered query
-    /// seeded from the bulletin's component and timestamp. Phase 4
-    /// wires this.
-    TraceComponent {
-        component_id: String,
-        since: std::time::SystemTime,
-    },
+    /// seeded from the bulletin's component. Phase 4 wires this.
+    TraceComponent { component_id: String },
 }
 
 impl Intent {
@@ -68,7 +68,11 @@ impl Intent {
             Self::FetchEventContent { .. } => "FetchEventContent",
             Self::JumpTo(CrossLink::OpenInBrowser { .. }) => "jump to Browser",
             Self::JumpTo(CrossLink::TraceComponent { .. }) => "trace component",
+            Self::CancelLineageQuery => "CancelLineageQuery",
             Self::DeleteLineageQuery { .. } => "DeleteLineageQuery",
+            Self::LoadEventDetail { .. } => "LoadEventDetail",
+            Self::RefreshLatestEvents { .. } => "RefreshLatestEvents",
+            Self::RefreshLineage { .. } => "RefreshLineage",
             Self::StartProcessor(_) => "StartProcessor",
             Self::StopProcessor(_) => "StopProcessor",
             Self::EnableControllerService(_) => "EnableControllerService",
@@ -115,10 +119,9 @@ impl IntentDispatcher {
                 component_id: component_id.clone(),
                 group_id: group_id.clone(),
             })),
-            Intent::JumpTo(CrossLink::TraceComponent { .. }) => {
-                Some(Ok(IntentOutcome::NotImplementedInPhase {
-                    intent_name: intent.name(),
-                    phase: 4,
+            Intent::JumpTo(CrossLink::TraceComponent { component_id }) => {
+                Some(Ok(IntentOutcome::TracerLandingOn {
+                    component_id: component_id.clone(),
                 }))
             }
             _ => None,
@@ -216,20 +219,17 @@ mod tests {
     }
 
     #[test]
-    fn cross_link_trace_component_returns_phase_4_stub() {
-        use std::time::SystemTime;
+    fn cross_link_trace_component_returns_tracer_landing_outcome() {
         let outcome = IntentDispatcher::handle_pure(&Intent::JumpTo(CrossLink::TraceComponent {
             component_id: "proc-1".into(),
-            since: SystemTime::UNIX_EPOCH,
         }))
         .expect("JumpTo must be handled by handle_pure")
-        .expect("JumpTo stubs return Ok(...)");
+        .expect("JumpTo returns Ok(...)");
         match outcome {
-            IntentOutcome::NotImplementedInPhase { intent_name, phase } => {
-                assert_eq!(intent_name, "trace component");
-                assert_eq!(phase, 4);
+            IntentOutcome::TracerLandingOn { component_id } => {
+                assert_eq!(component_id, "proc-1");
             }
-            other => panic!("expected NotImplementedInPhase, got {other:?}"),
+            other => panic!("expected TracerLandingOn, got {other:?}"),
         }
     }
 
@@ -263,10 +263,32 @@ mod tests {
         assert_eq!(
             Intent::JumpTo(CrossLink::TraceComponent {
                 component_id: "x".into(),
-                since: std::time::SystemTime::UNIX_EPOCH,
             })
             .name(),
             "trace component"
+        );
+        assert_eq!(Intent::CancelLineageQuery.name(), "CancelLineageQuery");
+        assert_eq!(
+            Intent::DeleteLineageQuery {
+                query_id: "q1".into()
+            }
+            .name(),
+            "DeleteLineageQuery"
+        );
+        assert_eq!(
+            Intent::LoadEventDetail { event_id: 1 }.name(),
+            "LoadEventDetail"
+        );
+        assert_eq!(
+            Intent::RefreshLatestEvents {
+                component_id: "x".into()
+            }
+            .name(),
+            "RefreshLatestEvents"
+        );
+        assert_eq!(
+            Intent::RefreshLineage { uuid: "u".into() }.name(),
+            "RefreshLineage"
         );
         assert_eq!(Intent::StopProcessor("x".into()).name(), "StopProcessor");
         assert_eq!(
@@ -278,13 +300,6 @@ mod tests {
             "DisableControllerService"
         );
         assert_eq!(Intent::EmptyQueue("x".into()).name(), "EmptyQueue");
-        assert_eq!(
-            Intent::DeleteLineageQuery {
-                query_id: "q1".into()
-            }
-            .name(),
-            "DeleteLineageQuery"
-        );
     }
 
     #[test]
@@ -316,15 +331,23 @@ mod tests {
         assert!(
             !Intent::JumpTo(CrossLink::TraceComponent {
                 component_id: "x".into(),
-                since: std::time::SystemTime::UNIX_EPOCH,
             })
             .is_write()
         );
+        assert!(!Intent::CancelLineageQuery.is_write());
         assert!(
             !Intent::DeleteLineageQuery {
                 query_id: "q1".into()
             }
             .is_write()
         );
+        assert!(!Intent::LoadEventDetail { event_id: 1 }.is_write());
+        assert!(
+            !Intent::RefreshLatestEvents {
+                component_id: "x".into()
+            }
+            .is_write()
+        );
+        assert!(!Intent::RefreshLineage { uuid: "u".into() }.is_write());
     }
 }

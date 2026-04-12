@@ -7,8 +7,6 @@ use std::time::Instant;
 
 use crossterm::event::{Event, KeyCode, KeyEvent, KeyModifiers};
 use semver::Version;
-use time::OffsetDateTime;
-use time::format_description::well_known::Rfc3339;
 
 use crate::NifiLensError;
 use crate::config::Config;
@@ -616,17 +614,8 @@ fn handle_key(state: &mut AppState, key: KeyEvent, config: &Config) -> UpdateRes
             KeyCode::Char('t') => {
                 if let Some(idx) = state.bulletins.selected_ring_index() {
                     let b = &state.bulletins.ring[idx];
-                    let since = OffsetDateTime::parse(&b.timestamp_iso, &Rfc3339)
-                        .ok()
-                        .and_then(|dt| {
-                            std::time::UNIX_EPOCH.checked_add(std::time::Duration::from_secs(
-                                dt.unix_timestamp().max(0) as u64,
-                            ))
-                        })
-                        .unwrap_or_else(std::time::SystemTime::now);
                     let link = CrossLink::TraceComponent {
                         component_id: b.source_id.clone(),
-                        since,
                     };
                     return UpdateResult {
                         redraw: true,
@@ -794,7 +783,6 @@ fn handle_key(state: &mut AppState, key: KeyEvent, config: &Config) -> UpdateRes
                 }
                 let link = crate::intent::CrossLink::TraceComponent {
                     component_id: node.id.clone(),
-                    since: std::time::SystemTime::now(),
                 };
                 return UpdateResult {
                     redraw: true,
