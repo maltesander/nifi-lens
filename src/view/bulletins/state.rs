@@ -28,6 +28,7 @@ pub struct BulletinsState {
     pub selected: usize,
     pub auto_scroll: bool,
     pub new_since_pause: u32,
+    pub group_consecutive: bool,
 }
 
 #[derive(Debug, Clone)]
@@ -84,6 +85,7 @@ impl BulletinsState {
             selected: 0,
             auto_scroll: true,
             new_since_pause: 0,
+            group_consecutive: false,
         }
     }
 
