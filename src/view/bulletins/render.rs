@@ -225,7 +225,7 @@ fn render_list(
     let table = Table::new(
         rows,
         [
-            Constraint::Length(8),
+            Constraint::Length(15),
             Constraint::Length(5),
             Constraint::Length(20),
             Constraint::Length(24),
