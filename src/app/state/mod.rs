@@ -91,6 +91,7 @@ pub struct AppState {
     pub tracer: TracerState,
     pub flow_index: Option<FlowIndex>,
     pub status: StatusLine,
+    pub timestamp_cfg: crate::timestamp::TimestampConfig,
     pub error_detail: Option<String>,
     pub should_quit: bool,
     /// Set by the context-switch handler so the app loop can force-restart
@@ -115,6 +116,10 @@ impl AppState {
             tracer: TracerState::new(),
             flow_index: None,
             status: StatusLine::default(),
+            timestamp_cfg: crate::timestamp::TimestampConfig {
+                format: config.ui.timestamp_format,
+                tz: config.ui.timestamp_tz,
+            },
             error_detail: None,
             should_quit: false,
             pending_worker_restart: false,
