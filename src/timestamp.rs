@@ -81,6 +81,12 @@ pub fn parse_nifi_timestamp(raw: &str) -> Option<OffsetDateTime> {
 /// to decide "today vs older"; render call sites pass `OffsetDateTime::now_utc()`.
 /// `with_ms` forces millisecond precision regardless of preset —
 /// Tracer passes `true` for event detail rows.
+///
+/// Preset output shapes:
+/// - `Short`: `HH:MM:SS[.mmm]` when `dt` falls on today (per `now` and `cfg.tz`),
+///   `Mon DD HH:MM:SS[.mmm]` otherwise.
+/// - `Iso`: `YYYY-MM-DDTHH:MM:SS[.mmm]Z` (UTC) or with numeric offset (Local).
+/// - `Human`: always `Mon DD HH:MM:SS[.mmm]`.
 pub fn format(
     dt: OffsetDateTime,
     now: OffsetDateTime,
@@ -128,7 +134,7 @@ pub fn format(
                 let mut out = dt_local.format(desc).unwrap_or_default();
                 // Collapse "+00:00" to "Z" for UTC to match conventional ISO output.
                 if matches!(cfg.tz, TimestampTz::Utc) && out.ends_with("+00:00") {
-                    out.truncate(out.len() - 6);
+                    out.truncate(out.len() - 6); // strip the trailing "+00:00" (6 bytes)
                     out.push('Z');
                 }
                 out
@@ -138,7 +144,7 @@ pub fn format(
                 );
                 let mut out = dt_local.format(desc).unwrap_or_default();
                 if matches!(cfg.tz, TimestampTz::Utc) && out.ends_with("+00:00") {
-                    out.truncate(out.len() - 6);
+                    out.truncate(out.len() - 6); // strip the trailing "+00:00" (6 bytes)
                     out.push('Z');
                 }
                 out
