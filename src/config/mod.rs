@@ -38,22 +38,12 @@ fn default_ring_size() -> usize {
 }
 
 /// UI rendering preferences, set via `[ui]` in the TOML config.
-#[derive(Debug, Clone, Deserialize, PartialEq, Eq)]
-#[serde(deny_unknown_fields)]
+#[derive(Debug, Clone, Default, Deserialize, PartialEq, Eq)]
 pub struct UiConfig {
     #[serde(default)]
     pub timestamp_format: crate::timestamp::TimestampFormat,
     #[serde(default)]
     pub timestamp_tz: crate::timestamp::TimestampTz,
-}
-
-impl Default for UiConfig {
-    fn default() -> Self {
-        Self {
-            timestamp_format: crate::timestamp::TimestampFormat::Short,
-            timestamp_tz: crate::timestamp::TimestampTz::Utc,
-        }
-    }
 }
 
 #[derive(Debug, Clone, Deserialize, PartialEq, Eq)]
