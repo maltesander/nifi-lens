@@ -11,6 +11,17 @@ prop_replace 'nifi.security.truststore'         "${TRUSTSTORE_PATH}"
 prop_replace 'nifi.security.truststoreType'     "${TRUSTSTORE_TYPE}"
 prop_replace 'nifi.security.truststorePasswd'   "${TRUSTSTORE_PASSWORD}"
 
+# Clustering — only applied when the container sets NIFI_CLUSTER_IS_NODE=true.
+# Standalone containers (e.g., nifi-2-6-0) omit this env var entirely.
+if [ "${NIFI_CLUSTER_IS_NODE}" = "true" ]; then
+    prop_replace 'nifi.cluster.is.node'                       'true'
+    prop_replace 'nifi.cluster.node.address'                  "${NIFI_CLUSTER_NODE_ADDRESS}"
+    prop_replace 'nifi.cluster.node.protocol.port'            '11443'
+    prop_replace 'nifi.zookeeper.connect.string'              "${NIFI_ZOOKEEPER_CONNECT_STRING}"
+    prop_replace 'nifi.cluster.flow.election.max.wait.time'   '30 secs'
+    prop_replace 'nifi.state.management.embedded.zookeeper.start' 'false'
+fi
+
 if [ -n "${SINGLE_USER_CREDENTIALS_USERNAME}" ] && [ -n "${SINGLE_USER_CREDENTIALS_PASSWORD}" ]; then
     # `set-single-user-credentials` rewrites login-identity-providers.xml AND
     # authorizers.xml to use the `single-user-authorizer`, which grants the
