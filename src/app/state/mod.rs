@@ -347,13 +347,19 @@ pub fn collect_hints(state: &AppState) -> Vec<crate::widget::hint_bar::HintSpan>
 fn capture_anchor(state: &AppState) -> Option<crate::app::history::SelectionAnchor> {
     use crate::app::history::SelectionAnchor;
     match state.current_tab {
-        ViewId::Browser => state
-            .browser
-            .visible
-            .get(state.browser.selected)
-            .map(|&arena_idx| {
-                SelectionAnchor::ComponentId(state.browser.nodes[arena_idx].id.clone())
-            }),
+        ViewId::Browser => {
+            state
+                .browser
+                .visible
+                .get(state.browser.selected)
+                .and_then(|&arena_idx| {
+                    state
+                        .browser
+                        .nodes
+                        .get(arena_idx)
+                        .map(|n| SelectionAnchor::ComponentId(n.id.clone()))
+                })
+        }
         ViewId::Bulletins => Some(SelectionAnchor::RowIndex(state.bulletins.selected)),
         ViewId::Health => {
             use crate::view::health::state::HealthCategory;
@@ -392,8 +398,28 @@ fn restore_anchor(state: &mut AppState, entry: &crate::app::history::HistoryEntr
             let max = state.bulletins.filtered_indices().len().saturating_sub(1);
             state.bulletins.selected = (*idx).min(max);
         }
-        (Some(SelectionAnchor::RowIndex(_)), ViewId::Health) => {
-            // Best-effort: Health uses ListNavigation which clamps on render.
+        (Some(SelectionAnchor::RowIndex(idx)), ViewId::Health) => {
+            use crate::app::navigation::ListNavigation;
+            use crate::view::health::state::HealthCategory;
+            // Best-effort: clamp to current category's row count.
+            match state.health.selected_category {
+                HealthCategory::Queues => {
+                    let max = state.health.queues.list_len().saturating_sub(1);
+                    state.health.queues.selected = (*idx).min(max);
+                }
+                HealthCategory::Repositories => {
+                    let max = state.health.repositories.list_len().saturating_sub(1);
+                    state.health.repositories.selected = (*idx).min(max);
+                }
+                HealthCategory::Nodes => {
+                    let max = state.health.nodes.list_len().saturating_sub(1);
+                    state.health.nodes.selected = (*idx).min(max);
+                }
+                HealthCategory::Processors => {
+                    let max = state.health.processors.list_len().saturating_sub(1);
+                    state.health.processors.selected = (*idx).min(max);
+                }
+            }
         }
         _ => {}
     }
