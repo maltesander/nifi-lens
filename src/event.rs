@@ -22,6 +22,7 @@ pub enum ViewPayload {
     Bulletins(BulletinsPayload),
     Browser(BrowserPayload),
     Tracer(TracerPayload),
+    Health(HealthPayload),
 }
 
 /// One poll cycle's worth of data for the Overview tab. Composed inside the
@@ -93,6 +94,13 @@ pub enum IntentOutcome {
     TracerInputInvalid {
         raw: String,
     },
+}
+
+/// Payload variants pushed from the Health worker back into the UI loop.
+#[derive(Debug, Clone)]
+pub enum HealthPayload {
+    PgStatus(crate::client::health::FullPgStatusSnapshot),
+    SystemDiag(crate::client::health::SystemDiagSnapshot),
 }
 
 /// Payload variants pushed from Tracer workers back into the UI loop.

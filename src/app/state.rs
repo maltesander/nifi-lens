@@ -256,6 +256,22 @@ pub fn update(state: &mut AppState, event: AppEvent, config: &Config) -> UpdateR
                 tracer_followup: followup,
             }
         }
+        AppEvent::Data(ViewPayload::Health(payload)) => {
+            match payload {
+                crate::event::HealthPayload::PgStatus(snap) => {
+                    crate::view::health::state::apply_pg_status(&mut state.health, snap);
+                }
+                crate::event::HealthPayload::SystemDiag(diag) => {
+                    crate::view::health::state::apply_system_diagnostics(&mut state.health, diag);
+                }
+            }
+            state.last_refresh = Instant::now();
+            UpdateResult {
+                redraw: true,
+                intent: None,
+                tracer_followup: None,
+            }
+        }
         AppEvent::IntentOutcome(outcome) => handle_intent_outcome(state, outcome),
         AppEvent::Quit => {
             state.should_quit = true;
