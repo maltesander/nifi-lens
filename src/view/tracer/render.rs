@@ -147,7 +147,7 @@ fn render_lineage_running(frame: &mut Frame, area: Rect, running: &LineageRunnin
 
     // Progress gauge.
     let gauge = Gauge::default()
-        .gauge_style(Style::default().fg(ratatui::style::Color::Cyan))
+        .gauge_style(crate::theme::accent())
         .percent(running.percent as u16)
         .label(format!("{}%", running.percent));
     // Centre the gauge horizontally to avoid it spanning full width.
