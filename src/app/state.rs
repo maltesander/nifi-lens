@@ -178,6 +178,8 @@ pub enum BannerSeverity {
 pub struct UpdateResult {
     pub redraw: bool,
     pub intent: Option<PendingIntent>,
+    /// Side-effect from the Tracer reducer that the app loop must dispatch.
+    pub tracer_followup: Option<crate::view::tracer::state::Followup>,
 }
 
 /// An intent the reducer wants the caller to dispatch. The caller owns the
@@ -196,11 +198,13 @@ pub fn update(state: &mut AppState, event: AppEvent, config: &Config) -> UpdateR
         AppEvent::Input(Event::Resize(_, _)) => UpdateResult {
             redraw: true,
             intent: None,
+            tracer_followup: None,
         },
         AppEvent::Input(_) => UpdateResult::default(),
         AppEvent::Tick => UpdateResult {
             redraw: false,
             intent: None,
+            tracer_followup: None,
         },
         AppEvent::Data(ViewPayload::Overview(payload)) => {
             apply_overview_payload(&mut state.overview, payload);
@@ -208,6 +212,7 @@ pub fn update(state: &mut AppState, event: AppEvent, config: &Config) -> UpdateR
             UpdateResult {
                 redraw: true,
                 intent: None,
+                tracer_followup: None,
             }
         }
         AppEvent::Data(ViewPayload::Bulletins(payload)) => {
@@ -216,6 +221,7 @@ pub fn update(state: &mut AppState, event: AppEvent, config: &Config) -> UpdateR
             UpdateResult {
                 redraw: true,
                 intent: None,
+                tracer_followup: None,
             }
         }
         AppEvent::Data(ViewPayload::Browser(payload)) => {
@@ -224,14 +230,16 @@ pub fn update(state: &mut AppState, event: AppEvent, config: &Config) -> UpdateR
             UpdateResult {
                 redraw: true,
                 intent: None,
+                tracer_followup: None,
             }
         }
         AppEvent::Data(ViewPayload::Tracer(payload)) => {
-            let _followups = crate::view::tracer::state::apply_payload(&mut state.tracer, payload);
+            let followup = crate::view::tracer::state::apply_payload(&mut state.tracer, payload);
             state.last_refresh = Instant::now();
             UpdateResult {
                 redraw: true,
                 intent: None,
+                tracer_followup: followup,
             }
         }
         AppEvent::IntentOutcome(outcome) => handle_intent_outcome(state, outcome),
@@ -240,6 +248,7 @@ pub fn update(state: &mut AppState, event: AppEvent, config: &Config) -> UpdateR
             UpdateResult {
                 redraw: false,
                 intent: Some(PendingIntent::Quit),
+                tracer_followup: None,
             }
         }
     }
@@ -255,6 +264,7 @@ fn handle_key(state: &mut AppState, key: KeyEvent, config: &Config) -> UpdateRes
                     return UpdateResult {
                         redraw: true,
                         intent: None,
+                        tracer_followup: None,
                     };
                 }
                 return UpdateResult::default();
@@ -265,6 +275,7 @@ fn handle_key(state: &mut AppState, key: KeyEvent, config: &Config) -> UpdateRes
                     return UpdateResult {
                         redraw: true,
                         intent: None,
+                        tracer_followup: None,
                     };
                 }
                 return UpdateResult::default();
@@ -279,6 +290,7 @@ fn handle_key(state: &mut AppState, key: KeyEvent, config: &Config) -> UpdateRes
                         return UpdateResult {
                             redraw: true,
                             intent: None,
+                            tracer_followup: None,
                         };
                     }
                     KeyCode::Down | KeyCode::Char('j') => {
@@ -286,6 +298,7 @@ fn handle_key(state: &mut AppState, key: KeyEvent, config: &Config) -> UpdateRes
                         return UpdateResult {
                             redraw: true,
                             intent: None,
+                            tracer_followup: None,
                         };
                     }
                     KeyCode::Up | KeyCode::Char('k') => {
@@ -293,6 +306,7 @@ fn handle_key(state: &mut AppState, key: KeyEvent, config: &Config) -> UpdateRes
                         return UpdateResult {
                             redraw: true,
                             intent: None,
+                            tracer_followup: None,
                         };
                     }
                     KeyCode::Enter => {
@@ -304,6 +318,7 @@ fn handle_key(state: &mut AppState, key: KeyEvent, config: &Config) -> UpdateRes
                             return UpdateResult {
                                 redraw: true,
                                 intent: Some(PendingIntent::SwitchContext(name)),
+                                tracer_followup: None,
                             };
                         }
                         return UpdateResult::default();
@@ -318,6 +333,7 @@ fn handle_key(state: &mut AppState, key: KeyEvent, config: &Config) -> UpdateRes
                         return UpdateResult {
                             redraw: true,
                             intent: None,
+                            tracer_followup: None,
                         };
                     }
                     (KeyCode::Up, _) | (KeyCode::Char('p'), KeyModifiers::CONTROL) => {
@@ -325,6 +341,7 @@ fn handle_key(state: &mut AppState, key: KeyEvent, config: &Config) -> UpdateRes
                         return UpdateResult {
                             redraw: true,
                             intent: None,
+                            tracer_followup: None,
                         };
                     }
                     (KeyCode::Down, _) | (KeyCode::Char('n'), KeyModifiers::CONTROL) => {
@@ -332,6 +349,7 @@ fn handle_key(state: &mut AppState, key: KeyEvent, config: &Config) -> UpdateRes
                         return UpdateResult {
                             redraw: true,
                             intent: None,
+                            tracer_followup: None,
                         };
                     }
                     (KeyCode::Backspace, KeyModifiers::NONE) => {
@@ -342,6 +360,7 @@ fn handle_key(state: &mut AppState, key: KeyEvent, config: &Config) -> UpdateRes
                         return UpdateResult {
                             redraw: true,
                             intent: None,
+                            tracer_followup: None,
                         };
                     }
                     (KeyCode::Char(ch), KeyModifiers::NONE)
@@ -353,6 +372,7 @@ fn handle_key(state: &mut AppState, key: KeyEvent, config: &Config) -> UpdateRes
                         return UpdateResult {
                             redraw: true,
                             intent: None,
+                            tracer_followup: None,
                         };
                     }
                     (KeyCode::Enter, _) => {
@@ -370,11 +390,13 @@ fn handle_key(state: &mut AppState, key: KeyEvent, config: &Config) -> UpdateRes
                             return UpdateResult {
                                 redraw: true,
                                 intent: Some(PendingIntent::JumpTo(link)),
+                                tracer_followup: None,
                             };
                         }
                         return UpdateResult {
                             redraw: true,
                             intent: None,
+                            tracer_followup: None,
                         };
                     }
                     _ => return UpdateResult::default(),
@@ -387,6 +409,7 @@ fn handle_key(state: &mut AppState, key: KeyEvent, config: &Config) -> UpdateRes
                         return UpdateResult {
                             redraw: true,
                             intent: None,
+                            tracer_followup: None,
                         };
                     }
                     KeyCode::Down | KeyCode::Char('j') => {
@@ -397,6 +420,7 @@ fn handle_key(state: &mut AppState, key: KeyEvent, config: &Config) -> UpdateRes
                         return UpdateResult {
                             redraw: true,
                             intent: None,
+                            tracer_followup: None,
                         };
                     }
                     KeyCode::Up | KeyCode::Char('k') => {
@@ -404,6 +428,7 @@ fn handle_key(state: &mut AppState, key: KeyEvent, config: &Config) -> UpdateRes
                         return UpdateResult {
                             redraw: true,
                             intent: None,
+                            tracer_followup: None,
                         };
                     }
                     KeyCode::PageDown => {
@@ -411,6 +436,7 @@ fn handle_key(state: &mut AppState, key: KeyEvent, config: &Config) -> UpdateRes
                         return UpdateResult {
                             redraw: true,
                             intent: None,
+                            tracer_followup: None,
                         };
                     }
                     KeyCode::PageUp => {
@@ -418,6 +444,7 @@ fn handle_key(state: &mut AppState, key: KeyEvent, config: &Config) -> UpdateRes
                         return UpdateResult {
                             redraw: true,
                             intent: None,
+                            tracer_followup: None,
                         };
                     }
                     _ => return UpdateResult::default(),
@@ -441,6 +468,7 @@ fn handle_key(state: &mut AppState, key: KeyEvent, config: &Config) -> UpdateRes
                 return UpdateResult {
                     redraw: true,
                     intent: None,
+                    tracer_followup: None,
                 };
             }
             KeyCode::Enter => {
@@ -449,6 +477,7 @@ fn handle_key(state: &mut AppState, key: KeyEvent, config: &Config) -> UpdateRes
                 return UpdateResult {
                     redraw: true,
                     intent: None,
+                    tracer_followup: None,
                 };
             }
             KeyCode::Backspace => {
@@ -457,6 +486,7 @@ fn handle_key(state: &mut AppState, key: KeyEvent, config: &Config) -> UpdateRes
                 return UpdateResult {
                     redraw: true,
                     intent: None,
+                    tracer_followup: None,
                 };
             }
             KeyCode::Char(ch) => {
@@ -465,6 +495,7 @@ fn handle_key(state: &mut AppState, key: KeyEvent, config: &Config) -> UpdateRes
                 return UpdateResult {
                     redraw: true,
                     intent: None,
+                    tracer_followup: None,
                 };
             }
             _ => return UpdateResult::default(),
@@ -484,6 +515,7 @@ fn handle_key(state: &mut AppState, key: KeyEvent, config: &Config) -> UpdateRes
                 return UpdateResult {
                     redraw: true,
                     intent: None,
+                    tracer_followup: None,
                 };
             }
             KeyCode::Char('w') => {
@@ -491,6 +523,7 @@ fn handle_key(state: &mut AppState, key: KeyEvent, config: &Config) -> UpdateRes
                 return UpdateResult {
                     redraw: true,
                     intent: None,
+                    tracer_followup: None,
                 };
             }
             KeyCode::Char('i') => {
@@ -498,6 +531,7 @@ fn handle_key(state: &mut AppState, key: KeyEvent, config: &Config) -> UpdateRes
                 return UpdateResult {
                     redraw: true,
                     intent: None,
+                    tracer_followup: None,
                 };
             }
             KeyCode::Char('T') => {
@@ -505,6 +539,7 @@ fn handle_key(state: &mut AppState, key: KeyEvent, config: &Config) -> UpdateRes
                 return UpdateResult {
                     redraw: true,
                     intent: None,
+                    tracer_followup: None,
                 };
             }
             KeyCode::Char('c') => {
@@ -512,6 +547,7 @@ fn handle_key(state: &mut AppState, key: KeyEvent, config: &Config) -> UpdateRes
                 return UpdateResult {
                     redraw: true,
                     intent: None,
+                    tracer_followup: None,
                 };
             }
             KeyCode::Char('p') => {
@@ -519,6 +555,7 @@ fn handle_key(state: &mut AppState, key: KeyEvent, config: &Config) -> UpdateRes
                 return UpdateResult {
                     redraw: true,
                     intent: None,
+                    tracer_followup: None,
                 };
             }
             KeyCode::Char('/') => {
@@ -526,6 +563,7 @@ fn handle_key(state: &mut AppState, key: KeyEvent, config: &Config) -> UpdateRes
                 return UpdateResult {
                     redraw: true,
                     intent: None,
+                    tracer_followup: None,
                 };
             }
             KeyCode::Char('g') | KeyCode::Home => {
@@ -533,6 +571,7 @@ fn handle_key(state: &mut AppState, key: KeyEvent, config: &Config) -> UpdateRes
                 return UpdateResult {
                     redraw: true,
                     intent: None,
+                    tracer_followup: None,
                 };
             }
             KeyCode::Char('G') | KeyCode::End => {
@@ -540,6 +579,7 @@ fn handle_key(state: &mut AppState, key: KeyEvent, config: &Config) -> UpdateRes
                 return UpdateResult {
                     redraw: true,
                     intent: None,
+                    tracer_followup: None,
                 };
             }
             KeyCode::Up | KeyCode::Char('k') => {
@@ -547,6 +587,7 @@ fn handle_key(state: &mut AppState, key: KeyEvent, config: &Config) -> UpdateRes
                 return UpdateResult {
                     redraw: true,
                     intent: None,
+                    tracer_followup: None,
                 };
             }
             KeyCode::Down | KeyCode::Char('j') => {
@@ -554,6 +595,7 @@ fn handle_key(state: &mut AppState, key: KeyEvent, config: &Config) -> UpdateRes
                 return UpdateResult {
                     redraw: true,
                     intent: None,
+                    tracer_followup: None,
                 };
             }
             KeyCode::Enter => {
@@ -566,6 +608,7 @@ fn handle_key(state: &mut AppState, key: KeyEvent, config: &Config) -> UpdateRes
                     return UpdateResult {
                         redraw: true,
                         intent: Some(PendingIntent::JumpTo(link)),
+                        tracer_followup: None,
                     };
                 }
                 return UpdateResult::default();
@@ -588,6 +631,7 @@ fn handle_key(state: &mut AppState, key: KeyEvent, config: &Config) -> UpdateRes
                     return UpdateResult {
                         redraw: true,
                         intent: Some(PendingIntent::JumpTo(link)),
+                        tracer_followup: None,
                     };
                 }
                 return UpdateResult::default();
@@ -611,6 +655,7 @@ fn handle_key(state: &mut AppState, key: KeyEvent, config: &Config) -> UpdateRes
                 return UpdateResult {
                     redraw: true,
                     intent: None,
+                    tracer_followup: None,
                 };
             }
             KeyCode::Down | KeyCode::Char('j') => {
@@ -619,6 +664,7 @@ fn handle_key(state: &mut AppState, key: KeyEvent, config: &Config) -> UpdateRes
                 return UpdateResult {
                     redraw: true,
                     intent: None,
+                    tracer_followup: None,
                 };
             }
             KeyCode::PageDown => {
@@ -627,6 +673,7 @@ fn handle_key(state: &mut AppState, key: KeyEvent, config: &Config) -> UpdateRes
                 return UpdateResult {
                     redraw: true,
                     intent: None,
+                    tracer_followup: None,
                 };
             }
             KeyCode::PageUp => {
@@ -635,6 +682,7 @@ fn handle_key(state: &mut AppState, key: KeyEvent, config: &Config) -> UpdateRes
                 return UpdateResult {
                     redraw: true,
                     intent: None,
+                    tracer_followup: None,
                 };
             }
             KeyCode::Home => {
@@ -643,6 +691,7 @@ fn handle_key(state: &mut AppState, key: KeyEvent, config: &Config) -> UpdateRes
                 return UpdateResult {
                     redraw: true,
                     intent: None,
+                    tracer_followup: None,
                 };
             }
             KeyCode::End => {
@@ -651,6 +700,7 @@ fn handle_key(state: &mut AppState, key: KeyEvent, config: &Config) -> UpdateRes
                 return UpdateResult {
                     redraw: true,
                     intent: None,
+                    tracer_followup: None,
                 };
             }
             KeyCode::Enter | KeyCode::Right | KeyCode::Char('l') => {
@@ -659,6 +709,7 @@ fn handle_key(state: &mut AppState, key: KeyEvent, config: &Config) -> UpdateRes
                 return UpdateResult {
                     redraw: true,
                     intent: None,
+                    tracer_followup: None,
                 };
             }
             KeyCode::Backspace | KeyCode::Left | KeyCode::Char('h') => {
@@ -667,6 +718,7 @@ fn handle_key(state: &mut AppState, key: KeyEvent, config: &Config) -> UpdateRes
                 return UpdateResult {
                     redraw: true,
                     intent: None,
+                    tracer_followup: None,
                 };
             }
             KeyCode::Char('r') => {
@@ -679,6 +731,7 @@ fn handle_key(state: &mut AppState, key: KeyEvent, config: &Config) -> UpdateRes
                 return UpdateResult {
                     redraw: true,
                     intent: None,
+                    tracer_followup: None,
                 };
             }
             KeyCode::Char('e') => {
@@ -697,6 +750,7 @@ fn handle_key(state: &mut AppState, key: KeyEvent, config: &Config) -> UpdateRes
                     return UpdateResult {
                         redraw: true,
                         intent: None,
+                        tracer_followup: None,
                     };
                 }
                 return UpdateResult::default();
@@ -726,6 +780,7 @@ fn handle_key(state: &mut AppState, key: KeyEvent, config: &Config) -> UpdateRes
                 return UpdateResult {
                     redraw: true,
                     intent: None,
+                    tracer_followup: None,
                 };
             }
             KeyCode::Char('t') => {
@@ -744,6 +799,7 @@ fn handle_key(state: &mut AppState, key: KeyEvent, config: &Config) -> UpdateRes
                 return UpdateResult {
                     redraw: true,
                     intent: Some(PendingIntent::JumpTo(link)),
+                    tracer_followup: None,
                 };
             }
             _ => {}
@@ -759,6 +815,7 @@ fn handle_key(state: &mut AppState, key: KeyEvent, config: &Config) -> UpdateRes
             UpdateResult {
                 redraw: false,
                 intent: Some(PendingIntent::Quit),
+                tracer_followup: None,
             }
         }
         (KeyCode::Char('c'), KeyModifiers::CONTROL) => {
@@ -766,6 +823,7 @@ fn handle_key(state: &mut AppState, key: KeyEvent, config: &Config) -> UpdateRes
             UpdateResult {
                 redraw: false,
                 intent: Some(PendingIntent::Quit),
+                tracer_followup: None,
             }
         }
         (KeyCode::Tab, _) => {
@@ -773,6 +831,7 @@ fn handle_key(state: &mut AppState, key: KeyEvent, config: &Config) -> UpdateRes
             UpdateResult {
                 redraw: true,
                 intent: None,
+                tracer_followup: None,
             }
         }
         (KeyCode::BackTab, _) => {
@@ -780,6 +839,7 @@ fn handle_key(state: &mut AppState, key: KeyEvent, config: &Config) -> UpdateRes
             UpdateResult {
                 redraw: true,
                 intent: None,
+                tracer_followup: None,
             }
         }
         (KeyCode::F(1), _) => {
@@ -787,6 +847,7 @@ fn handle_key(state: &mut AppState, key: KeyEvent, config: &Config) -> UpdateRes
             UpdateResult {
                 redraw: true,
                 intent: None,
+                tracer_followup: None,
             }
         }
         (KeyCode::F(2), _) => {
@@ -794,6 +855,7 @@ fn handle_key(state: &mut AppState, key: KeyEvent, config: &Config) -> UpdateRes
             UpdateResult {
                 redraw: true,
                 intent: None,
+                tracer_followup: None,
             }
         }
         (KeyCode::F(3), _) => {
@@ -801,6 +863,7 @@ fn handle_key(state: &mut AppState, key: KeyEvent, config: &Config) -> UpdateRes
             UpdateResult {
                 redraw: true,
                 intent: None,
+                tracer_followup: None,
             }
         }
         (KeyCode::F(4), _) => {
@@ -808,6 +871,7 @@ fn handle_key(state: &mut AppState, key: KeyEvent, config: &Config) -> UpdateRes
             UpdateResult {
                 redraw: true,
                 intent: None,
+                tracer_followup: None,
             }
         }
         (KeyCode::Char('?'), _) => {
@@ -815,6 +879,7 @@ fn handle_key(state: &mut AppState, key: KeyEvent, config: &Config) -> UpdateRes
             UpdateResult {
                 redraw: true,
                 intent: None,
+                tracer_followup: None,
             }
         }
         (KeyCode::Char('k'), KeyModifiers::CONTROL) => {
@@ -827,6 +892,7 @@ fn handle_key(state: &mut AppState, key: KeyEvent, config: &Config) -> UpdateRes
             UpdateResult {
                 redraw: true,
                 intent: None,
+                tracer_followup: None,
             }
         }
         (KeyCode::Char('f'), KeyModifiers::CONTROL) => {
@@ -839,6 +905,7 @@ fn handle_key(state: &mut AppState, key: KeyEvent, config: &Config) -> UpdateRes
                 return UpdateResult {
                     redraw: true,
                     intent: None,
+                    tracer_followup: None,
                 };
             }
             let mut fs = crate::widget::fuzzy_find::FuzzyFindState::new();
@@ -849,6 +916,7 @@ fn handle_key(state: &mut AppState, key: KeyEvent, config: &Config) -> UpdateRes
             UpdateResult {
                 redraw: true,
                 intent: None,
+                tracer_followup: None,
             }
         }
         (KeyCode::Char('e'), KeyModifiers::NONE) => {
@@ -860,6 +928,7 @@ fn handle_key(state: &mut AppState, key: KeyEvent, config: &Config) -> UpdateRes
                 return UpdateResult {
                     redraw: true,
                     intent: None,
+                    tracer_followup: None,
                 };
             }
             UpdateResult::default()
@@ -894,6 +963,7 @@ fn handle_intent_outcome(
             UpdateResult {
                 redraw: true,
                 intent: None,
+                tracer_followup: None,
             }
         }
         Ok(IntentOutcome::ViewRefreshed { .. }) => {
@@ -901,6 +971,7 @@ fn handle_intent_outcome(
             UpdateResult {
                 redraw: true,
                 intent: None,
+                tracer_followup: None,
             }
         }
         Ok(IntentOutcome::Quitting) => {
@@ -908,6 +979,7 @@ fn handle_intent_outcome(
             UpdateResult {
                 redraw: false,
                 intent: None,
+                tracer_followup: None,
             }
         }
         Ok(IntentOutcome::NotImplementedInPhase { intent_name, phase }) => {
@@ -919,6 +991,7 @@ fn handle_intent_outcome(
             UpdateResult {
                 redraw: true,
                 intent: None,
+                tracer_followup: None,
             }
         }
         Ok(IntentOutcome::OpenInBrowserTarget {
@@ -943,6 +1016,7 @@ fn handle_intent_outcome(
                 return UpdateResult {
                     redraw: true,
                     intent: None,
+                    tracer_followup: None,
                 };
             };
             // Expand every ancestor.
@@ -960,6 +1034,7 @@ fn handle_intent_outcome(
             UpdateResult {
                 redraw: true,
                 intent: None,
+                tracer_followup: None,
             }
         }
         Ok(IntentOutcome::TracerLandingOn { component_id: _ }) => {
@@ -969,6 +1044,7 @@ fn handle_intent_outcome(
             UpdateResult {
                 redraw: true,
                 intent: None,
+                tracer_followup: None,
             }
         }
         Ok(IntentOutcome::TracerLineageStarted { .. }) => {
@@ -976,6 +1052,7 @@ fn handle_intent_outcome(
             UpdateResult {
                 redraw: true,
                 intent: None,
+                tracer_followup: None,
             }
         }
         Ok(IntentOutcome::TracerInputInvalid { raw }) => {
@@ -987,6 +1064,7 @@ fn handle_intent_outcome(
             UpdateResult {
                 redraw: true,
                 intent: None,
+                tracer_followup: None,
             }
         }
         Err(err) => {
@@ -1003,6 +1081,7 @@ fn handle_intent_outcome(
             UpdateResult {
                 redraw: true,
                 intent: None,
+                tracer_followup: None,
             }
         }
     }

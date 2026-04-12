@@ -23,6 +23,9 @@ pub enum Intent {
     FetchEventContent { event_id: u64, side: ContentSide },
     JumpTo(CrossLink),
 
+    // Phase 4: delete a consumed lineage query on the server.
+    DeleteLineageQuery { query_id: String },
+
     // Write intents — declared; dispatcher refuses unconditionally in Phase 0.
     StartProcessor(String),
     StopProcessor(String),
@@ -65,6 +68,7 @@ impl Intent {
             Self::FetchEventContent { .. } => "FetchEventContent",
             Self::JumpTo(CrossLink::OpenInBrowser { .. }) => "jump to Browser",
             Self::JumpTo(CrossLink::TraceComponent { .. }) => "trace component",
+            Self::DeleteLineageQuery { .. } => "DeleteLineageQuery",
             Self::StartProcessor(_) => "StartProcessor",
             Self::StopProcessor(_) => "StopProcessor",
             Self::EnableControllerService(_) => "EnableControllerService",
@@ -130,6 +134,10 @@ impl IntentDispatcher {
 
         match intent {
             Intent::SwitchContext(name) => self.switch_context(name).await,
+            Intent::DeleteLineageQuery { .. } => Ok(IntentOutcome::NotImplementedInPhase {
+                intent_name: "DeleteLineageQuery",
+                phase: 0,
+            }),
             other => Ok(IntentOutcome::NotImplementedInPhase {
                 intent_name: other.name(),
                 phase: 0,
@@ -270,6 +278,13 @@ mod tests {
             "DisableControllerService"
         );
         assert_eq!(Intent::EmptyQueue("x".into()).name(), "EmptyQueue");
+        assert_eq!(
+            Intent::DeleteLineageQuery {
+                query_id: "q1".into()
+            }
+            .name(),
+            "DeleteLineageQuery"
+        );
     }
 
     #[test]
@@ -303,6 +318,12 @@ mod tests {
                 component_id: "x".into(),
                 since: std::time::SystemTime::UNIX_EPOCH,
             })
+            .is_write()
+        );
+        assert!(
+            !Intent::DeleteLineageQuery {
+                query_id: "q1".into()
+            }
             .is_write()
         );
     }

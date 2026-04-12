@@ -225,12 +225,99 @@ pub enum Followup {
 
 // ── Reducer ───────────────────────────────────────────────────────────────────
 
+/// Transitions from Entry to LineageRunning with an empty query_id.
+pub fn start_lineage(state: &mut TracerState, uuid: String, abort: Option<AbortHandle>) {
+    state.mode = TracerMode::LineageRunning(LineageRunningState {
+        uuid,
+        query_id: String::new(),
+        percent: 0,
+        started_at: SystemTime::now(),
+        abort,
+    });
+    state.last_error = None;
+}
+
+/// Cancels a running lineage query, returning to Entry mode.
+///
+/// If a query_id has been received, emits a [`Followup::DeleteLineageQuery`]
+/// so the caller can clean it up on the server.
+pub fn cancel_lineage(state: &mut TracerState) -> Option<Followup> {
+    let mut followup = None;
+    if let TracerMode::LineageRunning(LineageRunningState {
+        query_id, abort, ..
+    }) = &mut state.mode
+    {
+        if let Some(handle) = abort.take() {
+            handle.abort();
+        }
+        if !query_id.is_empty() {
+            followup = Some(Followup::DeleteLineageQuery {
+                query_id: std::mem::take(query_id),
+            });
+        }
+    }
+    state.mode = TracerMode::Entry(EntryState::default());
+    followup
+}
+
 /// Folds a [`TracerPayload`] into `state`.
 ///
 /// Returns an optional [`Followup`] when an async side-effect is needed.
-pub fn apply_payload(_state: &mut TracerState, _payload: TracerPayload) -> Option<Followup> {
-    // Arms filled in by Tasks 11–13.
-    None
+pub fn apply_payload(state: &mut TracerState, payload: TracerPayload) -> Option<Followup> {
+    match payload {
+        TracerPayload::LineageSubmitted { uuid, query_id } => {
+            if let TracerMode::LineageRunning(ref mut running) = state.mode
+                && running.uuid == uuid
+                && running.query_id.is_empty()
+            {
+                running.query_id = query_id;
+            }
+            None
+        }
+        TracerPayload::LineagePartial { query_id, percent } => {
+            if let TracerMode::LineageRunning(ref mut running) = state.mode
+                && running.query_id == query_id
+            {
+                running.percent = percent;
+            }
+            None
+        }
+        TracerPayload::LineageDone {
+            uuid,
+            query_id,
+            snapshot,
+            fetched_at,
+        } => {
+            if let TracerMode::LineageRunning(ref running) = state.mode
+                && running.query_id == query_id
+            {
+                state.mode = TracerMode::Lineage(Box::new(LineageView {
+                    uuid,
+                    snapshot,
+                    selected_event: 0,
+                    event_detail: EventDetail::default(),
+                    diff_mode: AttributeDiffMode::default(),
+                    fetched_at,
+                }));
+                return Some(Followup::DeleteLineageQuery { query_id });
+            }
+            // Stale query_id — still emit delete so it gets cleaned up.
+            Some(Followup::DeleteLineageQuery { query_id })
+        }
+        TracerPayload::LineageFailed {
+            query_id, error, ..
+        } => {
+            if let TracerMode::LineageRunning(ref running) = state.mode
+                && (running.query_id == query_id || running.query_id.is_empty())
+            {
+                state.last_error = Some(error);
+                state.mode = TracerMode::Entry(EntryState::default());
+            }
+            None
+        }
+        // Arms filled in by Tasks 12–13.
+        _ => None,
+    }
 }
 
 // ── Entry-mode helpers ────────────────────────────────────────────────────────
@@ -364,5 +451,242 @@ mod tests {
         let toggled = mode.toggle();
         assert_eq!(toggled, AttributeDiffMode::Changed);
         assert_eq!(toggled.toggle(), AttributeDiffMode::All);
+    }
+
+    // ── LineageRunning reducer tests ────────────────────────────────────────
+
+    const TEST_UUID: &str = "7a2e8b9c-1234-4abc-9def-0123456789ab";
+
+    #[test]
+    fn start_lineage_transitions_entry_to_running_with_empty_query_id() {
+        let mut state = TracerState::new();
+        start_lineage(&mut state, TEST_UUID.to_string(), None);
+        let TracerMode::LineageRunning(ref running) = state.mode else {
+            panic!("expected LineageRunning mode");
+        };
+        assert_eq!(running.uuid, TEST_UUID);
+        assert!(running.query_id.is_empty());
+        assert_eq!(running.percent, 0);
+        assert!(running.abort.is_none());
+        assert!(state.last_error.is_none());
+    }
+
+    #[test]
+    fn lineage_submitted_fills_query_id_when_uuid_matches() {
+        let mut state = TracerState::new();
+        start_lineage(&mut state, TEST_UUID.to_string(), None);
+
+        let followup = apply_payload(
+            &mut state,
+            TracerPayload::LineageSubmitted {
+                uuid: TEST_UUID.to_string(),
+                query_id: "q-42".to_string(),
+            },
+        );
+        assert!(followup.is_none());
+
+        let TracerMode::LineageRunning(ref running) = state.mode else {
+            panic!("expected LineageRunning mode");
+        };
+        assert_eq!(running.query_id, "q-42");
+    }
+
+    #[test]
+    fn lineage_submitted_stale_uuid_is_dropped() {
+        let mut state = TracerState::new();
+        start_lineage(&mut state, TEST_UUID.to_string(), None);
+
+        let followup = apply_payload(
+            &mut state,
+            TracerPayload::LineageSubmitted {
+                uuid: "stale-uuid".to_string(),
+                query_id: "q-99".to_string(),
+            },
+        );
+        assert!(followup.is_none());
+
+        let TracerMode::LineageRunning(ref running) = state.mode else {
+            panic!("expected LineageRunning mode");
+        };
+        assert!(running.query_id.is_empty(), "query_id should remain empty");
+    }
+
+    #[test]
+    fn lineage_partial_updates_percent_when_query_id_matches() {
+        let mut state = TracerState::new();
+        start_lineage(&mut state, TEST_UUID.to_string(), None);
+        apply_payload(
+            &mut state,
+            TracerPayload::LineageSubmitted {
+                uuid: TEST_UUID.to_string(),
+                query_id: "q-42".to_string(),
+            },
+        );
+
+        let followup = apply_payload(
+            &mut state,
+            TracerPayload::LineagePartial {
+                query_id: "q-42".to_string(),
+                percent: 55,
+            },
+        );
+        assert!(followup.is_none());
+
+        let TracerMode::LineageRunning(ref running) = state.mode else {
+            panic!("expected LineageRunning mode");
+        };
+        assert_eq!(running.percent, 55);
+    }
+
+    #[test]
+    fn lineage_partial_stale_query_id_is_dropped() {
+        let mut state = TracerState::new();
+        start_lineage(&mut state, TEST_UUID.to_string(), None);
+        apply_payload(
+            &mut state,
+            TracerPayload::LineageSubmitted {
+                uuid: TEST_UUID.to_string(),
+                query_id: "q-42".to_string(),
+            },
+        );
+
+        apply_payload(
+            &mut state,
+            TracerPayload::LineagePartial {
+                query_id: "q-stale".to_string(),
+                percent: 99,
+            },
+        );
+
+        let TracerMode::LineageRunning(ref running) = state.mode else {
+            panic!("expected LineageRunning mode");
+        };
+        assert_eq!(running.percent, 0, "percent should stay at 0");
+    }
+
+    #[test]
+    fn lineage_done_transitions_to_lineage_view() {
+        use crate::client::LineageSnapshot;
+
+        let mut state = TracerState::new();
+        start_lineage(&mut state, TEST_UUID.to_string(), None);
+        apply_payload(
+            &mut state,
+            TracerPayload::LineageSubmitted {
+                uuid: TEST_UUID.to_string(),
+                query_id: "q-42".to_string(),
+            },
+        );
+
+        let snapshot = LineageSnapshot {
+            events: vec![],
+            percent_completed: 100,
+            finished: true,
+        };
+        let followup = apply_payload(
+            &mut state,
+            TracerPayload::LineageDone {
+                uuid: TEST_UUID.to_string(),
+                query_id: "q-42".to_string(),
+                snapshot,
+                fetched_at: SystemTime::now(),
+            },
+        );
+
+        assert!(matches!(state.mode, TracerMode::Lineage(_)));
+        assert!(
+            matches!(followup, Some(Followup::DeleteLineageQuery { ref query_id }) if query_id == "q-42")
+        );
+    }
+
+    #[test]
+    fn lineage_done_stale_query_id_emits_delete_followup() {
+        use crate::client::LineageSnapshot;
+
+        let mut state = TracerState::new();
+        start_lineage(&mut state, TEST_UUID.to_string(), None);
+        apply_payload(
+            &mut state,
+            TracerPayload::LineageSubmitted {
+                uuid: TEST_UUID.to_string(),
+                query_id: "q-42".to_string(),
+            },
+        );
+
+        let snapshot = LineageSnapshot {
+            events: vec![],
+            percent_completed: 100,
+            finished: true,
+        };
+        let followup = apply_payload(
+            &mut state,
+            TracerPayload::LineageDone {
+                uuid: TEST_UUID.to_string(),
+                query_id: "q-stale".to_string(),
+                snapshot,
+                fetched_at: SystemTime::now(),
+            },
+        );
+
+        // State should remain LineageRunning (stale query_id doesn't match)
+        assert!(matches!(state.mode, TracerMode::LineageRunning(_)));
+        // But we still emit delete to clean up the stale query on the server
+        assert!(
+            matches!(followup, Some(Followup::DeleteLineageQuery { ref query_id }) if query_id == "q-stale")
+        );
+    }
+
+    #[test]
+    fn lineage_failed_returns_to_entry_with_error() {
+        let mut state = TracerState::new();
+        start_lineage(&mut state, TEST_UUID.to_string(), None);
+        apply_payload(
+            &mut state,
+            TracerPayload::LineageSubmitted {
+                uuid: TEST_UUID.to_string(),
+                query_id: "q-42".to_string(),
+            },
+        );
+
+        apply_payload(
+            &mut state,
+            TracerPayload::LineageFailed {
+                uuid: TEST_UUID.to_string(),
+                query_id: "q-42".to_string(),
+                error: "server error".to_string(),
+            },
+        );
+
+        assert!(matches!(state.mode, TracerMode::Entry(_)));
+        assert_eq!(state.last_error.as_deref(), Some("server error"));
+    }
+
+    #[test]
+    fn cancel_lineage_transitions_to_entry_and_emits_delete_when_query_id_known() {
+        let mut state = TracerState::new();
+        start_lineage(&mut state, TEST_UUID.to_string(), None);
+        apply_payload(
+            &mut state,
+            TracerPayload::LineageSubmitted {
+                uuid: TEST_UUID.to_string(),
+                query_id: "q-42".to_string(),
+            },
+        );
+
+        let followup = cancel_lineage(&mut state);
+        assert!(matches!(state.mode, TracerMode::Entry(_)));
+        assert!(
+            matches!(followup, Some(Followup::DeleteLineageQuery { ref query_id }) if query_id == "q-42")
+        );
+    }
+
+    #[test]
+    fn cancel_lineage_before_submission_does_not_emit_delete() {
+        let mut state = TracerState::new();
+        start_lineage(&mut state, TEST_UUID.to_string(), None);
+
+        let followup = cancel_lineage(&mut state);
+        assert!(matches!(state.mode, TracerMode::Entry(_)));
+        assert!(followup.is_none());
     }
 }

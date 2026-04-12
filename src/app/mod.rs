@@ -66,6 +66,22 @@ pub async fn run(
     while let Some(event) = rx.recv().await {
         let result = update(&mut state, event, &config);
 
+        // Dispatch tracer followups (e.g. delete a consumed lineage query).
+        if let Some(followup) = result.tracer_followup {
+            match followup {
+                crate::view::tracer::state::Followup::DeleteLineageQuery { query_id } => {
+                    let dispatcher = dispatcher.clone();
+                    let tx = tx.clone();
+                    tokio::spawn(async move {
+                        let outcome = dispatcher
+                            .dispatch(Intent::DeleteLineageQuery { query_id })
+                            .await;
+                        let _ = tx.send(AppEvent::IntentOutcome(outcome)).await;
+                    });
+                }
+            }
+        }
+
         if let Some(pending) = result.intent {
             let dispatcher = dispatcher.clone();
             let tx = tx.clone();
