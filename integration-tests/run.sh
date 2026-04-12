@@ -42,7 +42,14 @@ docker compose -f "$COMPOSE_FILE" up -d
 # without exhausting the 30-minute job budget.
 READY_TIMEOUT="${NIFILENS_READY_TIMEOUT:-600}"
 for version in "${VERSIONS[@]}"; do
-    service="nifi-${version//./-}"
+    base="nifi-${version//./-}"
+    # Clustered versions use <base>-node1 / <base>-node2 service names;
+    # standalone versions use just <base>. Probe for -node1 first.
+    if docker compose -f "$COMPOSE_FILE" ps --services 2>/dev/null | grep -q "^${base}-node1$"; then
+        service="${base}-node1"
+    else
+        service="$base"
+    fi
     echo "--- Waiting for $service healthcheck (timeout ${READY_TIMEOUT}s)..."
     SECONDS_WAITED=0
     until docker compose -f "$COMPOSE_FILE" exec -T "$service" \
