@@ -618,7 +618,16 @@ fn render_processor_row(
         ),
         Span::raw(format!("{:<22}", truncate(&proc.group_path, 20))),
         Span::raw(format!("{:<10}", proc.active_threads)),
-        Span::raw(format!("{:<12}", proc.run_status)),
+        Span::styled(
+            format!("{:<12}", proc.run_status),
+            Style::default().fg(match proc.run_status.as_str() {
+                "RUNNING" => Color::Green,
+                "STOPPED" => Color::Yellow,
+                "DISABLED" => Color::DarkGray,
+                "INVALID" => Color::Red,
+                _ => Color::White,
+            }),
+        ),
         Span::raw(cpu),
     ]);
     frame.render_widget(Paragraph::new(line), Rect::new(x, y, width, 1));
