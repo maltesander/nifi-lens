@@ -270,7 +270,7 @@ fn render_queue_row(frame: &mut Frame, area: Rect, y: u16, row: &QueuePressureRo
         truncate(&row.source_name, 15),
         truncate(&row.destination_name, 15)
     );
-    let bar = render_fill_bar(10, row.fill_percent);
+    let bar = crate::widget::gauge::fill_bar(10, row.fill_percent);
     let ttf = format_time_to_full(&row.time_to_full);
     let pct = format!("{:>3}%", row.fill_percent);
 
@@ -385,7 +385,7 @@ fn render_repo_aggregate_row(
         RepoKind::Provenance => "P",
     };
 
-    let fill = render_fill_bar(15, row.fill_percent);
+    let fill = crate::widget::gauge::fill_bar(15, row.fill_percent);
     let pct = format!("{:>3}%", row.fill_percent);
 
     let line1 = Line::from(vec![
@@ -477,7 +477,7 @@ fn render_repo_per_node_detail(frame: &mut Frame, area: Rect, state: &HealthStat
 
 /// Render one per-node repository row.
 fn render_node_repo_row(frame: &mut Frame, x: u16, y: u16, width: u16, node: &NodeRepoFillBar) {
-    let bar = render_fill_bar(10, node.utilization_percent);
+    let bar = crate::widget::gauge::fill_bar(10, node.utilization_percent);
     let pct = format!("{:>3}%", node.utilization_percent);
     let used = format_bytes(node.used_bytes);
     let total = format_bytes(node.total_bytes);
@@ -573,7 +573,7 @@ fn render_node_row(
     selected: bool,
 ) {
     let gutter = if selected { ">" } else { " " };
-    let bar = render_fill_bar(10, node.heap_percent);
+    let bar = crate::widget::gauge::fill_bar(10, node.heap_percent);
     let pct = format!("{:>3}%", node.heap_percent);
 
     let gc_delta_str = match node.gc_delta {
@@ -724,12 +724,6 @@ fn render_processor_row(
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
-
-fn render_fill_bar(width: u16, percent: u32) -> String {
-    let filled = (width as u32 * percent / 100).min(width as u32) as usize;
-    let empty = width as usize - filled;
-    format!("{}{}", "\u{2588}".repeat(filled), "\u{2591}".repeat(empty))
-}
 
 fn format_time_to_full(ttf: &TimeToFull) -> String {
     match ttf {
