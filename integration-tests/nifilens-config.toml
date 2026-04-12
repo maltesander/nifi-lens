@@ -3,7 +3,7 @@
 # Usage (live dev):
 #   export NIFILENS_IT_PASSWORD=adminpassword123
 #   cargo run -- --config integration-tests/nifilens-config.toml \
-#                --context dev-nifi-2-8-0
+#                --context dev-nifi-2-9-0
 #
 # Usage (seeder):
 #   cargo run -p nifilens-fixture-seeder -- \
@@ -11,7 +11,7 @@
 #
 # The same password env var is set by integration-tests/run.sh.
 
-current_context = "dev-nifi-2-8-0"
+current_context = "dev-nifi-2-9-0"
 
 [[contexts]]
 name = "dev-nifi-2-6-0"
@@ -22,7 +22,7 @@ ca_cert_path = "integration-tests/scripts/certs/ca.crt"
 version_strategy = "closest"
 
 [[contexts]]
-name = "dev-nifi-2-8-0"
+name = "dev-nifi-2-9-0"
 url = "https://localhost:8444"
 username = "admin"
 password_env = "NIFILENS_IT_PASSWORD"
