@@ -12,6 +12,7 @@ use std::time::SystemTime;
 
 use nifi_rust_client::dynamic::traits::ProvenanceApi as _;
 use nifi_rust_client::dynamic::traits::ProvenanceEventsApi as _;
+use nifi_rust_client::dynamic::traits::ProvenanceEventsContentApi as _;
 use nifi_rust_client::dynamic::types::{LineageDto, LineageEntity, LineageRequestDto};
 
 use crate::client::NifiClient;
@@ -333,6 +334,92 @@ impl NifiClient {
 
         Ok(())
     }
+
+    /// Fetches the raw content bytes for a provenance event and classifies them.
+    ///
+    /// Maps `GET /nifi-api/provenance-events/{id}/content/input` or `.../output`
+    /// depending on `side`. The raw bytes are classified by [`classify_content`]
+    /// into a [`ContentRender`] variant. Errors are mapped to
+    /// [`NifiLensError::ProvenanceContentFetchFailed`].
+    pub async fn provenance_content(
+        &self,
+        event_id: i64,
+        side: ContentSide,
+    ) -> Result<ContentSnapshot, NifiLensError> {
+        tracing::debug!(
+            context = %self.context_name(),
+            event_id,
+            side = side.as_str(),
+            "fetching provenance event content",
+        );
+
+        let id_str = event_id.to_string();
+        let events_api = self.inner.provenanceevents_api();
+        let content_api = events_api.content(&id_str);
+
+        let bytes = match side {
+            ContentSide::Input => content_api.get_input_content(None).await,
+            ContentSide::Output => content_api.get_output_content(None).await,
+        }
+        .map_err(|err| {
+            classify_or_fallback(self.context_name(), Box::new(err), |source| {
+                NifiLensError::ProvenanceContentFetchFailed {
+                    context: self.context_name().to_string(),
+                    event_id,
+                    side: side.as_str(),
+                    source,
+                }
+            })
+        })?;
+
+        let total_bytes = bytes.len();
+        let render = classify_content(&bytes);
+        let raw: std::sync::Arc<[u8]> = bytes.into();
+
+        Ok(ContentSnapshot {
+            event_id,
+            side,
+            render,
+            total_bytes,
+            raw,
+        })
+    }
+}
+
+/// Classifies raw bytes into a [`ContentRender`] variant.
+///
+/// - Empty slice → [`ContentRender::Empty`]
+/// - Valid UTF-8 text → [`ContentRender::Text`] with JSON pretty-printing if parseable
+/// - Non-UTF-8 bytes → [`ContentRender::Hex`] with the first 4 KiB hex-dumped
+pub(crate) fn classify_content(bytes: &[u8]) -> ContentRender {
+    if bytes.is_empty() {
+        return ContentRender::Empty;
+    }
+    match std::str::from_utf8(bytes) {
+        Ok(text) => {
+            let pretty = serde_json::from_slice::<serde_json::Value>(bytes)
+                .and_then(|v| serde_json::to_string_pretty(&v))
+                .unwrap_or_else(|_| text.to_string());
+            ContentRender::Text { pretty }
+        }
+        Err(_) => ContentRender::Hex {
+            first_4k: hex_dump(&bytes[..bytes.len().min(4096)]),
+        },
+    }
+}
+
+fn hex_dump(bytes: &[u8]) -> String {
+    use std::fmt::Write as _;
+    let mut out = String::with_capacity(bytes.len() * 3);
+    for (i, byte) in bytes.iter().enumerate() {
+        if i > 0 && i % 16 == 0 {
+            out.push('\n');
+        } else if i > 0 {
+            out.push(' ');
+        }
+        let _ = write!(out, "{byte:02x}");
+    }
+    out
 }
 
 /// Converts lineage graph nodes into a chronological list of event summaries.
@@ -378,5 +465,43 @@ pub(crate) fn summary_from_dto(
         flow_file_uuid: dto.flow_file_uuid.unwrap_or_default(),
         relationship: dto.relationship,
         details: dto.details,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn classify_empty_is_empty() {
+        assert!(matches!(classify_content(b""), ContentRender::Empty));
+    }
+
+    #[test]
+    fn classify_plain_utf8_is_text() {
+        match classify_content(b"hello world") {
+            ContentRender::Text { pretty } => assert_eq!(pretty, "hello world"),
+            other => panic!("got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn classify_json_is_prettyprinted_text() {
+        match classify_content(br#"{"a":1,"b":[2,3]}"#) {
+            ContentRender::Text { pretty } => {
+                assert!(pretty.contains("\"a\": 1"));
+                assert!(pretty.contains('\n'));
+            }
+            other => panic!("got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn classify_invalid_utf8_is_hex() {
+        let bytes = vec![0xff, 0x00, 0x61, 0xfe];
+        match classify_content(&bytes) {
+            ContentRender::Hex { first_4k } => assert_eq!(first_4k, "ff 00 61 fe"),
+            other => panic!("got {other:?}"),
+        }
     }
 }

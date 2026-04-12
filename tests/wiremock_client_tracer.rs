@@ -1,6 +1,7 @@
 //! Wiremock tests: Phase 4 tracer client wrappers.
 
 use nifi_lens::client::NifiClient;
+use nifi_lens::client::tracer::{ContentRender, ContentSide};
 use nifi_lens::config::{ResolvedContext, VersionStrategy};
 use nifi_lens::error::NifiLensError;
 use wiremock::matchers::{method, path, query_param};
@@ -228,4 +229,98 @@ async fn get_provenance_event_populates_detail_and_triples() {
     assert!(db_target.is_changed());
     assert_eq!(db_target.previous.as_deref(), Some("prod-replica-1"));
     assert_eq!(db_target.current.as_deref(), Some("prod-replica-2"));
+}
+
+#[tokio::test]
+async fn provenance_content_input_text_json_is_pretty_printed() {
+    let server = MockServer::start().await;
+    stub_login_and_about(&server).await;
+
+    Mock::given(method("GET"))
+        .and(path("/nifi-api/provenance-events/42/content/input"))
+        .respond_with(
+            ResponseTemplate::new(200)
+                .set_body_bytes(br#"{"a":1,"b":2}"#.to_vec())
+                .insert_header("content-type", "application/json"),
+        )
+        .mount(&server)
+        .await;
+
+    let client = NifiClient::connect(&ctx(server.uri())).await.unwrap();
+    let snap = client
+        .provenance_content(42, ContentSide::Input)
+        .await
+        .unwrap();
+
+    assert_eq!(snap.event_id, 42);
+    assert_eq!(snap.side, ContentSide::Input);
+    assert_eq!(snap.total_bytes, br#"{"a":1,"b":2}"#.len());
+    match snap.render {
+        ContentRender::Text { pretty } => {
+            assert!(pretty.contains('\n'), "expected newlines in pretty output");
+            assert!(pretty.contains("\"a\": 1"));
+            assert!(pretty.contains("\"b\": 2"));
+        }
+        other => panic!("expected ContentRender::Text, got: {other:?}"),
+    }
+}
+
+#[tokio::test]
+async fn provenance_content_input_non_utf8_is_hex_dump() {
+    let server = MockServer::start().await;
+    stub_login_and_about(&server).await;
+
+    let payload: Vec<u8> = vec![0xff, 0xfe, 0xfd, 0xfc, 0x00, 0x01, 0x02, 0x03];
+    Mock::given(method("GET"))
+        .and(path("/nifi-api/provenance-events/42/content/input"))
+        .respond_with(
+            ResponseTemplate::new(200)
+                .set_body_bytes(payload.clone())
+                .insert_header("content-type", "application/octet-stream"),
+        )
+        .mount(&server)
+        .await;
+
+    let client = NifiClient::connect(&ctx(server.uri())).await.unwrap();
+    let snap = client
+        .provenance_content(42, ContentSide::Input)
+        .await
+        .unwrap();
+
+    match snap.render {
+        ContentRender::Hex { first_4k } => {
+            assert!(
+                first_4k.contains("ff fe fd fc"),
+                "hex dump should contain 'ff fe fd fc', got: {first_4k}"
+            );
+        }
+        other => panic!("expected ContentRender::Hex, got: {other:?}"),
+    }
+}
+
+#[tokio::test]
+async fn provenance_content_output_not_found_errors() {
+    let server = MockServer::start().await;
+    stub_login_and_about(&server).await;
+
+    Mock::given(method("GET"))
+        .and(path("/nifi-api/provenance-events/42/content/output"))
+        .respond_with(ResponseTemplate::new(404).set_body_string("not found"))
+        .mount(&server)
+        .await;
+
+    let client = NifiClient::connect(&ctx(server.uri())).await.unwrap();
+    let err = client
+        .provenance_content(42, ContentSide::Output)
+        .await
+        .unwrap_err();
+
+    assert!(
+        matches!(
+            &err,
+            NifiLensError::ProvenanceContentFetchFailed { event_id: 42, side, .. }
+            if *side == "output"
+        ),
+        "expected ProvenanceContentFetchFailed with event_id=42 and side=output, got: {err}"
+    );
 }
