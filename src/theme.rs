@@ -27,3 +27,19 @@ pub fn info() -> Style {
 pub fn cursor_row() -> Style {
     Style::default().add_modifier(Modifier::REVERSED)
 }
+
+pub fn success() -> Style {
+    Style::default().fg(Color::Green)
+}
+
+pub fn disabled() -> Style {
+    Style::default().fg(Color::DarkGray)
+}
+
+pub fn bold() -> Style {
+    Style::default().add_modifier(Modifier::BOLD)
+}
+
+pub fn highlight() -> Style {
+    Style::default().add_modifier(Modifier::REVERSED)
+}

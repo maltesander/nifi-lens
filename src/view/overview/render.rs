@@ -82,7 +82,7 @@ fn render_counts(frame: &mut Frame, area: Rect, snapshot: Option<&OverviewSnapsh
             let c = &s.controller;
             Line::from(vec![
                 Span::raw("running "),
-                Span::styled(c.running.to_string(), Style::default().fg(Color::Green)),
+                Span::styled(c.running.to_string(), theme::success()),
                 Span::raw("  stopped "),
                 Span::styled(c.stopped.to_string(), Style::default().fg(Color::Yellow)),
                 Span::raw("  invalid "),

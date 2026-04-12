@@ -278,7 +278,7 @@ fn render_queue_row(frame: &mut Frame, area: Rect, y: u16, row: &QueuePressureRo
         Span::styled(
             format!("{label:<32}"),
             if selected {
-                Style::default().add_modifier(Modifier::REVERSED)
+                theme::cursor_row()
             } else {
                 Style::default()
             },
@@ -508,7 +508,7 @@ fn render_node_row(
         Span::styled(
             format!("{:<22}", truncate(&node.node_address, 20)),
             if selected {
-                Style::default().add_modifier(Modifier::REVERSED)
+                theme::cursor_row()
             } else {
                 Style::default()
             },
@@ -611,7 +611,7 @@ fn render_processor_row(
         Span::styled(
             format!("{:<24}", truncate(&proc.name, 22)),
             if selected {
-                Style::default().add_modifier(Modifier::REVERSED)
+                theme::cursor_row()
             } else {
                 Style::default()
             },

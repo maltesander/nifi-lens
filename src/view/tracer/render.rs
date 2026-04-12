@@ -14,7 +14,7 @@ use std::time::SystemTime;
 
 use ratatui::Frame;
 use ratatui::layout::{Alignment, Constraint, Direction, Layout, Rect};
-use ratatui::style::{Modifier, Style};
+use ratatui::style::Style;
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Borders, Cell, Gauge, Paragraph, Row, Table};
 
@@ -193,7 +193,7 @@ fn render_lineage_timeline(frame: &mut Frame, area: Rect, view: &LineageView) {
         .map(|(idx, e)| {
             let is_selected = idx == selected_in_window;
             let base_style = if is_selected {
-                Style::default().add_modifier(Modifier::REVERSED)
+                theme::cursor_row()
             } else {
                 Style::default()
             };
@@ -593,7 +593,7 @@ fn render_event_table(frame: &mut Frame, area: Rect, view: &LatestEventsView) {
         .enumerate()
         .map(|(idx, e)| {
             let style = if idx == selected_in_window {
-                Style::default().add_modifier(Modifier::REVERSED)
+                theme::cursor_row()
             } else {
                 Style::default()
             };

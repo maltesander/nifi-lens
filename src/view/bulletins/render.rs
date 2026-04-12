@@ -191,7 +191,7 @@ fn render_list(frame: &mut Frame, area: Rect, state: &BulletinsState) {
         .enumerate()
         .map(|(idx, b)| {
             let style = if idx == selected_in_window {
-                Style::default().add_modifier(Modifier::REVERSED)
+                theme::cursor_row()
             } else {
                 Style::default()
             };
