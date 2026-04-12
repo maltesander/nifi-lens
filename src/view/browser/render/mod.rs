@@ -175,10 +175,55 @@ fn status_summary(summary: &NodeStatusSummary) -> String {
     }
 }
 
+/// Build the breadcrumb line for the current selection.
+fn build_breadcrumb_line(state: &BrowserState) -> Line<'static> {
+    let segments = state.breadcrumb_segments();
+    if segments.is_empty() {
+        return Line::from("");
+    }
+
+    let last = segments.len() - 1;
+    let mut spans: Vec<Span<'static>> = Vec::new();
+
+    for (i, seg) in segments.iter().enumerate() {
+        if i > 0 {
+            spans.push(Span::styled(" > ", theme::muted()));
+        }
+
+        let style = if Some(i) == state.breadcrumb_focus {
+            theme::cursor_row() // highlighted segment in breadcrumb mode
+        } else if i == last {
+            theme::bold() // current node (non-navigable)
+        } else {
+            theme::muted() // ancestor (navigable in breadcrumb mode)
+        };
+
+        spans.push(Span::styled(seg.name.clone(), style));
+    }
+
+    Line::from(spans)
+}
+
 fn render_detail(frame: &mut Frame, area: Rect, state: &BrowserState) {
     let Some(&arena_idx) = state.visible.get(state.selected) else {
         return;
     };
+
+    // Split: 1 line for breadcrumb, rest for detail content.
+    let chunks = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([
+            Constraint::Length(1), // breadcrumb
+            Constraint::Fill(1),   // detail content
+        ])
+        .split(area);
+
+    // Render breadcrumb.
+    let crumb_line = build_breadcrumb_line(state);
+    frame.render_widget(Paragraph::new(crumb_line), chunks[0]);
+
+    let detail_area = chunks[1];
+
     let node = &state.nodes[arena_idx];
     let header = format!(
         "{kind} — {name}",
@@ -188,17 +233,19 @@ fn render_detail(frame: &mut Frame, area: Rect, state: &BrowserState) {
     let header_line = Line::from(Span::styled(header, theme::accent()));
 
     match state.details.get(&arena_idx) {
-        Some(NodeDetail::ProcessGroup(d)) => pg::render(frame, area, d, state),
-        Some(NodeDetail::Processor(d)) => processor::render(frame, area, d, state),
-        Some(NodeDetail::Connection(d)) => connection::render(frame, area, d, state),
-        Some(NodeDetail::ControllerService(d)) => controller_service::render(frame, area, d, state),
+        Some(NodeDetail::ProcessGroup(d)) => pg::render(frame, detail_area, d, state),
+        Some(NodeDetail::Processor(d)) => processor::render(frame, detail_area, d, state),
+        Some(NodeDetail::Connection(d)) => connection::render(frame, detail_area, d, state),
+        Some(NodeDetail::ControllerService(d)) => {
+            controller_service::render(frame, detail_area, d, state);
+        }
         None => {
             let lines = vec![
                 header_line,
                 Line::from(""),
                 Line::from(Span::styled("loading…", theme::muted())),
             ];
-            frame.render_widget(Paragraph::new(lines), area);
+            frame.render_widget(Paragraph::new(lines), detail_area);
         }
     }
 }
@@ -315,6 +362,53 @@ pub fn render_properties_modal(
         .take(inner.height as usize)
         .collect();
     frame.render_widget(Paragraph::new(windowed), inner);
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::client::{NodeKind, NodeStatusSummary};
+    use crate::view::browser::state::{BrowserState, TreeNode, rebuild_visible};
+
+    #[test]
+    fn breadcrumb_line_shows_path_segments() {
+        let mut state = BrowserState::new();
+        // Build Root > Generate (2 nodes).
+        state.nodes.push(TreeNode {
+            parent: None,
+            children: vec![1],
+            kind: NodeKind::ProcessGroup,
+            id: "root-id".into(),
+            group_id: String::new(),
+            name: "Root".into(),
+            status_summary: NodeStatusSummary::ProcessGroup {
+                running: 1,
+                stopped: 0,
+                invalid: 0,
+                disabled: 0,
+            },
+        });
+        state.nodes.push(TreeNode {
+            parent: Some(0),
+            children: vec![],
+            kind: NodeKind::Processor,
+            id: "proc-1".into(),
+            group_id: "root-id".into(),
+            name: "Generate".into(),
+            status_summary: NodeStatusSummary::Processor {
+                run_status: "Running".into(),
+            },
+        });
+        state.expanded.insert(0);
+        rebuild_visible(&mut state);
+        state.selected = 1;
+
+        let line = build_breadcrumb_line(&state);
+        let text: String = line.spans.iter().map(|s| s.content.as_ref()).collect();
+        assert!(text.contains("Root"));
+        assert!(text.contains("Generate"));
+        assert!(text.contains(" > "));
+    }
 }
 
 #[cfg(test)]

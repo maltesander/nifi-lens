@@ -9,6 +9,11 @@ pub(crate) struct BrowserHandler;
 
 impl ViewKeyHandler for BrowserHandler {
     fn handle_key(state: &mut AppState, key: KeyEvent) -> Option<UpdateResult> {
+        // Breadcrumb mode intercepts all keys.
+        if state.browser.breadcrumb_focus.is_some() {
+            return handle_breadcrumb_key(state, key);
+        }
+
         if !matches!(key.modifiers, KeyModifiers::NONE | KeyModifiers::SHIFT) {
             return None;
         }
@@ -166,6 +171,18 @@ impl ViewKeyHandler for BrowserHandler {
                     tracer_followup: None,
                 })
             }
+            KeyCode::Char('b') => {
+                let segments = state.browser.breadcrumb_segments();
+                if segments.len() > 1 {
+                    // Focus the last ancestor (parent of selected node).
+                    state.browser.breadcrumb_focus = Some(segments.len() - 2);
+                }
+                Some(UpdateResult {
+                    redraw: true,
+                    intent: None,
+                    tracer_followup: None,
+                })
+            }
             _ => None,
         }
     }
@@ -223,12 +240,62 @@ impl ViewKeyHandler for BrowserHandler {
     }
 }
 
+fn handle_breadcrumb_key(state: &mut AppState, key: KeyEvent) -> Option<UpdateResult> {
+    let focus = state.browser.breadcrumb_focus?;
+    let segments = state.browser.breadcrumb_segments();
+    let max_focus = segments.len().saturating_sub(2); // last segment is current node
+
+    match key.code {
+        KeyCode::Char('h') | KeyCode::Left => {
+            state.browser.breadcrumb_focus = Some(focus.saturating_sub(1));
+            Some(UpdateResult {
+                redraw: true,
+                intent: None,
+                tracer_followup: None,
+            })
+        }
+        KeyCode::Char('l') | KeyCode::Right => {
+            state.browser.breadcrumb_focus = Some((focus + 1).min(max_focus));
+            Some(UpdateResult {
+                redraw: true,
+                intent: None,
+                tracer_followup: None,
+            })
+        }
+        KeyCode::Enter => {
+            if let Some(seg) = segments.get(focus) {
+                let arena_idx = seg.arena_idx;
+                if let Some(pos) = state.browser.visible.iter().position(|&i| i == arena_idx) {
+                    state.browser.selected = pos;
+                    state.browser.emit_detail_request_for_current_selection();
+                }
+            }
+            state.browser.breadcrumb_focus = None;
+            Some(UpdateResult {
+                redraw: true,
+                intent: None,
+                tracer_followup: None,
+            })
+        }
+        KeyCode::Esc => {
+            state.browser.breadcrumb_focus = None;
+            Some(UpdateResult {
+                redraw: true,
+                intent: None,
+                tracer_followup: None,
+            })
+        }
+        _ => Some(UpdateResult::default()), // consume all other keys in breadcrumb mode
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::super::tests::{fresh_state, key, seeded_browser_state, tiny_config};
     use super::super::update;
-    use crate::app::state::{BannerSeverity, Modal, PendingIntent, ViewId};
+    use crate::app::state::{AppState, BannerSeverity, Modal, PendingIntent, ViewId};
     use crate::client::{NodeKind, NodeStatusSummary, RawNode, RecursiveSnapshot};
+    use crate::config::Config;
     use crate::event::{AppEvent, BrowserPayload, ViewPayload};
     use crate::intent::CrossLink;
     use crate::view::browser::state::{FlowIndex, FlowIndexEntry, PropertiesModalState};
@@ -540,5 +607,137 @@ mod tests {
             }
             other => panic!("expected TraceComponent, got {other:?}"),
         }
+    }
+
+    /// Build a 3-level tree: Root (PG) > Pipeline (PG) > Generate (Processor).
+    /// Root and Pipeline are expanded so all three are visible.
+    /// Returns (state, config) with `current_tab` set to Browser.
+    fn three_level_browser_state() -> (AppState, Config) {
+        let mut s = fresh_state();
+        let c = tiny_config();
+        let snap = RecursiveSnapshot {
+            nodes: vec![
+                RawNode {
+                    parent_idx: None,
+                    kind: NodeKind::ProcessGroup,
+                    id: "root".into(),
+                    group_id: "root".into(),
+                    name: "Root".into(),
+                    status_summary: NodeStatusSummary::ProcessGroup {
+                        running: 0,
+                        stopped: 0,
+                        invalid: 0,
+                        disabled: 0,
+                    },
+                },
+                RawNode {
+                    parent_idx: Some(0),
+                    kind: NodeKind::ProcessGroup,
+                    id: "pipeline".into(),
+                    group_id: "root".into(),
+                    name: "Pipeline".into(),
+                    status_summary: NodeStatusSummary::ProcessGroup {
+                        running: 0,
+                        stopped: 0,
+                        invalid: 0,
+                        disabled: 0,
+                    },
+                },
+                RawNode {
+                    parent_idx: Some(1),
+                    kind: NodeKind::Processor,
+                    id: "gen".into(),
+                    group_id: "pipeline".into(),
+                    name: "Generate".into(),
+                    status_summary: NodeStatusSummary::Processor {
+                        run_status: "Running".into(),
+                    },
+                },
+            ],
+            fetched_at: SystemTime::now(),
+        };
+        update(
+            &mut s,
+            AppEvent::Data(ViewPayload::Browser(BrowserPayload::Tree(snap))),
+            &c,
+        );
+        // Expand Pipeline so Generate is visible.
+        s.browser.expanded.insert(1);
+        crate::view::browser::state::rebuild_visible(&mut s.browser);
+        s.current_tab = ViewId::Browser;
+        (s, c)
+    }
+
+    #[test]
+    fn b_enters_breadcrumb_mode() {
+        let (mut s, c) = three_level_browser_state();
+        // Select Generate (visible index 2, arena index 2).
+        s.browser.selected = 2;
+        update(&mut s, key(KeyCode::Char('b'), KeyModifiers::NONE), &c);
+        // Breadcrumb segments for Generate: [Root, Pipeline, Generate].
+        // Focus should land on the last ancestor = index 1 (Pipeline).
+        assert_eq!(s.browser.breadcrumb_focus, Some(1));
+    }
+
+    #[test]
+    fn b_at_root_is_noop() {
+        let (mut s, c) = three_level_browser_state();
+        // Select Root (visible index 0). Only 1 segment → no breadcrumb mode.
+        s.browser.selected = 0;
+        update(&mut s, key(KeyCode::Char('b'), KeyModifiers::NONE), &c);
+        assert_eq!(s.browser.breadcrumb_focus, None);
+    }
+
+    #[test]
+    fn h_l_navigate_breadcrumb_segments() {
+        let (mut s, c) = three_level_browser_state();
+        // Select Generate → breadcrumb segments: [Root(0), Pipeline(1), Generate(2)].
+        s.browser.selected = 2;
+        update(&mut s, key(KeyCode::Char('b'), KeyModifiers::NONE), &c);
+        assert_eq!(s.browser.breadcrumb_focus, Some(1)); // Pipeline
+
+        // h → move to Root (index 0).
+        update(&mut s, key(KeyCode::Char('h'), KeyModifiers::NONE), &c);
+        assert_eq!(s.browser.breadcrumb_focus, Some(0));
+
+        // h again → still 0 (saturating).
+        update(&mut s, key(KeyCode::Char('h'), KeyModifiers::NONE), &c);
+        assert_eq!(s.browser.breadcrumb_focus, Some(0));
+
+        // l → back to 1 (Pipeline).
+        update(&mut s, key(KeyCode::Char('l'), KeyModifiers::NONE), &c);
+        assert_eq!(s.browser.breadcrumb_focus, Some(1));
+    }
+
+    #[test]
+    fn enter_in_breadcrumb_jumps_to_ancestor() {
+        let (mut s, c) = three_level_browser_state();
+        // Select Generate (visible index 2).
+        s.browser.selected = 2;
+        update(&mut s, key(KeyCode::Char('b'), KeyModifiers::NONE), &c);
+        assert_eq!(s.browser.breadcrumb_focus, Some(1)); // Pipeline
+
+        // Navigate to Root (index 0).
+        update(&mut s, key(KeyCode::Char('h'), KeyModifiers::NONE), &c);
+        assert_eq!(s.browser.breadcrumb_focus, Some(0));
+
+        // Enter → jump to Root, exit breadcrumb mode.
+        update(&mut s, key(KeyCode::Enter, KeyModifiers::NONE), &c);
+        assert_eq!(s.browser.breadcrumb_focus, None);
+        // Root is visible index 0.
+        assert_eq!(s.browser.selected, 0);
+    }
+
+    #[test]
+    fn esc_in_breadcrumb_cancels() {
+        let (mut s, c) = three_level_browser_state();
+        s.browser.selected = 2;
+        update(&mut s, key(KeyCode::Char('b'), KeyModifiers::NONE), &c);
+        assert_eq!(s.browser.breadcrumb_focus, Some(1));
+
+        let prev_selected = s.browser.selected;
+        update(&mut s, key(KeyCode::Esc, KeyModifiers::NONE), &c);
+        assert_eq!(s.browser.breadcrumb_focus, None);
+        assert_eq!(s.browser.selected, prev_selected);
     }
 }

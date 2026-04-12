@@ -96,6 +96,8 @@ pub struct AppState {
     /// Set by the context-switch handler so the app loop can force-restart
     /// the current view worker (the registry no-ops when the view matches).
     pub pending_worker_restart: bool,
+    /// Cross-link back/forward history.
+    pub history: crate::app::history::TabHistory,
 }
 
 impl AppState {
@@ -116,6 +118,7 @@ impl AppState {
             error_detail: None,
             should_quit: false,
             pending_worker_restart: false,
+            history: crate::app::history::TabHistory::default(),
         }
     }
 }
@@ -316,19 +319,84 @@ pub fn collect_hints(state: &AppState) -> Vec<crate::widget::hint_bar::HintSpan>
     };
 
     // Global hints appended
-    // TODO: wire history in Task 5
-    // if state.history.can_go_back() {
-    //     hints.push(HintSpan { key: "Alt+\u{2190}", action: "back" });
-    // }
-    // if state.history.can_go_forward() {
-    //     hints.push(HintSpan { key: "Alt+\u{2192}", action: "fwd" });
-    // }
+    if state.history.can_go_back() {
+        hints.push(HintSpan {
+            key: "Alt+\u{2190}",
+            action: "back",
+        });
+    }
+    if state.history.can_go_forward() {
+        hints.push(HintSpan {
+            key: "Alt+\u{2192}",
+            action: "fwd",
+        });
+    }
     hints.push(HintSpan {
         key: "?",
         action: "help",
     });
 
     hints
+}
+
+// ---------------------------------------------------------------------------
+// Tab-history anchor helpers
+// ---------------------------------------------------------------------------
+
+/// Capture the current selection anchor for the active tab.
+fn capture_anchor(state: &AppState) -> Option<crate::app::history::SelectionAnchor> {
+    use crate::app::history::SelectionAnchor;
+    match state.current_tab {
+        ViewId::Browser => state
+            .browser
+            .visible
+            .get(state.browser.selected)
+            .map(|&arena_idx| {
+                SelectionAnchor::ComponentId(state.browser.nodes[arena_idx].id.clone())
+            }),
+        ViewId::Bulletins => Some(SelectionAnchor::RowIndex(state.bulletins.selected)),
+        ViewId::Health => {
+            use crate::view::health::state::HealthCategory;
+            let idx = match state.health.selected_category {
+                HealthCategory::Queues => state.health.queues.selected,
+                HealthCategory::Repositories => state.health.repositories.selected,
+                HealthCategory::Nodes => state.health.nodes.selected,
+                HealthCategory::Processors => state.health.processors.selected,
+            };
+            Some(SelectionAnchor::RowIndex(idx))
+        }
+        ViewId::Overview | ViewId::Tracer => None,
+    }
+}
+
+/// Restore selection from a history entry's anchor.
+fn restore_anchor(state: &mut AppState, entry: &crate::app::history::HistoryEntry) {
+    use crate::app::history::SelectionAnchor;
+    match (&entry.anchor, entry.tab) {
+        (Some(SelectionAnchor::ComponentId(id)), ViewId::Browser) => {
+            let target = state.browser.nodes.iter().position(|n| n.id == *id);
+            if let Some(arena_idx) = target {
+                let mut cursor = state.browser.nodes[arena_idx].parent;
+                while let Some(p) = cursor {
+                    state.browser.expanded.insert(p);
+                    cursor = state.browser.nodes[p].parent;
+                }
+                rebuild_visible(&mut state.browser);
+                if let Some(pos) = state.browser.visible.iter().position(|&i| i == arena_idx) {
+                    state.browser.selected = pos;
+                }
+                state.browser.emit_detail_request_for_current_selection();
+            }
+        }
+        (Some(SelectionAnchor::RowIndex(idx)), ViewId::Bulletins) => {
+            let max = state.bulletins.filtered_indices().len().saturating_sub(1);
+            state.bulletins.selected = (*idx).min(max);
+        }
+        (Some(SelectionAnchor::RowIndex(_)), ViewId::Health) => {
+            // Best-effort: Health uses ListNavigation which clamps on render.
+        }
+        _ => {}
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -699,6 +767,38 @@ fn handle_key(state: &mut AppState, key: KeyEvent, config: &Config) -> UpdateRes
                 tracer_followup: None,
             }
         }
+        (KeyCode::Left, KeyModifiers::ALT) => {
+            let anchor = capture_anchor(state);
+            let current = crate::app::history::HistoryEntry {
+                tab: state.current_tab,
+                anchor,
+            };
+            if let Some(entry) = state.history.pop_back(current) {
+                state.current_tab = entry.tab;
+                restore_anchor(state, &entry);
+            }
+            UpdateResult {
+                redraw: true,
+                intent: None,
+                tracer_followup: None,
+            }
+        }
+        (KeyCode::Right, KeyModifiers::ALT) => {
+            let anchor = capture_anchor(state);
+            let current = crate::app::history::HistoryEntry {
+                tab: state.current_tab,
+                anchor,
+            };
+            if let Some(entry) = state.history.pop_forward(current) {
+                state.current_tab = entry.tab;
+                restore_anchor(state, &entry);
+            }
+            UpdateResult {
+                redraw: true,
+                intent: None,
+                tracer_followup: None,
+            }
+        }
         (KeyCode::Tab, _) => {
             state.current_tab = state.current_tab.next();
             UpdateResult {
@@ -901,6 +1001,11 @@ fn handle_intent_outcome(
             component_id,
             group_id: _group_id,
         }) => {
+            let anchor = capture_anchor(state);
+            state.history.push(crate::app::history::HistoryEntry {
+                tab: state.current_tab,
+                anchor,
+            });
             state.current_tab = ViewId::Browser;
             state.modal = None;
             state.error_detail = None;
@@ -941,6 +1046,11 @@ fn handle_intent_outcome(
             }
         }
         Ok(IntentOutcome::TracerLandingOn { component_id }) => {
+            let anchor = capture_anchor(state);
+            state.history.push(crate::app::history::HistoryEntry {
+                tab: state.current_tab,
+                anchor,
+            });
             use crate::view::tracer::state::start_latest_events;
             start_latest_events(&mut state.tracer, component_id);
             state.current_tab = ViewId::Tracer;
@@ -1252,5 +1362,81 @@ mod tests {
             s.status.banner.as_ref().unwrap().severity,
             BannerSeverity::Error
         );
+    }
+
+    #[test]
+    fn cross_link_open_in_browser_pushes_history() {
+        let (mut s, c) = seeded_browser_state();
+        s.current_tab = ViewId::Bulletins;
+        let outcome = Ok(IntentOutcome::OpenInBrowserTarget {
+            component_id: "gen".into(),
+            group_id: "root".into(),
+        });
+        update(&mut s, AppEvent::IntentOutcome(outcome), &c);
+        assert!(s.history.can_go_back(), "back stack should have an entry");
+        assert_eq!(s.current_tab, ViewId::Browser);
+    }
+
+    #[test]
+    fn cross_link_tracer_landing_pushes_history() {
+        let mut s = fresh_state();
+        let c = tiny_config();
+        s.current_tab = ViewId::Browser;
+        let outcome = Ok(IntentOutcome::TracerLandingOn {
+            component_id: "some-comp".into(),
+        });
+        update(&mut s, AppEvent::IntentOutcome(outcome), &c);
+        assert!(s.history.can_go_back(), "back stack should have an entry");
+        assert_eq!(s.current_tab, ViewId::Tracer);
+    }
+
+    #[test]
+    fn alt_left_navigates_back() {
+        let mut s = fresh_state();
+        let c = tiny_config();
+        s.current_tab = ViewId::Bulletins;
+        s.history.push(crate::app::history::HistoryEntry {
+            tab: ViewId::Bulletins,
+            anchor: None,
+        });
+        s.current_tab = ViewId::Browser;
+
+        update(&mut s, key(KeyCode::Left, KeyModifiers::ALT), &c);
+        assert_eq!(s.current_tab, ViewId::Bulletins);
+    }
+
+    #[test]
+    fn alt_right_navigates_forward() {
+        let mut s = fresh_state();
+        let c = tiny_config();
+        // Simulate: was on Bulletins, pushed history, moved to Browser,
+        // then popped back. Forward stack should have Browser.
+        s.history.push(crate::app::history::HistoryEntry {
+            tab: ViewId::Bulletins,
+            anchor: None,
+        });
+        s.current_tab = ViewId::Browser;
+        // Pop back to Bulletins (populates forward with Browser).
+        let current = crate::app::history::HistoryEntry {
+            tab: ViewId::Browser,
+            anchor: None,
+        };
+        let entry = s.history.pop_back(current);
+        assert!(entry.is_some());
+        s.current_tab = ViewId::Bulletins;
+        assert!(s.history.can_go_forward());
+
+        update(&mut s, key(KeyCode::Right, KeyModifiers::ALT), &c);
+        assert_eq!(s.current_tab, ViewId::Browser);
+    }
+
+    #[test]
+    fn alt_left_noop_when_history_empty() {
+        let mut s = fresh_state();
+        let c = tiny_config();
+        s.current_tab = ViewId::Browser;
+        update(&mut s, key(KeyCode::Left, KeyModifiers::ALT), &c);
+        // Tab unchanged — no history.
+        assert_eq!(s.current_tab, ViewId::Browser);
     }
 }

@@ -309,6 +309,7 @@ pub fn apply_tree_snapshot(state: &mut BrowserState, snap: RecursiveSnapshot) {
     state.expanded = new_expanded;
     state.details = new_details;
     state.pending_detail = None;
+    state.breadcrumb_focus = None;
     state.last_tree_fetched_at = Some(snap.fetched_at);
 
     rebuild_visible(state);

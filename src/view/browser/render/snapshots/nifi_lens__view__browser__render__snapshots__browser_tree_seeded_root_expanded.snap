@@ -1,12 +1,13 @@
 ---
 source: src/view/browser/render/mod.rs
+assertion_line: 501
 expression: render_to_string(&s)
 ---
 "┌ Browser — last <DUR> ago ───────────────────────────────────────────────────────────────────────────────────────────────┐"
-"│▾  root  ● 5 ○ 1 ⚠ 0 ⌀ 0          │Process Group — root                                                               │"
-"│    ● GenerateFlowFile            │                                                                                   │"
-"│    → gen→upd  34% 12/12 / 1KB    │loading…                                                                           │"
-"│                                  │                                                                                   │"
+"│▾  root  ● 5 ○ 1 ⚠ 0 ⌀ 0          │root                                                                               │"
+"│    ● GenerateFlowFile            │Process Group — root                                                               │"
+"│    → gen→upd  34% 12/12 / 1KB    │                                                                                   │"
+"│                                  │loading…                                                                           │"
 "│                                  │                                                                                   │"
 "│                                  │                                                                                   │"
 "│                                  │                                                                                   │"

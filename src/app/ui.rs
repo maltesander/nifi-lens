@@ -18,12 +18,16 @@ pub fn render(frame: &mut Frame, state: &AppState) {
             Constraint::Length(3), // tab bar
             Constraint::Fill(1),   // content
             Constraint::Length(1), // status bar
+            Constraint::Length(1), // hint bar
         ])
         .split(root);
 
     render_tab_bar(frame, chunks[0], state);
     render_content(frame, chunks[1], state);
     status_bar::render(frame, chunks[2], state);
+
+    let hints = crate::app::state::collect_hints(state);
+    crate::widget::hint_bar::render(frame, chunks[3], &hints);
 
     if let Some(modal) = &state.modal {
         match modal {
