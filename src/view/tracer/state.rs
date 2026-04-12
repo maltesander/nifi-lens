@@ -9,6 +9,7 @@ use std::time::SystemTime;
 
 use tokio::task::AbortHandle;
 
+use crate::app::navigation::ListNavigation;
 use crate::client::{
     AttributeTriple, ContentRender, ContentSide, LatestEventsSnapshot, LineageSnapshot,
     ProvenanceEventDetail, ProvenanceEventSummary,
@@ -100,6 +101,28 @@ impl LatestEventsView {
     }
 }
 
+impl ListNavigation for LatestEventsView {
+    fn list_len(&self) -> usize {
+        self.events.len()
+    }
+
+    fn selected(&self) -> Option<usize> {
+        if self.events.is_empty() {
+            None
+        } else {
+            Some(self.selected)
+        }
+    }
+
+    fn set_selected(&mut self, index: Option<usize>) {
+        self.selected = index.unwrap_or(0);
+    }
+
+    fn wraps(&self) -> bool {
+        true
+    }
+}
+
 // ── LineageRunning ───────────────────────────────────────────────────────────
 
 /// State while a lineage query is being polled.
@@ -137,6 +160,28 @@ pub struct LineageView {
     pub diff_mode: AttributeDiffMode,
     /// When the lineage snapshot was last fetched.
     pub fetched_at: SystemTime,
+}
+
+impl ListNavigation for LineageView {
+    fn list_len(&self) -> usize {
+        self.snapshot.events.len()
+    }
+
+    fn selected(&self) -> Option<usize> {
+        if self.snapshot.events.is_empty() {
+            None
+        } else {
+            Some(self.selected_event)
+        }
+    }
+
+    fn set_selected(&mut self, index: Option<usize>) {
+        self.selected_event = index.unwrap_or(0);
+    }
+
+    fn wraps(&self) -> bool {
+        true
+    }
 }
 
 // ── EventDetail ──────────────────────────────────────────────────────────────
@@ -235,9 +280,9 @@ pub enum Followup {
 /// Resets `event_detail` to [`EventDetail::NotLoaded`] on any selection change.
 pub fn lineage_move_down(state: &mut TracerState) {
     if let TracerMode::Lineage(ref mut view) = state.mode {
-        let len = view.snapshot.events.len();
-        if len > 0 {
-            view.selected_event = (view.selected_event + 1) % len;
+        let prev = view.selected_event;
+        ListNavigation::move_down(view.as_mut());
+        if view.selected_event != prev {
             view.event_detail = EventDetail::NotLoaded;
         }
     }
@@ -248,9 +293,9 @@ pub fn lineage_move_down(state: &mut TracerState) {
 /// Resets `event_detail` to [`EventDetail::NotLoaded`] on any selection change.
 pub fn lineage_move_up(state: &mut TracerState) {
     if let TracerMode::Lineage(ref mut view) = state.mode {
-        let len = view.snapshot.events.len();
-        if len > 0 {
-            view.selected_event = view.selected_event.checked_sub(1).unwrap_or(len - 1);
+        let prev = view.selected_event;
+        ListNavigation::move_up(view.as_mut());
+        if view.selected_event != prev {
             view.event_detail = EventDetail::NotLoaded;
         }
     }
@@ -320,20 +365,14 @@ pub fn start_latest_events(state: &mut TracerState, component_id: String) {
 /// Moves the selection down by one row in LatestEvents mode, wrapping at the end.
 pub fn latest_events_move_down(state: &mut TracerState) {
     if let TracerMode::LatestEvents(ref mut view) = state.mode {
-        let len = view.events.len();
-        if len > 0 {
-            view.selected = (view.selected + 1) % len;
-        }
+        ListNavigation::move_down(view);
     }
 }
 
 /// Moves the selection up by one row in LatestEvents mode, wrapping at the start.
 pub fn latest_events_move_up(state: &mut TracerState) {
     if let TracerMode::LatestEvents(ref mut view) = state.mode {
-        let len = view.events.len();
-        if len > 0 {
-            view.selected = view.selected.checked_sub(1).unwrap_or(len - 1);
-        }
+        ListNavigation::move_up(view);
     }
 }
 

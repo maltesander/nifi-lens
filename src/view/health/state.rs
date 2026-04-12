@@ -1,5 +1,6 @@
 //! Pure state reducer for the Health tab.
 
+use crate::app::navigation::ListNavigation;
 use crate::client::health::{
     self, FullPgStatusSnapshot, NodesState, ProcessorThreadState, QueuePressureState,
     RepositoryState, SystemDiagSnapshot, TOP_N,
@@ -87,6 +88,72 @@ pub fn apply_system_diagnostics(state: &mut HealthState, diag: SystemDiagSnapsho
     state.repositories = health::extract_repositories(&diag);
     health::update_nodes(&mut state.nodes, &diag);
     state.last_sysdiag_refresh = Some(diag.fetched_at);
+}
+
+impl ListNavigation for QueuePressureState {
+    fn list_len(&self) -> usize {
+        self.rows.len()
+    }
+
+    fn selected(&self) -> Option<usize> {
+        if self.rows.is_empty() {
+            None
+        } else {
+            Some(self.selected)
+        }
+    }
+
+    fn set_selected(&mut self, index: Option<usize>) {
+        self.selected = index.unwrap_or(0);
+    }
+
+    fn wraps(&self) -> bool {
+        true
+    }
+}
+
+impl ListNavigation for NodesState {
+    fn list_len(&self) -> usize {
+        self.nodes.len()
+    }
+
+    fn selected(&self) -> Option<usize> {
+        if self.nodes.is_empty() {
+            None
+        } else {
+            Some(self.selected)
+        }
+    }
+
+    fn set_selected(&mut self, index: Option<usize>) {
+        self.selected = index.unwrap_or(0);
+    }
+
+    fn wraps(&self) -> bool {
+        true
+    }
+}
+
+impl ListNavigation for ProcessorThreadState {
+    fn list_len(&self) -> usize {
+        self.rows.len()
+    }
+
+    fn selected(&self) -> Option<usize> {
+        if self.rows.is_empty() {
+            None
+        } else {
+            Some(self.selected)
+        }
+    }
+
+    fn set_selected(&mut self, index: Option<usize>) {
+        self.selected = index.unwrap_or(0);
+    }
+
+    fn wraps(&self) -> bool {
+        true
+    }
 }
 
 // ---------------------------------------------------------------------------

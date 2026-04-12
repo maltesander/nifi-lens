@@ -10,6 +10,7 @@ use std::time::SystemTime;
 
 use tokio::sync::{mpsc, oneshot};
 
+use crate::app::navigation::ListNavigation;
 use crate::client::browser::{
     ConnectionDetail, ControllerServiceDetail, NodeKind, NodeStatusSummary, ProcessGroupDetail,
     ProcessorDetail, RawNode, RecursiveSnapshot,
@@ -44,39 +45,27 @@ impl BrowserState {
     }
 
     pub fn move_down(&mut self) {
-        if self.visible.is_empty() {
-            return;
-        }
-        if self.selected + 1 < self.visible.len() {
-            self.selected += 1;
-        }
+        ListNavigation::move_down(self);
     }
 
     pub fn move_up(&mut self) {
-        if self.selected > 0 {
-            self.selected -= 1;
-        }
+        ListNavigation::move_up(self);
     }
 
     pub fn page_down(&mut self, by: usize) {
-        if self.visible.is_empty() {
-            return;
-        }
-        self.selected = (self.selected + by).min(self.visible.len() - 1);
+        ListNavigation::page_down(self, by);
     }
 
     pub fn page_up(&mut self, by: usize) {
-        self.selected = self.selected.saturating_sub(by);
+        ListNavigation::page_up(self, by);
     }
 
     pub fn jump_home(&mut self) {
-        self.selected = 0;
+        ListNavigation::jump_home(self);
     }
 
     pub fn jump_end(&mut self) {
-        if !self.visible.is_empty() {
-            self.selected = self.visible.len() - 1;
-        }
+        ListNavigation::jump_end(self);
     }
 
     /// `Enter` / `→` / `l` behavior. On a collapsed PG, expands and moves
@@ -150,6 +139,24 @@ impl BrowserState {
         } else {
             self.pending_detail_unsent = true;
         }
+    }
+}
+
+impl ListNavigation for BrowserState {
+    fn list_len(&self) -> usize {
+        self.visible.len()
+    }
+
+    fn selected(&self) -> Option<usize> {
+        if self.visible.is_empty() {
+            None
+        } else {
+            Some(self.selected)
+        }
+    }
+
+    fn set_selected(&mut self, index: Option<usize>) {
+        self.selected = index.unwrap_or(0);
     }
 }
 

@@ -6,6 +6,7 @@
 use std::collections::VecDeque;
 use std::time::SystemTime;
 
+use crate::app::navigation::ListNavigation;
 use crate::client::BulletinSnapshot;
 use crate::event::BulletinsPayload;
 
@@ -236,32 +237,26 @@ impl BulletinsState {
     // ---- navigation / pause ----
 
     pub fn move_selection_up(&mut self) {
-        if self.selected > 0 {
-            self.selected -= 1;
+        let prev = self.selected;
+        ListNavigation::move_up(self);
+        if self.selected != prev {
             self.auto_scroll = false;
         }
     }
     pub fn move_selection_down(&mut self) {
+        ListNavigation::move_down(self);
         let vis_len = self.filtered_indices().len();
-        if vis_len == 0 {
-            return;
-        }
-        let max = vis_len - 1;
-        if self.selected < max {
-            self.selected += 1;
-        }
-        if self.selected == max {
+        if vis_len > 0 && self.selected == vis_len - 1 {
             self.auto_scroll = true;
             self.new_since_pause = 0;
         }
     }
     pub fn jump_to_oldest(&mut self) {
-        self.selected = 0;
+        ListNavigation::jump_home(self);
         self.auto_scroll = false;
     }
     pub fn jump_to_newest(&mut self) {
-        let max = self.filtered_indices().len().saturating_sub(1);
-        self.selected = max;
+        ListNavigation::jump_end(self);
         self.auto_scroll = true;
         self.new_since_pause = 0;
     }
@@ -303,6 +298,24 @@ impl BulletinsState {
         } else {
             0
         };
+    }
+}
+
+impl ListNavigation for BulletinsState {
+    fn list_len(&self) -> usize {
+        self.filtered_indices().len()
+    }
+
+    fn selected(&self) -> Option<usize> {
+        if self.filtered_indices().is_empty() {
+            None
+        } else {
+            Some(self.selected)
+        }
+    }
+
+    fn set_selected(&mut self, index: Option<usize>) {
+        self.selected = index.unwrap_or(0);
     }
 }
 

@@ -6,7 +6,6 @@
 /// All movement methods have default implementations that handle
 /// empty lists gracefully (no panics) and support both clamping
 /// (default) and wrapping behaviour via `wraps`.
-#[allow(dead_code)] // Wired to view states in a follow-up commit.
 pub(crate) trait ListNavigation {
     /// Number of items in the list.
     fn list_len(&self) -> usize;
