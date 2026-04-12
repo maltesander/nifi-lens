@@ -357,6 +357,7 @@ mod tests {
                     collection_millis: 300,
                 }],
                 load_average: Some(1.5),
+                available_processors: Some(8),
                 total_threads: 100,
                 uptime: "2 days".into(),
                 content_repos: Vec::new(),
@@ -424,6 +425,7 @@ mod tests {
                 heap_max_bytes: 8_000,
                 gc: Vec::new(),
                 load_average: None,
+                available_processors: Some(4),
                 total_threads: 10,
                 uptime: "1h".into(),
                 content_repos: vec![
