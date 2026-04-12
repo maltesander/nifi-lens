@@ -10,4 +10,4 @@
 #   3. Edit integration-tests/nifilens-config.toml.
 #   4. Edit tests/common/versions.rs (port_for match arm).
 #   5. Push. CI drift check will fail loudly if you missed any of steps 2–4.
-versions = ["2.6.0", "2.8.0"]
+versions = ["2.6.0", "2.9.0"]
