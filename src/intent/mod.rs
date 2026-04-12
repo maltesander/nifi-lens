@@ -2,13 +2,13 @@
 
 use std::sync::Arc;
 
-use tokio::sync::RwLock;
+use tokio::sync::{RwLock, mpsc};
 
 use crate::app::state::ViewId;
 use crate::client::NifiClient;
 use crate::config::Config;
 use crate::error::NifiLensError;
-use crate::event::IntentOutcome;
+use crate::event::{AppEvent, IntentOutcome};
 
 #[derive(Debug, Clone)]
 pub enum Intent {
@@ -96,6 +96,7 @@ impl Intent {
 pub struct IntentDispatcher {
     pub client: Arc<RwLock<NifiClient>>,
     pub config: Arc<Config>,
+    pub tx: mpsc::Sender<AppEvent>,
 }
 
 impl IntentDispatcher {
@@ -119,11 +120,9 @@ impl IntentDispatcher {
                 component_id: component_id.clone(),
                 group_id: group_id.clone(),
             })),
-            Intent::JumpTo(CrossLink::TraceComponent { component_id }) => {
-                Some(Ok(IntentOutcome::TracerLandingOn {
-                    component_id: component_id.clone(),
-                }))
-            }
+            // TraceComponent is dispatched in `dispatch()` to spawn the
+            // latest-events worker alongside the tab switch.
+            Intent::JumpTo(CrossLink::TraceComponent { .. }) => None,
             _ => None,
         }
     }
@@ -137,10 +136,83 @@ impl IntentDispatcher {
 
         match intent {
             Intent::SwitchContext(name) => self.switch_context(name).await,
-            Intent::DeleteLineageQuery { .. } => Ok(IntentOutcome::NotImplementedInPhase {
-                intent_name: "DeleteLineageQuery",
-                phase: 0,
+
+            // --- Phase 4 tracer intents ---
+            Intent::JumpTo(CrossLink::TraceComponent { component_id }) => {
+                crate::view::tracer::worker::spawn_latest_events(
+                    self.client.clone(),
+                    self.tx.clone(),
+                    component_id.clone(),
+                );
+                Ok(IntentOutcome::TracerLandingOn { component_id })
+            }
+            Intent::TraceFlowfile(uuid) => {
+                let handle = crate::view::tracer::worker::spawn_lineage(
+                    self.client.clone(),
+                    self.tx.clone(),
+                    uuid.clone(),
+                );
+                Ok(IntentOutcome::TracerLineageStarted {
+                    uuid,
+                    abort: handle.abort_handle(),
+                })
+            }
+            Intent::RefreshLatestEvents { component_id } => {
+                crate::view::tracer::worker::spawn_latest_events(
+                    self.client.clone(),
+                    self.tx.clone(),
+                    component_id,
+                );
+                Ok(IntentOutcome::ViewRefreshed {
+                    view: ViewId::Tracer,
+                })
+            }
+            Intent::RefreshLineage { uuid } => {
+                let handle = crate::view::tracer::worker::spawn_lineage(
+                    self.client.clone(),
+                    self.tx.clone(),
+                    uuid.clone(),
+                );
+                Ok(IntentOutcome::TracerLineageStarted {
+                    uuid,
+                    abort: handle.abort_handle(),
+                })
+            }
+            Intent::LoadEventDetail { event_id } => {
+                crate::view::tracer::worker::spawn_event_detail(
+                    self.client.clone(),
+                    self.tx.clone(),
+                    event_id,
+                );
+                Ok(IntentOutcome::ViewRefreshed {
+                    view: ViewId::Tracer,
+                })
+            }
+            Intent::FetchEventContent { event_id, side } => {
+                let client_side = match side {
+                    ContentSide::Input => crate::client::ContentSide::Input,
+                    ContentSide::Output => crate::client::ContentSide::Output,
+                };
+                crate::view::tracer::worker::spawn_content(
+                    self.client.clone(),
+                    self.tx.clone(),
+                    event_id as i64,
+                    client_side,
+                );
+                Ok(IntentOutcome::ViewRefreshed {
+                    view: ViewId::Tracer,
+                })
+            }
+            Intent::DeleteLineageQuery { query_id } => {
+                crate::view::tracer::worker::spawn_delete_lineage(self.client.clone(), query_id);
+                Ok(IntentOutcome::ViewRefreshed {
+                    view: ViewId::Tracer,
+                })
+            }
+            Intent::CancelLineageQuery => Ok(IntentOutcome::ViewRefreshed {
+                view: ViewId::Tracer,
             }),
+
             other => Ok(IntentOutcome::NotImplementedInPhase {
                 intent_name: other.name(),
                 phase: 0,
@@ -219,18 +291,16 @@ mod tests {
     }
 
     #[test]
-    fn cross_link_trace_component_returns_tracer_landing_outcome() {
-        let outcome = IntentDispatcher::handle_pure(&Intent::JumpTo(CrossLink::TraceComponent {
+    fn cross_link_trace_component_not_handled_by_handle_pure() {
+        // TraceComponent is dispatched in `dispatch()` (not `handle_pure`)
+        // because it needs to spawn the latest-events worker.
+        let result = IntentDispatcher::handle_pure(&Intent::JumpTo(CrossLink::TraceComponent {
             component_id: "proc-1".into(),
-        }))
-        .expect("JumpTo must be handled by handle_pure")
-        .expect("JumpTo returns Ok(...)");
-        match outcome {
-            IntentOutcome::TracerLandingOn { component_id } => {
-                assert_eq!(component_id, "proc-1");
-            }
-            other => panic!("expected TracerLandingOn, got {other:?}"),
-        }
+        }));
+        assert!(
+            result.is_none(),
+            "TraceComponent should not be handled by handle_pure"
+        );
     }
 
     #[test]
