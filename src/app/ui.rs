@@ -84,7 +84,7 @@ fn render_content(frame: &mut Frame, area: Rect, state: &AppState) {
         ViewId::Overview => overview::render(frame, area, &state.overview),
         ViewId::Bulletins => bulletins::render(frame, area, &state.bulletins, &state.timestamp_cfg),
         ViewId::Browser => browser::render(frame, area, &state.browser, &state.flow_index),
-        ViewId::Tracer => tracer::render(frame, area, &state.tracer),
+        ViewId::Tracer => tracer::render(frame, area, &state.tracer, &state.timestamp_cfg),
         ViewId::Health => health::render(frame, area, &state.health),
     }
 }
