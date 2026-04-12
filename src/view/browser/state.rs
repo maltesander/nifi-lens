@@ -37,6 +37,16 @@ pub struct BrowserState {
     /// `r` pushes a unit on it; the worker wakes and fetches immediately.
     /// Task 15 wires this.
     pub force_tick_tx: Option<oneshot::Sender<()>>,
+    /// `None` = tree pane has focus. `Some(i)` = breadcrumb segment `i`
+    /// is highlighted. Set by the `b` key, cleared by `Esc` or `Enter`.
+    pub breadcrumb_focus: Option<usize>,
+}
+
+/// One segment in the breadcrumb path.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct BreadcrumbSegment {
+    pub name: String,
+    pub arena_idx: usize,
 }
 
 impl BrowserState {
@@ -139,6 +149,25 @@ impl BrowserState {
         } else {
             self.pending_detail_unsent = true;
         }
+    }
+
+    /// Build the breadcrumb path from root to the currently selected node.
+    /// Returns an empty vec if no node is selected.
+    pub fn breadcrumb_segments(&self) -> Vec<BreadcrumbSegment> {
+        let Some(&arena_idx) = self.visible.get(self.selected) else {
+            return Vec::new();
+        };
+        let mut segments = Vec::new();
+        let mut cursor = Some(arena_idx);
+        while let Some(i) = cursor {
+            segments.push(BreadcrumbSegment {
+                name: self.nodes[i].name.clone(),
+                arena_idx: i,
+            });
+            cursor = self.nodes[i].parent;
+        }
+        segments.reverse();
+        segments
     }
 }
 
@@ -897,5 +926,90 @@ mod tests {
         let before = s.details.len();
         apply_node_detail(&mut s, payload);
         assert_eq!(s.details.len(), before);
+    }
+
+    #[test]
+    fn breadcrumb_segments_at_root() {
+        let mut state = BrowserState::default();
+        state.nodes.push(TreeNode {
+            parent: None,
+            children: vec![],
+            kind: NodeKind::ProcessGroup,
+            id: "root-id".into(),
+            group_id: String::new(),
+            name: "NiFi Flow".into(),
+            status_summary: NodeStatusSummary::ProcessGroup {
+                running: 0,
+                stopped: 0,
+                invalid: 0,
+                disabled: 0,
+            },
+        });
+        state.visible = vec![0];
+        state.selected = 0;
+
+        let segs = state.breadcrumb_segments();
+        assert_eq!(segs.len(), 1);
+        assert_eq!(segs[0].name, "NiFi Flow");
+        assert_eq!(segs[0].arena_idx, 0);
+    }
+
+    #[test]
+    fn breadcrumb_segments_nested() {
+        // Build Root > Pipeline > Generate
+        let mut state = BrowserState::default();
+        state.nodes.push(TreeNode {
+            parent: None,
+            children: vec![1],
+            kind: NodeKind::ProcessGroup,
+            id: "root-id".into(),
+            group_id: String::new(),
+            name: "Root".into(),
+            status_summary: NodeStatusSummary::ProcessGroup {
+                running: 0,
+                stopped: 0,
+                invalid: 0,
+                disabled: 0,
+            },
+        });
+        state.nodes.push(TreeNode {
+            parent: Some(0),
+            children: vec![2],
+            kind: NodeKind::ProcessGroup,
+            id: "pg-1".into(),
+            group_id: "root-id".into(),
+            name: "Pipeline".into(),
+            status_summary: NodeStatusSummary::ProcessGroup {
+                running: 0,
+                stopped: 0,
+                invalid: 0,
+                disabled: 0,
+            },
+        });
+        state.nodes.push(TreeNode {
+            parent: Some(1),
+            children: vec![],
+            kind: NodeKind::Processor,
+            id: "proc-1".into(),
+            group_id: "pg-1".into(),
+            name: "Generate".into(),
+            status_summary: NodeStatusSummary::Processor {
+                run_status: "Running".into(),
+            },
+        });
+        state.visible = vec![0, 1, 2];
+        state.selected = 2;
+
+        let segs = state.breadcrumb_segments();
+        assert_eq!(segs.len(), 3);
+        assert_eq!(segs[0].name, "Root");
+        assert_eq!(segs[1].name, "Pipeline");
+        assert_eq!(segs[2].name, "Generate");
+    }
+
+    #[test]
+    fn breadcrumb_focus_default_is_none() {
+        let state = BrowserState::default();
+        assert!(state.breadcrumb_focus.is_none());
     }
 }
