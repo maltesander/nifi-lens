@@ -22,7 +22,7 @@ openssl req -newkey rsa:2048 -keyout "$CERTS_DIR/server.key" \
 openssl x509 -req -in "$CERTS_DIR/server.csr" \
     -CA "$CERTS_DIR/ca.crt" -CAkey "$CERTS_DIR/ca.key" \
     -CAcreateserial -out "$CERTS_DIR/server.crt" -days 365 \
-    -extfile <(printf "basicConstraints=critical,CA:false\nsubjectAltName=DNS:localhost,IP:127.0.0.1\nextendedKeyUsage=serverAuth") \
+    -extfile <(printf "basicConstraints=critical,CA:false\nsubjectAltName=DNS:localhost,DNS:nifi-2-9-0-node1,DNS:nifi-2-9-0-node2,IP:127.0.0.1\nextendedKeyUsage=serverAuth,clientAuth") \
     2>/dev/null
 
 openssl pkcs12 -export \
