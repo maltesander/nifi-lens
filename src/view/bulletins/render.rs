@@ -27,7 +27,7 @@ use time;
 
 use crate::client::Severity;
 use crate::theme;
-use crate::view::bulletins::state::{BulletinsState, ComponentType};
+use crate::view::bulletins::state::{BulletinsState, ComponentType, GroupedRow};
 
 const FILTER_BAR_ROWS: u16 = 2;
 const DETAIL_PANE_ROWS: u16 = 6;
@@ -169,8 +169,8 @@ fn render_list(
         frame.render_widget(centered, spot);
         return;
     }
-    let filtered = state.filtered_indices();
-    if filtered.is_empty() {
+    let groups: Vec<GroupedRow> = state.grouped_view();
+    if groups.is_empty() {
         let centered = Paragraph::new(Span::styled(
             "no bulletins match the current filters (press c to clear)".to_string(),
             theme::muted(),
@@ -194,18 +194,26 @@ fn render_list(
     } else {
         0
     };
-    let window = &filtered[scroll_offset..filtered.len().min(scroll_offset + visible_rows)];
+    let window = &groups[scroll_offset..groups.len().min(scroll_offset + visible_rows)];
     let selected_in_window = state.selected.saturating_sub(scroll_offset);
     let now = time::OffsetDateTime::now_utc();
     let rows: Vec<Row> = window
         .iter()
-        .map(|&i| &state.ring[i])
         .enumerate()
-        .map(|(idx, b)| {
+        .map(|(idx, group)| {
+            let b = &state.ring[group.latest_ring_idx];
             let style = if idx == selected_in_window {
                 theme::cursor_row()
             } else {
                 Style::default()
+            };
+            let message_cell = if group.count > 1 {
+                Cell::from(Line::from(vec![
+                    Span::styled(format!("[\u{00D7}{}] ", group.count), theme::warning()),
+                    Span::raw(b.message.clone()),
+                ]))
+            } else {
+                Cell::from(b.message.clone())
             };
             Row::new(vec![
                 Cell::from(format_bulletin_time(
@@ -217,7 +225,7 @@ fn render_list(
                 Cell::from(format_severity_label(&b.level)).style(severity_style(&b.level)),
                 Cell::from(truncate_right(&b.source_name, 20)),
                 Cell::from(truncate_left(&b.group_id, 24)),
-                Cell::from(b.message.clone()),
+                message_cell,
             ])
             .style(style)
         })
