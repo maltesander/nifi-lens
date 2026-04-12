@@ -16,15 +16,21 @@ current_context = "dev-nifi-2-9-0"
 [[contexts]]
 name = "dev-nifi-2-6-0"
 url = "https://localhost:8443"
-username = "admin"
-password_env = "NIFILENS_IT_PASSWORD"
 ca_cert_path = "integration-tests/scripts/certs/ca.crt"
 version_strategy = "closest"
+
+[contexts.auth]
+type = "password"
+username = "admin"
+password_env = "NIFILENS_IT_PASSWORD"
 
 [[contexts]]
 name = "dev-nifi-2-9-0"
 url = "https://localhost:8444"
-username = "admin"
-password_env = "NIFILENS_IT_PASSWORD"
 ca_cert_path = "integration-tests/scripts/certs/ca.crt"
 version_strategy = "closest"
+
+[contexts.auth]
+type = "password"
+username = "admin"
+password_env = "NIFILENS_IT_PASSWORD"

@@ -4,7 +4,7 @@ use nifi_lens::client::{
     ConnectionDetail, ControllerServiceDetail, NifiClient, NodeKind, ProcessGroupDetail,
     ProcessorDetail, RecursiveSnapshot,
 };
-use nifi_lens::config::{ResolvedContext, VersionStrategy};
+use nifi_lens::config::{ResolvedAuth, ResolvedContext, VersionStrategy};
 use wiremock::matchers::{method, path, query_param};
 use wiremock::{Mock, MockServer, ResponseTemplate};
 
@@ -32,11 +32,14 @@ fn ctx(url: String) -> ResolvedContext {
     ResolvedContext {
         name: "wiremock".into(),
         url,
-        username: "admin".into(),
-        password: "anything".into(),
+        auth: ResolvedAuth::Password {
+            username: "admin".into(),
+            password: "anything".into(),
+        },
         version_strategy: VersionStrategy::Closest,
         insecure_tls: true,
         ca_cert_path: None,
+        proxied_entities_chain: None,
     }
 }
 

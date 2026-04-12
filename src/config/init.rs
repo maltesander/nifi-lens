@@ -29,9 +29,12 @@ name = "dev"
 # Base URL of the NiFi instance (https:// required).
 url = "https://nifi-dev.internal:8443"
 
-# Login username.
-username = "admin"
-
+# Authentication. Three types are supported:
+#
+#   type = "password"  — username + password (or password_env)
+#   type = "token"     — pre-obtained JWT (token or token_env)
+#   type = "mtls"      — mutual TLS with client_identity_path
+#
 # Password is read from an environment variable. Export it before running
 # nifilens:
 #
@@ -39,6 +42,9 @@ username = "admin"
 #
 # Alternatively, replace `password_env = "..."` with `password = "..."` to
 # use a literal (nifilens will emit a warning on every load).
+[contexts.auth]
+type = "password"
+username = "admin"
 password_env = "NIFILENS_DEV_PASSWORD"
 
 # How to map the detected NiFi version to a supported API module:

@@ -63,10 +63,13 @@ current_context = "dev"
 [[contexts]]
 name = "dev"
 url = "https://nifi-dev.internal:8443"
+version_strategy = "closest"   # strict | closest | latest
+insecure_tls = false
+
+[contexts.auth]
+type = "password"
 username = "admin"
 password_env = "NIFILENS_DEV_PASSWORD"
-version_strategy = "closest"
-insecure_tls = false
 ```
 
 Then:
@@ -174,21 +177,36 @@ ring_size = 5000
 [[contexts]]
 name = "dev"
 url = "https://nifi-dev.internal:8443"
-username = "admin"
-password_env = "NIFILENS_DEV_PASSWORD"
 version_strategy = "closest"   # strict | closest | latest
 insecure_tls = false
+
+[contexts.auth]
+type = "password"              # password | token | mtls
+username = "admin"
+password_env = "NIFILENS_DEV_PASSWORD"
 
 [[contexts]]
 name = "prod"
 url = "https://nifi-prod.internal:8443"
+version_strategy = "strict"
+
+[contexts.auth]
+type = "password"
 username = "operator"
 password_env = "NIFILENS_PROD_PASSWORD"
-version_strategy = "strict"
 ```
 
-- **Credentials** primarily via `password_env` → environment variable.
-  Plaintext `password = "..."` is supported but emits a warning at load.
+- **Credentials** are configured in the `[contexts.auth]` sub-table. Three
+  types are supported:
+
+  | Type | Fields | Notes |
+  |------|--------|-------|
+  | `password` | `username`, `password_env` or `password` | `password_env` preferred; `password` emits a warning |
+  | `token` | `token_env` or `token` | Pre-obtained JWT; `token_env` preferred |
+  | `mtls` | `client_identity_path` | PEM containing private key + cert chain |
+
+  Any context can optionally include `proxied_entities_chain = "<user1><user2>"`
+  for NiFi proxy deployments.
 - **File permissions** must be `0600`; `nifilens` refuses to start if the
   config is world-readable.
 - **CLI overrides:** `nifilens --context stage`, `nifilens --config ./local.toml`.

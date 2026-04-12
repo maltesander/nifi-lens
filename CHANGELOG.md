@@ -9,6 +9,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **BREAKING:** config auth moved from top-level `username`/`password_env`
+  to `[contexts.auth]` sub-table with `type` discriminator (`password`,
+  `token`, `mtls`). See README for migration examples.
+- Token auth (`type = "token"`) for pre-obtained JWT tokens via `token_env`
+  or `token`.
+- mTLS auth (`type = "mtls"`) with `client_identity_path`.
+- `proxied_entities_chain` context field for NiFi proxy deployments.
 - **Health tab (Phase 5):** cluster-wide operational dashboard with four
   categories — queue backpressure leaderboard with server-predicted
   time-to-full, repository fill bars, per-node heap/GC/load strips,
@@ -142,5 +149,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **`deny.toml`** now allows `BSL-1.0` (clipboard-win / error-code via
   arboard) and ignores `RUSTSEC-2024-0436` (unmaintained `paste`
   transitive via ratatui — no safe upgrade available).
+
+### Dependencies
+
+- Bump `nifi-rust-client` from 0.7.0 to 0.8.0.
 
 [Unreleased]: https://github.com/maltesander/nifi-lens/commits/HEAD

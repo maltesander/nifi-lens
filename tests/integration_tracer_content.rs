@@ -9,7 +9,7 @@
 
 use nifi_lens::client::NifiClient;
 use nifi_lens::client::tracer::ContentSide;
-use nifi_lens::config::{ResolvedContext, VersionStrategy};
+use nifi_lens::config::{ResolvedAuth, ResolvedContext, VersionStrategy};
 use nifi_lens::error::NifiLensError;
 
 #[path = "common/mod.rs"]
@@ -39,11 +39,14 @@ async fn integration_tracer_content_text_render() {
         let ctx = ResolvedContext {
             name: context_for(version),
             url: format!("https://localhost:{}", port_for(version)),
-            username: username.clone(),
-            password: password.clone(),
+            auth: ResolvedAuth::Password {
+                username: username.clone(),
+                password: password.clone(),
+            },
             version_strategy: VersionStrategy::Closest,
             insecure_tls: false,
             ca_cert_path: Some(ca_path.clone().into()),
+            proxied_entities_chain: None,
         };
 
         let client = NifiClient::connect(&ctx)

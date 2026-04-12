@@ -48,16 +48,24 @@ pub enum NifiLensError {
         available: Vec<String>,
     },
 
-    #[snafu(display(
-        "context {context:?} uses password_env {var:?} but the environment variable is not set"
-    ))]
-    MissingPasswordEnv { context: String, var: String },
+    /// An auth env var (password_env or token_env) is not set.
+    #[snafu(display("context {context:?}: auth uses env var {var:?} but it is not set"))]
+    MissingAuthEnvVar { context: String, var: String },
 
     #[snafu(display("CA cert file not found at {}", path.display()))]
     CaCertNotFound { path: PathBuf },
 
     #[snafu(display("failed to read CA cert at {}: {source}", path.display()))]
     CaCertReadFailed {
+        path: PathBuf,
+        source: std::io::Error,
+    },
+
+    #[snafu(display("client identity file not found at {}", path.display()))]
+    ClientIdentityNotFound { path: PathBuf },
+
+    #[snafu(display("failed to read client identity at {}: {source}", path.display()))]
+    ClientIdentityReadFailed {
         path: PathBuf,
         source: std::io::Error,
     },
@@ -92,9 +100,10 @@ pub enum NifiLensError {
         "context {context:?}: NiFi rejected the credentials\n\
          \n\
          hints:\n\
-         - double-check `username` in the config\n\
-         - verify the password: either the `password` field, or the environment\n\
-           variable named by `password_env`"
+         - check the [contexts.auth] section in your config\n\
+         - for type=\"password\": verify username and password/password_env\n\
+         - for type=\"token\": verify the JWT is valid and not expired\n\
+         - for type=\"mtls\": verify the client identity PEM"
     ))]
     NifiUnauthorized { context: String },
 

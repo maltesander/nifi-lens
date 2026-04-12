@@ -6,10 +6,13 @@ use std::path::{Path, PathBuf};
 use snafu::ResultExt;
 
 use crate::cli::Args;
-use crate::config::{Config, Credentials, ResolvedContext};
+use crate::config::{
+    AuthConfig, Config, PasswordCredentials, ResolvedAuth, ResolvedContext, TokenCredentials,
+};
 use crate::error::{
-    CaCertNotFoundSnafu, ConfigMissingSnafu, ConfigParseSnafu, ConfigWorldReadableSnafu,
-    MissingPasswordEnvSnafu, NifiLensError, UnknownContextSnafu,
+    CaCertNotFoundSnafu, ClientIdentityNotFoundSnafu, ClientIdentityReadFailedSnafu,
+    ConfigMissingSnafu, ConfigParseSnafu, ConfigWorldReadableSnafu, MissingAuthEnvVarSnafu,
+    NifiLensError, UnknownContextSnafu,
 };
 
 /// Load the config file pointed at by `args`, resolve the active context,
@@ -50,30 +53,18 @@ pub fn load(args: &Args) -> Result<(Config, ResolvedContext), NifiLensError> {
             .build()
         })?;
 
-    let password = match &context.credentials {
-        Credentials::EnvVar { password_env } => std::env::var(password_env).map_err(|_| {
-            MissingPasswordEnvSnafu {
-                context: context.name.clone(),
-                var: password_env.clone(),
-            }
-            .build()
-        })?,
-        Credentials::Plain { password } => {
-            tracing::warn!(context = %context.name, "plaintext password in config");
-            password.clone()
-        }
-    };
+    let auth = resolve_auth(&context.name, &context.auth)?;
 
     validate_tls(context)?;
 
     let resolved = ResolvedContext {
         name: context.name.clone(),
         url: context.url.clone(),
-        username: context.username.clone(),
-        password,
+        auth,
         version_strategy: context.version_strategy,
         insecure_tls: context.insecure_tls,
         ca_cert_path: context.ca_cert_path.clone(),
+        proxied_entities_chain: context.proxied_entities_chain.clone(),
     };
 
     Ok((config, resolved))
@@ -121,6 +112,65 @@ fn validate_bulletins(bulletins: &crate::config::BulletinsConfig) -> Result<(), 
         });
     }
     Ok(())
+}
+
+pub(crate) fn resolve_env_var(context_name: &str, var: &str) -> Result<String, NifiLensError> {
+    std::env::var(var).map_err(|_| {
+        MissingAuthEnvVarSnafu {
+            context: context_name.to_string(),
+            var: var.to_string(),
+        }
+        .build()
+    })
+}
+
+pub(crate) fn resolve_auth(
+    context_name: &str,
+    auth: &AuthConfig,
+) -> Result<ResolvedAuth, NifiLensError> {
+    match auth {
+        AuthConfig::Password(pw) => {
+            let password = match &pw.credentials {
+                PasswordCredentials::EnvVar { password_env } => {
+                    resolve_env_var(context_name, password_env)?
+                }
+                PasswordCredentials::Plain { password } => {
+                    tracing::warn!(context = %context_name, "plaintext password in config");
+                    password.clone()
+                }
+            };
+            Ok(ResolvedAuth::Password {
+                username: pw.username.clone(),
+                password,
+            })
+        }
+        AuthConfig::Token(tok) => {
+            let token = match &tok.credentials {
+                TokenCredentials::EnvVar { token_env } => resolve_env_var(context_name, token_env)?,
+                TokenCredentials::Plain { token } => {
+                    tracing::warn!(context = %context_name, "plaintext token in config");
+                    token.clone()
+                }
+            };
+            Ok(ResolvedAuth::Token { token })
+        }
+        AuthConfig::Mtls(mtls) => {
+            if !mtls.client_identity_path.exists() {
+                return ClientIdentityNotFoundSnafu {
+                    path: mtls.client_identity_path.clone(),
+                }
+                .fail();
+            }
+            let pem = std::fs::read(&mtls.client_identity_path).context(
+                ClientIdentityReadFailedSnafu {
+                    path: mtls.client_identity_path.clone(),
+                },
+            )?;
+            Ok(ResolvedAuth::Mtls {
+                client_identity_pem: pem,
+            })
+        }
+    }
 }
 
 fn validate_tls(context: &crate::config::Context) -> Result<(), NifiLensError> {
@@ -184,6 +234,9 @@ current_context = "dev"
 [[contexts]]
 name = "dev"
 url = "https://localhost:8443"
+
+[contexts.auth]
+type = "password"
 username = "admin"
 password_env = "TEST_PW"
 "#,
@@ -215,6 +268,9 @@ current_context = "dev"
 [[contexts]]
 name = "dev"
 url = "https://localhost:8443"
+
+[contexts.auth]
+type = "password"
 username = "admin"
 password_env = "NIFILENS_TEST_PW"
 "#,
@@ -225,7 +281,10 @@ password_env = "NIFILENS_TEST_PW"
         unsafe { std::env::set_var("NIFILENS_TEST_PW", "secret-123") };
         let args = args_for(file.path(), None);
         let (_config, resolved) = load(&args).unwrap();
-        assert_eq!(resolved.password, "secret-123");
+        match &resolved.auth {
+            ResolvedAuth::Password { password, .. } => assert_eq!(password, "secret-123"),
+            other => panic!("expected ResolvedAuth::Password, got {other:?}"),
+        }
         unsafe { std::env::remove_var("NIFILENS_TEST_PW") };
     }
 
@@ -238,6 +297,9 @@ current_context = "dev"
 [[contexts]]
 name = "dev"
 url = "https://localhost:8443"
+
+[contexts.auth]
+type = "password"
 username = "admin"
 password_env = "NIFILENS_DEFINITELY_NOT_SET_XYZ"
 "#,
@@ -246,7 +308,7 @@ password_env = "NIFILENS_DEFINITELY_NOT_SET_XYZ"
         unsafe { std::env::remove_var("NIFILENS_DEFINITELY_NOT_SET_XYZ") };
         let args = args_for(file.path(), None);
         let err = load(&args).unwrap_err();
-        assert!(matches!(err, NifiLensError::MissingPasswordEnv { .. }));
+        assert!(matches!(err, NifiLensError::MissingAuthEnvVar { .. }));
     }
 
     #[test]
@@ -258,13 +320,19 @@ current_context = "dev"
 [[contexts]]
 name = "dev"
 url = "https://localhost:8443"
+
+[contexts.auth]
+type = "password"
 username = "admin"
 password = "literal"
 "#,
         );
         let args = args_for(file.path(), None);
         let (_, resolved) = load(&args).unwrap();
-        assert_eq!(resolved.password, "literal");
+        match &resolved.auth {
+            ResolvedAuth::Password { password, .. } => assert_eq!(password, "literal"),
+            other => panic!("expected ResolvedAuth::Password, got {other:?}"),
+        }
     }
 
     #[test]
@@ -276,12 +344,18 @@ current_context = "dev"
 [[contexts]]
 name = "dev"
 url = "https://dev:8443"
+
+[contexts.auth]
+type = "password"
 username = "admin"
 password = "x"
 
 [[contexts]]
 name = "prod"
 url = "https://prod:8443"
+
+[contexts.auth]
+type = "password"
 username = "admin"
 password = "y"
 "#,
@@ -301,6 +375,9 @@ current_context = "dev"
 [[contexts]]
 name = "dev"
 url = "https://dev:8443"
+
+[contexts.auth]
+type = "password"
 username = "admin"
 password = "x"
 "#,
@@ -325,6 +402,9 @@ current_context = "dev"
 [[contexts]]
 name = "dev"
 url = "https://dev:8443"
+
+[contexts.auth]
+type = "password"
 username = "admin"
 password = "x"
 "#,
@@ -346,6 +426,9 @@ ring_size = 2500
 [[contexts]]
 name = "dev"
 url = "https://dev:8443"
+
+[contexts.auth]
+type = "password"
 username = "admin"
 password = "x"
 "#,
@@ -367,6 +450,9 @@ ring_size = 50
 [[contexts]]
 name = "dev"
 url = "https://dev:8443"
+
+[contexts.auth]
+type = "password"
 username = "admin"
 password = "x"
 "#,
@@ -394,6 +480,9 @@ ring_size = 500000
 [[contexts]]
 name = "dev"
 url = "https://dev:8443"
+
+[contexts.auth]
+type = "password"
 username = "admin"
 password = "x"
 "#,
@@ -412,13 +501,113 @@ current_context = "dev"
 [[contexts]]
 name = "dev"
 url = "https://dev:8443"
+ca_cert_path = "/definitely/not/here.crt"
+
+[contexts.auth]
+type = "password"
 username = "admin"
 password = "x"
-ca_cert_path = "/definitely/not/here.crt"
 "#,
         );
         let args = args_for(file.path(), None);
         let err = load(&args).unwrap_err();
         assert!(matches!(err, NifiLensError::CaCertNotFound { .. }));
+    }
+
+    #[test]
+    fn token_env_var_resolves() {
+        let file = temp_config_with(
+            r#"
+current_context = "dev"
+
+[[contexts]]
+name = "dev"
+url = "https://localhost:8443"
+
+[contexts.auth]
+type = "token"
+token_env = "NIFILENS_TEST_TOKEN"
+"#,
+        );
+        // SAFETY: unsafe because Rust 2024 edition.
+        unsafe { std::env::set_var("NIFILENS_TEST_TOKEN", "bearer-abc") };
+        let args = args_for(file.path(), None);
+        let (_config, resolved) = load(&args).unwrap();
+        match &resolved.auth {
+            ResolvedAuth::Token { token } => assert_eq!(token, "bearer-abc"),
+            other => panic!("expected ResolvedAuth::Token, got {other:?}"),
+        }
+        unsafe { std::env::remove_var("NIFILENS_TEST_TOKEN") };
+    }
+
+    #[test]
+    fn token_env_var_missing_errors() {
+        let file = temp_config_with(
+            r#"
+current_context = "dev"
+
+[[contexts]]
+name = "dev"
+url = "https://localhost:8443"
+
+[contexts.auth]
+type = "token"
+token_env = "NIFILENS_TOKEN_DEFINITELY_NOT_SET_XYZ"
+"#,
+        );
+        // SAFETY: ensure the env var is absent; unsafe because Rust 2024.
+        unsafe { std::env::remove_var("NIFILENS_TOKEN_DEFINITELY_NOT_SET_XYZ") };
+        let args = args_for(file.path(), None);
+        let err = load(&args).unwrap_err();
+        assert!(matches!(err, NifiLensError::MissingAuthEnvVar { .. }));
+    }
+
+    #[test]
+    fn mtls_identity_not_found_errors() {
+        let file = temp_config_with(
+            r#"
+current_context = "dev"
+
+[[contexts]]
+name = "dev"
+url = "https://localhost:8443"
+
+[contexts.auth]
+type = "mtls"
+client_identity_path = "/definitely/not/here.pem"
+"#,
+        );
+        let args = args_for(file.path(), None);
+        let err = load(&args).unwrap_err();
+        assert!(matches!(
+            err,
+            NifiLensError::ClientIdentityNotFound { .. }
+                | NifiLensError::ClientIdentityReadFailed { .. }
+        ));
+    }
+
+    #[test]
+    fn proxied_entities_chain_resolves() {
+        let file = temp_config_with(
+            r#"
+current_context = "dev"
+
+[[contexts]]
+name = "dev"
+url = "https://localhost:8443"
+proxied_entities_chain = "CN=proxy.example.com"
+
+[contexts.auth]
+type = "password"
+username = "admin"
+password = "x"
+"#,
+        );
+        let args = args_for(file.path(), None);
+        let (_config, resolved) = load(&args).unwrap();
+        assert_eq!(
+            resolved.proxied_entities_chain.as_deref(),
+            Some("CN=proxy.example.com")
+        );
     }
 }

@@ -1438,9 +1438,9 @@ dependencies = [
 
 [[package]]
 name = "nifi-openapi-gen"
-version = "0.7.0"
+version = "0.8.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "0027259f3d7795e83d165ae2bb30c794eedadbad54c9067a14fa9d49619efd41"
+checksum = "756699e5aa592556f152979e3459b49d9b79cc394deb9af7e05e4f36a168c08e"
 dependencies = [
  "prettyplease",
  "semver",
@@ -1452,9 +1452,9 @@ dependencies = [
 
 [[package]]
 name = "nifi-rust-client"
-version = "0.7.0"
+version = "0.8.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "1ec49e320d771a500f816a8824154dbe12e48ca5e01d706075b2f559d9215295"
+checksum = "ff5f922ecdcc9883ade18fd83a83edad7652f9f4d19cc44efbf54c00f478af56"
 dependencies = [
  "async-trait",
  "nifi-openapi-gen",
@@ -2440,7 +2440,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "32497e9a4c7b38532efcdebeef879707aa9f794296a4f0244f6f69e9bc8574bd"
 dependencies = [
  "fastrand",
- "getrandom 0.3.4",
+ "getrandom 0.4.2",
  "once_cell",
  "rustix 1.1.4",
  "windows-sys 0.61.2",

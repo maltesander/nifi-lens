@@ -219,11 +219,11 @@ ring exceeds its capacity.
 
 ## Dependency on `nifi-rust-client`
 
-`nifi-lens` depends on `nifi-rust-client = "0.7.0"` with the `dynamic`
+`nifi-lens` depends on `nifi-rust-client = "0.8.0"` with the `dynamic`
 feature, declared in `Cargo.toml`:
 
 ```toml
-nifi-rust-client = { version = "0.7.0", features = ["dynamic"] }
+nifi-rust-client = { version = "0.8.0", features = ["dynamic"] }
 ```
 
 At the bottom of `Cargo.toml` there is a **commented-out**

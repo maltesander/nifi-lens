@@ -257,23 +257,16 @@ impl IntentDispatcher {
                     .collect(),
             })?;
 
-        let password = match &context.credentials {
-            crate::config::Credentials::EnvVar { password_env } => std::env::var(password_env)
-                .map_err(|_| NifiLensError::MissingPasswordEnv {
-                    context: context.name.clone(),
-                    var: password_env.clone(),
-                })?,
-            crate::config::Credentials::Plain { password } => password.clone(),
-        };
+        let auth = crate::config::loader::resolve_auth(&context.name, &context.auth)?;
 
         let resolved = crate::config::ResolvedContext {
             name: context.name.clone(),
             url: context.url.clone(),
-            username: context.username.clone(),
-            password,
+            auth,
             version_strategy: context.version_strategy,
             insecure_tls: context.insecure_tls,
             ca_cert_path: context.ca_cert_path.clone(),
+            proxied_entities_chain: context.proxied_entities_chain.clone(),
         };
 
         let new_context_name = resolved.name.clone();

@@ -4,7 +4,7 @@
 //! (generated from `integration-tests/versions.toml`).
 
 use nifi_lens::client::NifiClient;
-use nifi_lens::config::{ResolvedContext, VersionStrategy};
+use nifi_lens::config::{ResolvedAuth, ResolvedContext, VersionStrategy};
 
 #[path = "common/mod.rs"]
 mod common;
@@ -26,11 +26,14 @@ async fn connect_detects_version_and_reads_about() {
         let ctx = ResolvedContext {
             name: context_for(version),
             url: format!("https://localhost:{}", port_for(version)),
-            username: username.clone(),
-            password: password.clone(),
+            auth: ResolvedAuth::Password {
+                username: username.clone(),
+                password: password.clone(),
+            },
             version_strategy: VersionStrategy::Closest,
             insecure_tls: false,
             ca_cert_path: Some(ca_path.clone().into()),
+            proxied_entities_chain: None,
         };
 
         let client = NifiClient::connect(&ctx)

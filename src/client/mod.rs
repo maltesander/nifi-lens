@@ -16,7 +16,7 @@ use nifi_rust_client::NifiError;
 use nifi_rust_client::dynamic::{DynamicClient, traits::FlowApi as _};
 use semver::Version;
 
-use crate::config::ResolvedContext;
+use crate::config::{ResolvedAuth, ResolvedContext};
 use crate::error::NifiLensError;
 
 /// Try to classify a boxed library error into a specific `NifiLensError`
@@ -122,31 +122,53 @@ impl DerefMut for NifiClient {
 }
 
 impl NifiClient {
-    /// Build, login, detect version, and return a connected client.
+    /// Build, authenticate, detect version, and return a connected client.
     pub async fn connect(ctx: &ResolvedContext) -> Result<Self, NifiLensError> {
         tracing::debug!(context = %ctx.name, url = %ctx.url, "connecting");
 
         let inner = build::build_dynamic_client(ctx)?;
 
-        // DynamicClient::login is &self (not &mut self) and also triggers
-        // version detection automatically.
-        inner
-            .login(&ctx.username, &ctx.password)
-            .await
-            .map_err(|err| {
-                classify_or_fallback(&ctx.name, Box::new(err), |source| {
-                    NifiLensError::LoginFailed {
-                        context: ctx.name.clone(),
-                        source,
-                    }
-                })
-            })?;
+        // Authenticate and detect the NiFi server version.
+        //
+        // - Password auth: DynamicClient::login() authenticates AND detects
+        //   the version in one step.
+        // - Token auth: install the pre-obtained JWT, then detect version
+        //   explicitly (set_token does not trigger version detection).
+        // - mTLS: the TLS handshake already authenticated; just detect version.
+        match &ctx.auth {
+            ResolvedAuth::Password { username, password } => {
+                inner.login(username, password).await.map_err(|err| {
+                    classify_or_fallback(&ctx.name, Box::new(err), |source| {
+                        NifiLensError::LoginFailed {
+                            context: ctx.name.clone(),
+                            source,
+                        }
+                    })
+                })?;
+            }
+            ResolvedAuth::Token { token } => {
+                inner.inner().set_token(token.clone()).await;
+                inner.detect_version().await.map_err(|err| {
+                    classify_or_fallback(&ctx.name, Box::new(err), |source| {
+                        NifiLensError::LoginFailed {
+                            context: ctx.name.clone(),
+                            source,
+                        }
+                    })
+                })?;
+            }
+            ResolvedAuth::Mtls { .. } => {
+                inner.detect_version().await.map_err(|err| {
+                    classify_or_fallback(&ctx.name, Box::new(err), |source| {
+                        NifiLensError::LoginFailed {
+                            context: ctx.name.clone(),
+                            source,
+                        }
+                    })
+                })?;
+            }
+        }
 
-        // detected_version() returns Option<DetectedVersion> under
-        // nifi-rust-client 0.7.0 (was DetectedVersion in 0.5.0). After a
-        // successful login(), the Option is guaranteed populated by the
-        // library's internal detect_version() call, but we still map the
-        // None case to a typed error rather than unwrap.
         let detected =
             inner
                 .detected_version()

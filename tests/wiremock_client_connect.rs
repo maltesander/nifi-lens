@@ -1,7 +1,7 @@
 //! Wiremock test: happy path for NifiClient::connect.
 
 use nifi_lens::client::NifiClient;
-use nifi_lens::config::{ResolvedContext, VersionStrategy};
+use nifi_lens::config::{ResolvedAuth, ResolvedContext, VersionStrategy};
 use wiremock::matchers::{method, path};
 use wiremock::{Mock, MockServer, ResponseTemplate};
 
@@ -35,11 +35,14 @@ async fn connect_happy_path_detects_version() {
     let ctx = ResolvedContext {
         name: "wiremock".into(),
         url: server.uri(),
-        username: "admin".into(),
-        password: "anything".into(),
+        auth: ResolvedAuth::Password {
+            username: "admin".into(),
+            password: "anything".into(),
+        },
         version_strategy: VersionStrategy::Closest,
         insecure_tls: true, // wiremock is plaintext HTTP
         ca_cert_path: None,
+        proxied_entities_chain: None,
     };
 
     let client = NifiClient::connect(&ctx)

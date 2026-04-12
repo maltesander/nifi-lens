@@ -1663,7 +1663,9 @@ fn handle_health_key(state: &mut AppState, key: KeyEvent) -> Option<UpdateResult
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::config::{Context, Credentials, VersionStrategy};
+    use crate::config::{
+        AuthConfig, Context, PasswordAuthConfig, PasswordCredentials, VersionStrategy,
+    };
 
     fn fresh_state() -> AppState {
         let c = tiny_config();
@@ -1678,24 +1680,30 @@ mod tests {
                 Context {
                     name: "dev".into(),
                     url: "https://dev:8443".into(),
-                    username: "admin".into(),
-                    credentials: Credentials::Plain {
-                        password: "x".into(),
-                    },
+                    auth: AuthConfig::Password(PasswordAuthConfig {
+                        username: "admin".into(),
+                        credentials: PasswordCredentials::Plain {
+                            password: "x".into(),
+                        },
+                    }),
                     version_strategy: VersionStrategy::Strict,
                     insecure_tls: false,
                     ca_cert_path: None,
+                    proxied_entities_chain: None,
                 },
                 Context {
                     name: "prod".into(),
                     url: "https://prod:8443".into(),
-                    username: "admin".into(),
-                    credentials: Credentials::Plain {
-                        password: "y".into(),
-                    },
+                    auth: AuthConfig::Password(PasswordAuthConfig {
+                        username: "admin".into(),
+                        credentials: PasswordCredentials::Plain {
+                            password: "y".into(),
+                        },
+                    }),
                     version_strategy: VersionStrategy::Strict,
                     insecure_tls: false,
                     ca_cert_path: None,
+                    proxied_entities_chain: None,
                 },
             ],
         }
