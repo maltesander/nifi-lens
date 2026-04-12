@@ -279,10 +279,11 @@ referenced `password_env` variable, and run `cargo run -- --context dev`.
 
 ### Integration test fixture
 
-The integration harness at `integration-tests/` brings up two simultaneous
-NiFi containers (2.6.0 floor + 2.8.0 ceiling), seeds each with a rich
-fixture via `nifilens-fixture-seeder`, and runs `cargo test --test
-'integration_*' -- --ignored` against both. One command does it all:
+The integration harness at `integration-tests/` brings up a standalone
+NiFi 2.6.0 (floor) and a 2-node NiFi 2.9.0 cluster (ceiling) with
+ZooKeeper, seeds each with a rich fixture via `nifilens-fixture-seeder`,
+and runs `cargo test --test 'integration_*' -- --ignored` against both.
+One command does it all:
 
 ```bash
 ./integration-tests/run.sh
@@ -299,9 +300,9 @@ cargo run -p nifilens-fixture-seeder -- \
     --context dev-nifi-2-6-0 --skip-if-seeded
 cargo run -p nifilens-fixture-seeder -- \
     --config integration-tests/nifilens-config.toml \
-    --context dev-nifi-2-8-0 --skip-if-seeded
+    --context dev-nifi-2-9-0 --skip-if-seeded
 cargo run -- --config integration-tests/nifilens-config.toml \
-    --context dev-nifi-2-8-0
+    --context dev-nifi-2-9-0
 ```
 
 `--skip-if-seeded` makes re-runs of the seeder a no-op when the fixture
@@ -311,8 +312,15 @@ marker PG (`nifilens-fixture-v1`) is already present, so iterating on
 The fixture is four process groups (`healthy-pipeline` with nested
 `ingest` / `enrich` children, `noisy-pipeline`, `backpressure-pipeline`,
 `invalid-pipeline`) plus three controller services, all under a top-level
-marker PG named `nifilens-fixture-v1`. Bumping the marker name
-invalidates stale fixtures automatically on the next seed pass.
+marker PG named `nifilens-fixture-v1`. When the detected NiFi version is
+>= 2.9.0, the seeder also creates `stress-pipeline` — a longer branching
+flow with ConvertRecord (JSON to CSV), UpdateRecord (add computed fields,
+transform existing), RouteOnAttribute (hot/normal split), and dual
+ControlRate bottlenecks for sustained queue backpressure. The stress
+pipeline adds four additional controller services (`stress-json-reader`,
+`stress-csv-writer`, `stress-csv-reader`, `stress-csv-writer-out`).
+Bumping the marker name invalidates stale fixtures automatically on the
+next seed pass.
 
 ### Bumping the NiFi ceiling version
 

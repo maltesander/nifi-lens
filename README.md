@@ -211,10 +211,10 @@ test `nifi-lens` against live clusters without touching production.
 ./integration-tests/run.sh
 ```
 
-This boots `apache/nifi:2.6.0` (port 8443) and `apache/nifi:2.8.0` (port
-8444), seeds both via the `nifilens-fixture-seeder` workspace binary,
-runs the `#[ignore]`-gated integration suite, then tears the containers
-down.
+This boots `apache/nifi:2.6.0` (standalone, port 8443) and a 2-node
+`apache/nifi:2.9.0` cluster (ports 8444-8445) with ZooKeeper, seeds both
+via the `nifilens-fixture-seeder` workspace binary, runs the
+`#[ignore]`-gated integration suite, then tears the containers down.
 
 For long-running live testing, skip the test step and leave the fixture
 up:
@@ -224,9 +224,9 @@ docker compose -f integration-tests/docker-compose.yml up -d
 export NIFILENS_IT_PASSWORD=adminpassword123
 cargo run -p nifilens-fixture-seeder -- \
     --config integration-tests/nifilens-config.toml \
-    --context dev-nifi-2-8-0
+    --context dev-nifi-2-9-0
 cargo run -- --config integration-tests/nifilens-config.toml \
-    --context dev-nifi-2-8-0
+    --context dev-nifi-2-9-0
 ```
 
 The seeder supports `--skip-if-seeded` for idempotent re-runs during
