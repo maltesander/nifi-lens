@@ -1475,6 +1475,7 @@ dependencies = [
  "clap",
  "nifi-lens",
  "nifi-rust-client",
+ "semver",
  "snafu 0.8.9",
  "tempfile",
  "tokio",
