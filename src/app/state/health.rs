@@ -287,4 +287,52 @@ mod tests {
             other => panic!("expected RefreshView(Health), got {other:?}"),
         }
     }
+
+    #[test]
+    fn system_diag_fallback_applies_data_and_sets_warning_banner() {
+        use crate::app::state::BannerSeverity;
+        use crate::client::health::{
+            GcSnapshot, NodeDiagnostics, SystemDiagAggregate, SystemDiagSnapshot,
+        };
+
+        let mut s = fresh_state();
+        let c = tiny_config();
+        s.current_tab = ViewId::Health;
+
+        let diag = SystemDiagSnapshot {
+            aggregate: SystemDiagAggregate::default(),
+            nodes: vec![NodeDiagnostics {
+                address: "Cluster (aggregate)".to_string(),
+                heap_used_bytes: 4_000,
+                heap_max_bytes: 8_000,
+                gc: vec![GcSnapshot {
+                    name: "G1".into(),
+                    collection_count: 42,
+                    collection_millis: 300,
+                }],
+                load_average: Some(1.5),
+                total_threads: 100,
+                uptime: "2 days".into(),
+            }],
+            fetched_at: Instant::now(),
+        };
+
+        update(
+            &mut s,
+            AppEvent::Data(ViewPayload::Health(HealthPayload::SystemDiagFallback {
+                diag,
+                warning: "nodewise diagnostics unavailable; showing cluster aggregate".into(),
+            })),
+            &c,
+        );
+
+        // The nodes table should have one row.
+        assert_eq!(s.health.nodes.nodes.len(), 1);
+        assert_eq!(s.health.nodes.nodes[0].node_address, "Cluster (aggregate)");
+
+        // A warning banner should be set.
+        let banner = s.status.banner.as_ref().expect("banner must be set");
+        assert_eq!(banner.severity, BannerSeverity::Warning);
+        assert!(banner.message.contains("aggregate"));
+    }
 }

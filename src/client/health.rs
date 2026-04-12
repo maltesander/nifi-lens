@@ -537,7 +537,7 @@ impl NifiClient {
             ),
         };
 
-        let nodes = entity
+        let mut nodes: Vec<NodeDiagnostics> = entity
             .node_snapshots
             .as_deref()
             .unwrap_or_default()
@@ -571,6 +571,32 @@ impl NifiClient {
                 })
             })
             .collect();
+
+        // When nodewise data is absent (e.g. aggregate-only fallback),
+        // synthesize a single row from the aggregate snapshot so the
+        // Nodes table is never empty.
+        if let (true, Some(snap)) = (nodes.is_empty(), agg) {
+            let gc = snap
+                .garbage_collection
+                .as_deref()
+                .unwrap_or_default()
+                .iter()
+                .map(|g| GcSnapshot {
+                    name: g.name.clone().unwrap_or_default(),
+                    collection_count: g.collection_count.unwrap_or(0).max(0) as u64,
+                    collection_millis: g.collection_millis.unwrap_or(0).max(0) as u64,
+                })
+                .collect();
+            nodes.push(NodeDiagnostics {
+                address: "Cluster (aggregate)".to_string(),
+                heap_used_bytes: snap.used_heap_bytes.unwrap_or(0).max(0) as u64,
+                heap_max_bytes: snap.max_heap_bytes.unwrap_or(0).max(0) as u64,
+                gc,
+                load_average: snap.processor_load_average,
+                total_threads: snap.total_threads.unwrap_or(0).max(0) as u32,
+                uptime: snap.uptime.clone().unwrap_or_default(),
+            });
+        }
 
         Ok(SystemDiagSnapshot {
             aggregate,
@@ -1063,5 +1089,38 @@ mod tests {
             node2.gc_delta.is_none(),
             "brand-new node must get None delta"
         );
+    }
+
+    #[test]
+    fn update_nodes_aggregate_fallback_produces_single_row() {
+        let mut state = NodesState::default();
+
+        // Simulate an aggregate-only response (no per-node data) with a
+        // single synthetic "Cluster (aggregate)" node.
+        let snap = diag_snap(
+            Vec::new(),
+            None,
+            Vec::new(),
+            vec![NodeDiagnostics {
+                address: "Cluster (aggregate)".to_string(),
+                heap_used_bytes: 4_000,
+                heap_max_bytes: 8_000,
+                gc: vec![GcSnapshot {
+                    name: "G1".to_string(),
+                    collection_count: 42,
+                    collection_millis: 300,
+                }],
+                load_average: Some(1.5),
+                total_threads: 100,
+                uptime: "2 days".to_string(),
+            }],
+        );
+        update_nodes(&mut state, &snap);
+
+        assert_eq!(state.nodes.len(), 1);
+        assert_eq!(state.nodes[0].node_address, "Cluster (aggregate)");
+        assert_eq!(state.nodes[0].heap_used_bytes, 4_000);
+        assert_eq!(state.nodes[0].heap_max_bytes, 8_000);
+        assert_eq!(state.nodes[0].gc_collection_count, 42);
     }
 }

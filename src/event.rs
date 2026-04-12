@@ -103,6 +103,12 @@ pub enum IntentOutcome {
 pub enum HealthPayload {
     PgStatus(crate::client::health::FullPgStatusSnapshot),
     SystemDiag(crate::client::health::SystemDiagSnapshot),
+    /// Aggregate-only fallback when nodewise diagnostics failed.
+    /// Carries the aggregate snapshot plus a warning message for the banner.
+    SystemDiagFallback {
+        diag: crate::client::health::SystemDiagSnapshot,
+        warning: String,
+    },
 }
 
 /// Payload variants pushed from Tracer workers back into the UI loop.

@@ -295,6 +295,14 @@ pub fn update(state: &mut AppState, event: AppEvent, config: &Config) -> UpdateR
                 crate::event::HealthPayload::SystemDiag(diag) => {
                     crate::view::health::state::apply_system_diagnostics(&mut state.health, diag);
                 }
+                crate::event::HealthPayload::SystemDiagFallback { diag, warning } => {
+                    crate::view::health::state::apply_system_diagnostics(&mut state.health, diag);
+                    state.status.banner = Some(Banner {
+                        severity: BannerSeverity::Warning,
+                        message: warning,
+                        detail: None,
+                    });
+                }
             }
             state.last_refresh = Instant::now();
             UpdateResult {

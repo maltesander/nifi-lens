@@ -56,9 +56,34 @@ async fn poll_system_diagnostics(client: &Arc<RwLock<NifiClient>>, tx: &mpsc::Se
                 )))
                 .await;
         }
-        Err(err) => {
-            tracing::warn!(error = %err, "health worker: sysdiag poll failed");
-            let _ = tx.send(AppEvent::IntentOutcome(Err(err))).await;
+        Err(nodewise_err) => {
+            tracing::warn!(
+                error = %nodewise_err,
+                "health worker: nodewise sysdiag failed, trying aggregate fallback"
+            );
+            // Fallback: try aggregate-only diagnostics so the Nodes table
+            // shows at least a summary row instead of being empty.
+            match guard.system_diagnostics(false).await {
+                Ok(diag) => {
+                    let _ = tx
+                        .send(AppEvent::Data(ViewPayload::Health(
+                            HealthPayload::SystemDiagFallback {
+                                diag,
+                                warning:
+                                    "nodewise diagnostics unavailable; showing cluster aggregate"
+                                        .into(),
+                            },
+                        )))
+                        .await;
+                }
+                Err(agg_err) => {
+                    tracing::warn!(
+                        error = %agg_err,
+                        "health worker: aggregate sysdiag also failed"
+                    );
+                    let _ = tx.send(AppEvent::IntentOutcome(Err(nodewise_err))).await;
+                }
+            }
         }
     }
 }
