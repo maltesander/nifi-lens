@@ -2,7 +2,9 @@
 
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 
-use super::{AppState, PendingIntent, UpdateResult, ViewKeyHandler};
+use super::{
+    AppState, Banner, BannerSeverity, PendingIntent, StatusLine, UpdateResult, ViewKeyHandler,
+};
 use crate::app::navigation::ListNavigation;
 
 /// Zero-sized dispatch struct for the Health tab.
@@ -70,7 +72,26 @@ impl ViewKeyHandler for HealthHandler {
                             component_id: r.processor_id.clone(),
                             group_id: r.group_id.clone(),
                         }),
-                    _ => None,
+                    HealthCategory::Repositories | HealthCategory::Nodes => {
+                        let category_name = match state.health.selected_category {
+                            HealthCategory::Repositories => "repository",
+                            HealthCategory::Nodes => "node",
+                            _ => unreachable!(),
+                        };
+                        state.status = StatusLine {
+                            banner: Some(Banner {
+                                severity: BannerSeverity::Info,
+                                message: format!(
+                                    "Cross-link not available for {category_name} rows"
+                                ),
+                                detail: None,
+                            }),
+                        };
+                        return Some(UpdateResult {
+                            redraw: true,
+                            ..UpdateResult::default()
+                        });
+                    }
                 };
                 if let Some(link) = cross_link {
                     return Some(UpdateResult {
@@ -213,6 +234,48 @@ mod tests {
             }
             other => panic!("expected JumpTo(OpenInBrowser), got {other:?}"),
         }
+    }
+
+    #[test]
+    fn health_enter_on_repository_shows_info_banner() {
+        let (mut s, c) = seeded_health_state();
+        s.health.selected_category = HealthCategory::Repositories;
+        let r = update(&mut s, key(KeyCode::Enter, KeyModifiers::NONE), &c);
+        assert!(r.redraw);
+        assert!(r.intent.is_none());
+        let banner = s.status.banner.as_ref().expect("banner should be set");
+        assert_eq!(banner.severity, crate::app::state::BannerSeverity::Info);
+        assert!(
+            banner.message.contains("not available"),
+            "message should mention 'not available': {}",
+            banner.message
+        );
+        assert!(
+            banner.message.contains("repository"),
+            "message should mention 'repository': {}",
+            banner.message
+        );
+    }
+
+    #[test]
+    fn health_enter_on_node_shows_info_banner() {
+        let (mut s, c) = seeded_health_state();
+        s.health.selected_category = HealthCategory::Nodes;
+        let r = update(&mut s, key(KeyCode::Enter, KeyModifiers::NONE), &c);
+        assert!(r.redraw);
+        assert!(r.intent.is_none());
+        let banner = s.status.banner.as_ref().expect("banner should be set");
+        assert_eq!(banner.severity, crate::app::state::BannerSeverity::Info);
+        assert!(
+            banner.message.contains("not available"),
+            "message should mention 'not available': {}",
+            banner.message
+        );
+        assert!(
+            banner.message.contains("node"),
+            "message should mention 'node': {}",
+            banner.message
+        );
     }
 
     #[test]
