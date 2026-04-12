@@ -425,16 +425,13 @@ impl NifiClient {
             .unwrap_or_default();
         let config = component.config.unwrap_or_default();
 
-        // Library returns `Option<HashMap<String, Option<String>>>`. Flatten
-        // into `Vec<(String, String)>`. HashMap ordering is non-deterministic;
-        // the UI displays whatever order iteration returns. Stable property
-        // ordering is a Phase 5 polish item.
-        let properties: Vec<(String, String)> = config
+        let mut properties: Vec<(String, String)> = config
             .properties
             .unwrap_or_default()
             .into_iter()
             .map(|(k, v)| (k, v.unwrap_or_default()))
             .collect();
+        properties.sort_by(|a, b| a.0.cmp(&b.0));
 
         let validation_errors = component.validation_errors.unwrap_or_default();
 
@@ -639,12 +636,13 @@ impl NifiClient {
             })
             .unwrap_or_default();
 
-        let properties: Vec<(String, String)> = component
+        let mut properties: Vec<(String, String)> = component
             .properties
             .unwrap_or_default()
             .into_iter()
             .map(|(k, v)| (k, v.unwrap_or_default()))
             .collect();
+        properties.sort_by(|a, b| a.0.cmp(&b.0));
 
         Ok(ControllerServiceDetail {
             id: cs_id.to_string(),

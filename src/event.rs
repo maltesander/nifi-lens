@@ -63,6 +63,7 @@ pub enum BrowserPayload {
 #[derive(Debug)]
 pub enum IntentOutcome {
     ContextSwitched {
+        new_context_name: String,
         new_version: semver::Version,
     },
     ViewRefreshed {

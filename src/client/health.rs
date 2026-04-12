@@ -331,10 +331,11 @@ fn compute_time_to_full(c: &ConnectionStatusRow, fill_percent: u32) -> TimeToFul
     TimeToFull::Seconds(seconds)
 }
 
-/// Build a processor active-thread leaderboard from a full PG status snapshot.
+/// Build a processor thread leaderboard from a full PG status snapshot.
 ///
-/// Idle processors (active_thread_count == 0) are excluded. Results are sorted
-/// by active thread count descending and truncated to `top_n`.
+/// Results are sorted by active thread count descending and truncated to
+/// `top_n`. Idle processors (active_thread_count == 0) are included so the
+/// pane is never empty when processors exist.
 pub fn compute_processor_threads(
     snapshot: &FullPgStatusSnapshot,
     top_n: usize,
@@ -342,7 +343,6 @@ pub fn compute_processor_threads(
     let mut rows: Vec<ProcessorThreadRow> = snapshot
         .processors
         .iter()
-        .filter(|p| p.active_thread_count > 0)
         .map(|p| ProcessorThreadRow {
             processor_id: p.id.clone(),
             group_id: p.group_id.clone(),
@@ -921,7 +921,7 @@ mod tests {
     // -----------------------------------------------------------------------
 
     #[test]
-    fn processor_threads_sorts_descending_omits_idle() {
+    fn processor_threads_sorts_descending_includes_idle() {
         let procs = vec![
             proc_row("idle", 0),
             proc_row("busy5", 5),
@@ -929,9 +929,10 @@ mod tests {
         ];
         let snap = snap_with_procs(procs);
         let rows = compute_processor_threads(&snap, TOP_N);
-        assert_eq!(rows.len(), 2, "idle processor must be omitted");
+        assert_eq!(rows.len(), 3, "idle processor must be included");
         assert_eq!(rows[0].active_threads, 8);
         assert_eq!(rows[1].active_threads, 5);
+        assert_eq!(rows[2].active_threads, 0);
     }
 
     // -----------------------------------------------------------------------

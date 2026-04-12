@@ -97,6 +97,16 @@ impl WorkerRegistry {
         }
     }
 
+    /// Abort the current worker so the next `ensure()` call spawns a
+    /// fresh one. Used after context switch — the view tab hasn't changed
+    /// but the backing client has.
+    pub fn invalidate(&mut self) {
+        if let Some((view, handle)) = self.current.take() {
+            tracing::debug!(?view, "worker registry: invalidating for context switch");
+            handle.abort();
+        }
+    }
+
     /// Abort the currently-running view worker, if any. Called on app
     /// shutdown. The registry only ever holds one active worker, so this
     /// aborts exactly one handle or none.

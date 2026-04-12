@@ -121,6 +121,10 @@ pub async fn run(
                 .map_err(|source| NifiLensError::TerminalInit { source })?;
         }
 
+        if state.pending_worker_restart {
+            workers.invalidate();
+            state.pending_worker_restart = false;
+        }
         let bulletins_last_id = state.bulletins.last_id;
         workers.ensure(
             state.current_tab,

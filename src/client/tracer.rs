@@ -337,7 +337,7 @@ impl NifiClient {
     /// Fetches the raw content bytes for a provenance event and classifies them.
     ///
     /// Maps `GET /nifi-api/provenance-events/{id}/content/input` or `.../output`
-    /// depending on `side`. The raw bytes are classified by [`classify_content`]
+    /// depending on `side`. The raw bytes are classified by `classify_content`
     /// into a [`ContentRender`] variant. Errors are mapped to
     /// [`NifiLensError::ProvenanceContentFetchFailed`].
     pub async fn provenance_content(

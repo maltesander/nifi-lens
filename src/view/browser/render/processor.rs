@@ -62,8 +62,9 @@ pub fn render(frame: &mut Frame, area: Rect, d: &ProcessorDetail, _state: &Brows
             format!("Validation errors: {ve}"),
             theme::error(),
         )));
+        let max_err_width = (area.width as usize).saturating_sub(4);
         for err in d.validation_errors.iter().take(INLINE_VALIDATION_ROWS) {
-            lines.push(Line::from(format!("  {err}")));
+            lines.push(Line::from(format!("  {}", truncate(err, max_err_width))));
         }
         if ve > INLINE_VALIDATION_ROWS {
             lines.push(Line::from(Span::styled(

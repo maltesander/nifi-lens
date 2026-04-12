@@ -33,7 +33,9 @@ pub fn render(frame: &mut Frame, area: Rect, d: &ControllerServiceDetail, _state
         theme::accent(),
     )));
     for (k, v) in d.properties.iter().take(n) {
-        lines.push(Line::from(format!("  {k:28} {v}")));
+        let key = format!("  {:28}", truncate(k, 28));
+        let val = truncate(v, 60);
+        lines.push(Line::from(format!("{key} {val}")));
     }
     if m > INLINE_PROPERTY_ROWS {
         lines.push(Line::from(Span::styled(
@@ -50,12 +52,22 @@ pub fn render(frame: &mut Frame, area: Rect, d: &ControllerServiceDetail, _state
             format!("Validation errors: {ve}"),
             theme::error(),
         )));
+        let max_err_width = (area.width as usize).saturating_sub(4);
         for err in d.validation_errors.iter().take(3) {
-            lines.push(Line::from(format!("  {err}")));
+            lines.push(Line::from(format!("  {}", truncate(err, max_err_width))));
         }
     }
 
     frame.render_widget(Paragraph::new(lines), area);
+}
+
+fn truncate(s: &str, max: usize) -> String {
+    if s.chars().count() <= max {
+        s.to_string()
+    } else {
+        let head: String = s.chars().take(max.saturating_sub(1)).collect();
+        format!("{head}…")
+    }
 }
 
 #[cfg(test)]

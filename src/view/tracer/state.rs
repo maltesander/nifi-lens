@@ -394,7 +394,7 @@ pub fn apply_payload(state: &mut TracerState, payload: TracerPayload) -> Option<
         }
         TracerPayload::LineagePartial { query_id, percent } => {
             if let TracerMode::LineageRunning(ref mut running) = state.mode
-                && running.query_id == query_id
+                && (running.query_id == query_id || running.query_id.is_empty())
             {
                 running.percent = percent;
             }
@@ -407,7 +407,7 @@ pub fn apply_payload(state: &mut TracerState, payload: TracerPayload) -> Option<
             fetched_at,
         } => {
             if let TracerMode::LineageRunning(ref running) = state.mode
-                && running.query_id == query_id
+                && (running.query_id == query_id || running.query_id.is_empty())
             {
                 state.mode = TracerMode::Lineage(Box::new(LineageView {
                     uuid,
@@ -843,6 +843,58 @@ mod tests {
         assert!(
             matches!(followup, Some(Followup::DeleteLineageQuery { ref query_id }) if query_id == "q-stale")
         );
+    }
+
+    #[test]
+    fn lineage_done_before_submitted_still_transitions() {
+        use crate::client::LineageSnapshot;
+
+        let mut state = TracerState::new();
+        start_lineage(&mut state, TEST_UUID.to_string(), None);
+        // Do NOT send LineageSubmitted — simulate the race where
+        // LineageDone arrives first (query_id on state is still "").
+        let snapshot = LineageSnapshot {
+            events: vec![],
+            percent_completed: 100,
+            finished: true,
+        };
+        let followup = apply_payload(
+            &mut state,
+            TracerPayload::LineageDone {
+                uuid: TEST_UUID.to_string(),
+                query_id: "q-42".to_string(),
+                snapshot,
+                fetched_at: SystemTime::now(),
+            },
+        );
+
+        assert!(
+            matches!(state.mode, TracerMode::Lineage(_)),
+            "LineageDone with empty query_id on state must still transition"
+        );
+        assert!(
+            matches!(followup, Some(Followup::DeleteLineageQuery { ref query_id }) if query_id == "q-42")
+        );
+    }
+
+    #[test]
+    fn lineage_partial_before_submitted_still_updates_percent() {
+        let mut state = TracerState::new();
+        start_lineage(&mut state, TEST_UUID.to_string(), None);
+        // Do NOT send LineageSubmitted.
+        apply_payload(
+            &mut state,
+            TracerPayload::LineagePartial {
+                query_id: "q-42".to_string(),
+                percent: 50,
+            },
+        );
+
+        if let TracerMode::LineageRunning(ref running) = state.mode {
+            assert_eq!(running.percent, 50);
+        } else {
+            panic!("expected LineageRunning mode");
+        }
     }
 
     #[test]

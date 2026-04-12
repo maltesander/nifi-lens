@@ -67,6 +67,9 @@ pub struct AppState {
     pub status: StatusLine,
     pub error_detail: Option<String>,
     pub should_quit: bool,
+    /// Set by the context-switch handler so the app loop can force-restart
+    /// the current view worker (the registry no-ops when the view matches).
+    pub pending_worker_restart: bool,
 }
 
 impl AppState {
@@ -86,6 +89,7 @@ impl AppState {
             status: StatusLine::default(),
             error_detail: None,
             should_quit: false,
+            pending_worker_restart: false,
         }
     }
 }
@@ -1043,11 +1047,29 @@ fn handle_intent_outcome(
     outcome: Result<IntentOutcome, NifiLensError>,
 ) -> UpdateResult {
     match outcome {
-        Ok(IntentOutcome::ContextSwitched { new_version }) => {
+        Ok(IntentOutcome::ContextSwitched {
+            new_context_name,
+            new_version,
+        }) => {
+            state.context_name = new_context_name;
             state.detected_version = new_version;
             state.last_refresh = Instant::now();
             state.modal = None;
             state.status.banner = None;
+
+            // Clear all per-view state so stale data from the previous
+            // context doesn't linger until the next worker poll.
+            let ring_cap = state.bulletins.ring_capacity;
+            state.overview = OverviewState::new();
+            state.bulletins = BulletinsState::with_capacity(ring_cap);
+            state.browser = BrowserState::new();
+            state.health = HealthState::new();
+            state.tracer = TracerState::new();
+            state.flow_index = None;
+
+            // Signal the app loop to force-restart the current view worker.
+            state.pending_worker_restart = true;
+
             UpdateResult {
                 redraw: true,
                 intent: None,
@@ -1787,11 +1809,14 @@ mod tests {
         let c = tiny_config();
         update(&mut s, key(KeyCode::Char('k'), KeyModifiers::CONTROL), &c);
         let outcome = Ok(IntentOutcome::ContextSwitched {
+            new_context_name: "other-ctx".into(),
             new_version: Version::new(2, 7, 2),
         });
         update(&mut s, AppEvent::IntentOutcome(outcome), &c);
         assert_eq!(s.detected_version, Version::new(2, 7, 2));
+        assert_eq!(s.context_name, "other-ctx");
         assert!(s.modal.is_none());
+        assert!(s.pending_worker_restart, "worker restart must be flagged");
     }
 
     #[test]

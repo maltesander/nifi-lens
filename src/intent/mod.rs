@@ -257,10 +257,14 @@ impl IntentDispatcher {
             ca_cert_path: context.ca_cert_path.clone(),
         };
 
+        let new_context_name = resolved.name.clone();
         let new_client = NifiClient::connect(&resolved).await?;
         let new_version = new_client.detected_version().clone();
         *self.client.write().await = new_client;
-        Ok(IntentOutcome::ContextSwitched { new_version })
+        Ok(IntentOutcome::ContextSwitched {
+            new_context_name,
+            new_version,
+        })
     }
 }
 
