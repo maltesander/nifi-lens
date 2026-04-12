@@ -5,7 +5,7 @@
 
 use ratatui::Frame;
 use ratatui::layout::{Alignment, Constraint, Direction, Layout, Rect};
-use ratatui::style::{Color, Modifier, Style};
+use ratatui::style::{Color, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Borders, Paragraph};
 
@@ -67,7 +67,7 @@ fn render_left_strip(frame: &mut Frame, area: Rect, state: &HealthState) {
         let badge_span = if badge == 0 {
             Span::styled(format!("  {badge}"), theme::muted())
         } else {
-            Span::styled(format!("  {badge}"), Style::default().fg(Color::Yellow))
+            Span::styled(format!("  {badge}"), theme::warning())
         };
 
         let line = Line::from(vec![
@@ -76,7 +76,7 @@ fn render_left_strip(frame: &mut Frame, area: Rect, state: &HealthState) {
             Span::styled(
                 format!("{label:<14}"),
                 if selected {
-                    Style::default().add_modifier(Modifier::BOLD)
+                    theme::bold()
                 } else {
                     Style::default()
                 },
@@ -390,10 +390,7 @@ fn render_repo_aggregate_row(
 
     let line1 = Line::from(vec![
         Span::raw(format!("{gutter} ")),
-        Span::styled(
-            format!("[{kind_prefix}] "),
-            Style::default().add_modifier(Modifier::BOLD),
-        ),
+        Span::styled(format!("[{kind_prefix}] "), theme::bold()),
         Span::styled(
             format!("{:<20}", truncate(&row.identifier, 18)),
             if selected {
@@ -452,15 +449,9 @@ fn render_repo_per_node_detail(frame: &mut Frame, area: Rect, state: &HealthStat
     // Header
     if y < max_y {
         let hdr = Line::from(vec![
-            Span::styled(
-                format!("  {:<22}", "Node"),
-                Style::default().add_modifier(Modifier::BOLD),
-            ),
-            Span::styled(
-                format!("{:<20}", "Used / Total"),
-                Style::default().add_modifier(Modifier::BOLD),
-            ),
-            Span::styled("Fill", Style::default().add_modifier(Modifier::BOLD)),
+            Span::styled(format!("  {:<22}", "Node"), theme::bold()),
+            Span::styled(format!("{:<20}", "Used / Total"), theme::bold()),
+            Span::styled("Fill", theme::bold()),
         ]);
         frame.render_widget(Paragraph::new(hdr), Rect::new(area.x, y, area.width, 1));
         y += 1;
@@ -516,27 +507,12 @@ fn render_nodes(frame: &mut Frame, area: Rect, state: &HealthState) {
     if y < max_y {
         let hdr = Line::from(vec![
             Span::styled("  ", Style::default()),
-            Span::styled(
-                format!("{:<22}", "Node"),
-                Style::default().add_modifier(Modifier::BOLD),
-            ),
-            Span::styled(
-                format!("{:<18}", "Heap"),
-                Style::default().add_modifier(Modifier::BOLD),
-            ),
-            Span::styled(
-                format!("{:<14}", "GC"),
-                Style::default().add_modifier(Modifier::BOLD),
-            ),
-            Span::styled(
-                format!("{:<10}", "Load"),
-                Style::default().add_modifier(Modifier::BOLD),
-            ),
-            Span::styled(
-                format!("{:<10}", "Threads"),
-                Style::default().add_modifier(Modifier::BOLD),
-            ),
-            Span::styled("Uptime", Style::default().add_modifier(Modifier::BOLD)),
+            Span::styled(format!("{:<22}", "Node"), theme::bold()),
+            Span::styled(format!("{:<18}", "Heap"), theme::bold()),
+            Span::styled(format!("{:<14}", "GC"), theme::bold()),
+            Span::styled(format!("{:<10}", "Load"), theme::bold()),
+            Span::styled(format!("{:<10}", "Threads"), theme::bold()),
+            Span::styled("Uptime", theme::bold()),
         ]);
         frame.render_widget(Paragraph::new(hdr), Rect::new(area.x, y, area.width, 1));
         y += 1;
@@ -596,7 +572,7 @@ fn render_node_row(
         None => format!("{}", node.gc_collection_count),
     };
     let gc_style = match node.gc_delta {
-        Some(d) if d > 5 => Style::default().fg(Color::Red),
+        Some(d) if d > 5 => theme::error(),
         _ => Style::default(),
     };
 
@@ -658,23 +634,11 @@ fn render_processors(frame: &mut Frame, area: Rect, state: &HealthState) {
     if y < max_y {
         let hdr = Line::from(vec![
             Span::styled("  ", Style::default()),
-            Span::styled(
-                format!("{:<24}", "Processor"),
-                Style::default().add_modifier(Modifier::BOLD),
-            ),
-            Span::styled(
-                format!("{:<22}", "PG Path"),
-                Style::default().add_modifier(Modifier::BOLD),
-            ),
-            Span::styled(
-                format!("{:<10}", "Threads"),
-                Style::default().add_modifier(Modifier::BOLD),
-            ),
-            Span::styled(
-                format!("{:<12}", "Status"),
-                Style::default().add_modifier(Modifier::BOLD),
-            ),
-            Span::styled("CPU (5m)", Style::default().add_modifier(Modifier::BOLD)),
+            Span::styled(format!("{:<24}", "Processor"), theme::bold()),
+            Span::styled(format!("{:<22}", "PG Path"), theme::bold()),
+            Span::styled(format!("{:<10}", "Threads"), theme::bold()),
+            Span::styled(format!("{:<12}", "Status"), theme::bold()),
+            Span::styled("CPU (5m)", theme::bold()),
         ]);
         frame.render_widget(Paragraph::new(hdr), Rect::new(area.x, y, area.width, 1));
         y += 1;
@@ -727,13 +691,13 @@ fn render_processor_row(
         Span::raw(format!("{:<10}", proc.active_threads)),
         Span::styled(
             format!("{:<12}", proc.run_status),
-            Style::default().fg(match proc.run_status.as_str() {
-                "RUNNING" => Color::Green,
-                "STOPPED" => Color::Yellow,
-                "DISABLED" => Color::DarkGray,
-                "INVALID" => Color::Red,
-                _ => Color::White,
-            }),
+            match proc.run_status.as_str() {
+                "RUNNING" => theme::success(),
+                "STOPPED" => theme::warning(),
+                "DISABLED" => theme::disabled(),
+                "INVALID" => theme::error(),
+                _ => Style::default(),
+            },
         ),
         Span::raw(cpu),
     ]);
