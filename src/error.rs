@@ -9,6 +9,7 @@ use std::path::PathBuf;
 
 use snafu::Snafu;
 
+/// Top-level error type surfaced at the application edge.
 #[derive(Debug, Snafu)]
 #[snafu(visibility(pub))]
 pub enum NifiLensError {

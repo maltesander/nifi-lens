@@ -1,7 +1,9 @@
-//! nifi-lens — a keyboard-driven TUI lens into Apache NiFi 2.x.
+//! nifi-lens — a keyboard-driven terminal UI for observing and debugging
+//! Apache NiFi 2.x clusters.
 //!
-//! The library crate holds every module except the `main` entry point.
-//! Integration tests can `use nifi_lens::...` without spawning a binary.
+//! Read-only and multi-cluster (kubeconfig-style context switching), powered
+//! by [`nifi-rust-client`](https://docs.rs/nifi-rust-client) with the
+//! `dynamic` feature so one binary works against every supported NiFi version.
 
 pub mod app;
 pub mod cli;

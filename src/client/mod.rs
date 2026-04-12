@@ -89,6 +89,9 @@ fn collect_queues(
     }
 }
 
+/// Thin wrapper around `nifi_rust_client::dynamic::DynamicClient`.
+///
+/// Exposed via `Deref` so callers can invoke any NiFi API method directly.
 pub struct NifiClient {
     inner: DynamicClient,
     context_name: String,

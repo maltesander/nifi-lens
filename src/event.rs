@@ -2,6 +2,7 @@
 
 use crate::error::NifiLensError;
 
+/// Events flowing through the single channel consumed by the UI task.
 pub enum AppEvent {
     /// Terminal input forwarded by the crossterm task.
     Input(crossterm::event::Event),
