@@ -225,6 +225,54 @@ pub enum Followup {
 
 // ── Reducer ───────────────────────────────────────────────────────────────────
 
+/// Transitions to LatestEvents mode with loading=true and an empty event list.
+///
+/// `component_label` is initially set to `component_id` and updated when the
+/// first [`TracerPayload::LatestEvents`] snapshot arrives.
+pub fn start_latest_events(state: &mut TracerState, component_id: String) {
+    state.mode = TracerMode::LatestEvents(LatestEventsView {
+        component_label: component_id.clone(),
+        component_id,
+        events: Vec::new(),
+        selected: 0,
+        fetched_at: SystemTime::now(),
+        loading: true,
+    });
+    state.last_error = None;
+}
+
+/// Moves the selection down by one row in LatestEvents mode, wrapping at the end.
+pub fn latest_events_move_down(state: &mut TracerState) {
+    if let TracerMode::LatestEvents(ref mut view) = state.mode {
+        let len = view.events.len();
+        if len > 0 {
+            view.selected = (view.selected + 1) % len;
+        }
+    }
+}
+
+/// Moves the selection up by one row in LatestEvents mode, wrapping at the start.
+pub fn latest_events_move_up(state: &mut TracerState) {
+    if let TracerMode::LatestEvents(ref mut view) = state.mode {
+        let len = view.events.len();
+        if len > 0 {
+            view.selected = view.selected.checked_sub(1).unwrap_or(len - 1);
+        }
+    }
+}
+
+/// Returns the `flow_file_uuid` of the currently selected row in LatestEvents mode,
+/// or `None` when not in that mode or the event list is empty.
+pub fn latest_events_selected_uuid(state: &TracerState) -> Option<String> {
+    if let TracerMode::LatestEvents(ref view) = state.mode {
+        view.events
+            .get(view.selected)
+            .map(|e| e.flow_file_uuid.clone())
+    } else {
+        None
+    }
+}
+
 /// Transitions from Entry to LineageRunning with an empty query_id.
 pub fn start_lineage(state: &mut TracerState, uuid: String, abort: Option<AbortHandle>) {
     state.mode = TracerMode::LineageRunning(LineageRunningState {
@@ -315,7 +363,30 @@ pub fn apply_payload(state: &mut TracerState, payload: TracerPayload) -> Option<
             }
             None
         }
-        // Arms filled in by Tasks 12–13.
+        TracerPayload::LatestEvents(snap) => {
+            if let TracerMode::LatestEvents(ref mut view) = state.mode
+                && view.component_id == snap.component_id
+            {
+                view.component_label = snap.component_label;
+                view.events = snap.events;
+                view.fetched_at = snap.fetched_at;
+                view.loading = false;
+            }
+            None
+        }
+        TracerPayload::LatestEventsFailed {
+            component_id,
+            error,
+        } => {
+            if let TracerMode::LatestEvents(ref mut view) = state.mode
+                && view.component_id == component_id
+            {
+                view.loading = false;
+                state.last_error = Some(error);
+            }
+            None
+        }
+        // Arms filled in by Task 13.
         _ => None,
     }
 }
@@ -688,5 +759,158 @@ mod tests {
         let followup = cancel_lineage(&mut state);
         assert!(matches!(state.mode, TracerMode::Entry(_)));
         assert!(followup.is_none());
+    }
+
+    // ── LatestEvents reducer tests ──────────────────────────────────────────
+
+    const COMP_ID: &str = "comp-aaaa-bbbb-cccc-dddddddddddd";
+
+    fn fake_summary(id: i64, uuid: &str) -> ProvenanceEventSummary {
+        ProvenanceEventSummary {
+            event_id: id,
+            event_time_iso: "2026-01-01T00:00:00Z".to_string(),
+            event_type: "CREATE".to_string(),
+            component_id: COMP_ID.to_string(),
+            component_name: "MyProcessor".to_string(),
+            component_type: "GenerateFlowFile".to_string(),
+            group_id: "root".to_string(),
+            flow_file_uuid: uuid.to_string(),
+            relationship: None,
+            details: None,
+        }
+    }
+
+    #[test]
+    fn start_latest_events_transitions_into_loading_view() {
+        let mut state = TracerState::new();
+        start_latest_events(&mut state, COMP_ID.to_string());
+
+        let TracerMode::LatestEvents(ref view) = state.mode else {
+            panic!("expected LatestEvents mode");
+        };
+        assert_eq!(view.component_id, COMP_ID);
+        assert_eq!(view.component_label, COMP_ID);
+        assert!(view.events.is_empty());
+        assert_eq!(view.selected, 0);
+        assert!(view.loading);
+        assert!(state.last_error.is_none());
+    }
+
+    #[test]
+    fn latest_events_payload_populates_matching_component() {
+        let mut state = TracerState::new();
+        start_latest_events(&mut state, COMP_ID.to_string());
+
+        let snap = LatestEventsSnapshot {
+            component_id: COMP_ID.to_string(),
+            component_label: "MyProcessor".to_string(),
+            events: vec![fake_summary(1, "uuid-1111"), fake_summary(2, "uuid-2222")],
+            fetched_at: SystemTime::now(),
+        };
+        let followup = apply_payload(&mut state, TracerPayload::LatestEvents(snap));
+        assert!(followup.is_none());
+
+        let TracerMode::LatestEvents(ref view) = state.mode else {
+            panic!("expected LatestEvents mode");
+        };
+        assert_eq!(view.component_label, "MyProcessor");
+        assert_eq!(view.events.len(), 2);
+        assert!(!view.loading);
+    }
+
+    #[test]
+    fn latest_events_payload_with_mismatched_component_is_dropped() {
+        let mut state = TracerState::new();
+        start_latest_events(&mut state, COMP_ID.to_string());
+
+        let snap = LatestEventsSnapshot {
+            component_id: "other-component".to_string(),
+            component_label: "Other".to_string(),
+            events: vec![fake_summary(99, "uuid-9999")],
+            fetched_at: SystemTime::now(),
+        };
+        apply_payload(&mut state, TracerPayload::LatestEvents(snap));
+
+        let TracerMode::LatestEvents(ref view) = state.mode else {
+            panic!("expected LatestEvents mode");
+        };
+        assert!(view.events.is_empty(), "events should remain empty");
+        assert!(view.loading, "loading should remain true");
+    }
+
+    #[test]
+    fn latest_events_j_k_moves_selection_and_wraps() {
+        let mut state = TracerState::new();
+        start_latest_events(&mut state, COMP_ID.to_string());
+
+        // Populate with 3 events via payload
+        let snap = LatestEventsSnapshot {
+            component_id: COMP_ID.to_string(),
+            component_label: "MyProcessor".to_string(),
+            events: vec![
+                fake_summary(1, "uuid-1111"),
+                fake_summary(2, "uuid-2222"),
+                fake_summary(3, "uuid-3333"),
+            ],
+            fetched_at: SystemTime::now(),
+        };
+        apply_payload(&mut state, TracerPayload::LatestEvents(snap));
+
+        // Move down: 0 → 1 → 2 → wraps to 0
+        latest_events_move_down(&mut state);
+        assert!(matches!(&state.mode, TracerMode::LatestEvents(v) if v.selected == 1));
+        latest_events_move_down(&mut state);
+        latest_events_move_down(&mut state); // wraps
+        assert!(matches!(&state.mode, TracerMode::LatestEvents(v) if v.selected == 0));
+
+        // Move up from 0 wraps to last (2)
+        latest_events_move_up(&mut state);
+        assert!(matches!(&state.mode, TracerMode::LatestEvents(v) if v.selected == 2));
+    }
+
+    #[test]
+    fn latest_events_selected_uuid_returns_row_uuid() {
+        let mut state = TracerState::new();
+        start_latest_events(&mut state, COMP_ID.to_string());
+
+        let snap = LatestEventsSnapshot {
+            component_id: COMP_ID.to_string(),
+            component_label: "MyProcessor".to_string(),
+            events: vec![fake_summary(1, "uuid-1111"), fake_summary(2, "uuid-2222")],
+            fetched_at: SystemTime::now(),
+        };
+        apply_payload(&mut state, TracerPayload::LatestEvents(snap));
+
+        assert_eq!(
+            latest_events_selected_uuid(&state).as_deref(),
+            Some("uuid-1111")
+        );
+
+        latest_events_move_down(&mut state);
+        assert_eq!(
+            latest_events_selected_uuid(&state).as_deref(),
+            Some("uuid-2222")
+        );
+    }
+
+    #[test]
+    fn latest_events_failed_payload_clears_loading_and_sets_banner() {
+        let mut state = TracerState::new();
+        start_latest_events(&mut state, COMP_ID.to_string());
+
+        let followup = apply_payload(
+            &mut state,
+            TracerPayload::LatestEventsFailed {
+                component_id: COMP_ID.to_string(),
+                error: "connection refused".to_string(),
+            },
+        );
+        assert!(followup.is_none());
+
+        let TracerMode::LatestEvents(ref view) = state.mode else {
+            panic!("expected LatestEvents mode");
+        };
+        assert!(!view.loading);
+        assert_eq!(state.last_error.as_deref(), Some("connection refused"));
     }
 }
