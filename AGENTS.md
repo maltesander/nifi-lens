@@ -212,10 +212,9 @@ ring exceeds its capacity.
 - **Health tab `Enter` cross-link is a stub for non-queue/processor rows.**
   Pressing `Enter` on a repository or node row emits no cross-link intent;
   the keybind is silently ignored. Phase 6 polish item.
-- **Repository fill bars show cluster-aggregate, not per-node.**
-  The Health tab's repository section displays aggregate storage usage
-  across the cluster. Per-node repository breakdown is available in the
-  API response (`nodewise=true`) but not rendered. Phase 6 polish item.
+- **Repository fill bars now show per-node breakdown.** *(resolved in
+  Phase 6)* Selecting a repository row with `j`/`k` in the Repositories
+  category shows per-node fill bars in a detail pane on the right.
 
 ## Dependency on `nifi-rust-client`
 

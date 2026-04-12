@@ -44,6 +44,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **`[bulletins] ring_size` config knob.** Optional; default 5000;
   valid range 100..=100_000. Controls the size of the in-memory ring
   the Bulletins tab keeps.
+- **Per-node repository breakdown.** The Health tab's Repositories
+  category now supports `j`/`k` navigation. Selecting a repository row
+  shows per-node fill bars in a detail pane, replacing the former
+  aggregate-only display.
 - **Per-view help modal sections.** The `?` help modal now renders a
   per-tab keybind section below the global keys.
 - **Multi-version integration test fixture.** `integration-tests/run.sh`

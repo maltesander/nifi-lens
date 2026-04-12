@@ -3,7 +3,7 @@
 use crate::app::navigation::ListNavigation;
 use crate::client::health::{
     self, FullPgStatusSnapshot, NodesState, ProcessorThreadState, QueuePressureState,
-    RepositoryState, SystemDiagSnapshot, TOP_N,
+    RepositoryState, SystemDiagSnapshot, TOP_N, build_per_node_for_row,
 };
 
 /// All mutable state for the Health tab.
@@ -85,9 +85,44 @@ pub fn apply_pg_status(state: &mut HealthState, snapshot: FullPgStatusSnapshot) 
 
 /// Fold a [`SystemDiagSnapshot`] into the repository and node sub-states.
 pub fn apply_system_diagnostics(state: &mut HealthState, diag: SystemDiagSnapshot) {
+    // Preserve the previous selection index (clamped later).
+    let prev_selected = state.repositories.selected;
     state.repositories = health::extract_repositories(&diag);
+    // Restore selection, clamped to the new row count.
+    if !state.repositories.rows.is_empty() {
+        state.repositories.selected = prev_selected.min(state.repositories.rows.len() - 1);
+        // Rebuild per_node for the restored selection.
+        state.repositories.per_node = build_per_node_for_row(
+            &state.repositories.rows[state.repositories.selected],
+            &diag.nodes,
+        );
+    }
+    // Stash node diagnostics for later per_node rebuilds on selection change.
+    state.repositories.node_diagnostics = diag.nodes.clone();
     health::update_nodes(&mut state.nodes, &diag);
     state.last_sysdiag_refresh = Some(diag.fetched_at);
+}
+
+impl ListNavigation for RepositoryState {
+    fn list_len(&self) -> usize {
+        self.rows.len()
+    }
+
+    fn selected(&self) -> Option<usize> {
+        if self.rows.is_empty() {
+            None
+        } else {
+            Some(self.selected)
+        }
+    }
+
+    fn set_selected(&mut self, index: Option<usize>) {
+        self.selected = index.unwrap_or(0);
+    }
+
+    fn wraps(&self) -> bool {
+        true
+    }
 }
 
 impl ListNavigation for QueuePressureState {
@@ -199,5 +234,40 @@ mod tests {
         );
         assert_eq!(HealthCategory::from_index(0), None);
         assert_eq!(HealthCategory::from_index(5), None);
+    }
+
+    #[test]
+    fn repository_state_list_navigation_wraps() {
+        use crate::client::health::{RepoKind, RepoRow, RepositoryState, Severity};
+
+        let mut repos = RepositoryState {
+            rows: vec![
+                RepoRow {
+                    kind: RepoKind::Content,
+                    identifier: "a".into(),
+                    fill_percent: 50,
+                    severity: Severity::Green,
+                },
+                RepoRow {
+                    kind: RepoKind::FlowFile,
+                    identifier: "b".into(),
+                    fill_percent: 30,
+                    severity: Severity::Green,
+                },
+            ],
+            ..RepositoryState::default()
+        };
+        assert_eq!(repos.selected(), Some(0));
+
+        repos.move_down();
+        assert_eq!(repos.selected(), Some(1));
+
+        // Wrap around.
+        repos.move_down();
+        assert_eq!(repos.selected(), Some(0));
+
+        // Wrap backwards.
+        repos.move_up();
+        assert_eq!(repos.selected(), Some(1));
     }
 }

@@ -10,6 +10,16 @@ use crate::app::navigation::ListNavigation;
 /// Zero-sized dispatch struct for the Health tab.
 pub(crate) struct HealthHandler;
 
+/// Rebuild the per-node detail for the currently selected repository row.
+fn rebuild_repo_per_node(repos: &mut crate::client::health::RepositoryState) {
+    if let Some(row) = repos.rows.get(repos.selected) {
+        repos.per_node =
+            crate::client::health::build_per_node_for_row(row, &repos.node_diagnostics);
+    } else {
+        repos.per_node.clear();
+    }
+}
+
 impl ViewKeyHandler for HealthHandler {
     fn handle_key(state: &mut AppState, key: KeyEvent) -> Option<UpdateResult> {
         use crate::view::health::state::HealthCategory;
@@ -36,7 +46,10 @@ impl ViewKeyHandler for HealthHandler {
                 HealthCategory::Processors => {
                     state.health.processors.move_down();
                 }
-                HealthCategory::Repositories => {}
+                HealthCategory::Repositories => {
+                    state.health.repositories.move_down();
+                    rebuild_repo_per_node(&mut state.health.repositories);
+                }
             },
             // Detail table navigation (k / up)
             KeyCode::Up | KeyCode::Char('k') => match state.health.selected_category {
@@ -49,7 +62,10 @@ impl ViewKeyHandler for HealthHandler {
                 HealthCategory::Processors => {
                     state.health.processors.move_up();
                 }
-                HealthCategory::Repositories => {}
+                HealthCategory::Repositories => {
+                    state.health.repositories.move_up();
+                    rebuild_repo_per_node(&mut state.health.repositories);
+                }
             },
             // Enter → jump to Browser for Queues and Processors
             KeyCode::Enter => {
@@ -313,6 +329,9 @@ mod tests {
                 load_average: Some(1.5),
                 total_threads: 100,
                 uptime: "2 days".into(),
+                content_repos: Vec::new(),
+                flowfile_repo: None,
+                provenance_repos: Vec::new(),
             }],
             fetched_at: Instant::now(),
         };
@@ -334,5 +353,93 @@ mod tests {
         let banner = s.status.banner.as_ref().expect("banner must be set");
         assert_eq!(banner.severity, BannerSeverity::Warning);
         assert!(banner.message.contains("aggregate"));
+    }
+
+    #[test]
+    fn health_j_k_navigate_repositories() {
+        use crate::client::health::{
+            NodeDiagnostics, RepoUsage, SystemDiagAggregate, SystemDiagSnapshot,
+        };
+
+        let mut s = fresh_state();
+        let c = tiny_config();
+        s.current_tab = ViewId::Health;
+        s.health.selected_category = HealthCategory::Repositories;
+
+        // Seed system diagnostics with 2 content repos + per-node data.
+        let diag = SystemDiagSnapshot {
+            aggregate: SystemDiagAggregate {
+                content_repos: vec![
+                    RepoUsage {
+                        identifier: "content-1".into(),
+                        used_bytes: 60_000,
+                        total_bytes: 100_000,
+                        free_bytes: 40_000,
+                        utilization_percent: 60,
+                    },
+                    RepoUsage {
+                        identifier: "content-2".into(),
+                        used_bytes: 20_000,
+                        total_bytes: 100_000,
+                        free_bytes: 80_000,
+                        utilization_percent: 20,
+                    },
+                ],
+                flowfile_repo: None,
+                provenance_repos: Vec::new(),
+            },
+            nodes: vec![NodeDiagnostics {
+                address: "node1:8080".into(),
+                heap_used_bytes: 1_000,
+                heap_max_bytes: 8_000,
+                gc: Vec::new(),
+                load_average: None,
+                total_threads: 10,
+                uptime: "1h".into(),
+                content_repos: vec![
+                    RepoUsage {
+                        identifier: "content-1".into(),
+                        used_bytes: 55_000,
+                        total_bytes: 100_000,
+                        free_bytes: 45_000,
+                        utilization_percent: 55,
+                    },
+                    RepoUsage {
+                        identifier: "content-2".into(),
+                        used_bytes: 15_000,
+                        total_bytes: 100_000,
+                        free_bytes: 85_000,
+                        utilization_percent: 15,
+                    },
+                ],
+                flowfile_repo: None,
+                provenance_repos: Vec::new(),
+            }],
+            fetched_at: Instant::now(),
+        };
+        update(
+            &mut s,
+            AppEvent::Data(ViewPayload::Health(HealthPayload::SystemDiag(diag))),
+            &c,
+        );
+
+        // Should have 2 rows, selected=0 (content-1).
+        assert_eq!(s.health.repositories.rows.len(), 2);
+        assert_eq!(s.health.repositories.selected, 0);
+        assert_eq!(s.health.repositories.rows[0].identifier, "content-1");
+        // per_node should have 1 node with content-1 data.
+        assert_eq!(s.health.repositories.per_node.len(), 1);
+        assert_eq!(s.health.repositories.per_node[0].utilization_percent, 55);
+
+        // Press j → selected=1 (content-2), per_node rebuilds.
+        update(&mut s, key(KeyCode::Char('j'), KeyModifiers::NONE), &c);
+        assert_eq!(s.health.repositories.selected, 1);
+        assert_eq!(s.health.repositories.per_node.len(), 1);
+        assert_eq!(s.health.repositories.per_node[0].utilization_percent, 15);
+
+        // Press k → selected=0 (content-1), per_node rebuilds.
+        update(&mut s, key(KeyCode::Char('k'), KeyModifiers::NONE), &c);
+        assert_eq!(s.health.repositories.selected, 0);
+        assert_eq!(s.health.repositories.per_node[0].utilization_percent, 55);
     }
 }

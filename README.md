@@ -112,12 +112,13 @@ the selected component.
 
 **Health** *(shipped)* — "How healthy is my cluster right now?" Two-pane
 ops dashboard with four categories: queue backpressure leaderboard with
-server-predicted time-to-full, repository fill bars, per-node heap/GC/load
-strips, and processor thread leaderboard. Navigate categories with `1`–`4`
-and scroll detail rows with `j`/`k`. Press `Enter` on a queue or processor
-row to jump directly to that component in the Browser tab. Refreshes
-automatically (PG status every 10 s, system diagnostics every 30 s); press
-`r` to force an immediate refresh.
+server-predicted time-to-full, repository fill bars with per-node breakdown,
+per-node heap/GC/load strips, and processor thread leaderboard. Navigate
+categories with `1`–`4` and scroll detail rows with `j`/`k`. Select a
+repository row to see per-node fill bars in the detail pane. Press `Enter`
+on a queue or processor row to jump directly to that component in the
+Browser tab. Refreshes automatically (PG status every 10 s, system
+diagnostics every 30 s); press `r` to force an immediate refresh.
 
 ### Browser tab
 

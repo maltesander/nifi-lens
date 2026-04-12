@@ -10,7 +10,8 @@ use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Borders, Paragraph};
 
 use crate::client::health::{
-    NodeHealthRow, ProcessorThreadRow, QueuePressureRow, RepoFillBar, Severity, TimeToFull,
+    NodeHealthRow, NodeRepoFillBar, ProcessorThreadRow, QueuePressureRow, RepoKind, RepoRow,
+    Severity, TimeToFull,
 };
 use crate::theme;
 use crate::view::health::state::{HealthCategory, HealthState};
@@ -326,79 +327,103 @@ fn render_repositories(frame: &mut Frame, area: Rect, state: &HealthState) {
         render_centered_muted(frame, area, "waiting for first poll\u{2026}");
         return;
     }
-
-    let mut y = area.y;
-    let max_y = area.y + area.height;
-
-    y = render_repo_section(
-        frame,
-        area.x,
-        y,
-        max_y,
-        area.width,
-        "Content Repository",
-        &state.repositories.content,
-    );
-    if let Some(ref ff) = state.repositories.flowfile {
-        y = render_repo_section(
-            frame,
-            area.x,
-            y,
-            max_y,
-            area.width,
-            "FlowFile Repository",
-            std::slice::from_ref(ff),
-        );
+    if state.repositories.rows.is_empty() {
+        render_centered_muted(frame, area, "no repository data");
+        return;
     }
-    let _ = render_repo_section(
-        frame,
-        area.x,
-        y,
-        max_y,
-        area.width,
-        "Provenance Repository",
-        &state.repositories.provenance,
-    );
+
+    // Split: left half for aggregate list, right half for per-node detail.
+    let chunks = Layout::default()
+        .direction(Direction::Horizontal)
+        .constraints([Constraint::Percentage(50), Constraint::Percentage(50)])
+        .split(area);
+
+    render_repo_aggregate_list(frame, chunks[0], state);
+    render_repo_per_node_detail(frame, chunks[1], state);
 }
 
-fn render_repo_section(
-    frame: &mut Frame,
-    x: u16,
-    mut y: u16,
-    max_y: u16,
-    width: u16,
-    title: &str,
-    bars: &[RepoFillBar],
-) -> u16 {
-    if y >= max_y {
-        return y;
-    }
-    // Section title
-    let title_line = Line::from(Span::styled(
-        format!("  {title}"),
-        Style::default().add_modifier(Modifier::BOLD),
-    ));
-    frame.render_widget(Paragraph::new(title_line), Rect::new(x, y, width, 1));
-    y += 1;
+/// Render the scrollable aggregate repository list with selection.
+fn render_repo_aggregate_list(frame: &mut Frame, area: Rect, state: &HealthState) {
+    let repos = &state.repositories;
 
-    for bar in bars {
-        if y + 2 > max_y {
+    // Each row occupies 2 lines (fill bar + size details).
+    let lines_per_row = 2_usize;
+    let visible_rows = (area.height as usize) / lines_per_row;
+    let scroll_offset = if visible_rows == 0 || repos.selected < visible_rows {
+        0
+    } else {
+        repos.selected + 1 - visible_rows
+    };
+
+    let window_end = repos.rows.len().min(scroll_offset + visible_rows);
+    let window = &repos.rows[scroll_offset..window_end];
+    let selected_in_window = repos.selected.saturating_sub(scroll_offset);
+
+    for (i, row) in window.iter().enumerate() {
+        let y = area.y + (i as u16) * lines_per_row as u16;
+        if y + 1 >= area.y + area.height {
             break;
         }
-        let fill = render_fill_bar(20, bar.utilization_percent);
-        let pct = format!("{:>3}%", bar.utilization_percent);
-        let line1 = Line::from(vec![
-            Span::raw(format!("    {:<22}", bar.identifier)),
-            Span::styled(
-                format!("[{fill}]"),
-                Style::default().fg(severity_color(&bar.severity)),
-            ),
-            Span::raw(" "),
-            Span::styled(pct, Style::default().fg(severity_color(&bar.severity))),
-        ]);
-        frame.render_widget(Paragraph::new(line1), Rect::new(x, y, width, 1));
-        y += 1;
+        let is_selected = i == selected_in_window;
+        render_repo_aggregate_row(frame, area, y, row, is_selected, &state.repositories);
+    }
+}
 
+/// Render one aggregate repository row (fill bar + sizes).
+fn render_repo_aggregate_row(
+    frame: &mut Frame,
+    area: Rect,
+    y: u16,
+    row: &RepoRow,
+    selected: bool,
+    repos: &crate::client::health::RepositoryState,
+) {
+    let gutter = if selected { ">" } else { " " };
+    let kind_prefix = match row.kind {
+        RepoKind::Content => "C",
+        RepoKind::FlowFile => "F",
+        RepoKind::Provenance => "P",
+    };
+
+    let fill = render_fill_bar(15, row.fill_percent);
+    let pct = format!("{:>3}%", row.fill_percent);
+
+    let line1 = Line::from(vec![
+        Span::raw(format!("{gutter} ")),
+        Span::styled(
+            format!("[{kind_prefix}] "),
+            Style::default().add_modifier(Modifier::BOLD),
+        ),
+        Span::styled(
+            format!("{:<20}", truncate(&row.identifier, 18)),
+            if selected {
+                theme::cursor_row()
+            } else {
+                Style::default()
+            },
+        ),
+        Span::styled(
+            format!("[{fill}]"),
+            Style::default().fg(severity_color(&row.severity)),
+        ),
+        Span::raw(" "),
+        Span::styled(pct, Style::default().fg(severity_color(&row.severity))),
+    ]);
+    frame.render_widget(Paragraph::new(line1), Rect::new(area.x, y, area.width, 1));
+
+    // Line 2: used / total / free from the corresponding RepoFillBar.
+    let bar = match row.kind {
+        RepoKind::Content => repos
+            .content
+            .iter()
+            .find(|b| b.identifier == row.identifier),
+        RepoKind::FlowFile => repos.flowfile.as_ref(),
+        RepoKind::Provenance => repos
+            .provenance
+            .iter()
+            .find(|b| b.identifier == row.identifier),
+    };
+    if let Some(bar) = bar {
         let used = format_bytes(bar.used_bytes);
         let total = format_bytes(bar.total_bytes);
         let free = format_bytes(bar.free_bytes);
@@ -406,11 +431,68 @@ fn render_repo_section(
             format!("      {used} / {total} \u{00b7} free {free}"),
             theme::muted(),
         ));
-        frame.render_widget(Paragraph::new(line2), Rect::new(x, y, width, 1));
+        frame.render_widget(
+            Paragraph::new(line2),
+            Rect::new(area.x, y + 1, area.width, 1),
+        );
+    }
+}
+
+/// Render per-node fill bars for the selected repository.
+fn render_repo_per_node_detail(frame: &mut Frame, area: Rect, state: &HealthState) {
+    let per_node = &state.repositories.per_node;
+    if per_node.is_empty() {
+        render_centered_muted(frame, area, "no per-node data");
+        return;
+    }
+
+    let mut y = area.y;
+    let max_y = area.y + area.height;
+
+    // Header
+    if y < max_y {
+        let hdr = Line::from(vec![
+            Span::styled(
+                format!("  {:<22}", "Node"),
+                Style::default().add_modifier(Modifier::BOLD),
+            ),
+            Span::styled(
+                format!("{:<20}", "Used / Total"),
+                Style::default().add_modifier(Modifier::BOLD),
+            ),
+            Span::styled("Fill", Style::default().add_modifier(Modifier::BOLD)),
+        ]);
+        frame.render_widget(Paragraph::new(hdr), Rect::new(area.x, y, area.width, 1));
         y += 1;
     }
 
-    y
+    for node in per_node {
+        if y >= max_y {
+            break;
+        }
+        render_node_repo_row(frame, area.x, y, area.width, node);
+        y += 1;
+    }
+}
+
+/// Render one per-node repository row.
+fn render_node_repo_row(frame: &mut Frame, x: u16, y: u16, width: u16, node: &NodeRepoFillBar) {
+    let bar = render_fill_bar(10, node.utilization_percent);
+    let pct = format!("{:>3}%", node.utilization_percent);
+    let used = format_bytes(node.used_bytes);
+    let total = format_bytes(node.total_bytes);
+
+    let line = Line::from(vec![
+        Span::raw(format!("  {:<22}", truncate(&node.node_address, 20))),
+        Span::raw(format!("{used:>8} / {total:<8}  ")),
+        Span::styled(
+            format!("[{bar}]"),
+            Style::default().fg(severity_color(&node.severity)),
+        ),
+        Span::raw(" "),
+        Span::styled(pct, Style::default().fg(severity_color(&node.severity))),
+    ]);
+    frame.render_widget(Paragraph::new(line), Rect::new(x, y, width, 1));
 }
 
 // ---------------------------------------------------------------------------
@@ -702,7 +784,8 @@ fn render_centered_muted(frame: &mut Frame, area: Rect, text: &str) {
 mod tests {
     use super::render;
     use crate::client::health::{
-        NodeHealthRow, ProcessorThreadRow, QueuePressureRow, RepoFillBar, Severity, TimeToFull,
+        NodeHealthRow, NodeRepoFillBar, ProcessorThreadRow, QueuePressureRow, RepoFillBar,
+        RepoKind, RepoRow, Severity, TimeToFull,
     };
     use crate::view::health::state::{HealthCategory, HealthState};
     use ratatui::Terminal;
@@ -818,6 +901,45 @@ mod tests {
             severity: Severity::Red,
         });
         state.repositories.provenance = vec![];
+        // Populate rows for the new selection-aware rendering.
+        state.repositories.rows = vec![
+            RepoRow {
+                kind: RepoKind::Content,
+                identifier: "content-1".into(),
+                fill_percent: 78,
+                severity: Severity::Yellow,
+            },
+            RepoRow {
+                kind: RepoKind::Content,
+                identifier: "content-2".into(),
+                fill_percent: 20,
+                severity: Severity::Green,
+            },
+            RepoRow {
+                kind: RepoKind::FlowFile,
+                identifier: "flowfile-repo".into(),
+                fill_percent: 95,
+                severity: Severity::Red,
+            },
+        ];
+        state.repositories.per_node = vec![
+            NodeRepoFillBar {
+                node_address: "nifi-node-1:8443".into(),
+                used_bytes: 30_000_000_000,
+                total_bytes: 40_000_000_000,
+                free_bytes: 10_000_000_000,
+                utilization_percent: 75,
+                severity: Severity::Yellow,
+            },
+            NodeRepoFillBar {
+                node_address: "nifi-node-2:8443".into(),
+                used_bytes: 30_500_000_000,
+                total_bytes: 37_500_000_000,
+                free_bytes: 7_000_000_000,
+                utilization_percent: 81,
+                severity: Severity::Red,
+            },
+        ];
         insta::assert_snapshot!("health_repositories_populated", snap(&state));
     }
 

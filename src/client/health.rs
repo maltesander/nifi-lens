@@ -81,7 +81,7 @@ pub struct RepoUsage {
     pub utilization_percent: u32,
 }
 
-/// Per-node heap, GC, thread, and load telemetry.
+/// Per-node heap, GC, thread, load, and repository telemetry.
 #[derive(Debug, Clone)]
 pub struct NodeDiagnostics {
     pub address: String,
@@ -91,6 +91,9 @@ pub struct NodeDiagnostics {
     pub load_average: Option<f64>,
     pub total_threads: u32,
     pub uptime: String,
+    pub content_repos: Vec<RepoUsage>,
+    pub flowfile_repo: Option<RepoUsage>,
+    pub provenance_repos: Vec<RepoUsage>,
 }
 
 /// GC collector snapshot from a single node.
@@ -232,12 +235,48 @@ pub struct QueuePressureState {
     pub selected: usize,
 }
 
+/// The kind of a repository row (used for matching per-node data).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum RepoKind {
+    Content,
+    FlowFile,
+    Provenance,
+}
+
+/// A selectable row in the repository aggregate list.
+#[derive(Debug, Clone)]
+pub struct RepoRow {
+    pub kind: RepoKind,
+    pub identifier: String,
+    pub fill_percent: u32,
+    pub severity: Severity,
+}
+
+/// Per-node fill bar for a single repository on a specific cluster node.
+#[derive(Debug, Clone)]
+pub struct NodeRepoFillBar {
+    pub node_address: String,
+    pub used_bytes: u64,
+    pub total_bytes: u64,
+    pub free_bytes: u64,
+    pub utilization_percent: u32,
+    pub severity: Severity,
+}
+
 /// Stateful container for repository fill bars.
 #[derive(Debug, Default)]
 pub struct RepositoryState {
     pub content: Vec<RepoFillBar>,
     pub flowfile: Option<RepoFillBar>,
     pub provenance: Vec<RepoFillBar>,
+    /// Flat list of aggregate repo rows for selection.
+    pub rows: Vec<RepoRow>,
+    /// Index of the currently selected row.
+    pub selected: usize,
+    /// Per-node breakdown for the selected repository.
+    pub per_node: Vec<NodeRepoFillBar>,
+    /// Cached node diagnostics for rebuilding `per_node` on selection change.
+    pub node_diagnostics: Vec<NodeDiagnostics>,
 }
 
 /// Stateful container for the node-health table.
@@ -366,8 +405,10 @@ pub fn compute_processor_threads(
 }
 
 /// Map system-diagnostics aggregate repository data to display-ready fill bars.
+///
+/// Also builds a flat `rows` vector and populates `per_node` for the first row.
 pub fn extract_repositories(diag: &SystemDiagSnapshot) -> RepositoryState {
-    let content = diag
+    let content: Vec<RepoFillBar> = diag
         .aggregate
         .content_repos
         .iter()
@@ -376,18 +417,85 @@ pub fn extract_repositories(diag: &SystemDiagSnapshot) -> RepositoryState {
 
     let flowfile = diag.aggregate.flowfile_repo.as_ref().map(repo_to_fill_bar);
 
-    let provenance = diag
+    let provenance: Vec<RepoFillBar> = diag
         .aggregate
         .provenance_repos
         .iter()
         .map(repo_to_fill_bar)
         .collect();
 
+    // Build flat row list for selection.
+    let mut rows: Vec<RepoRow> = Vec::new();
+    for bar in &content {
+        rows.push(RepoRow {
+            kind: RepoKind::Content,
+            identifier: bar.identifier.clone(),
+            fill_percent: bar.utilization_percent,
+            severity: Severity::for_repo(bar.utilization_percent),
+        });
+    }
+    if let Some(ref ff) = flowfile {
+        rows.push(RepoRow {
+            kind: RepoKind::FlowFile,
+            identifier: ff.identifier.clone(),
+            fill_percent: ff.utilization_percent,
+            severity: Severity::for_repo(ff.utilization_percent),
+        });
+    }
+    for bar in &provenance {
+        rows.push(RepoRow {
+            kind: RepoKind::Provenance,
+            identifier: bar.identifier.clone(),
+            fill_percent: bar.utilization_percent,
+            severity: Severity::for_repo(bar.utilization_percent),
+        });
+    }
+
+    // Build per_node for the first row (if any).
+    let per_node = if let Some(first) = rows.first() {
+        build_per_node_for_row(first, &diag.nodes)
+    } else {
+        Vec::new()
+    };
+
     RepositoryState {
         content,
         flowfile,
         provenance,
+        rows,
+        selected: 0,
+        per_node,
+        node_diagnostics: Vec::new(),
     }
+}
+
+/// Build per-node fill bars for a given repository row by looking up the
+/// matching repo on each node.
+pub fn build_per_node_for_row(row: &RepoRow, nodes: &[NodeDiagnostics]) -> Vec<NodeRepoFillBar> {
+    nodes
+        .iter()
+        .filter_map(|node| {
+            let repo = match row.kind {
+                RepoKind::Content => node
+                    .content_repos
+                    .iter()
+                    .find(|r| r.identifier == row.identifier),
+                RepoKind::FlowFile => node.flowfile_repo.as_ref(),
+                RepoKind::Provenance => node
+                    .provenance_repos
+                    .iter()
+                    .find(|r| r.identifier == row.identifier),
+            };
+            repo.map(|r| NodeRepoFillBar {
+                node_address: node.address.clone(),
+                used_bytes: r.used_bytes,
+                total_bytes: r.total_bytes,
+                free_bytes: r.free_bytes,
+                utilization_percent: r.utilization_percent,
+                severity: Severity::for_repo(r.utilization_percent),
+            })
+        })
+        .collect()
 }
 
 /// Convert a `RepoUsage` to a `RepoFillBar` with severity annotation.
@@ -560,6 +668,15 @@ impl NifiClient {
                         collection_millis: g.collection_millis.unwrap_or(0).max(0) as u64,
                     })
                     .collect();
+                let content_repos =
+                    extract_repo_usages(snap.content_repository_storage_usage.as_deref());
+                let flowfile_repo = snap
+                    .flow_file_repository_storage_usage
+                    .as_ref()
+                    .map(map_repo_usage);
+                let provenance_repos =
+                    extract_repo_usages(snap.provenance_repository_storage_usage.as_deref());
+
                 Some(NodeDiagnostics {
                     address,
                     heap_used_bytes: snap.used_heap_bytes.unwrap_or(0).max(0) as u64,
@@ -568,6 +685,9 @@ impl NifiClient {
                     load_average: snap.processor_load_average,
                     total_threads: snap.total_threads.unwrap_or(0).max(0) as u32,
                     uptime: snap.uptime.clone().unwrap_or_default(),
+                    content_repos,
+                    flowfile_repo,
+                    provenance_repos,
                 })
             })
             .collect();
@@ -595,6 +715,16 @@ impl NifiClient {
                 load_average: snap.processor_load_average,
                 total_threads: snap.total_threads.unwrap_or(0).max(0) as u32,
                 uptime: snap.uptime.clone().unwrap_or_default(),
+                content_repos: extract_repo_usages(
+                    snap.content_repository_storage_usage.as_deref(),
+                ),
+                flowfile_repo: snap
+                    .flow_file_repository_storage_usage
+                    .as_ref()
+                    .map(map_repo_usage),
+                provenance_repos: extract_repo_usages(
+                    snap.provenance_repository_storage_usage.as_deref(),
+                ),
             });
         }
 
@@ -844,6 +974,9 @@ mod tests {
             load_average: Some(1.0),
             total_threads: 50,
             uptime: "1h".to_string(),
+            content_repos: Vec::new(),
+            flowfile_repo: None,
+            provenance_repos: Vec::new(),
         }
     }
 
@@ -1113,6 +1246,9 @@ mod tests {
                 load_average: Some(1.5),
                 total_threads: 100,
                 uptime: "2 days".to_string(),
+                content_repos: Vec::new(),
+                flowfile_repo: None,
+                provenance_repos: Vec::new(),
             }],
         );
         update_nodes(&mut state, &snap);
@@ -1122,5 +1258,103 @@ mod tests {
         assert_eq!(state.nodes[0].heap_used_bytes, 4_000);
         assert_eq!(state.nodes[0].heap_max_bytes, 8_000);
         assert_eq!(state.nodes[0].gc_collection_count, 42);
+    }
+
+    // -----------------------------------------------------------------------
+    // build_per_node_for_row tests
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn build_per_node_for_row_content_repo() {
+        let nodes = vec![
+            NodeDiagnostics {
+                address: "node1:8080".to_string(),
+                content_repos: vec![repo("default", 45)],
+                ..node_diag("node1:8080", 1000, 8000, 0)
+            },
+            NodeDiagnostics {
+                address: "node2:8080".to_string(),
+                content_repos: vec![repo("default", 80)],
+                ..node_diag("node2:8080", 1000, 8000, 0)
+            },
+        ];
+        let row = RepoRow {
+            kind: RepoKind::Content,
+            identifier: "default".to_string(),
+            fill_percent: 60,
+            severity: Severity::Green,
+        };
+        let per_node = build_per_node_for_row(&row, &nodes);
+        assert_eq!(per_node.len(), 2);
+        assert_eq!(per_node[0].node_address, "node1:8080");
+        assert_eq!(per_node[0].utilization_percent, 45);
+        assert_eq!(per_node[1].node_address, "node2:8080");
+        assert_eq!(per_node[1].utilization_percent, 80);
+    }
+
+    #[test]
+    fn build_per_node_for_row_flowfile_repo() {
+        let nodes = vec![NodeDiagnostics {
+            flowfile_repo: Some(repo("flowfile", 33)),
+            ..node_diag("node1:8080", 1000, 8000, 0)
+        }];
+        let row = RepoRow {
+            kind: RepoKind::FlowFile,
+            identifier: "flowfile".to_string(),
+            fill_percent: 33,
+            severity: Severity::Green,
+        };
+        let per_node = build_per_node_for_row(&row, &nodes);
+        assert_eq!(per_node.len(), 1);
+        assert_eq!(per_node[0].utilization_percent, 33);
+    }
+
+    #[test]
+    fn build_per_node_for_row_missing_repo_skips_node() {
+        let nodes = vec![node_diag("node1:8080", 1000, 8000, 0)];
+        let row = RepoRow {
+            kind: RepoKind::Content,
+            identifier: "nonexistent".to_string(),
+            fill_percent: 50,
+            severity: Severity::Green,
+        };
+        let per_node = build_per_node_for_row(&row, &nodes);
+        assert!(per_node.is_empty());
+    }
+
+    #[test]
+    fn extract_repositories_builds_rows_and_per_node() {
+        let nodes = vec![
+            NodeDiagnostics {
+                content_repos: vec![repo("content-1", 55)],
+                flowfile_repo: Some(repo("flowfile", 20)),
+                provenance_repos: vec![repo("provenance-1", 88)],
+                ..node_diag("node1:8080", 1000, 8000, 0)
+            },
+            NodeDiagnostics {
+                content_repos: vec![repo("content-1", 70)],
+                flowfile_repo: Some(repo("flowfile", 40)),
+                provenance_repos: vec![repo("provenance-1", 92)],
+                ..node_diag("node2:8080", 2000, 8000, 0)
+            },
+        ];
+        let snap = diag_snap(
+            vec![repo("content-1", 60)],
+            Some(repo("flowfile", 30)),
+            vec![repo("provenance-1", 91)],
+            nodes,
+        );
+        let state = extract_repositories(&snap);
+
+        // rows: content-1, flowfile, provenance-1
+        assert_eq!(state.rows.len(), 3);
+        assert_eq!(state.rows[0].kind, RepoKind::Content);
+        assert_eq!(state.rows[1].kind, RepoKind::FlowFile);
+        assert_eq!(state.rows[2].kind, RepoKind::Provenance);
+
+        // per_node defaults to first row (content-1)
+        assert_eq!(state.per_node.len(), 2);
+        assert_eq!(state.per_node[0].utilization_percent, 55);
+        assert_eq!(state.per_node[1].utilization_percent, 70);
     }
 }
