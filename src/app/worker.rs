@@ -85,8 +85,11 @@ impl WorkerRegistry {
                 None
             }
             ViewId::Health => {
-                tracing::debug!(?view, "worker registry: no worker for this view yet");
-                None
+                tracing::debug!(?view, "worker registry: spawning health worker");
+                Some(crate::view::health::worker::spawn(
+                    client.clone(),
+                    tx.clone(),
+                ))
             }
         };
         if let Some(handle) = handle {
