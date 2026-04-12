@@ -9,6 +9,8 @@
 
 use serde::Deserialize;
 use time::OffsetDateTime;
+use time::format_description::well_known::Iso8601;
+use time::macros::format_description;
 
 /// Preset timestamp display format, chosen via `[ui] timestamp_format`.
 #[derive(Debug, Clone, Copy, Default, Deserialize, PartialEq, Eq)]
@@ -44,10 +46,10 @@ pub struct TimestampConfig {
 /// Returns `None` for any input that does not match one of the two
 /// expected shapes — callers should fall back to rendering the raw
 /// string.
+///
+/// Leading and trailing whitespace is trimmed before parsing; inner
+/// whitespace is preserved as-is.
 pub fn parse_nifi_timestamp(raw: &str) -> Option<OffsetDateTime> {
-    use time::format_description::well_known::Iso8601;
-    use time::macros::format_description;
-
     let raw = raw.trim();
     if raw.is_empty() {
         return None;
@@ -127,5 +129,11 @@ mod tests {
     fn parse_nifi_human_format_with_millis() {
         let got = parse_nifi_timestamp("04/12/2026 14:32:18.456 UTC").unwrap();
         assert_eq!(got, datetime!(2026-04-12 14:32:18.456 UTC));
+    }
+
+    #[test]
+    fn parse_trims_whitespace_around_valid_input() {
+        let got = parse_nifi_timestamp("  2026-04-12T14:32:18Z  ").unwrap();
+        assert_eq!(got, datetime!(2026-04-12 14:32:18 UTC));
     }
 }
