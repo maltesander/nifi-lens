@@ -215,6 +215,26 @@ ring exceeds its capacity.
   Phase 6)* Selecting a repository row with `j`/`k` in the Repositories
   category shows per-node fill bars in a detail pane on the right.
 
+**Accepted UI Readability edge cases:**
+
+- **Icon coloring vs selected row.** On a selected (highlighted) row,
+  the run-state icon's foreground color fights the `REVERSED` modifier.
+  REVERSED wins; the icon is still recognizable by glyph shape alone.
+- **Spark-bar resolution.** A 4-cell spark-bar has 32 discrete fill
+  states. Sub-cell load changes will not re-render visibly. This is a
+  trend indicator paired with the numeric label, not a precision readout.
+- **Grouping with auto-scroll pause.** When auto-scroll is active and
+  `Shift+B` collapses incoming bursts, the visible row count shrinks.
+  Auto-scroll stays on row 0; the user sees fewer rows, each
+  representing more bulletins.
+- **`num_cpus` missing on a node.** When `available_processors` is
+  absent from the DTO, the Load column falls back to the plain numeric
+  rendering with no spark-bar. Defensive default; the field is
+  populated on every supported NiFi version in practice.
+- **`time` crate, not `chrono`.** The spec said `chrono`; the
+  implementation uses `time` 0.3 because it is already a dependency and
+  covers every requirement (parse + format + local-offset).
+
 ## Dependency on `nifi-rust-client`
 
 `nifi-lens` depends on `nifi-rust-client = "0.8.0"` with the `dynamic`
@@ -452,9 +472,15 @@ usable state.
    (`Alt+Left`/`Alt+Right`) for cross-link back/forward with selection
    restore, interactive breadcrumb bar in Browser detail pane, context-
    sensitive sticky footer hint line.
-9. **Phase 7 — Write-path scaffolding.** Dry-run mode, confirmation modal
-   primitive, audit log, `--allow-writes` flag. No writes enabled yet —
-   this just lays the rails for v2.
+9. **UI Readability Improvements — Information density.** *(shipped)*
+   Browser per-processor run-state icons, Health Load spark-bar gauge,
+   Bulletins consecutive-source grouping (`Shift+B`), configurable
+   timestamp format via new `[ui]` config section
+   (`timestamp_format` / `timestamp_tz`), theme audit pass replacing
+   inline `Color::*`/`Modifier::*` constructors with `theme::*` helpers.
+10. **Phase 7 — Write-path scaffolding.** Dry-run mode, confirmation modal
+    primitive, audit log, `--allow-writes` flag. No writes enabled yet —
+    this just lays the rails for v2.
 
 Each phase has its own design spec and implementation plan under
 `docs/superpowers/`, local-only.
