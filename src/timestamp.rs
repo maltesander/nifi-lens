@@ -45,9 +45,34 @@ pub struct TimestampConfig {
 /// expected shapes — callers should fall back to rendering the raw
 /// string.
 pub fn parse_nifi_timestamp(raw: &str) -> Option<OffsetDateTime> {
-    // Implemented in Task 3.
-    let _ = raw;
-    None
+    use time::format_description::well_known::Iso8601;
+    use time::macros::format_description;
+
+    let raw = raw.trim();
+    if raw.is_empty() {
+        return None;
+    }
+
+    // Try RFC-3339 / ISO-8601 first (covers the `T...Z` shape with or without ms).
+    if let Ok(dt) = OffsetDateTime::parse(raw, &Iso8601::DEFAULT) {
+        return Some(dt);
+    }
+
+    // NiFi human format: `MM/DD/YYYY HH:MM:SS[.mmm] UTC`.
+    // The trailing `UTC` tag is how NiFi indicates the offset; treat it as +00:00.
+    let (ts_part, tz_part) = raw.rsplit_once(' ')?;
+    if tz_part != "UTC" {
+        return None;
+    }
+
+    let with_ms =
+        format_description!("[month]/[day]/[year] [hour]:[minute]:[second].[subsecond digits:3]");
+    let without_ms = format_description!("[month]/[day]/[year] [hour]:[minute]:[second]");
+
+    let primitive = time::PrimitiveDateTime::parse(ts_part, with_ms)
+        .or_else(|_| time::PrimitiveDateTime::parse(ts_part, without_ms))
+        .ok()?;
+    Some(primitive.assume_utc())
 }
 
 /// Format `dt` for display. `now` is used only by the `Short` preset
@@ -68,9 +93,39 @@ pub fn format(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use time::macros::datetime;
 
     #[test]
     fn parse_returns_none_on_garbage() {
         assert!(parse_nifi_timestamp("not a timestamp").is_none());
+    }
+
+    #[test]
+    fn parse_returns_none_on_empty() {
+        assert!(parse_nifi_timestamp("").is_none());
+    }
+
+    #[test]
+    fn parse_iso_8601_with_millis() {
+        let got = parse_nifi_timestamp("2026-04-12T14:32:18.123Z").unwrap();
+        assert_eq!(got, datetime!(2026-04-12 14:32:18.123 UTC));
+    }
+
+    #[test]
+    fn parse_iso_8601_without_millis() {
+        let got = parse_nifi_timestamp("2026-04-12T14:32:18Z").unwrap();
+        assert_eq!(got, datetime!(2026-04-12 14:32:18 UTC));
+    }
+
+    #[test]
+    fn parse_nifi_human_format() {
+        let got = parse_nifi_timestamp("04/12/2026 14:32:18 UTC").unwrap();
+        assert_eq!(got, datetime!(2026-04-12 14:32:18 UTC));
+    }
+
+    #[test]
+    fn parse_nifi_human_format_with_millis() {
+        let got = parse_nifi_timestamp("04/12/2026 14:32:18.456 UTC").unwrap();
+        assert_eq!(got, datetime!(2026-04-12 14:32:18.456 UTC));
     }
 }
