@@ -14,6 +14,7 @@ pub mod event;
 pub mod intent;
 pub mod logging;
 pub mod theme;
+pub mod timestamp;
 pub mod view;
 pub mod widget;
 
