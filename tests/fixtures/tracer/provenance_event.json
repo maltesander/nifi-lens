@@ -1,0 +1,21 @@
+{
+  "provenanceEvent": {
+    "eventId": 42,
+    "eventTime": "04/12/2026 10:14:22.040 UTC",
+    "eventType": "DROP",
+    "componentId": "proc-123",
+    "componentName": "PutDatabaseRecord",
+    "componentType": "PutDatabaseRecord",
+    "groupId": "root-persist",
+    "flowFileUuid": "a7f3b2c1-1111-4abc-9def-0000000000aa",
+    "relationship": "failure",
+    "details": "db connection refused",
+    "inputContentAvailable": true,
+    "outputContentAvailable": false,
+    "attributes": [
+      { "name": "filename", "value": "report-2026-04-12.csv", "previousValue": "report-2026-04-12.csv" },
+      { "name": "db.target", "value": "prod-replica-2", "previousValue": "prod-replica-1" },
+      { "name": "retry.count", "value": "3", "previousValue": "2" }
+    ]
+  }
+}

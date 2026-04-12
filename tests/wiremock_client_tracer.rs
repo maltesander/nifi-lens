@@ -202,3 +202,30 @@ async fn delete_lineage_returns_ok_on_200() {
     let client = NifiClient::connect(&ctx(server.uri())).await.unwrap();
     client.delete_lineage("lineage-query-0001").await.unwrap();
 }
+
+#[tokio::test]
+async fn get_provenance_event_populates_detail_and_triples() {
+    let server = MockServer::start().await;
+    stub_login_and_about(&server).await;
+    let body = load_fixture("provenance_event.json");
+    Mock::given(method("GET"))
+        .and(path("/nifi-api/provenance-events/42"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(body))
+        .mount(&server)
+        .await;
+    let client = NifiClient::connect(&ctx(server.uri())).await.unwrap();
+    let detail = client.get_provenance_event(42).await.unwrap();
+    assert_eq!(detail.summary.event_id, 42);
+    assert_eq!(detail.summary.event_type, "DROP");
+    assert!(detail.input_available);
+    assert!(!detail.output_available);
+    assert_eq!(detail.attributes.len(), 3);
+    let filename = &detail.attributes[0];
+    assert_eq!(filename.key, "filename");
+    assert!(!filename.is_changed());
+    let db_target = &detail.attributes[1];
+    assert_eq!(db_target.key, "db.target");
+    assert!(db_target.is_changed());
+    assert_eq!(db_target.previous.as_deref(), Some("prod-replica-1"));
+    assert_eq!(db_target.current.as_deref(), Some("prod-replica-2"));
+}

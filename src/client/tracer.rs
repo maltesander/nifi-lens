@@ -249,6 +249,62 @@ impl NifiClient {
         }
     }
 
+    /// Fetches the full detail of a single provenance event by its numeric ID.
+    ///
+    /// Maps `GET /nifi-api/provenance-events/{id}` into a [`ProvenanceEventDetail`].
+    /// Errors are classified via `classify_or_fallback`.
+    pub async fn get_provenance_event(
+        &self,
+        event_id: i64,
+    ) -> Result<ProvenanceEventDetail, NifiLensError> {
+        tracing::debug!(
+            context = %self.context_name(),
+            event_id,
+            "fetching /provenance-events/{event_id}",
+        );
+
+        let dto = self
+            .inner
+            .provenanceevents_api()
+            .get_provenance_event(&event_id.to_string(), None)
+            .await
+            .map_err(|err| {
+                classify_or_fallback(self.context_name(), Box::new(err), |source| {
+                    NifiLensError::ProvenanceEventFetchFailed {
+                        context: self.context_name().to_string(),
+                        event_id,
+                        source,
+                    }
+                })
+            })?;
+
+        let input_available = dto.input_content_available.unwrap_or(false);
+        let output_available = dto.output_content_available.unwrap_or(false);
+        let transit_uri = dto.transit_uri.clone();
+        let attributes = dto
+            .attributes
+            .as_ref()
+            .map(|attrs| {
+                attrs
+                    .iter()
+                    .map(|a| AttributeTriple {
+                        key: a.name.clone().unwrap_or_default(),
+                        previous: a.previous_value.clone(),
+                        current: a.value.clone(),
+                    })
+                    .collect::<Vec<_>>()
+            })
+            .unwrap_or_default();
+
+        Ok(ProvenanceEventDetail {
+            summary: summary_from_dto(dto),
+            attributes,
+            transit_uri,
+            input_available,
+            output_available,
+        })
+    }
+
     /// Deletes a lineage query from the NiFi server.
     ///
     /// Maps `DELETE /nifi-api/provenance/lineage/{id}`. Errors are classified
