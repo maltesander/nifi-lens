@@ -133,6 +133,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **Phase 6 structural cleanup.** Split monolithic `app/state.rs`
+  (2,535 lines) into per-view key handler modules behind a
+  `ViewKeyHandler` trait. Extracted `ListNavigation` trait for shared
+  list navigation math. Genericized worker polling loop for Overview and
+  Bulletins. Consolidated inline styles into semantic theme helpers.
 - Bumped `nifi-rust-client` from 0.5.0 to 0.7.0 — adds typed provenance
   content bodies, NiFi 2.9.0 support, and `Option<DetectedVersion>`.
 - Dropped the `since` field from `CrossLink::TraceComponent`.
@@ -153,6 +158,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **`deny.toml`** now allows `BSL-1.0` (clipboard-win / error-code via
   arboard) and ignores `RUSTSEC-2024-0436` (unmaintained `paste`
   transitive via ratatui — no safe upgrade available).
+
+### Fixed
+
+- Health tab: stalled queues (items queued, zero throughput) now show
+  `∞ (stalled)` in red instead of the misleading `stable` label.
+- Health tab: per-node diagnostics fall back to cluster aggregate with a
+  warning banner when the nodewise fetch fails.
+- Health tab: pressing `Enter` on repository or node rows now shows an
+  info hint instead of silently doing nothing.
+- Help modal: removed stale "Phase 3/4 stub" annotations from
+  keybinding descriptions.
 
 ### Dependencies
 

@@ -43,7 +43,7 @@ nifi-lens/
     ├── event.rs            # AppEvent, IntentOutcome, ViewPayload
     ├── config/             # mod, loader, init — schema, load, config init
     ├── client/             # mod, build — NifiClient wrapper (Deref) + TLS
-    ├── app/                # mod (run loop), state (reducer), ui (frame render)
+    ├── app/                # mod (run loop), state/ (per-view reducers + ViewKeyHandler), ui (frame render), navigation, worker
     ├── intent/             # Intent enum + IntentDispatcher
     ├── view/               # per-tab views; overview/ shipped Phase 1 with state/render/worker
     └── widget/             # status_bar, help_modal, context_switcher
@@ -201,17 +201,16 @@ ring exceeds its capacity.
 
 **Accepted Phase 5 edge cases:**
 
-- **Node diagnostics show aggregate only when nodewise fetch fails.**
-  If NiFi returns an error for the per-node system-diagnostics call,
-  the Nodes pane falls back to showing no rows. A graceful aggregate
-  fallback is a Phase 6 polish item.
-- **Time-to-full estimate is zero when throughput is zero.** Connections
-  with a back-pressured queue but zero recent throughput show
-  `TimeToFull::Unknown` rather than infinity. The distinction is not
-  surfaced to the user. Phase 6 polish item.
-- **Health tab `Enter` cross-link is a stub for non-queue/processor rows.**
-  Pressing `Enter` on a repository or node row emits no cross-link intent;
-  the keybind is silently ignored. Phase 6 polish item.
+- **Node diagnostics aggregate fallback.** *(resolved in Phase 6)* When
+  the nodewise system-diagnostics call fails, the worker retries with
+  aggregate-only and shows a single "Cluster (aggregate)" row with a
+  warning banner.
+- **Stalled queue display.** *(resolved in Phase 6)* Connections with
+  queued items but zero throughput now show `∞ (stalled)` in red instead
+  of the misleading `stable` label.
+- **Health tab `Enter` hint for non-crosslink rows.** *(resolved in
+  Phase 6)* Pressing `Enter` on a repository or node row now shows an
+  info-severity banner instead of silently doing nothing.
 - **Repository fill bars now show per-node breakdown.** *(resolved in
   Phase 6)* Selecting a repository row with `j`/`k` in the Repositories
   category shows per-node fill bars in a detail pane on the right.
@@ -444,8 +443,11 @@ usable state.
    strips, and processor thread leaderboard. Dual-cadence worker (10s
    PG status, 30s system diagnostics). `Enter` on queue/processor rows
    jumps to Browser.
-7. **Phase 6 — Polish and first release.** Help modal filled out, error
-   surfacing reviewed, screencasts, `v0.1.0` to crates.io.
+7. **Phase 6 — Polish.** *(shipped)* Structural cleanup (`app/state.rs`
+   split into per-view modules behind `ViewKeyHandler` trait,
+   `ListNavigation` trait, generic worker polling, theme consolidation),
+   Health tab edge cases (aggregate fallback, stalled queue display,
+   cross-link hints, per-node repository breakdown), help modal cleanup.
 8. **Phase 7 — Write-path scaffolding.** Dry-run mode, confirmation modal
    primitive, audit log, `--allow-writes` flag. No writes enabled yet —
    this just lays the rails for v2.
