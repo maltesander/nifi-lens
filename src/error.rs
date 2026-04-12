@@ -233,6 +233,13 @@ pub enum NifiLensError {
         source: std::io::Error,
     },
 
+    /// See `ClientBuildFailed` for the boxed-source rationale.
+    #[snafu(display("failed to fetch system diagnostics for context {context:?}: {source}"))]
+    SystemDiagnosticsFailed {
+        context: String,
+        source: Box<dyn std::error::Error + Send + Sync>,
+    },
+
     /// See `ClientBuildFailed` for the boxed-source rationale; callers
     /// must box explicitly.
     #[snafu(display(

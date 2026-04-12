@@ -7,6 +7,7 @@
 
 pub mod browser;
 pub mod build;
+pub mod health;
 pub mod tracer;
 
 use std::ops::{Deref, DerefMut};
@@ -403,6 +404,11 @@ pub struct BulletinBoardSnapshot {
 pub use browser::{
     ConnectionDetail, ControllerServiceDetail, ControllerServiceSummary, NodeKind,
     NodeStatusSummary, ProcessGroupDetail, ProcessorDetail, RawNode, RecursiveSnapshot,
+};
+pub use health::{
+    ConnectionStatusRow, FullPgStatusSnapshot, GcSnapshot, NodeDiagnostics, NodeHealthRow,
+    ProcessorStatusRow, ProcessorThreadRow, QueuePressureRow, RepoFillBar, RepoUsage,
+    Severity as HealthSeverity, SystemDiagAggregate, SystemDiagSnapshot, TimeToFull,
 };
 pub use tracer::{
     AttributeTriple, ContentRender, ContentSide, ContentSnapshot, LatestEventsSnapshot,
