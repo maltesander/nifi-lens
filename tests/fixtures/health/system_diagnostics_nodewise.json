@@ -1,0 +1,166 @@
+{
+  "systemDiagnostics": {
+    "aggregateSnapshot": {
+      "totalHeap": "2 GB",
+      "usedHeap": "1 GB",
+      "freeHeap": "1 GB",
+      "heapUtilization": "50%",
+      "maxHeap": "4 GB",
+      "usedHeapBytes": 1073741824,
+      "maxHeapBytes": 4294967296,
+      "availableProcessors": 8,
+      "totalThreads": 120,
+      "uptime": "2:00:00.000",
+      "statsLastRefreshed": "01/01/2026 00:00:00 UTC",
+      "processorLoadAverage": 1.5,
+      "contentRepositoryStorageUsage": [
+        {
+          "identifier": "default",
+          "freeSpace": "220 MB",
+          "freeSpaceBytes": 230686720,
+          "totalSpace": "1 GB",
+          "totalSpaceBytes": 1073741824,
+          "usedSpace": "840 MB",
+          "usedSpaceBytes": 881217536,
+          "utilization": "78%"
+        }
+      ],
+      "flowFileRepositoryStorageUsage": {
+        "identifier": "default",
+        "freeSpace": "690 MB",
+        "freeSpaceBytes": 723517440,
+        "totalSpace": "1 GB",
+        "totalSpaceBytes": 1073741824,
+        "usedSpace": "330 MB",
+        "usedSpaceBytes": 346030080,
+        "utilization": "31%"
+      },
+      "provenanceRepositoryStorageUsage": [
+        {
+          "identifier": "provenance",
+          "freeSpace": "93 MB",
+          "freeSpaceBytes": 97517568,
+          "totalSpace": "1 GB",
+          "totalSpaceBytes": 1073741824,
+          "usedSpace": "978 MB",
+          "usedSpaceBytes": 1025507328,
+          "utilization": "91%"
+        }
+      ],
+      "garbageCollection": [
+        {
+          "name": "G1 Young Generation",
+          "collectionCount": 50,
+          "collectionMillis": 300,
+          "collectionTime": "00:00:00.300"
+        }
+      ]
+    },
+    "nodeSnapshots": [
+      {
+        "nodeId": "node-1-id",
+        "address": "node1.nifi.local",
+        "apiPort": 8443,
+        "snapshot": {
+          "totalHeap": "2 GB",
+          "usedHeap": "768 MB",
+          "freeHeap": "1280 MB",
+          "heapUtilization": "75%",
+          "maxHeap": "4 GB",
+          "usedHeapBytes": 805306368,
+          "maxHeapBytes": 4294967296,
+          "availableProcessors": 4,
+          "totalThreads": 88,
+          "uptime": "1:00:00.000",
+          "statsLastRefreshed": "01/01/2026 00:00:00 UTC",
+          "processorLoadAverage": 0.8,
+          "contentRepositoryStorageUsage": [
+            {
+              "identifier": "default",
+              "freeSpaceBytes": 268435456,
+              "totalSpaceBytes": 1073741824,
+              "usedSpaceBytes": 805306368,
+              "utilization": "75%"
+            }
+          ],
+          "flowFileRepositoryStorageUsage": {
+            "identifier": "default",
+            "freeSpaceBytes": 536870912,
+            "totalSpaceBytes": 1073741824,
+            "usedSpaceBytes": 536870912,
+            "utilization": "50%"
+          },
+          "provenanceRepositoryStorageUsage": [
+            {
+              "identifier": "provenance",
+              "freeSpaceBytes": 107374182,
+              "totalSpaceBytes": 1073741824,
+              "usedSpaceBytes": 966367642,
+              "utilization": "90%"
+            }
+          ],
+          "garbageCollection": [
+            {
+              "name": "G1 Young Generation",
+              "collectionCount": 142,
+              "collectionMillis": 820,
+              "collectionTime": "00:00:00.820"
+            }
+          ]
+        }
+      },
+      {
+        "nodeId": "node-2-id",
+        "address": "node2.nifi.local",
+        "apiPort": 8443,
+        "snapshot": {
+          "totalHeap": "2 GB",
+          "usedHeap": "1843 MB",
+          "freeHeap": "205 MB",
+          "heapUtilization": "90%",
+          "maxHeap": "4 GB",
+          "usedHeapBytes": 1932735284,
+          "maxHeapBytes": 4294967296,
+          "availableProcessors": 4,
+          "totalThreads": 132,
+          "uptime": "3:00:00.000",
+          "statsLastRefreshed": "01/01/2026 00:00:00 UTC",
+          "processorLoadAverage": 2.2,
+          "contentRepositoryStorageUsage": [
+            {
+              "identifier": "default",
+              "freeSpaceBytes": 107374182,
+              "totalSpaceBytes": 1073741824,
+              "usedSpaceBytes": 966367642,
+              "utilization": "90%"
+            }
+          ],
+          "flowFileRepositoryStorageUsage": {
+            "identifier": "default",
+            "freeSpaceBytes": 268435456,
+            "totalSpaceBytes": 1073741824,
+            "usedSpaceBytes": 805306368,
+            "utilization": "75%"
+          },
+          "provenanceRepositoryStorageUsage": [
+            {
+              "identifier": "provenance",
+              "freeSpaceBytes": 53687091,
+              "totalSpaceBytes": 1073741824,
+              "usedSpaceBytes": 1020054733,
+              "utilization": "95%"
+            }
+          ],
+          "garbageCollection": [
+            {
+              "name": "G1 Young Generation",
+              "collectionCount": 312,
+              "collectionMillis": 2100,
+              "collectionTime": "00:00:02.100"
+            }
+          ]
+        }
+      }
+    ]
+  }
+}

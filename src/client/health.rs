@@ -2,7 +2,10 @@
 
 use std::time::Instant;
 
-use nifi_rust_client::dynamic::traits::{FlowApi as _, FlowStatusApi as _};
+use nifi_rust_client::dynamic::traits::{
+    FlowApi as _, FlowStatusApi as _, SystemDiagnosticsApi as _,
+};
+use nifi_rust_client::dynamic::types::common::StorageUsageDto;
 
 use crate::client::NifiClient;
 use crate::client::classify_or_fallback;
@@ -256,6 +259,131 @@ impl NifiClient {
             fetched_at: Instant::now(),
         })
     }
+
+    /// Calls `GET /nifi-api/system-diagnostics?nodewise=true` and extracts
+    /// aggregate repository utilization and per-node heap/GC/load telemetry
+    /// into a [`SystemDiagSnapshot`].
+    pub async fn system_diagnostics(
+        &self,
+        nodewise: bool,
+    ) -> Result<SystemDiagSnapshot, NifiLensError> {
+        tracing::debug!(
+            context = %self.context_name(),
+            nodewise,
+            "fetching /system-diagnostics"
+        );
+        let entity = self
+            .inner
+            .systemdiagnostics_api()
+            .get_system_diagnostics(Some(nodewise), None, None)
+            .await
+            .map_err(|err| {
+                classify_or_fallback(self.context_name(), Box::new(err), |source| {
+                    NifiLensError::SystemDiagnosticsFailed {
+                        context: self.context_name().to_string(),
+                        source,
+                    }
+                })
+            })?;
+
+        let agg = entity.aggregate_snapshot.as_ref();
+
+        let aggregate = SystemDiagAggregate {
+            content_repos: extract_repo_usages(
+                agg.and_then(|s| s.content_repository_storage_usage.as_deref()),
+            ),
+            flowfile_repo: agg
+                .and_then(|s| s.flow_file_repository_storage_usage.as_ref())
+                .map(map_repo_usage),
+            provenance_repos: extract_repo_usages(
+                agg.and_then(|s| s.provenance_repository_storage_usage.as_deref()),
+            ),
+        };
+
+        let nodes = entity
+            .node_snapshots
+            .as_deref()
+            .unwrap_or_default()
+            .iter()
+            .filter_map(|n| {
+                let snap = n.snapshot.as_ref()?;
+                let address = format!(
+                    "{}:{}",
+                    n.address.as_deref().unwrap_or("unknown"),
+                    n.api_port.unwrap_or(0),
+                );
+                let gc = snap
+                    .garbage_collection
+                    .as_deref()
+                    .unwrap_or_default()
+                    .iter()
+                    .map(|g| GcSnapshot {
+                        name: g.name.clone().unwrap_or_default(),
+                        collection_count: g.collection_count.unwrap_or(0).max(0) as u64,
+                        collection_millis: g.collection_millis.unwrap_or(0).max(0) as u64,
+                    })
+                    .collect();
+                Some(NodeDiagnostics {
+                    address,
+                    heap_used_bytes: snap.used_heap_bytes.unwrap_or(0).max(0) as u64,
+                    heap_max_bytes: snap.max_heap_bytes.unwrap_or(0).max(0) as u64,
+                    gc,
+                    load_average: snap.processor_load_average,
+                    total_threads: snap.total_threads.unwrap_or(0).max(0) as u32,
+                    uptime: snap.uptime.clone().unwrap_or_default(),
+                })
+            })
+            .collect();
+
+        Ok(SystemDiagSnapshot {
+            aggregate,
+            nodes,
+            fetched_at: Instant::now(),
+        })
+    }
+}
+
+/// Extract utilization percentage from a `StorageUsageDto`.
+///
+/// NiFi returns `utilization` as a string like `"78%"`. We strip the suffix and
+/// parse to `u32`. If that fails we fall back to computing `used / total * 100`.
+fn parse_utilization(dto: &StorageUsageDto) -> u32 {
+    if let Some(s) = dto.utilization.as_deref() {
+        let trimmed = s.trim_end_matches('%').trim();
+        if let Ok(v) = trimmed.parse::<u32>() {
+            return v;
+        }
+        // Handle fractional strings like "78.3%".
+        if let Ok(f) = trimmed.parse::<f64>() {
+            return f as u32;
+        }
+    }
+    // Computed fallback.
+    let total = dto.total_space_bytes.unwrap_or(0);
+    let used = dto.used_space_bytes.unwrap_or(0);
+    if total > 0 {
+        ((used as f64 / total as f64) * 100.0) as u32
+    } else {
+        0
+    }
+}
+
+fn map_repo_usage(dto: &StorageUsageDto) -> RepoUsage {
+    RepoUsage {
+        identifier: dto.identifier.clone().unwrap_or_default(),
+        used_bytes: dto.used_space_bytes.unwrap_or(0).max(0) as u64,
+        total_bytes: dto.total_space_bytes.unwrap_or(0).max(0) as u64,
+        free_bytes: dto.free_space_bytes.unwrap_or(0).max(0) as u64,
+        utilization_percent: parse_utilization(dto),
+    }
+}
+
+fn extract_repo_usages(repos: Option<&[StorageUsageDto]>) -> Vec<RepoUsage> {
+    repos
+        .unwrap_or_default()
+        .iter()
+        .map(map_repo_usage)
+        .collect()
 }
 
 /// Threshold above which a prediction value is treated as "infinity" / not useful.
