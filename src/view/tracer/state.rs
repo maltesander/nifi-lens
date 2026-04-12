@@ -15,7 +15,7 @@ use crate::client::{
     ProvenanceEventDetail, ProvenanceEventSummary,
 };
 
-use super::TracerPayload;
+use crate::event::TracerPayload;
 
 // ── Top-level state ──────────────────────────────────────────────────────────
 
@@ -228,10 +228,56 @@ pub enum Followup {
 /// Folds a [`TracerPayload`] into `state`.
 ///
 /// Returns an optional [`Followup`] when an async side-effect is needed.
-/// Task 10 replaces this stub with the real implementation.
-pub fn apply_payload(_state: &mut TracerState, payload: TracerPayload) -> Option<Followup> {
-    match payload {
-        TracerPayload::Noop => None,
+pub fn apply_payload(_state: &mut TracerState, _payload: TracerPayload) -> Option<Followup> {
+    // Arms filled in by Tasks 11–13.
+    None
+}
+
+// ── Entry-mode helpers ────────────────────────────────────────────────────────
+
+/// Appends `ch` to the UUID input field when in Entry mode.
+pub fn handle_entry_char(state: &mut TracerState, ch: char) {
+    if let TracerMode::Entry(EntryState { input }) = &mut state.mode {
+        state.last_error = None;
+        input.push(ch);
+    }
+}
+
+/// Removes the last character from the UUID input field when in Entry mode.
+pub fn handle_entry_backspace(state: &mut TracerState) {
+    if let TracerMode::Entry(EntryState { input }) = &mut state.mode {
+        state.last_error = None;
+        input.pop();
+    }
+}
+
+/// Clears the UUID input field when in Entry mode.
+pub fn handle_entry_clear(state: &mut TracerState) {
+    if let TracerMode::Entry(EntryState { input }) = &mut state.mode {
+        state.last_error = None;
+        input.clear();
+    }
+}
+
+/// Validates the current input as a UUID.
+///
+/// Returns `Some(uuid_string)` on success (normalised to lowercase hyphenated
+/// form), or `None` after setting `state.last_error` when the input is not a
+/// valid UUID. Returns `None` immediately when not in Entry mode.
+pub fn entry_submit(state: &mut TracerState) -> Option<String> {
+    let TracerMode::Entry(EntryState { input }) = &state.mode else {
+        return None;
+    };
+    let trimmed = input.trim();
+    match uuid::Uuid::parse_str(trimmed) {
+        Ok(u) => {
+            state.last_error = None;
+            Some(u.to_string())
+        }
+        Err(_) => {
+            state.last_error = Some("invalid UUID: expected 8-4-4-4-12 hex".to_string());
+            None
+        }
     }
 }
 
@@ -246,6 +292,70 @@ mod tests {
         let state = TracerState::new();
         assert!(matches!(state.mode, TracerMode::Entry(ref e) if e.input.is_empty()));
         assert!(state.last_error.is_none());
+    }
+
+    #[test]
+    fn entry_typing_accumulates() {
+        let mut state = TracerState::new();
+        handle_entry_char(&mut state, 'a');
+        handle_entry_char(&mut state, 'b');
+        handle_entry_char(&mut state, 'c');
+        let TracerMode::Entry(EntryState { input }) = &state.mode else {
+            panic!("expected Entry mode");
+        };
+        assert_eq!(input, "abc");
+    }
+
+    #[test]
+    fn entry_backspace_removes_last_char() {
+        let mut state = TracerState::new();
+        handle_entry_char(&mut state, 'a');
+        handle_entry_char(&mut state, 'b');
+        handle_entry_backspace(&mut state);
+        let TracerMode::Entry(EntryState { input }) = &state.mode else {
+            panic!("expected Entry mode");
+        };
+        assert_eq!(input, "a");
+    }
+
+    #[test]
+    fn entry_ctrl_u_clears() {
+        let mut state = TracerState::new();
+        handle_entry_char(&mut state, 'a');
+        handle_entry_char(&mut state, 'b');
+        handle_entry_clear(&mut state);
+        let TracerMode::Entry(EntryState { input }) = &state.mode else {
+            panic!("expected Entry mode");
+        };
+        assert!(input.is_empty());
+    }
+
+    #[test]
+    fn entry_submit_valid_uuid_returns_validated() {
+        let mut state = TracerState::new();
+        for ch in "7a2e8b9c-1234-4abc-9def-0123456789ab".chars() {
+            handle_entry_char(&mut state, ch);
+        }
+        let result = entry_submit(&mut state);
+        assert_eq!(
+            result.as_deref(),
+            Some("7a2e8b9c-1234-4abc-9def-0123456789ab")
+        );
+        assert!(state.last_error.is_none());
+    }
+
+    #[test]
+    fn entry_submit_invalid_uuid_sets_banner_and_returns_none() {
+        let mut state = TracerState::new();
+        for ch in "not-a-uuid".chars() {
+            handle_entry_char(&mut state, ch);
+        }
+        let result = entry_submit(&mut state);
+        assert!(result.is_none());
+        assert_eq!(
+            state.last_error.as_deref(),
+            Some("invalid UUID: expected 8-4-4-4-12 hex")
+        );
     }
 
     #[test]

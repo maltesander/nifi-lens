@@ -21,6 +21,7 @@ pub enum ViewPayload {
     Overview(OverviewPayload),
     Bulletins(BulletinsPayload),
     Browser(BrowserPayload),
+    Tracer(TracerPayload),
 }
 
 /// One poll cycle's worth of data for the Overview tab. Composed inside the
@@ -58,7 +59,7 @@ pub enum BrowserPayload {
 }
 
 /// Result of a successful intent dispatch.
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 pub enum IntentOutcome {
     ContextSwitched {
         new_version: semver::Version,
@@ -78,5 +79,68 @@ pub enum IntentOutcome {
     OpenInBrowserTarget {
         component_id: String,
         group_id: String,
+    },
+    /// Phase 4: cross-link from Bulletins tab navigates Tracer to latest-events view.
+    TracerLandingOn {
+        component_id: String,
+    },
+    /// Phase 4: a lineage query has been submitted; holds the abort handle.
+    TracerLineageStarted {
+        uuid: String,
+        abort: tokio::task::AbortHandle,
+    },
+    /// Phase 4: user submitted input that is not a valid UUID.
+    TracerInputInvalid {
+        raw: String,
+    },
+}
+
+/// Payload variants pushed from Tracer workers back into the UI loop.
+#[derive(Debug, Clone)]
+pub enum TracerPayload {
+    LatestEvents(crate::client::LatestEventsSnapshot),
+    LatestEventsFailed {
+        component_id: String,
+        error: String,
+    },
+    LineageSubmitted {
+        uuid: String,
+        query_id: String,
+    },
+    LineagePartial {
+        query_id: String,
+        percent: u8,
+    },
+    LineageDone {
+        uuid: String,
+        query_id: String,
+        snapshot: crate::client::LineageSnapshot,
+        fetched_at: std::time::SystemTime,
+    },
+    LineageFailed {
+        uuid: String,
+        query_id: String,
+        error: String,
+    },
+    EventDetail {
+        event_id: i64,
+        detail: crate::client::ProvenanceEventDetail,
+    },
+    EventDetailFailed {
+        event_id: i64,
+        error: String,
+    },
+    Content(crate::client::ContentSnapshot),
+    ContentFailed {
+        event_id: i64,
+        side: crate::client::ContentSide,
+        error: String,
+    },
+    ContentSaved {
+        path: std::path::PathBuf,
+    },
+    ContentSaveFailed {
+        path: std::path::PathBuf,
+        error: String,
     },
 }

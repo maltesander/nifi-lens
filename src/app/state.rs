@@ -226,6 +226,14 @@ pub fn update(state: &mut AppState, event: AppEvent, config: &Config) -> UpdateR
                 intent: None,
             }
         }
+        AppEvent::Data(ViewPayload::Tracer(payload)) => {
+            let _followups = crate::view::tracer::state::apply_payload(&mut state.tracer, payload);
+            state.last_refresh = Instant::now();
+            UpdateResult {
+                redraw: true,
+                intent: None,
+            }
+        }
         AppEvent::IntentOutcome(outcome) => handle_intent_outcome(state, outcome),
         AppEvent::Quit => {
             state.should_quit = true;
@@ -949,6 +957,33 @@ fn handle_intent_outcome(
             }
             state.browser.emit_detail_request_for_current_selection();
             state.status.banner = None;
+            UpdateResult {
+                redraw: true,
+                intent: None,
+            }
+        }
+        Ok(IntentOutcome::TracerLandingOn { component_id: _ }) => {
+            // Task 12 wires the full cross-link handler; for now just switch
+            // to the Tracer tab so the user can see it is the target.
+            state.current_tab = ViewId::Tracer;
+            UpdateResult {
+                redraw: true,
+                intent: None,
+            }
+        }
+        Ok(IntentOutcome::TracerLineageStarted { .. }) => {
+            // Task 11 wires the LineageRunning reducer.
+            UpdateResult {
+                redraw: true,
+                intent: None,
+            }
+        }
+        Ok(IntentOutcome::TracerInputInvalid { raw }) => {
+            state.status.banner = Some(Banner {
+                severity: BannerSeverity::Warning,
+                message: format!("invalid UUID: {raw}"),
+                detail: None,
+            });
             UpdateResult {
                 redraw: true,
                 intent: None,
