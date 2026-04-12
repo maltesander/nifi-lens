@@ -31,6 +31,9 @@ services:
     image: zookeeper:3.9
     environment:
       - ZOO_MY_ID=1
+      # ZooKeeper 3.6+ restricts four-letter words to [srvr] by default.
+      # Enable ruok for the healthcheck.
+      - ZOO_4LW_COMMANDS_WHITELIST=ruok,srvr
     healthcheck:
       test: ["CMD-SHELL", "echo ruok | nc localhost 2181 | grep imok"]
       interval: 10s
