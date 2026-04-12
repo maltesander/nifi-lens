@@ -14,11 +14,7 @@ services:
       - TRUSTSTORE_PATH=/opt/nifi/nifi-current/conf/truststore.p12
       - TRUSTSTORE_TYPE=PKCS12
       - TRUSTSTORE_PASSWORD=testpassword
-      # NiFi 2.x strictly validates Host headers against nifi.web.proxy.host.
-      # External port 8444 doesn't match the internal 8443, so we must
-      # explicitly whitelist all host:port pairs the seeder / nifi-lens
-      # will use.
-      - NIFI_WEB_PROXY_HOST=localhost:8443,localhost:8444
+      - NIFI_WEB_PROXY_HOST=localhost:8443,localhost:8444,localhost:8445
     volumes:
       - ./scripts/nifi-entrypoint.sh:/opt/nifi/scripts/nifi-entrypoint.sh:ro
       - ./scripts/certs/keystore.p12:/opt/nifi/nifi-current/conf/keystore.p12:ro
@@ -29,18 +25,28 @@ services:
       interval: 10s
       timeout: 5s
       retries: 18
-      # NiFi 2.x can take 4–6 minutes to finish booting on a 2 vCPU
-      # GitHub Actions runner with two instances competing for CPU.
-      # Kept in sync with run.sh's 600s wait loop so the healthcheck
-      # does not mark the container unhealthy before NiFi finishes
-      # starting.
       start_period: 300s
 
-  nifi-2-8-0:
-    image: apache/nifi:2.8.0
+  zookeeper:
+    image: zookeeper:3.9
+    environment:
+      - ZOO_MY_ID=1
+    healthcheck:
+      test: ["CMD-SHELL", "echo ruok | nc localhost 2181 | grep imok"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
+
+  nifi-2-9-0-node1:
+    image: apache/nifi:2.9.0
+    hostname: nifi-2-9-0-node1
     entrypoint: ["/bin/sh", "/opt/nifi/scripts/nifi-entrypoint.sh"]
     ports:
       - "8444:8443"
+    depends_on:
+      zookeeper:
+        condition: service_healthy
     environment:
       - SINGLE_USER_CREDENTIALS_USERNAME=admin
       - SINGLE_USER_CREDENTIALS_PASSWORD=adminpassword123
@@ -51,11 +57,11 @@ services:
       - TRUSTSTORE_PATH=/opt/nifi/nifi-current/conf/truststore.p12
       - TRUSTSTORE_TYPE=PKCS12
       - TRUSTSTORE_PASSWORD=testpassword
-      # NiFi 2.x strictly validates Host headers against nifi.web.proxy.host.
-      # External port 8444 doesn't match the internal 8443, so we must
-      # explicitly whitelist all host:port pairs the seeder / nifi-lens
-      # will use.
-      - NIFI_WEB_PROXY_HOST=localhost:8443,localhost:8444
+      - NIFI_WEB_PROXY_HOST=localhost:8443,localhost:8444,localhost:8445
+      # Clustering
+      - NIFI_CLUSTER_IS_NODE=true
+      - NIFI_CLUSTER_NODE_ADDRESS=nifi-2-9-0-node1
+      - NIFI_ZOOKEEPER_CONNECT_STRING=zookeeper:2181
     volumes:
       - ./scripts/nifi-entrypoint.sh:/opt/nifi/scripts/nifi-entrypoint.sh:ro
       - ./scripts/certs/keystore.p12:/opt/nifi/nifi-current/conf/keystore.p12:ro
@@ -66,9 +72,40 @@ services:
       interval: 10s
       timeout: 5s
       retries: 18
-      # NiFi 2.x can take 4–6 minutes to finish booting on a 2 vCPU
-      # GitHub Actions runner with two instances competing for CPU.
-      # Kept in sync with run.sh's 600s wait loop so the healthcheck
-      # does not mark the container unhealthy before NiFi finishes
-      # starting.
+      start_period: 300s
+
+  nifi-2-9-0-node2:
+    image: apache/nifi:2.9.0
+    hostname: nifi-2-9-0-node2
+    entrypoint: ["/bin/sh", "/opt/nifi/scripts/nifi-entrypoint.sh"]
+    ports:
+      - "8445:8443"
+    depends_on:
+      zookeeper:
+        condition: service_healthy
+    environment:
+      - SINGLE_USER_CREDENTIALS_USERNAME=admin
+      - SINGLE_USER_CREDENTIALS_PASSWORD=adminpassword123
+      - KEYSTORE_PATH=/opt/nifi/nifi-current/conf/keystore.p12
+      - KEYSTORE_TYPE=PKCS12
+      - KEYSTORE_PASSWORD=testpassword
+      - KEY_PASSWORD=testpassword
+      - TRUSTSTORE_PATH=/opt/nifi/nifi-current/conf/truststore.p12
+      - TRUSTSTORE_TYPE=PKCS12
+      - TRUSTSTORE_PASSWORD=testpassword
+      - NIFI_WEB_PROXY_HOST=localhost:8443,localhost:8444,localhost:8445
+      # Clustering
+      - NIFI_CLUSTER_IS_NODE=true
+      - NIFI_CLUSTER_NODE_ADDRESS=nifi-2-9-0-node2
+      - NIFI_ZOOKEEPER_CONNECT_STRING=zookeeper:2181
+    volumes:
+      - ./scripts/nifi-entrypoint.sh:/opt/nifi/scripts/nifi-entrypoint.sh:ro
+      - ./scripts/certs/keystore.p12:/opt/nifi/nifi-current/conf/keystore.p12:ro
+      - ./scripts/certs/truststore.p12:/opt/nifi/nifi-current/conf/truststore.p12:ro
+    healthcheck:
+      test:
+        ["CMD-SHELL", "grep -q 'Started Server on https://' /opt/nifi/nifi-current/logs/nifi-app.log 2>/dev/null"]
+      interval: 10s
+      timeout: 5s
+      retries: 18
       start_period: 300s
