@@ -133,6 +133,13 @@ pub async fn run(
             bulletins_last_id,
             &mut state.browser,
         );
+
+        // After ensure(), re-emit any pending Browser detail request that
+        // was dropped because the worker (and detail_tx) didn't exist yet
+        // — e.g. when a cross-link lands on Browser from another tab.
+        if state.browser.pending_detail_unsent && state.browser.detail_tx.is_some() {
+            state.browser.emit_detail_request_for_current_selection();
+        }
     }
 
     workers.shutdown();

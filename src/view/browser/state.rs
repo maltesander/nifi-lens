@@ -23,6 +23,10 @@ pub struct BrowserState {
     pub expanded: HashSet<usize>,
     pub details: HashMap<usize, NodeDetail>,
     pub pending_detail: Option<usize>,
+    /// `true` when a detail request was set via `pending_detail` but
+    /// `detail_tx` was `None` (worker not yet spawned). The app loop
+    /// re-emits the request once the worker creates `detail_tx`.
+    pub pending_detail_unsent: bool,
     pub last_tree_fetched_at: Option<SystemTime>,
     /// Populated by the `WorkerRegistry` when the Browser worker is
     /// spawned. Cleared back to `None` on tab-switch-out so reducer
@@ -142,6 +146,9 @@ impl BrowserState {
                 kind: node.kind,
                 id: node.id.clone(),
             });
+            self.pending_detail_unsent = false;
+        } else {
+            self.pending_detail_unsent = true;
         }
     }
 }

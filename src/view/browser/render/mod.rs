@@ -52,11 +52,22 @@ pub fn render(
 
     let chunks = Layout::default()
         .direction(Direction::Horizontal)
-        .constraints([Constraint::Percentage(30), Constraint::Percentage(70)])
+        .constraints([
+            Constraint::Percentage(30),
+            Constraint::Length(1),
+            Constraint::Percentage(70),
+        ])
         .split(inner);
 
     render_tree(frame, chunks[0], state);
-    render_detail(frame, chunks[1], state);
+
+    // Vertical separator between tree and detail panes.
+    let sep = Block::default()
+        .borders(Borders::LEFT)
+        .border_style(theme::muted());
+    frame.render_widget(sep, chunks[1]);
+
+    render_detail(frame, chunks[2], state);
 }
 
 fn tab_title(state: &BrowserState) -> String {

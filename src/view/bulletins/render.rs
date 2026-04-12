@@ -196,11 +196,11 @@ fn render_list(frame: &mut Frame, area: Rect, state: &BulletinsState) {
                 Style::default()
             };
             Row::new(vec![
-                Cell::from(format_hhmmss(&b.timestamp_iso)),
+                Cell::from(format_hhmmss(&b.timestamp_iso, &b.timestamp_human)),
                 Cell::from(format_severity_label(&b.level)).style(severity_style(&b.level)),
                 Cell::from(truncate_right(&b.source_name, 20)),
-                Cell::from(truncate_left(&b.group_id, 20)),
-                Cell::from(truncate_right(&b.message, 80)),
+                Cell::from(truncate_left(&b.group_id, 24)),
+                Cell::from(b.message.clone()),
             ])
             .style(style)
         })
@@ -211,7 +211,7 @@ fn render_list(frame: &mut Frame, area: Rect, state: &BulletinsState) {
             Constraint::Length(8),
             Constraint::Length(5),
             Constraint::Length(20),
-            Constraint::Length(20),
+            Constraint::Length(24),
             Constraint::Fill(1),
         ],
     )
@@ -233,15 +233,34 @@ fn render_detail(frame: &mut Frame, area: Rect, state: &BulletinsState) {
     let b = &state.ring[idx];
     let sev = format_severity_label(&b.level);
     let sev_style = severity_style(&b.level);
+    let ts = if b.timestamp_iso.is_empty() {
+        &b.timestamp_human
+    } else {
+        &b.timestamp_iso
+    };
     let line0 = Line::from(vec![
         Span::styled(sev, sev_style.add_modifier(Modifier::BOLD)),
-        Span::raw("  "),
-        Span::styled(b.timestamp_iso.clone(), theme::accent()),
-        Span::raw("  "),
-        Span::styled(format!("{}/{}", b.group_id, b.source_name), theme::muted()),
+        Span::raw("    "),
+        Span::styled(ts.to_string(), theme::accent()),
     ]);
-    let message_lines = wrap_lines(&b.message, inner.width.saturating_sub(1) as usize, 3);
-    let mut lines = vec![line0, Line::from("")];
+    let line1 = Line::from(vec![
+        Span::styled("Source: ", theme::muted()),
+        Span::raw(b.source_name.clone()),
+        Span::raw("  "),
+        Span::styled("ID: ", theme::muted()),
+        Span::raw(b.source_id.clone()),
+    ]);
+    let line2 = Line::from(vec![
+        Span::styled("Group:  ", theme::muted()),
+        Span::raw(b.group_id.clone()),
+    ]);
+    let max_msg_lines = inner.height.saturating_sub(5) as usize;
+    let message_lines = wrap_lines(
+        &b.message,
+        inner.width.saturating_sub(1) as usize,
+        max_msg_lines,
+    );
+    let mut lines = vec![line0, line1, line2, Line::from("")];
     for ml in message_lines {
         lines.push(Line::from(ml));
     }
@@ -267,15 +286,21 @@ fn severity_style(level: &str) -> Style {
     }
 }
 
-fn format_hhmmss(iso: &str) -> String {
+fn format_hhmmss(iso: &str, human: &str) -> String {
     // ISO-8601 / RFC-3339: "YYYY-MM-DDTHH:MM:SS…". Positions 11..19 are
-    // HH:MM:SS when the server emits a standard timestamp. Falls back to
-    // "--:--:--" for unparseable inputs.
+    // HH:MM:SS when the server emits a standard timestamp.
     if iso.len() >= 19 && iso.as_bytes()[10] == b'T' {
-        iso[11..19].to_string()
-    } else {
-        "--:--:--".to_string()
+        return iso[11..19].to_string();
     }
+    // Fallback: NiFi < 2.8.0 only populates `timestamp` (human-readable),
+    // e.g. "04/12/2026 11:44:00 UTC". Extract HH:MM:SS from position 11..19.
+    if human.len() >= 19 {
+        let slice = &human[11..19];
+        if slice.as_bytes()[2] == b':' {
+            return slice.to_string();
+        }
+    }
+    "--:--:--".to_string()
 }
 
 fn truncate_right(s: &str, max: usize) -> String {
@@ -395,6 +420,7 @@ mod tests {
             source_type: source_type.into(),
             group_id: "root".into(),
             timestamp_iso: ts.into(),
+            timestamp_human: String::new(),
         }
     }
 

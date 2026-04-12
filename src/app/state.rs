@@ -24,29 +24,29 @@ use crate::view::tracer::state::TracerState;
 pub enum ViewId {
     Overview,
     Bulletins,
+    Health,
     Browser,
     Tracer,
-    Health,
 }
 
 impl ViewId {
     pub fn next(self) -> Self {
         match self {
             Self::Overview => Self::Bulletins,
-            Self::Bulletins => Self::Browser,
+            Self::Bulletins => Self::Health,
+            Self::Health => Self::Browser,
             Self::Browser => Self::Tracer,
-            Self::Tracer => Self::Health,
-            Self::Health => Self::Overview,
+            Self::Tracer => Self::Overview,
         }
     }
 
     pub fn prev(self) -> Self {
         match self {
-            Self::Overview => Self::Health,
+            Self::Overview => Self::Tracer,
             Self::Bulletins => Self::Overview,
-            Self::Browser => Self::Bulletins,
+            Self::Health => Self::Bulletins,
+            Self::Browser => Self::Health,
             Self::Tracer => Self::Browser,
-            Self::Health => Self::Tracer,
         }
     }
 }
@@ -943,7 +943,7 @@ fn handle_key(state: &mut AppState, key: KeyEvent, config: &Config) -> UpdateRes
             }
         }
         (KeyCode::F(3), _) => {
-            state.current_tab = ViewId::Browser;
+            state.current_tab = ViewId::Health;
             UpdateResult {
                 redraw: true,
                 intent: None,
@@ -951,7 +951,7 @@ fn handle_key(state: &mut AppState, key: KeyEvent, config: &Config) -> UpdateRes
             }
         }
         (KeyCode::F(4), _) => {
-            state.current_tab = ViewId::Tracer;
+            state.current_tab = ViewId::Browser;
             UpdateResult {
                 redraw: true,
                 intent: None,
@@ -959,7 +959,7 @@ fn handle_key(state: &mut AppState, key: KeyEvent, config: &Config) -> UpdateRes
             }
         }
         (KeyCode::F(5), _) => {
-            state.current_tab = ViewId::Health;
+            state.current_tab = ViewId::Tracer;
             UpdateResult {
                 redraw: true,
                 intent: None,
@@ -1712,11 +1712,11 @@ mod tests {
         update(&mut s, key(KeyCode::Tab, KeyModifiers::NONE), &c);
         assert_eq!(s.current_tab, ViewId::Bulletins);
         update(&mut s, key(KeyCode::Tab, KeyModifiers::NONE), &c);
+        assert_eq!(s.current_tab, ViewId::Health);
+        update(&mut s, key(KeyCode::Tab, KeyModifiers::NONE), &c);
         assert_eq!(s.current_tab, ViewId::Browser);
         update(&mut s, key(KeyCode::Tab, KeyModifiers::NONE), &c);
         assert_eq!(s.current_tab, ViewId::Tracer);
-        update(&mut s, key(KeyCode::Tab, KeyModifiers::NONE), &c);
-        assert_eq!(s.current_tab, ViewId::Health);
         update(&mut s, key(KeyCode::Tab, KeyModifiers::NONE), &c);
         assert_eq!(s.current_tab, ViewId::Overview);
     }
@@ -1726,7 +1726,7 @@ mod tests {
         let mut s = fresh_state();
         let c = tiny_config();
         update(&mut s, key(KeyCode::BackTab, KeyModifiers::NONE), &c);
-        assert_eq!(s.current_tab, ViewId::Health);
+        assert_eq!(s.current_tab, ViewId::Tracer);
     }
 
     #[test]
@@ -1734,9 +1734,9 @@ mod tests {
         let mut s = fresh_state();
         let c = tiny_config();
         update(&mut s, key(KeyCode::F(3), KeyModifiers::NONE), &c);
+        assert_eq!(s.current_tab, ViewId::Health);
+        update(&mut s, key(KeyCode::F(4), KeyModifiers::NONE), &c);
         assert_eq!(s.current_tab, ViewId::Browser);
-        update(&mut s, key(KeyCode::F(1), KeyModifiers::NONE), &c);
-        assert_eq!(s.current_tab, ViewId::Overview);
     }
 
     #[test]
@@ -1852,6 +1852,7 @@ mod tests {
                 source_type: "PROCESSOR".into(),
                 group_id: "root".into(),
                 timestamp_iso: "2026-04-11T10:14:22Z".into(),
+                timestamp_human: String::new(),
             }],
             fetched_at: SystemTime::now(),
         };
@@ -1918,6 +1919,7 @@ mod tests {
                 source_type: "PROCESSOR".into(),
                 group_id: "root".into(),
                 timestamp_iso: "2026-04-11T10:14:22Z".into(),
+                timestamp_human: String::new(),
             }],
             fetched_at: SystemTime::now(),
         };

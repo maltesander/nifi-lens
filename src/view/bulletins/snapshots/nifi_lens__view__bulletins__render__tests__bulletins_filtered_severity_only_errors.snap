@@ -1,14 +1,13 @@
 ---
 source: src/view/bulletins/render.rs
-assertion_line: 454
 expression: render_to_string(&state)
 ---
 "┌ Bulletins ────────────────────────────────────────────────────────────────────────────────────────────── last <DUR> ago ┐"
 "│[E] [W] [I]   type: All   text: (none)                                                                                │"
 "│— e/w/i toggle severity · T type · / text · c clear · p pause · ? help —                                              │"
-"│time     sev   source               group                message                                                      │"
-"│10:14:20 ERROR C                    root                 error one                                                    │"
-"│10:14:22 ERROR D                    root                 error two                                                    │"
+"│time     sev   source               group                    message                                                  │"
+"│10:14:20 ERROR C                    root                     error one                                                │"
+"│10:14:22 ERROR D                    root                     error two                                                │"
 "│                                                                                                                      │"
 "│                                                                                                                      │"
 "│                                                                                                                      │"
@@ -27,9 +26,9 @@ expression: render_to_string(&state)
 "│                                                                                                                      │"
 "│                                                                                                                      │"
 "│──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────│"
-"│ERROR  2026-04-11T10:14:22Z  root/D                                                                                   │"
-"│                                                                                                                      │"
-"│error two                                                                                                             │"
+"│ERROR    2026-04-11T10:14:22Z                                                                                         │"
+"│Source: D  ID: src-4                                                                                                  │"
+"│Group:  root                                                                                                          │"
 "│                                                                                                                      │"
 "│                                                                                                                      │"
 "└──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┘"

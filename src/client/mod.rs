@@ -298,6 +298,7 @@ impl NifiClient {
                     source_type: dto.source_type.unwrap_or_default(),
                     group_id: dto.group_id.or(entity.group_id).unwrap_or_default(),
                     timestamp_iso: dto.timestamp_iso.unwrap_or_default(),
+                    timestamp_human: dto.timestamp.unwrap_or_default(),
                 })
             })
             .collect();
@@ -391,6 +392,10 @@ pub struct BulletinSnapshot {
     /// RFC-3339 / ISO-8601 timestamp ("2026-04-11T10:14:22.123Z"). Empty if
     /// the server did not populate `timestampIso`.
     pub timestamp_iso: String,
+    /// Human-readable timestamp ("04/12/2026 11:44:00 UTC"). Populated from
+    /// the `timestamp` field of the NiFi API; used as fallback when
+    /// `timestamp_iso` is empty (NiFi < 2.8.0).
+    pub timestamp_human: String,
 }
 
 /// Bulletin-board snapshot: just the list of bulletins. The Overview reducer

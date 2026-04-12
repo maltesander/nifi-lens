@@ -57,16 +57,16 @@ fn render_tab_bar(frame: &mut Frame, area: Rect, state: &AppState) {
     let titles = vec![
         Line::from("Overview"),
         Line::from("Bulletins"),
+        Line::from("Health"),
         Line::from("Browser"),
         Line::from("Tracer"),
-        Line::from("Health"),
     ];
     let idx = match state.current_tab {
         ViewId::Overview => 0,
         ViewId::Bulletins => 1,
-        ViewId::Browser => 2,
-        ViewId::Tracer => 3,
-        ViewId::Health => 4,
+        ViewId::Health => 2,
+        ViewId::Browser => 3,
+        ViewId::Tracer => 4,
     };
     let tabs = Tabs::new(titles)
         .block(Block::default().borders(Borders::ALL).title(" nifi-lens "))

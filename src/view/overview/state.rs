@@ -266,6 +266,7 @@ mod tests {
             source_type: "PROCESSOR".into(),
             group_id: "root".into(),
             timestamp_iso: iso.into(),
+            timestamp_human: String::new(),
         }
     }
 

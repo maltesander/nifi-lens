@@ -322,6 +322,7 @@ mod tests {
                 source_type: "PROCESSOR".into(),
                 group_id: "root".into(),
                 timestamp_iso: "2026-04-11T10:14:10Z".into(),
+                timestamp_human: String::new(),
             })
             .collect();
         let payload = OverviewPayload {
