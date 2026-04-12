@@ -24,6 +24,11 @@ if [ "${NIFI_CLUSTER_IS_NODE}" = "true" ]; then
     # value on every node. Standalone mode auto-generates one, but
     # cluster mode refuses to start without it.
     prop_replace 'nifi.sensitive.props.key'                   "${NIFI_SENSITIVE_PROPS_KEY:-nifilens-fixture-key}"
+    # state-management.xml has a separate ZK connect string for the
+    # cluster state provider (zk-provider). It's empty by default and
+    # NiFi does NOT auto-populate it from nifi.properties.
+    STATE_MGMT="${NIFI_HOME}/conf/state-management.xml"
+    sed -i "s|<property name=\"Connect String\"></property>|<property name=\"Connect String\">${NIFI_ZOOKEEPER_CONNECT_STRING}</property>|" "$STATE_MGMT"
 fi
 
 if [ -n "${SINGLE_USER_CREDENTIALS_USERNAME}" ] && [ -n "${SINGLE_USER_CREDENTIALS_PASSWORD}" ]; then
