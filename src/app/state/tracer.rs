@@ -2,7 +2,10 @@
 
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 
-use super::{AppState, Modal, PendingIntent, PendingSave, UpdateResult, ViewKeyHandler};
+use super::{
+    AppState, Banner, BannerSeverity, Modal, PendingIntent, PendingSave, StatusLine, UpdateResult,
+    ViewKeyHandler,
+};
 
 /// Zero-sized dispatch struct for the Tracer tab.
 pub(crate) struct TracerHandler;
@@ -220,7 +223,7 @@ fn handle_lineage_running(state: &mut AppState, key: KeyEvent) -> Option<UpdateR
 }
 
 fn handle_lineage(state: &mut AppState, key: KeyEvent) -> Option<UpdateResult> {
-    use crate::intent::{ContentSide as IntentSide, Intent};
+    use crate::intent::Intent;
     use crate::view::tracer::state::{self as ts, ContentPane, EventDetail, TracerMode};
 
     if !matches!(key.modifiers, KeyModifiers::NONE | KeyModifiers::SHIFT) {
@@ -258,42 +261,8 @@ fn handle_lineage(state: &mut AppState, key: KeyEvent) -> Option<UpdateResult> {
                 Some(UpdateResult::default())
             }
         }
-        KeyCode::Char('i') => {
-            if let Some(event_id) = ts::lineage_selected_event_id(&state.tracer) {
-                ts::lineage_mark_content_loading(
-                    &mut state.tracer,
-                    crate::client::ContentSide::Input,
-                );
-                Some(UpdateResult {
-                    redraw: true,
-                    intent: Some(PendingIntent::Dispatch(Intent::FetchEventContent {
-                        event_id,
-                        side: IntentSide::Input,
-                    })),
-                    tracer_followup: None,
-                })
-            } else {
-                Some(UpdateResult::default())
-            }
-        }
-        KeyCode::Char('o') => {
-            if let Some(event_id) = ts::lineage_selected_event_id(&state.tracer) {
-                ts::lineage_mark_content_loading(
-                    &mut state.tracer,
-                    crate::client::ContentSide::Output,
-                );
-                Some(UpdateResult {
-                    redraw: true,
-                    intent: Some(PendingIntent::Dispatch(Intent::FetchEventContent {
-                        event_id,
-                        side: IntentSide::Output,
-                    })),
-                    tracer_followup: None,
-                })
-            } else {
-                Some(UpdateResult::default())
-            }
-        }
+        KeyCode::Char('i') => dispatch_content_fetch(state, crate::client::ContentSide::Input),
+        KeyCode::Char('o') => dispatch_content_fetch(state, crate::client::ContentSide::Output),
         KeyCode::Char('s') => {
             // Open the save modal if content is currently shown.
             if let TracerMode::Lineage(ref view) = state.tracer.mode
@@ -368,6 +337,80 @@ fn handle_lineage(state: &mut AppState, key: KeyEvent) -> Option<UpdateResult> {
     }
 }
 
+/// Handles `i`/`o` in Lineage mode: only dispatches a content fetch when the
+/// currently loaded event has a claim on the requested side, otherwise surfaces
+/// an info banner. Without this guard NiFi returns HTTP 400 "Input Content
+/// Claim not specified" for events like CREATE that have no input claim.
+fn dispatch_content_fetch(
+    state: &mut AppState,
+    side: crate::client::ContentSide,
+) -> Option<UpdateResult> {
+    use crate::client::ContentSide;
+    use crate::intent::{ContentSide as IntentSide, Intent};
+    use crate::view::tracer::state::{self as ts, EventDetail, TracerMode};
+
+    let side_label = match side {
+        ContentSide::Input => "input",
+        ContentSide::Output => "output",
+    };
+
+    let (event_id, available) = match state.tracer.mode {
+        TracerMode::Lineage(ref view) => match view.event_detail {
+            EventDetail::Loaded { ref event, .. } => {
+                let avail = match side {
+                    ContentSide::Input => event.input_available,
+                    ContentSide::Output => event.output_available,
+                };
+                (event.summary.event_id, avail)
+            }
+            _ => {
+                state.status = StatusLine {
+                    banner: Some(Banner {
+                        severity: BannerSeverity::Info,
+                        message: "press Enter to load event detail first".to_string(),
+                        detail: None,
+                    }),
+                };
+                return Some(UpdateResult {
+                    redraw: true,
+                    intent: None,
+                    tracer_followup: None,
+                });
+            }
+        },
+        _ => return Some(UpdateResult::default()),
+    };
+
+    if !available {
+        state.status = StatusLine {
+            banner: Some(Banner {
+                severity: BannerSeverity::Info,
+                message: format!("no {side_label} content for this event"),
+                detail: None,
+            }),
+        };
+        return Some(UpdateResult {
+            redraw: true,
+            intent: None,
+            tracer_followup: None,
+        });
+    }
+
+    ts::lineage_mark_content_loading(&mut state.tracer, side);
+    let intent_side = match side {
+        ContentSide::Input => IntentSide::Input,
+        ContentSide::Output => IntentSide::Output,
+    };
+    Some(UpdateResult {
+        redraw: true,
+        intent: Some(PendingIntent::Dispatch(Intent::FetchEventContent {
+            event_id,
+            side: intent_side,
+        })),
+        tracer_followup: None,
+    })
+}
+
 /// Extracts the raw bytes from the Tracer's content pane and builds a
 /// `PendingSave`. Returns `None` if the content pane is not in the
 /// `Shown` state.
@@ -386,5 +429,125 @@ pub(super) fn extract_raw_for_save(
         }))
     } else {
         None
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::super::tests::{fresh_state, key, tiny_config};
+    use super::super::update;
+    use crate::app::state::{BannerSeverity, PendingIntent, ViewId};
+    use crate::client::tracer::ProvenanceEventDetail;
+    use crate::intent::Intent;
+    use crate::view::tracer::state::{
+        self as ts, ContentPane, EventDetail, LineageView, TracerMode,
+    };
+    use crossterm::event::{KeyCode, KeyModifiers};
+    use std::time::SystemTime;
+
+    fn seed_lineage_with_detail(
+        input_available: bool,
+        output_available: bool,
+    ) -> (crate::app::state::AppState, crate::config::Config) {
+        use crate::client::LineageSnapshot;
+        use crate::client::tracer::ProvenanceEventSummary;
+
+        let mut s = fresh_state();
+        let c = tiny_config();
+        s.current_tab = ViewId::Tracer;
+
+        let summary = ProvenanceEventSummary {
+            event_id: 42,
+            event_time_iso: "2026-01-01T00:00:00Z".to_string(),
+            event_type: "CREATE".to_string(),
+            component_id: "comp-42".to_string(),
+            component_name: "GenerateFlowFile".to_string(),
+            component_type: "GenerateFlowFile".to_string(),
+            group_id: "root".to_string(),
+            flow_file_uuid: "ff-42".to_string(),
+            relationship: None,
+            details: None,
+        };
+        let detail = ProvenanceEventDetail {
+            summary: summary.clone(),
+            attributes: vec![],
+            transit_uri: None,
+            input_available,
+            output_available,
+        };
+        s.tracer.mode = TracerMode::Lineage(Box::new(LineageView {
+            uuid: "ff-42".to_string(),
+            snapshot: LineageSnapshot {
+                events: vec![summary],
+                percent_completed: 100,
+                finished: true,
+            },
+            selected_event: 0,
+            event_detail: EventDetail::Loaded {
+                event: Box::new(detail),
+                content: ContentPane::default(),
+            },
+            diff_mode: ts::AttributeDiffMode::default(),
+            fetched_at: SystemTime::now(),
+        }));
+        (s, c)
+    }
+
+    #[test]
+    fn lineage_i_without_input_claim_shows_info_banner_and_no_intent() {
+        let (mut s, c) = seed_lineage_with_detail(false, true);
+        let r = update(&mut s, key(KeyCode::Char('i'), KeyModifiers::NONE), &c);
+        assert!(r.intent.is_none());
+        let banner = s.status.banner.as_ref().expect("banner should be set");
+        assert_eq!(banner.severity, BannerSeverity::Info);
+        assert!(
+            banner.message.contains("no input content"),
+            "unexpected banner: {}",
+            banner.message
+        );
+    }
+
+    #[test]
+    fn lineage_o_without_output_claim_shows_info_banner_and_no_intent() {
+        let (mut s, c) = seed_lineage_with_detail(true, false);
+        let r = update(&mut s, key(KeyCode::Char('o'), KeyModifiers::NONE), &c);
+        assert!(r.intent.is_none());
+        let banner = s.status.banner.as_ref().expect("banner should be set");
+        assert_eq!(banner.severity, BannerSeverity::Info);
+        assert!(
+            banner.message.contains("no output content"),
+            "unexpected banner: {}",
+            banner.message
+        );
+    }
+
+    #[test]
+    fn lineage_i_with_input_claim_dispatches_fetch_content_intent() {
+        let (mut s, c) = seed_lineage_with_detail(true, true);
+        let r = update(&mut s, key(KeyCode::Char('i'), KeyModifiers::NONE), &c);
+        match r.intent {
+            Some(PendingIntent::Dispatch(Intent::FetchEventContent { event_id, .. })) => {
+                assert_eq!(event_id, 42);
+            }
+            other => panic!("expected FetchEventContent intent, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn lineage_i_without_loaded_detail_shows_hint_banner_and_no_intent() {
+        let (mut s, c) = seed_lineage_with_detail(true, true);
+        // Clear the loaded detail.
+        if let TracerMode::Lineage(ref mut view) = s.tracer.mode {
+            view.event_detail = EventDetail::NotLoaded;
+        }
+        let r = update(&mut s, key(KeyCode::Char('i'), KeyModifiers::NONE), &c);
+        assert!(r.intent.is_none());
+        let banner = s.status.banner.as_ref().expect("banner should be set");
+        assert_eq!(banner.severity, BannerSeverity::Info);
+        assert!(
+            banner.message.contains("Enter"),
+            "unexpected banner: {}",
+            banner.message
+        );
     }
 }

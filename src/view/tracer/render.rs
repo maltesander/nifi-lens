@@ -418,6 +418,12 @@ fn render_attribute_table(
         })
         .collect();
 
+    let header_row = Row::new(vec![
+        Cell::from(""),
+        Cell::from(Span::styled("key", theme::muted())),
+        Cell::from(Span::styled("previous", theme::muted())),
+        Cell::from(Span::styled("current", theme::muted())),
+    ]);
     let table = Table::new(
         table_rows,
         [
@@ -426,7 +432,8 @@ fn render_attribute_table(
             Constraint::Length(29), // previous (28 + 1)
             Constraint::Fill(1),    // current
         ],
-    );
+    )
+    .header(header_row);
     frame.render_widget(table, table_area);
 }
 
