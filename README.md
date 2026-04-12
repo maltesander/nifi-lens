@@ -179,6 +179,18 @@ current_context = "dev"
 [bulletins]
 ring_size = 5000
 
+# Optional: UI rendering options. All fields are optional; the defaults
+# below match what the tool uses if you omit the section.
+[ui]
+# Timestamp display format in Bulletins and Tracer:
+#   "short"  — HH:MM:SS for today, "MMM DD HH:MM:SS" for older events
+#   "iso"    — 2026-04-12T14:32:18Z (or ...+02:00 with local tz)
+#   "human"  — Apr 12 14:32:18
+timestamp_format = "short"
+
+# "utc" or "local". "local" uses the host machine's time zone.
+timestamp_tz = "utc"
+
 [[contexts]]
 name = "dev"
 url = "https://nifi-dev.internal:8443"
