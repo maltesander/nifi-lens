@@ -18,9 +18,11 @@ use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Borders, Cell, Gauge, Paragraph, Row, Table};
 
+use crate::client::tracer::{AttributeTriple, ContentRender, ContentSide};
 use crate::theme;
 use crate::view::tracer::state::{
-    EntryState, LatestEventsView, LineageRunningState, TracerMode, TracerState,
+    AttributeDiffMode, ContentPane, EntryState, EventDetail, LatestEventsView, LineageRunningState,
+    LineageView, TracerMode, TracerState,
 };
 
 pub fn render(frame: &mut Frame, area: Rect, state: &TracerState) {
@@ -45,7 +47,7 @@ pub fn render(frame: &mut Frame, area: Rect, state: &TracerState) {
     match &state.mode {
         TracerMode::Entry(entry) => render_entry(frame, inner, entry, state.last_error.as_deref()),
         TracerMode::LineageRunning(running) => render_lineage_running(frame, inner, running),
-        TracerMode::Lineage(_) => render_lineage_stub(frame, inner),
+        TracerMode::Lineage(view) => render_lineage(frame, inner, view),
         TracerMode::LatestEvents(view) => {
             render_latest_events(frame, inner, view, state.last_error.as_deref())
         }
@@ -155,18 +157,354 @@ fn render_lineage_running(frame: &mut Frame, area: Rect, running: &LineageRunnin
     frame.render_widget(hint, rows[5]);
 }
 
-// ── Lineage stub ──────────────────────────────────────────────────────────────
+// ── Lineage ───────────────────────────────────────────────────────────────────
 
-fn render_lineage_stub(frame: &mut Frame, area: Rect) {
-    let para = Paragraph::new("(lineage view — Task 15)").alignment(Alignment::Center);
-    let mid = area.height.saturating_sub(1) / 2;
-    let spot = Rect {
+const DETAIL_HEIGHT: u16 = 14;
+
+fn render_lineage(frame: &mut Frame, area: Rect, view: &LineageView) {
+    let rows = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([
+            Constraint::Min(1),                // timeline
+            Constraint::Length(DETAIL_HEIGHT), // detail pane
+        ])
+        .split(area);
+
+    render_lineage_timeline(frame, rows[0], view);
+    render_lineage_detail(frame, rows[1], view);
+}
+
+fn render_lineage_timeline(frame: &mut Frame, area: Rect, view: &LineageView) {
+    let events = &view.snapshot.events;
+    let visible = area.height as usize;
+    let scroll_offset = if visible == 0 || view.selected_event < visible {
+        0
+    } else {
+        view.selected_event + 1 - visible
+    };
+
+    let window_end = events.len().min(scroll_offset + visible);
+    let window = &events[scroll_offset..window_end];
+    let selected_in_window = view.selected_event.saturating_sub(scroll_offset);
+
+    let table_rows: Vec<Row> = window
+        .iter()
+        .enumerate()
+        .map(|(idx, e)| {
+            let is_selected = idx == selected_in_window;
+            let base_style = if is_selected {
+                Style::default().add_modifier(Modifier::REVERSED)
+            } else {
+                Style::default()
+            };
+
+            let marker = if is_selected { ">" } else { " " };
+            let time = format_hhmmss_ms(&e.event_time_iso);
+            let event_type = format!("{:<16}", truncate(&e.event_type, 16));
+            let comp_name = format!("{:<22}", truncate(&e.component_name, 22));
+            let group = truncate(&e.group_id, 24).to_string();
+
+            let is_fail = e.relationship.as_deref().is_some_and(|r| r == "failure");
+
+            if is_fail {
+                Row::new(vec![
+                    Cell::from(Span::styled(marker, base_style)),
+                    Cell::from(Span::styled(time, base_style)),
+                    Cell::from(Span::styled(event_type, base_style)),
+                    Cell::from(Span::styled(comp_name, base_style)),
+                    Cell::from(Span::styled(group, base_style)),
+                    Cell::from(Span::styled("  \u{2190} fail", theme::error())),
+                ])
+            } else {
+                Row::new(vec![
+                    Cell::from(Span::styled(marker, base_style)),
+                    Cell::from(Span::styled(time, base_style)),
+                    Cell::from(Span::styled(event_type, base_style)),
+                    Cell::from(Span::styled(comp_name, base_style)),
+                    Cell::from(Span::styled(group, base_style)),
+                    Cell::from(Span::raw("")),
+                ])
+            }
+        })
+        .collect();
+
+    let table = Table::new(
+        table_rows,
+        [
+            Constraint::Length(1),  // gutter
+            Constraint::Length(12), // HH:MM:SS.mmm
+            Constraint::Length(17), // event type (16 + 1 space)
+            Constraint::Length(23), // component name (22 + 1 space)
+            Constraint::Length(25), // group path (24 + 1 space)
+            Constraint::Fill(1),    // fail tag or empty
+        ],
+    );
+    frame.render_widget(table, area);
+}
+
+fn render_lineage_detail(frame: &mut Frame, area: Rect, view: &LineageView) {
+    // Draw a top border for the detail pane separator.
+    let block = Block::default().borders(Borders::TOP);
+    let inner = block.inner(area);
+    frame.render_widget(block, area);
+
+    match &view.event_detail {
+        EventDetail::NotLoaded => {
+            let para = Paragraph::new(Span::styled(
+                "Press Enter to load this event's detail",
+                theme::muted(),
+            ))
+            .alignment(Alignment::Center);
+            let mid = inner.height.saturating_sub(1) / 2;
+            let spot = Rect {
+                x: inner.x,
+                y: inner.y + mid,
+                width: inner.width,
+                height: 1,
+            };
+            frame.render_widget(para, spot);
+        }
+        EventDetail::Loading => {
+            let para = Paragraph::new(Span::styled("Loading event detail\u{2026}", theme::muted()))
+                .alignment(Alignment::Center);
+            let mid = inner.height.saturating_sub(1) / 2;
+            let spot = Rect {
+                x: inner.x,
+                y: inner.y + mid,
+                width: inner.width,
+                height: 1,
+            };
+            frame.render_widget(para, spot);
+        }
+        EventDetail::Failed(err) => {
+            let para = Paragraph::new(Span::styled(
+                format!("failed to load event detail: {err}"),
+                theme::error(),
+            ));
+            frame.render_widget(para, inner);
+        }
+        EventDetail::Loaded { event, content } => {
+            render_lineage_detail_loaded(frame, inner, event, content, view.diff_mode);
+        }
+    }
+}
+
+fn render_lineage_detail_loaded(
+    frame: &mut Frame,
+    area: Rect,
+    event: &crate::client::tracer::ProvenanceEventDetail,
+    content: &ContentPane,
+    diff_mode: AttributeDiffMode,
+) {
+    let s = &event.summary;
+    let rel = s.relationship.as_deref().unwrap_or("");
+    let details = s.details.as_deref().unwrap_or("");
+
+    // Split into: header (1), attributes (variable), content pane (variable)
+    let rows = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([
+            Constraint::Length(1), // header line
+            Constraint::Fill(1),   // attributes
+            Constraint::Length(3), // content pane (header + 2 lines)
+        ])
+        .split(area);
+
+    // ── Header ──
+    let header_line = Line::from(vec![
+        Span::styled(format!("Event #{} \u{2014} ", s.event_id), theme::accent()),
+        Span::raw(s.component_name.clone()),
+        Span::styled(
+            format!("  ({} \u{00b7} {})", s.event_type, rel),
+            theme::muted(),
+        ),
+        Span::raw(if details.is_empty() {
+            String::new()
+        } else {
+            format!("  {details}")
+        }),
+    ]);
+    frame.render_widget(Paragraph::new(header_line), rows[0]);
+
+    // ── Attribute table ──
+    render_attribute_table(frame, rows[1], &event.attributes, diff_mode);
+
+    // ── Content pane ──
+    render_content_pane(frame, rows[2], content);
+}
+
+fn render_attribute_table(
+    frame: &mut Frame,
+    area: Rect,
+    attributes: &[AttributeTriple],
+    diff_mode: AttributeDiffMode,
+) {
+    if area.height == 0 {
+        return;
+    }
+
+    // First row is a header.
+    let changed_count = attributes.iter().filter(|a| a.is_changed()).count();
+    let mode_indicator = match diff_mode {
+        AttributeDiffMode::All => "[ \u{25ba} All | Changed ]",
+        AttributeDiffMode::Changed => "[ All | \u{25ba} Changed ]",
+    };
+    let attr_header = Line::from(vec![
+        Span::styled("Attributes  ", theme::muted()),
+        Span::styled(
+            format!("{mode_indicator} ({changed_count} changed)"),
+            theme::muted(),
+        ),
+    ]);
+
+    let visible_attrs: Vec<&AttributeTriple> =
+        attributes.iter().filter(|a| diff_mode.matches(a)).collect();
+
+    // We have area.height rows total. Use row 0 for header, rest for data rows.
+    let header_area = Rect {
         x: area.x,
-        y: area.y + mid,
+        y: area.y,
         width: area.width,
         height: 1,
     };
-    frame.render_widget(para, spot);
+    frame.render_widget(Paragraph::new(attr_header), header_area);
+
+    if area.height <= 1 {
+        return;
+    }
+    let table_area = Rect {
+        x: area.x,
+        y: area.y + 1,
+        width: area.width,
+        height: area.height - 1,
+    };
+
+    let table_rows: Vec<Row> = visible_attrs
+        .iter()
+        .map(|attr| {
+            let prev = attr.previous.as_deref().unwrap_or("(none)");
+            let curr = attr.current.as_deref().unwrap_or("(none)");
+            let gutter = if attr.is_changed() { "\u{00b7}" } else { " " };
+            let curr_style = if attr.is_changed() {
+                theme::warning()
+            } else {
+                Style::default()
+            };
+            Row::new(vec![
+                Cell::from(gutter),
+                Cell::from(truncate(&attr.key, 22).to_string()),
+                Cell::from(truncate(prev, 28).to_string()),
+                Cell::from(Span::styled(truncate(curr, 28).to_string(), curr_style)),
+            ])
+        })
+        .collect();
+
+    let table = Table::new(
+        table_rows,
+        [
+            Constraint::Length(1),  // gutter
+            Constraint::Length(23), // key (22 + 1)
+            Constraint::Length(29), // previous (28 + 1)
+            Constraint::Fill(1),    // current
+        ],
+    );
+    frame.render_widget(table, table_area);
+}
+
+fn render_content_pane(frame: &mut Frame, area: Rect, content: &ContentPane) {
+    if area.height == 0 {
+        return;
+    }
+
+    match content {
+        ContentPane::Collapsed => {
+            let header = Line::from(vec![
+                Span::styled("Content  ", theme::muted()),
+                Span::styled(
+                    "[ i input \u{00b7} o output \u{00b7} s save ]",
+                    theme::muted(),
+                ),
+            ]);
+            let hint = Paragraph::new(Span::styled(
+                "(collapsed \u{2014} press i or o to load)",
+                theme::muted(),
+            ));
+            let rows = Layout::default()
+                .direction(Direction::Vertical)
+                .constraints([Constraint::Length(1), Constraint::Fill(1)])
+                .split(area);
+            frame.render_widget(Paragraph::new(header), rows[0]);
+            frame.render_widget(hint, rows[1]);
+        }
+        ContentPane::LoadingInput => {
+            let para = Paragraph::new(Span::styled("loading input\u{2026}", theme::muted()));
+            frame.render_widget(para, area);
+        }
+        ContentPane::LoadingOutput => {
+            let para = Paragraph::new(Span::styled("loading output\u{2026}", theme::muted()));
+            frame.render_widget(para, area);
+        }
+        ContentPane::Shown {
+            side,
+            render,
+            total_bytes,
+            ..
+        } => {
+            render_content_shown(frame, area, side, render, *total_bytes);
+        }
+        ContentPane::Failed(err) => {
+            let para = Paragraph::new(Span::styled(
+                format!("content error: {err}"),
+                theme::error(),
+            ));
+            frame.render_widget(para, area);
+        }
+    }
+}
+
+fn render_content_shown(
+    frame: &mut Frame,
+    area: Rect,
+    side: &ContentSide,
+    render: &ContentRender,
+    total_bytes: usize,
+) {
+    let side_label = match side {
+        ContentSide::Input => "input",
+        ContentSide::Output => "output",
+    };
+    let header = Line::from(vec![
+        Span::styled(format!("Content ({side_label})  "), theme::muted()),
+        Span::styled(format!("{total_bytes} bytes"), theme::muted()),
+    ]);
+
+    let body_text = match render {
+        ContentRender::Text { pretty } => pretty.as_str(),
+        ContentRender::Hex { first_4k } => first_4k.as_str(),
+        ContentRender::Empty => "(empty)",
+    };
+
+    let rows = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([Constraint::Length(1), Constraint::Fill(1)])
+        .split(area);
+    frame.render_widget(Paragraph::new(header), rows[0]);
+
+    let available = rows[1].height as usize;
+    let lines: Vec<&str> = body_text.lines().collect();
+    let shown = lines.len().min(available.saturating_sub(1).max(1));
+    let mut display_lines: Vec<Line> = lines[..shown]
+        .iter()
+        .map(|l| Line::from(Span::raw(l.to_string())))
+        .collect();
+    if lines.len() > shown {
+        let remaining = lines.len() - shown;
+        display_lines.push(Line::from(Span::styled(
+            format!("\u{2026} ({remaining} more lines)"),
+            theme::muted(),
+        )));
+    }
+    frame.render_widget(Paragraph::new(display_lines), rows[1]);
 }
 
 // ── LatestEvents ──────────────────────────────────────────────────────────────
@@ -300,6 +638,36 @@ fn format_hhmmss(iso: &str) -> String {
     }
 }
 
+/// Format ISO timestamp as `HH:MM:SS.mmm`.  Falls back to `--:--:--.---`.
+fn format_hhmmss_ms(iso: &str) -> String {
+    // Typical format: 2026-01-15T12:34:56.789Z  (len >= 23)
+    // Also accept:    2026-01-15T12:34:56Z       (len >= 20, no ms)
+    if iso.len() >= 19 && iso.as_bytes()[10] == b'T' {
+        let time = &iso[11..]; // "12:34:56.789Z" or "12:34:56Z"
+        let base = if time.len() >= 8 {
+            &time[..8]
+        } else {
+            "00:00:00"
+        };
+        let ms = if time.len() >= 12 && time.as_bytes()[8] == b'.' {
+            &time[9..12]
+        } else {
+            "000"
+        };
+        format!("{base}.{ms}")
+    } else {
+        "--:--:--.---".to_string()
+    }
+}
+
+/// Truncates `s` to at most `max_chars` Unicode scalar values.
+fn truncate(s: &str, max_chars: usize) -> &str {
+    match s.char_indices().nth(max_chars) {
+        Some((byte_idx, _)) => &s[..byte_idx],
+        None => s,
+    }
+}
+
 fn short_uuid(uuid: &str) -> String {
     // Show first 8 chars of UUID (the first segment).
     uuid.chars().take(8).collect()
@@ -384,5 +752,136 @@ mod tests {
             { filters => vec![(r"elapsed \d+s", "elapsed <N>s")] },
             { insta::assert_snapshot!("lineage_running_low_percent", snap(&state)); }
         );
+    }
+
+    // ── Lineage mode snapshot helpers ─────────────────────────────────────────
+
+    fn make_lineage_summary(
+        id: i64,
+        event_type: &str,
+        rel: Option<&str>,
+    ) -> crate::client::tracer::ProvenanceEventSummary {
+        crate::client::tracer::ProvenanceEventSummary {
+            event_id: id,
+            event_time_iso: "2026-04-12T10:30:45.123Z".to_string(),
+            event_type: event_type.to_string(),
+            component_id: "proc-1111-2222-3333-4444".to_string(),
+            component_name: "LogAttribute".to_string(),
+            component_type: "LogAttribute".to_string(),
+            group_id: "pg-root-aaaa-bbbb".to_string(),
+            flow_file_uuid: "ff000001-0000-0000-0000-000000000001".to_string(),
+            relationship: rel.map(|s| s.to_string()),
+            details: None,
+        }
+    }
+
+    fn make_lineage_detail(event_id: i64) -> crate::client::tracer::ProvenanceEventDetail {
+        crate::client::tracer::ProvenanceEventDetail {
+            summary: make_lineage_summary(event_id, "CONTENT_MODIFIED", None),
+            attributes: vec![
+                crate::client::tracer::AttributeTriple {
+                    key: "filename".to_string(),
+                    previous: Some("old_file.csv".to_string()),
+                    current: Some("new_file.csv".to_string()),
+                },
+                crate::client::tracer::AttributeTriple {
+                    key: "mime.type".to_string(),
+                    previous: Some("text/plain".to_string()),
+                    current: Some("text/plain".to_string()),
+                },
+            ],
+            transit_uri: None,
+            input_available: true,
+            output_available: true,
+        }
+    }
+
+    fn seed_lineage_state(state: &mut TracerState) {
+        use crate::client::tracer::LineageSnapshot;
+        use crate::view::tracer::state::{AttributeDiffMode, EventDetail, LineageView};
+
+        state.mode = TracerMode::Lineage(Box::new(LineageView {
+            uuid: "ff000001-0000-0000-0000-000000000001".to_string(),
+            snapshot: LineageSnapshot {
+                events: vec![
+                    make_lineage_summary(1, "RECEIVE", None),
+                    make_lineage_summary(2, "CONTENT_MODIFIED", None),
+                    make_lineage_summary(3, "SEND", Some("failure")),
+                ],
+                percent_completed: 100,
+                finished: true,
+            },
+            selected_event: 1,
+            event_detail: EventDetail::NotLoaded,
+            diff_mode: AttributeDiffMode::All,
+            fetched_at: SystemTime::now(),
+        }));
+    }
+
+    #[test]
+    fn snapshot_lineage_view_loading_detail() {
+        use crate::view::tracer::state::EventDetail;
+
+        let mut state = TracerState::new();
+        seed_lineage_state(&mut state);
+        if let TracerMode::Lineage(ref mut view) = state.mode {
+            view.event_detail = EventDetail::Loading;
+        }
+        insta::assert_snapshot!("lineage_view_loading_detail", snap(&state));
+    }
+
+    #[test]
+    fn snapshot_lineage_view_collapsed_content() {
+        use crate::view::tracer::state::{ContentPane, EventDetail};
+
+        let mut state = TracerState::new();
+        seed_lineage_state(&mut state);
+        if let TracerMode::Lineage(ref mut view) = state.mode {
+            view.event_detail = EventDetail::Loaded {
+                event: Box::new(make_lineage_detail(2)),
+                content: ContentPane::Collapsed,
+            };
+        }
+        insta::assert_snapshot!("lineage_view_collapsed_content", snap(&state));
+    }
+
+    #[test]
+    fn snapshot_lineage_view_expanded_text_content() {
+        use crate::client::tracer::{ContentRender, ContentSide};
+        use crate::view::tracer::state::{ContentPane, EventDetail};
+        use std::sync::Arc;
+
+        let mut state = TracerState::new();
+        seed_lineage_state(&mut state);
+        if let TracerMode::Lineage(ref mut view) = state.mode {
+            view.event_detail = EventDetail::Loaded {
+                event: Box::new(make_lineage_detail(2)),
+                content: ContentPane::Shown {
+                    side: ContentSide::Output,
+                    render: ContentRender::Text {
+                        pretty: "{\n  \"key\": \"value\",\n  \"count\": 42\n}".to_string(),
+                    },
+                    total_bytes: 36,
+                    raw: Arc::from(b"{}".as_ref()),
+                },
+            };
+        }
+        insta::assert_snapshot!("lineage_view_expanded_text_content", snap(&state));
+    }
+
+    #[test]
+    fn snapshot_lineage_view_diff_mode_changed() {
+        use crate::view::tracer::state::{AttributeDiffMode, ContentPane, EventDetail};
+
+        let mut state = TracerState::new();
+        seed_lineage_state(&mut state);
+        if let TracerMode::Lineage(ref mut view) = state.mode {
+            view.diff_mode = AttributeDiffMode::Changed;
+            view.event_detail = EventDetail::Loaded {
+                event: Box::new(make_lineage_detail(2)),
+                content: ContentPane::Collapsed,
+            };
+        }
+        insta::assert_snapshot!("lineage_view_diff_mode_changed", snap(&state));
     }
 }
