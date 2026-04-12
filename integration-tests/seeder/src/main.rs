@@ -102,7 +102,7 @@ async fn run(args: Args) -> Result<(), SeederError> {
     }
 
     cleanup::nuke_and_repave(&client).await?;
-    fixture::seed(&client).await?;
+    fixture::seed(&client, client.detected_version()).await?;
 
     Ok(())
 }
