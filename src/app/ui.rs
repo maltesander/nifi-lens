@@ -75,7 +75,7 @@ fn render_content(frame: &mut Frame, area: Rect, state: &AppState) {
         ViewId::Overview => overview::render(frame, area, &state.overview),
         ViewId::Bulletins => bulletins::render(frame, area, &state.bulletins),
         ViewId::Browser => browser::render(frame, area, &state.browser, &state.flow_index),
-        ViewId::Tracer => tracer::render(frame, area),
+        ViewId::Tracer => tracer::render(frame, area, &state.tracer),
     }
 }
 
