@@ -163,9 +163,14 @@ impl NifiClient {
     /// Submits a lineage query for the given flowfile UUID.
     ///
     /// Maps `POST /nifi-api/provenance/lineage` with a `FLOWFILE` request body
-    /// and returns the opaque `query_id` string needed to poll or delete the
-    /// query later. Errors are classified via `classify_or_fallback`.
-    pub async fn submit_lineage(&self, flow_file_uuid: &str) -> Result<String, NifiLensError> {
+    /// and returns `(query_id, cluster_node_id)`. The `cluster_node_id` is
+    /// `Some` when NiFi runs in cluster mode and must be passed to
+    /// [`poll_lineage`](Self::poll_lineage) and
+    /// [`delete_lineage`](Self::delete_lineage).
+    pub async fn submit_lineage(
+        &self,
+        flow_file_uuid: &str,
+    ) -> Result<(String, Option<String>), NifiLensError> {
         tracing::debug!(
             context = %self.context_name(),
             flow_file_uuid,
@@ -198,12 +203,17 @@ impl NifiClient {
                 })
             })?;
 
-        dto.id
+        let cluster_node_id = dto.request.and_then(|r| r.cluster_node_id);
+
+        let query_id = dto
+            .id
             .ok_or_else(|| NifiLensError::LineageQuerySubmitFailed {
                 context: self.context_name().to_string(),
                 uuid: flow_file_uuid.to_string(),
                 source: "server returned no query id".into(),
-            })
+            })?;
+
+        Ok((query_id, cluster_node_id))
     }
 
     /// Polls a lineage query and returns [`LineagePoll::Running`] or
@@ -211,7 +221,11 @@ impl NifiClient {
     ///
     /// Maps `GET /nifi-api/provenance/lineage/{id}`. Errors are classified via
     /// `classify_or_fallback`.
-    pub async fn poll_lineage(&self, query_id: &str) -> Result<LineagePoll, NifiLensError> {
+    pub async fn poll_lineage(
+        &self,
+        query_id: &str,
+        cluster_node_id: Option<&str>,
+    ) -> Result<LineagePoll, NifiLensError> {
         tracing::debug!(
             context = %self.context_name(),
             query_id,
@@ -221,7 +235,7 @@ impl NifiClient {
         let dto = self
             .inner
             .provenance_api()
-            .get_lineage(query_id, None)
+            .get_lineage(query_id, cluster_node_id)
             .await
             .map_err(|err| {
                 classify_or_fallback(self.context_name(), Box::new(err), |source| {
@@ -310,7 +324,11 @@ impl NifiClient {
     /// Maps `DELETE /nifi-api/provenance/lineage/{id}`. Errors are classified
     /// via `classify_or_fallback`. Delete failures are typically logged at warn
     /// level and never surfaced to the user.
-    pub async fn delete_lineage(&self, query_id: &str) -> Result<(), NifiLensError> {
+    pub async fn delete_lineage(
+        &self,
+        query_id: &str,
+        cluster_node_id: Option<&str>,
+    ) -> Result<(), NifiLensError> {
         tracing::debug!(
             context = %self.context_name(),
             query_id,
@@ -319,7 +337,7 @@ impl NifiClient {
 
         self.inner
             .provenance_api()
-            .delete_lineage(query_id, None)
+            .delete_lineage(query_id, cluster_node_id)
             .await
             .map_err(|err| {
                 classify_or_fallback(self.context_name(), Box::new(err), |source| {

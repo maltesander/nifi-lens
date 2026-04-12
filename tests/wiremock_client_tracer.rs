@@ -130,12 +130,14 @@ async fn submit_lineage_returns_query_id() {
         .await;
 
     let client = NifiClient::connect(&ctx(server.uri())).await.unwrap();
-    let query_id = client
+    let (query_id, cluster_node_id) = client
         .submit_lineage("7a2e8b9c-1234-4abc-9def-0123456789ab")
         .await
         .unwrap();
 
     assert_eq!(query_id, "lineage-query-0001");
+    // Standalone fixture has no cluster_node_id in the response.
+    assert!(cluster_node_id.is_none());
 }
 
 #[tokio::test]
@@ -151,7 +153,10 @@ async fn poll_lineage_running_returns_percent() {
         .await;
 
     let client = NifiClient::connect(&ctx(server.uri())).await.unwrap();
-    let poll = client.poll_lineage("lineage-query-0001").await.unwrap();
+    let poll = client
+        .poll_lineage("lineage-query-0001", None)
+        .await
+        .unwrap();
 
     assert!(
         matches!(poll, nifi_lens::client::tracer::LineagePoll::Running { percent } if percent == 40),
@@ -172,7 +177,10 @@ async fn poll_lineage_finished_returns_snapshot_in_chronological_order() {
         .await;
 
     let client = NifiClient::connect(&ctx(server.uri())).await.unwrap();
-    let poll = client.poll_lineage("lineage-query-0001").await.unwrap();
+    let poll = client
+        .poll_lineage("lineage-query-0001", None)
+        .await
+        .unwrap();
 
     let snapshot = match poll {
         nifi_lens::client::tracer::LineagePoll::Finished(s) => s,
@@ -201,7 +209,10 @@ async fn delete_lineage_returns_ok_on_200() {
         .await;
 
     let client = NifiClient::connect(&ctx(server.uri())).await.unwrap();
-    client.delete_lineage("lineage-query-0001").await.unwrap();
+    client
+        .delete_lineage("lineage-query-0001", None)
+        .await
+        .unwrap();
 }
 
 #[tokio::test]

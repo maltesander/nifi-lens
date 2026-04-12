@@ -70,12 +70,18 @@ pub async fn run(
         // Dispatch tracer followups (e.g. delete a consumed lineage query).
         if let Some(followup) = result.tracer_followup {
             match followup {
-                crate::view::tracer::state::Followup::DeleteLineageQuery { query_id } => {
+                crate::view::tracer::state::Followup::DeleteLineageQuery {
+                    query_id,
+                    cluster_node_id,
+                } => {
                     let dispatcher = dispatcher.clone();
                     let tx = tx.clone();
                     tokio::task::spawn_local(async move {
                         let outcome = dispatcher
-                            .dispatch(Intent::DeleteLineageQuery { query_id })
+                            .dispatch(Intent::DeleteLineageQuery {
+                                query_id,
+                                cluster_node_id,
+                            })
                             .await;
                         let _ = tx.send(AppEvent::IntentOutcome(outcome)).await;
                     });

@@ -20,15 +20,27 @@ pub enum Intent {
     // Declared for Phase 1+; dispatcher returns NotImplementedInPhase.
     OpenProcessGroup(String),
     TraceFlowfile(String), // UUID as string — Phase 4 introduces `uuid::Uuid`
-    FetchEventContent { event_id: i64, side: ContentSide },
+    FetchEventContent {
+        event_id: i64,
+        side: ContentSide,
+    },
     JumpTo(CrossLink),
 
     // Phase 4 intents.
     CancelLineageQuery,
-    DeleteLineageQuery { query_id: String },
-    LoadEventDetail { event_id: i64 },
-    RefreshLatestEvents { component_id: String },
-    RefreshLineage { uuid: String },
+    DeleteLineageQuery {
+        query_id: String,
+        cluster_node_id: Option<String>,
+    },
+    LoadEventDetail {
+        event_id: i64,
+    },
+    RefreshLatestEvents {
+        component_id: String,
+    },
+    RefreshLineage {
+        uuid: String,
+    },
 
     // Write intents — declared; dispatcher refuses unconditionally in Phase 0.
     StartProcessor(String),
@@ -203,8 +215,15 @@ impl IntentDispatcher {
                     view: ViewId::Tracer,
                 })
             }
-            Intent::DeleteLineageQuery { query_id } => {
-                crate::view::tracer::worker::spawn_delete_lineage(self.client.clone(), query_id);
+            Intent::DeleteLineageQuery {
+                query_id,
+                cluster_node_id,
+            } => {
+                crate::view::tracer::worker::spawn_delete_lineage(
+                    self.client.clone(),
+                    query_id,
+                    cluster_node_id,
+                );
                 Ok(IntentOutcome::ViewRefreshed {
                     view: ViewId::Tracer,
                 })
@@ -344,7 +363,8 @@ mod tests {
         assert_eq!(Intent::CancelLineageQuery.name(), "CancelLineageQuery");
         assert_eq!(
             Intent::DeleteLineageQuery {
-                query_id: "q1".into()
+                query_id: "q1".into(),
+                cluster_node_id: None,
             }
             .name(),
             "DeleteLineageQuery"
@@ -411,7 +431,8 @@ mod tests {
         assert!(!Intent::CancelLineageQuery.is_write());
         assert!(
             !Intent::DeleteLineageQuery {
-                query_id: "q1".into()
+                query_id: "q1".into(),
+                cluster_node_id: None,
             }
             .is_write()
         );

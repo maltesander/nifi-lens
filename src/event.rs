@@ -115,6 +115,7 @@ pub enum TracerPayload {
     LineageSubmitted {
         uuid: String,
         query_id: String,
+        cluster_node_id: Option<String>,
     },
     LineagePartial {
         query_id: String,

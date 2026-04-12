@@ -109,6 +109,9 @@ pub struct LineageRunningState {
     pub uuid: String,
     /// Opaque query ID returned by the NiFi server.
     pub query_id: String,
+    /// Cluster node ID returned by the server in cluster mode. Must be
+    /// passed to poll and delete calls.
+    pub cluster_node_id: Option<String>,
     /// Last reported completion percentage (0–100).
     pub percent: u8,
     /// Wall-clock time when the query was submitted.
@@ -219,7 +222,10 @@ impl AttributeDiffMode {
 #[derive(Debug)]
 pub enum Followup {
     /// Ask the server to delete a completed lineage query.
-    DeleteLineageQuery { query_id: String },
+    DeleteLineageQuery {
+        query_id: String,
+        cluster_node_id: Option<String>,
+    },
 }
 
 // ── Reducer ───────────────────────────────────────────────────────────────────
@@ -348,6 +354,7 @@ pub fn start_lineage(state: &mut TracerState, uuid: String, abort: Option<AbortH
     state.mode = TracerMode::LineageRunning(LineageRunningState {
         uuid,
         query_id: String::new(),
+        cluster_node_id: None,
         percent: 0,
         started_at: SystemTime::now(),
         abort,
@@ -362,7 +369,10 @@ pub fn start_lineage(state: &mut TracerState, uuid: String, abort: Option<AbortH
 pub fn cancel_lineage(state: &mut TracerState) -> Option<Followup> {
     let mut followup = None;
     if let TracerMode::LineageRunning(LineageRunningState {
-        query_id, abort, ..
+        query_id,
+        cluster_node_id,
+        abort,
+        ..
     }) = &mut state.mode
     {
         if let Some(handle) = abort.take() {
@@ -371,6 +381,7 @@ pub fn cancel_lineage(state: &mut TracerState) -> Option<Followup> {
         if !query_id.is_empty() {
             followup = Some(Followup::DeleteLineageQuery {
                 query_id: std::mem::take(query_id),
+                cluster_node_id: cluster_node_id.take(),
             });
         }
     }
@@ -383,12 +394,17 @@ pub fn cancel_lineage(state: &mut TracerState) -> Option<Followup> {
 /// Returns an optional [`Followup`] when an async side-effect is needed.
 pub fn apply_payload(state: &mut TracerState, payload: TracerPayload) -> Option<Followup> {
     match payload {
-        TracerPayload::LineageSubmitted { uuid, query_id } => {
+        TracerPayload::LineageSubmitted {
+            uuid,
+            query_id,
+            cluster_node_id,
+        } => {
             if let TracerMode::LineageRunning(ref mut running) = state.mode
                 && running.uuid == uuid
                 && running.query_id.is_empty()
             {
                 running.query_id = query_id;
+                running.cluster_node_id = cluster_node_id;
             }
             None
         }
@@ -409,6 +425,7 @@ pub fn apply_payload(state: &mut TracerState, payload: TracerPayload) -> Option<
             if let TracerMode::LineageRunning(ref running) = state.mode
                 && (running.query_id == query_id || running.query_id.is_empty())
             {
+                let cluster_node_id = running.cluster_node_id.clone();
                 state.mode = TracerMode::Lineage(Box::new(LineageView {
                     uuid,
                     snapshot,
@@ -417,10 +434,17 @@ pub fn apply_payload(state: &mut TracerState, payload: TracerPayload) -> Option<
                     diff_mode: AttributeDiffMode::default(),
                     fetched_at,
                 }));
-                return Some(Followup::DeleteLineageQuery { query_id });
+                return Some(Followup::DeleteLineageQuery {
+                    query_id,
+                    cluster_node_id,
+                });
             }
             // Stale query_id — still emit delete so it gets cleaned up.
-            Some(Followup::DeleteLineageQuery { query_id })
+            // No cluster_node_id available for stale queries.
+            Some(Followup::DeleteLineageQuery {
+                query_id,
+                cluster_node_id: None,
+            })
         }
         TracerPayload::LineageFailed {
             query_id, error, ..
@@ -690,6 +714,7 @@ mod tests {
             TracerPayload::LineageSubmitted {
                 uuid: TEST_UUID.to_string(),
                 query_id: "q-42".to_string(),
+                cluster_node_id: None,
             },
         );
         assert!(followup.is_none());
@@ -710,6 +735,7 @@ mod tests {
             TracerPayload::LineageSubmitted {
                 uuid: "stale-uuid".to_string(),
                 query_id: "q-99".to_string(),
+                cluster_node_id: None,
             },
         );
         assert!(followup.is_none());
@@ -729,6 +755,7 @@ mod tests {
             TracerPayload::LineageSubmitted {
                 uuid: TEST_UUID.to_string(),
                 query_id: "q-42".to_string(),
+                cluster_node_id: None,
             },
         );
 
@@ -756,6 +783,7 @@ mod tests {
             TracerPayload::LineageSubmitted {
                 uuid: TEST_UUID.to_string(),
                 query_id: "q-42".to_string(),
+                cluster_node_id: None,
             },
         );
 
@@ -784,6 +812,7 @@ mod tests {
             TracerPayload::LineageSubmitted {
                 uuid: TEST_UUID.to_string(),
                 query_id: "q-42".to_string(),
+                cluster_node_id: None,
             },
         );
 
@@ -804,7 +833,7 @@ mod tests {
 
         assert!(matches!(state.mode, TracerMode::Lineage(_)));
         assert!(
-            matches!(followup, Some(Followup::DeleteLineageQuery { ref query_id }) if query_id == "q-42")
+            matches!(followup, Some(Followup::DeleteLineageQuery { ref query_id, .. }) if query_id == "q-42")
         );
     }
 
@@ -819,6 +848,7 @@ mod tests {
             TracerPayload::LineageSubmitted {
                 uuid: TEST_UUID.to_string(),
                 query_id: "q-42".to_string(),
+                cluster_node_id: None,
             },
         );
 
@@ -841,7 +871,7 @@ mod tests {
         assert!(matches!(state.mode, TracerMode::LineageRunning(_)));
         // But we still emit delete to clean up the stale query on the server
         assert!(
-            matches!(followup, Some(Followup::DeleteLineageQuery { ref query_id }) if query_id == "q-stale")
+            matches!(followup, Some(Followup::DeleteLineageQuery { ref query_id, .. }) if query_id == "q-stale")
         );
     }
 
@@ -873,7 +903,7 @@ mod tests {
             "LineageDone with empty query_id on state must still transition"
         );
         assert!(
-            matches!(followup, Some(Followup::DeleteLineageQuery { ref query_id }) if query_id == "q-42")
+            matches!(followup, Some(Followup::DeleteLineageQuery { ref query_id, .. }) if query_id == "q-42")
         );
     }
 
@@ -906,6 +936,7 @@ mod tests {
             TracerPayload::LineageSubmitted {
                 uuid: TEST_UUID.to_string(),
                 query_id: "q-42".to_string(),
+                cluster_node_id: None,
             },
         );
 
@@ -931,13 +962,14 @@ mod tests {
             TracerPayload::LineageSubmitted {
                 uuid: TEST_UUID.to_string(),
                 query_id: "q-42".to_string(),
+                cluster_node_id: None,
             },
         );
 
         let followup = cancel_lineage(&mut state);
         assert!(matches!(state.mode, TracerMode::Entry(_)));
         assert!(
-            matches!(followup, Some(Followup::DeleteLineageQuery { ref query_id }) if query_id == "q-42")
+            matches!(followup, Some(Followup::DeleteLineageQuery { ref query_id, .. }) if query_id == "q-42")
         );
     }
 

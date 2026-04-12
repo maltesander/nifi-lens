@@ -65,10 +65,10 @@ pub fn spawn_lineage(
 ) -> JoinHandle<()> {
     tokio::task::spawn_local(async move {
         // Step 1: submit
-        let query_id = {
+        let (query_id, cluster_node_id) = {
             let guard = client.read().await;
             match guard.submit_lineage(&uuid).await {
-                Ok(id) => id,
+                Ok(pair) => pair,
                 Err(err) => {
                     let _ = tx
                         .send(AppEvent::Data(ViewPayload::Tracer(
@@ -90,6 +90,7 @@ pub fn spawn_lineage(
                 TracerPayload::LineageSubmitted {
                     uuid: uuid.clone(),
                     query_id: query_id.clone(),
+                    cluster_node_id: cluster_node_id.clone(),
                 },
             )))
             .await
@@ -103,7 +104,10 @@ pub fn spawn_lineage(
             tokio::time::sleep(Duration::from_millis(500)).await;
 
             let guard = client.read().await;
-            match guard.poll_lineage(&query_id).await {
+            match guard
+                .poll_lineage(&query_id, cluster_node_id.as_deref())
+                .await
+            {
                 Ok(crate::client::LineagePoll::Running { percent }) => {
                     if tx
                         .send(AppEvent::Data(ViewPayload::Tracer(
@@ -130,7 +134,9 @@ pub fn spawn_lineage(
                         )))
                         .await;
                     // Best-effort cleanup — ignore errors
-                    let _ = guard.delete_lineage(&query_id).await;
+                    let _ = guard
+                        .delete_lineage(&query_id, cluster_node_id.as_deref())
+                        .await;
                     return;
                 }
                 Err(err) => {
@@ -244,10 +250,17 @@ pub fn spawn_save(tx: mpsc::Sender<AppEvent>, path: PathBuf, raw: Arc<[u8]>) -> 
 
 /// Fire-and-forget lineage query deletion. Failures are logged at `warn` level
 /// and never surfaced to the user.
-pub fn spawn_delete_lineage(client: Arc<RwLock<NifiClient>>, query_id: String) -> JoinHandle<()> {
+pub fn spawn_delete_lineage(
+    client: Arc<RwLock<NifiClient>>,
+    query_id: String,
+    cluster_node_id: Option<String>,
+) -> JoinHandle<()> {
     tokio::task::spawn_local(async move {
         let guard = client.read().await;
-        if let Err(err) = guard.delete_lineage(&query_id).await {
+        if let Err(err) = guard
+            .delete_lineage(&query_id, cluster_node_id.as_deref())
+            .await
+        {
             tracing::warn!(
                 query_id,
                 error = %err,

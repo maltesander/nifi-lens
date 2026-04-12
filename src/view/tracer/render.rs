@@ -744,6 +744,7 @@ mod tests {
         state.mode = TracerMode::LineageRunning(LineageRunningState {
             uuid: "550e8400-e29b-41d4-a716-446655440000".to_string(),
             query_id: "qry-001".to_string(),
+            cluster_node_id: None,
             percent: 12,
             started_at: SystemTime::now() - Duration::from_secs(2),
             abort: None,

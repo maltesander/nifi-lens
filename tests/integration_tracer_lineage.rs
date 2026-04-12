@@ -46,20 +46,23 @@ async fn integration_tracer_lineage_happy_path() {
             .unwrap_or_else(|e| panic!("connect to {version} failed: {e:?}"));
 
         // 1. Submit a lineage query for the probe UUID.
-        let query_id = client
+        let (query_id, cluster_node_id) = client
             .submit_lineage(PROBE_UUID)
             .await
             .unwrap_or_else(|e| panic!("submit_lineage on {version} failed: {e:?}"));
 
-        eprintln!("  query_id = {query_id}");
+        eprintln!("  query_id = {query_id}, cluster_node_id = {cluster_node_id:?}");
 
         // 2. Poll until finished (max 20 attempts × 500 ms = 10 s).
         let snapshot = {
             let mut snapshot = None;
             for attempt in 0..20 {
-                let poll = client.poll_lineage(&query_id).await.unwrap_or_else(|e| {
-                    panic!("poll_lineage attempt {attempt} on {version} failed: {e:?}")
-                });
+                let poll = client
+                    .poll_lineage(&query_id, cluster_node_id.as_deref())
+                    .await
+                    .unwrap_or_else(|e| {
+                        panic!("poll_lineage attempt {attempt} on {version} failed: {e:?}")
+                    });
 
                 match poll {
                     LineagePoll::Finished(s) => {
@@ -91,7 +94,7 @@ async fn integration_tracer_lineage_happy_path() {
 
         // 4. Clean up.
         client
-            .delete_lineage(&query_id)
+            .delete_lineage(&query_id, cluster_node_id.as_deref())
             .await
             .unwrap_or_else(|e| panic!("delete_lineage on {version} failed: {e:?}"));
 
