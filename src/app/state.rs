@@ -25,6 +25,7 @@ pub enum ViewId {
     Bulletins,
     Browser,
     Tracer,
+    Health,
 }
 
 impl ViewId {
@@ -33,16 +34,18 @@ impl ViewId {
             Self::Overview => Self::Bulletins,
             Self::Bulletins => Self::Browser,
             Self::Browser => Self::Tracer,
-            Self::Tracer => Self::Overview,
+            Self::Tracer => Self::Health,
+            Self::Health => Self::Overview,
         }
     }
 
     pub fn prev(self) -> Self {
         match self {
-            Self::Overview => Self::Tracer,
+            Self::Overview => Self::Health,
             Self::Bulletins => Self::Overview,
             Self::Browser => Self::Bulletins,
             Self::Tracer => Self::Browser,
+            Self::Health => Self::Tracer,
         }
     }
 }
@@ -923,6 +926,14 @@ fn handle_key(state: &mut AppState, key: KeyEvent, config: &Config) -> UpdateRes
                 tracer_followup: None,
             }
         }
+        (KeyCode::F(5), _) => {
+            state.current_tab = ViewId::Health;
+            UpdateResult {
+                redraw: true,
+                intent: None,
+                tracer_followup: None,
+            }
+        }
         (KeyCode::Char('?'), _) => {
             state.modal = Some(Modal::Help);
             UpdateResult {
@@ -1531,6 +1542,8 @@ mod tests {
         update(&mut s, key(KeyCode::Tab, KeyModifiers::NONE), &c);
         assert_eq!(s.current_tab, ViewId::Tracer);
         update(&mut s, key(KeyCode::Tab, KeyModifiers::NONE), &c);
+        assert_eq!(s.current_tab, ViewId::Health);
+        update(&mut s, key(KeyCode::Tab, KeyModifiers::NONE), &c);
         assert_eq!(s.current_tab, ViewId::Overview);
     }
 
@@ -1539,7 +1552,7 @@ mod tests {
         let mut s = fresh_state();
         let c = tiny_config();
         update(&mut s, key(KeyCode::BackTab, KeyModifiers::NONE), &c);
-        assert_eq!(s.current_tab, ViewId::Tracer);
+        assert_eq!(s.current_tab, ViewId::Health);
     }
 
     #[test]

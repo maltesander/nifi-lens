@@ -2,6 +2,7 @@
 
 pub mod browser;
 pub mod bulletins;
+pub mod health;
 pub mod overview;
 pub mod tracer;
 

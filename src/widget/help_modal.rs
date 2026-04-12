@@ -84,6 +84,7 @@ pub fn render(frame: &mut Frame, area: Rect, current_tab: ViewId) {
         ViewId::Bulletins => BULLETINS_TEXT,
         ViewId::Browser => BROWSER_TEXT,
         ViewId::Tracer => TRACER_TEXT,
+        ViewId::Health => "",
     };
     let text = format!("{GLOBAL_TEXT}\n{per_view}");
     let modal = center(area, 70, 22);

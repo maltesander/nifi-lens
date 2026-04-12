@@ -84,6 +84,10 @@ impl WorkerRegistry {
                 tracing::debug!(?view, "worker registry: no worker for this view");
                 None
             }
+            ViewId::Health => {
+                tracing::debug!(?view, "worker registry: no worker for this view yet");
+                None
+            }
         };
         if let Some(handle) = handle {
             self.current = Some((view, handle));

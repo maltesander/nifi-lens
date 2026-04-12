@@ -7,7 +7,7 @@ use ratatui::text::Line;
 use ratatui::widgets::{Block, Borders, Tabs};
 
 use crate::app::state::{AppState, Modal, ViewId};
-use crate::view::{browser, bulletins, overview, tracer};
+use crate::view::{browser, bulletins, health, overview, tracer};
 use crate::widget::{context_switcher, help_modal, status_bar};
 
 pub fn render(frame: &mut Frame, state: &AppState) {
@@ -59,12 +59,14 @@ fn render_tab_bar(frame: &mut Frame, area: Rect, state: &AppState) {
         Line::from("Bulletins"),
         Line::from("Browser"),
         Line::from("Tracer"),
+        Line::from("Health"),
     ];
     let idx = match state.current_tab {
         ViewId::Overview => 0,
         ViewId::Bulletins => 1,
         ViewId::Browser => 2,
         ViewId::Tracer => 3,
+        ViewId::Health => 4,
     };
     let tabs = Tabs::new(titles)
         .block(Block::default().borders(Borders::ALL).title(" nifi-lens "))
@@ -79,6 +81,7 @@ fn render_content(frame: &mut Frame, area: Rect, state: &AppState) {
         ViewId::Bulletins => bulletins::render(frame, area, &state.bulletins),
         ViewId::Browser => browser::render(frame, area, &state.browser, &state.flow_index),
         ViewId::Tracer => tracer::render(frame, area, &state.tracer),
+        ViewId::Health => health::render(frame, area),
     }
 }
 
