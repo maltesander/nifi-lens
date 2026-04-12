@@ -14,7 +14,7 @@
 
 use ratatui::Frame;
 use ratatui::layout::{Constraint, Direction, Layout, Rect};
-use ratatui::style::{Color, Modifier, Style};
+use ratatui::style::Style;
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Borders, Cell, Paragraph, Row, Sparkline, Table};
 
@@ -65,10 +65,7 @@ fn render_identity(frame: &mut Frame, area: Rect, snapshot: Option<&OverviewSnap
                 Span::raw("   version "),
                 Span::styled(s.about.version.clone(), theme::accent()),
                 Span::raw("   flowfiles queued "),
-                Span::styled(
-                    s.controller.flow_files_queued.to_string(),
-                    Style::default().add_modifier(Modifier::BOLD),
-                ),
+                Span::styled(s.controller.flow_files_queued.to_string(), theme::bold()),
             ])
         }
         None => Line::from(Span::styled("loading cluster identity…", theme::muted())),
@@ -84,9 +81,9 @@ fn render_counts(frame: &mut Frame, area: Rect, snapshot: Option<&OverviewSnapsh
                 Span::raw("running "),
                 Span::styled(c.running.to_string(), theme::success()),
                 Span::raw("  stopped "),
-                Span::styled(c.stopped.to_string(), Style::default().fg(Color::Yellow)),
+                Span::styled(c.stopped.to_string(), theme::warning()),
                 Span::raw("  invalid "),
-                Span::styled(c.invalid.to_string(), Style::default().fg(Color::Red)),
+                Span::styled(c.invalid.to_string(), theme::error()),
                 Span::raw("  disabled "),
                 Span::styled(c.disabled.to_string(), theme::muted()),
                 Span::raw("  threads "),
@@ -118,7 +115,7 @@ fn render_sparkline(frame: &mut Frame, area: Rect, buckets: &[BulletinBucket]) {
     let spark = Sparkline::default()
         .block(Block::default().title(title))
         .data(&data)
-        .style(Style::default().fg(Color::Cyan));
+        .style(theme::accent());
     frame.render_widget(spark, area);
 }
 
@@ -134,9 +131,9 @@ fn render_unhealthy(frame: &mut Frame, area: Rect, queues: &[UnhealthyQueue]) {
         queues
             .iter()
             .map(|q| {
-                let color = fill_color(q.fill_percent);
+                let style = fill_style(q.fill_percent);
                 Row::new(vec![
-                    Cell::from(format!("{:>3}%", q.fill_percent)).style(Style::default().fg(color)),
+                    Cell::from(format!("{:>3}%", q.fill_percent)).style(style),
                     Cell::from(q.name.clone()),
                     Cell::from(format!("{} → {}", q.source_name, q.destination_name)),
                     Cell::from(q.flow_files_queued.to_string()),
@@ -153,10 +150,7 @@ fn render_unhealthy(frame: &mut Frame, area: Rect, queues: &[UnhealthyQueue]) {
             Constraint::Length(8),
         ],
     )
-    .header(
-        Row::new(vec!["fill", "queue", "src → dst", "ffiles"])
-            .style(Style::default().add_modifier(Modifier::BOLD)),
-    )
+    .header(Row::new(vec!["fill", "queue", "src → dst", "ffiles"]).style(theme::bold()))
     .block(
         Block::default()
             .title(" Unhealthy queues ")
@@ -178,8 +172,7 @@ fn render_noisy(frame: &mut Frame, area: Rect, noisy: &[NoisyComponent]) {
             .map(|n| {
                 let sev_style = severity_style(n.max_severity);
                 Row::new(vec![
-                    Cell::from(n.count.to_string())
-                        .style(Style::default().add_modifier(Modifier::BOLD)),
+                    Cell::from(n.count.to_string()).style(theme::bold()),
                     Cell::from(n.source_name.clone()),
                     Cell::from(format!("{:?}", n.max_severity)).style(sev_style),
                 ])
@@ -194,10 +187,7 @@ fn render_noisy(frame: &mut Frame, area: Rect, noisy: &[NoisyComponent]) {
             Constraint::Length(8),
         ],
     )
-    .header(
-        Row::new(vec!["count", "source", "worst"])
-            .style(Style::default().add_modifier(Modifier::BOLD)),
-    )
+    .header(Row::new(vec!["count", "source", "worst"]).style(theme::bold()))
     .block(
         Block::default()
             .title(" Noisy components ")
@@ -206,11 +196,11 @@ fn render_noisy(frame: &mut Frame, area: Rect, noisy: &[NoisyComponent]) {
     frame.render_widget(table, area);
 }
 
-fn fill_color(percent: u32) -> Color {
+fn fill_style(percent: u32) -> Style {
     match percent {
-        0..=49 => Color::Green,
-        50..=79 => Color::Yellow,
-        _ => Color::Red,
+        0..=49 => theme::success(),
+        50..=79 => theme::warning(),
+        _ => theme::error(),
     }
 }
 
