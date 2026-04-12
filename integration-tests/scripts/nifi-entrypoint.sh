@@ -11,25 +11,11 @@ prop_replace 'nifi.security.truststore'         "${TRUSTSTORE_PATH}"
 prop_replace 'nifi.security.truststoreType'     "${TRUSTSTORE_TYPE}"
 prop_replace 'nifi.security.truststorePasswd'   "${TRUSTSTORE_PASSWORD}"
 
-# Clustering — only applied when the container sets NIFI_CLUSTER_IS_NODE=true.
-# Standalone containers (e.g., nifi-2-6-0) omit this env var entirely.
-if [ "${NIFI_CLUSTER_IS_NODE}" = "true" ]; then
-    prop_replace 'nifi.cluster.is.node'                       'true'
-    prop_replace 'nifi.cluster.node.address'                  "${NIFI_CLUSTER_NODE_ADDRESS}"
-    prop_replace 'nifi.cluster.node.protocol.port'            '11443'
-    prop_replace 'nifi.zookeeper.connect.string'              "${NIFI_ZOOKEEPER_CONNECT_STRING}"
-    prop_replace 'nifi.cluster.flow.election.max.wait.time'   '30 secs'
-    prop_replace 'nifi.state.management.embedded.zookeeper.start' 'false'
-    # Cluster nodes require an explicit sensitive props key — the same
-    # value on every node. Standalone mode auto-generates one, but
-    # cluster mode refuses to start without it.
-    prop_replace 'nifi.sensitive.props.key'                   "${NIFI_SENSITIVE_PROPS_KEY:-nifilens-fixture-key}"
-    # state-management.xml has a separate ZK connect string for the
-    # cluster state provider (zk-provider). It's empty by default and
-    # NiFi does NOT auto-populate it from nifi.properties.
-    STATE_MGMT="${NIFI_HOME}/conf/state-management.xml"
-    sed -i "s|<property name=\"Connect String\"></property>|<property name=\"Connect String\">${NIFI_ZOOKEEPER_CONNECT_STRING}</property>|" "$STATE_MGMT"
-fi
+# Clustering properties are handled by NiFi's own start.sh via env vars:
+#   NIFI_CLUSTER_IS_NODE, NIFI_CLUSTER_ADDRESS, NIFI_CLUSTER_NODE_PROTOCOL_PORT,
+#   NIFI_ZK_CONNECT_STRING, NIFI_ELECTION_MAX_WAIT, NIFI_SENSITIVE_PROPS_KEY.
+# start.sh also calls update_cluster_state_management.sh which patches
+# state-management.xml with the ZK connect string. No prop_replace needed here.
 
 if [ -n "${SINGLE_USER_CREDENTIALS_USERNAME}" ] && [ -n "${SINGLE_USER_CREDENTIALS_PASSWORD}" ]; then
     # `set-single-user-credentials` rewrites login-identity-providers.xml AND

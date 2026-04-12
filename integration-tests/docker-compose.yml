@@ -61,10 +61,14 @@ services:
       - TRUSTSTORE_TYPE=PKCS12
       - TRUSTSTORE_PASSWORD=testpassword
       - NIFI_WEB_PROXY_HOST=localhost:8443,localhost:8444,localhost:8445
-      # Clustering
+      # Clustering — env var names must match what NiFi's start.sh expects.
+      # start.sh calls prop_replace with these variables AFTER our entrypoint.
       - NIFI_CLUSTER_IS_NODE=true
-      - NIFI_CLUSTER_NODE_ADDRESS=nifi-2-9-0-node1
-      - NIFI_ZOOKEEPER_CONNECT_STRING=zookeeper:2181
+      - NIFI_CLUSTER_ADDRESS=nifi-2-9-0-node1
+      - NIFI_CLUSTER_NODE_PROTOCOL_PORT=11443
+      - NIFI_ZK_CONNECT_STRING=zookeeper:2181
+      - NIFI_ELECTION_MAX_WAIT=30 secs
+      - NIFI_SENSITIVE_PROPS_KEY=nifilens-fixture-key
     volumes:
       - ./scripts/nifi-entrypoint.sh:/opt/nifi/scripts/nifi-entrypoint.sh:ro
       - ./scripts/certs/keystore.p12:/opt/nifi/nifi-current/conf/keystore.p12:ro
@@ -99,8 +103,11 @@ services:
       - NIFI_WEB_PROXY_HOST=localhost:8443,localhost:8444,localhost:8445
       # Clustering
       - NIFI_CLUSTER_IS_NODE=true
-      - NIFI_CLUSTER_NODE_ADDRESS=nifi-2-9-0-node2
-      - NIFI_ZOOKEEPER_CONNECT_STRING=zookeeper:2181
+      - NIFI_CLUSTER_ADDRESS=nifi-2-9-0-node2
+      - NIFI_CLUSTER_NODE_PROTOCOL_PORT=11443
+      - NIFI_ZK_CONNECT_STRING=zookeeper:2181
+      - NIFI_ELECTION_MAX_WAIT=30 secs
+      - NIFI_SENSITIVE_PROPS_KEY=nifilens-fixture-key
     volumes:
       - ./scripts/nifi-entrypoint.sh:/opt/nifi/scripts/nifi-entrypoint.sh:ro
       - ./scripts/certs/keystore.p12:/opt/nifi/nifi-current/conf/keystore.p12:ro
