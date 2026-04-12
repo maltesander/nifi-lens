@@ -25,7 +25,14 @@ use crate::view::tracer::state::{
     LineageView, TracerMode, TracerState,
 };
 
-pub fn render(frame: &mut Frame, area: Rect, state: &TracerState) {
+pub fn render(
+    frame: &mut Frame,
+    area: Rect,
+    state: &TracerState,
+    cfg: &crate::timestamp::TimestampConfig,
+) {
+    let now = time::OffsetDateTime::now_utc();
+
     let title = match &state.mode {
         TracerMode::Entry(_) => " Tracer ",
         TracerMode::LineageRunning(_) => " Tracer — Running Lineage Query ",
@@ -47,9 +54,9 @@ pub fn render(frame: &mut Frame, area: Rect, state: &TracerState) {
     match &state.mode {
         TracerMode::Entry(entry) => render_entry(frame, inner, entry, state.last_error.as_deref()),
         TracerMode::LineageRunning(running) => render_lineage_running(frame, inner, running),
-        TracerMode::Lineage(view) => render_lineage(frame, inner, view),
+        TracerMode::Lineage(view) => render_lineage(frame, inner, view, now, cfg),
         TracerMode::LatestEvents(view) => {
-            render_latest_events(frame, inner, view, state.last_error.as_deref())
+            render_latest_events(frame, inner, view, state.last_error.as_deref(), now, cfg)
         }
     }
 }
@@ -140,7 +147,7 @@ fn render_lineage_running(frame: &mut Frame, area: Rect, running: &LineageRunnin
 
     // Progress gauge.
     let gauge = Gauge::default()
-        .gauge_style(Style::default().fg(ratatui::style::Color::Cyan))
+        .gauge_style(crate::theme::accent())
         .percent(running.percent as u16)
         .label(format!("{}%", running.percent));
     // Centre the gauge horizontally to avoid it spanning full width.
@@ -161,7 +168,13 @@ fn render_lineage_running(frame: &mut Frame, area: Rect, running: &LineageRunnin
 
 const DETAIL_HEIGHT: u16 = 14;
 
-fn render_lineage(frame: &mut Frame, area: Rect, view: &LineageView) {
+fn render_lineage(
+    frame: &mut Frame,
+    area: Rect,
+    view: &LineageView,
+    now: time::OffsetDateTime,
+    cfg: &crate::timestamp::TimestampConfig,
+) {
     let rows = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
@@ -170,11 +183,17 @@ fn render_lineage(frame: &mut Frame, area: Rect, view: &LineageView) {
         ])
         .split(area);
 
-    render_lineage_timeline(frame, rows[0], view);
+    render_lineage_timeline(frame, rows[0], view, now, cfg);
     render_lineage_detail(frame, rows[1], view);
 }
 
-fn render_lineage_timeline(frame: &mut Frame, area: Rect, view: &LineageView) {
+fn render_lineage_timeline(
+    frame: &mut Frame,
+    area: Rect,
+    view: &LineageView,
+    now: time::OffsetDateTime,
+    cfg: &crate::timestamp::TimestampConfig,
+) {
     let events = &view.snapshot.events;
     let visible = area.height as usize;
     let scroll_offset = if visible == 0 || view.selected_event < visible {
@@ -199,7 +218,7 @@ fn render_lineage_timeline(frame: &mut Frame, area: Rect, view: &LineageView) {
             };
 
             let marker = if is_selected { ">" } else { " " };
-            let time = format_hhmmss_ms(&e.event_time_iso);
+            let time = format_tracer_time(&e.event_time_iso, now, cfg, true);
             let event_type = format!("{:<16}", truncate(&e.event_type, 16));
             let comp_name = format!("{:<22}", truncate(&e.component_name, 22));
             let group = truncate(&e.group_id, 24).to_string();
@@ -232,7 +251,7 @@ fn render_lineage_timeline(frame: &mut Frame, area: Rect, view: &LineageView) {
         table_rows,
         [
             Constraint::Length(1),  // gutter
-            Constraint::Length(12), // HH:MM:SS.mmm
+            Constraint::Length(20), // Mon DD HH:MM:SS.mmm (19) + 1 space
             Constraint::Length(17), // event type (16 + 1 space)
             Constraint::Length(23), // component name (22 + 1 space)
             Constraint::Length(25), // group path (24 + 1 space)
@@ -514,6 +533,8 @@ fn render_latest_events(
     area: Rect,
     view: &LatestEventsView,
     last_error: Option<&str>,
+    now: time::OffsetDateTime,
+    cfg: &crate::timestamp::TimestampConfig,
 ) {
     let rows = Layout::default()
         .direction(Direction::Vertical)
@@ -561,7 +582,7 @@ fn render_latest_events(
         };
         frame.render_widget(placeholder, spot);
     } else {
-        render_event_table(frame, rows[1], view);
+        render_event_table(frame, rows[1], view, now, cfg);
     }
 
     // Footer.
@@ -576,7 +597,13 @@ fn render_latest_events(
     frame.render_widget(footer_text, rows[2]);
 }
 
-fn render_event_table(frame: &mut Frame, area: Rect, view: &LatestEventsView) {
+fn render_event_table(
+    frame: &mut Frame,
+    area: Rect,
+    view: &LatestEventsView,
+    now: time::OffsetDateTime,
+    cfg: &crate::timestamp::TimestampConfig,
+) {
     let visible_rows = area.height as usize;
     let scroll_offset = if visible_rows == 0 || view.selected < visible_rows {
         0
@@ -598,7 +625,7 @@ fn render_event_table(frame: &mut Frame, area: Rect, view: &LatestEventsView) {
                 Style::default()
             };
             let marker = if idx == selected_in_window { ">" } else { " " };
-            let time = format_hhmmss(&e.event_time_iso);
+            let time = format_tracer_time(&e.event_time_iso, now, cfg, false);
             let uuid_short = short_uuid(&e.flow_file_uuid);
             let relationship = e.relationship.as_deref().unwrap_or("-").to_string();
             let details = e.details.as_deref().unwrap_or("").to_string();
@@ -618,7 +645,7 @@ fn render_event_table(frame: &mut Frame, area: Rect, view: &LatestEventsView) {
         table_rows,
         [
             Constraint::Length(1),
-            Constraint::Length(8),
+            Constraint::Length(16), // Mon DD HH:MM:SS (15) + 1 space
             Constraint::Length(16),
             Constraint::Length(13),
             Constraint::Length(16),
@@ -630,49 +657,27 @@ fn render_event_table(frame: &mut Frame, area: Rect, view: &LatestEventsView) {
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
-fn format_hhmmss(ts: &str) -> String {
-    if let Some(time) = extract_time_part(ts)
-        && time.len() >= 8
-    {
-        return time[..8].to_string();
-    }
-    "--:--:--".to_string()
-}
-
-/// Format timestamp as `HH:MM:SS.mmm`. Falls back to `--:--:--.---`.
-fn format_hhmmss_ms(ts: &str) -> String {
-    if let Some(time) = extract_time_part(ts) {
-        let base = if time.len() >= 8 {
-            &time[..8]
-        } else {
-            "00:00:00"
-        };
-        let ms = if time.len() >= 12 && time.as_bytes()[8] == b'.' {
-            &time[9..12]
-        } else {
-            "000"
-        };
-        format!("{base}.{ms}")
-    } else {
-        "--:--:--.---".to_string()
-    }
-}
-
-/// Extracts the time portion from either ISO-8601 or NiFi's human-readable
-/// timestamp format.
+/// Format a NiFi timestamp string using the shared timestamp module.
 ///
-/// Supported formats:
-/// - ISO-8601: `2026-01-15T12:34:56.789Z` → `"12:34:56.789Z"`
-/// - NiFi:     `04/12/2026 10:14:22.001 UTC` → `"10:14:22.001 UTC"`
-fn extract_time_part(ts: &str) -> Option<&str> {
-    if ts.len() >= 19 && ts.as_bytes()[10] == b'T' {
-        // ISO-8601: split at 'T'
-        Some(&ts[11..])
-    } else if ts.len() >= 19 && ts.as_bytes()[2] == b'/' && ts.as_bytes()[5] == b'/' {
-        // NiFi human-readable: MM/dd/yyyy HH:mm:ss.SSS TZ
-        Some(&ts[11..])
-    } else {
-        None
+/// - `with_ms = true` → millisecond precision (`HH:MM:SS.mmm` or `Mon DD HH:MM:SS.mmm`)
+/// - `with_ms = false` → second precision (`HH:MM:SS` or `Mon DD HH:MM:SS`)
+///
+/// Falls back to `--:--:--.---` / `--:--:--` on parse failure.
+fn format_tracer_time(
+    ts: &str,
+    now: time::OffsetDateTime,
+    cfg: &crate::timestamp::TimestampConfig,
+    with_ms: bool,
+) -> String {
+    match crate::timestamp::parse_nifi_timestamp(ts) {
+        Some(dt) => crate::timestamp::format(dt, now, cfg, with_ms),
+        None => {
+            if with_ms {
+                "--:--:--.---".to_string()
+            } else {
+                "--:--:--".to_string()
+            }
+        }
     }
 }
 
@@ -714,10 +719,11 @@ mod tests {
     use std::time::{Duration, SystemTime};
 
     fn snap(state: &TracerState) -> String {
+        let cfg = crate::timestamp::TimestampConfig::default();
         let backend = TestBackend::new(120, 30);
         let mut terminal = Terminal::new(backend).unwrap();
         terminal
-            .draw(|frame| render(frame, frame.area(), state))
+            .draw(|frame| render(frame, frame.area(), state, &cfg))
             .unwrap();
         format!("{}", terminal.backend())
     }
@@ -900,43 +906,5 @@ mod tests {
             };
         }
         insta::assert_snapshot!("lineage_view_diff_mode_changed", snap(&state));
-    }
-
-    // ── timestamp helper tests ─────────────────────────────────────────────
-
-    use super::{format_hhmmss, format_hhmmss_ms};
-
-    #[test]
-    fn format_hhmmss_ms_iso8601() {
-        assert_eq!(format_hhmmss_ms("2026-01-15T12:34:56.789Z"), "12:34:56.789");
-    }
-
-    #[test]
-    fn format_hhmmss_ms_nifi_human() {
-        assert_eq!(
-            format_hhmmss_ms("04/12/2026 10:14:22.001 UTC"),
-            "10:14:22.001"
-        );
-    }
-
-    #[test]
-    fn format_hhmmss_ms_fallback() {
-        assert_eq!(format_hhmmss_ms("garbage"), "--:--:--.---");
-        assert_eq!(format_hhmmss_ms(""), "--:--:--.---");
-    }
-
-    #[test]
-    fn format_hhmmss_iso8601() {
-        assert_eq!(format_hhmmss("2026-01-15T12:34:56.789Z"), "12:34:56");
-    }
-
-    #[test]
-    fn format_hhmmss_nifi_human() {
-        assert_eq!(format_hhmmss("04/12/2026 10:14:22.001 UTC"), "10:14:22");
-    }
-
-    #[test]
-    fn format_hhmmss_fallback() {
-        assert_eq!(format_hhmmss("garbage"), "--:--:--");
     }
 }

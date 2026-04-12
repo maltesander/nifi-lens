@@ -9,6 +9,11 @@ use ratatui::layout::Rect;
 
 pub use state::{BulletinsState, apply_payload};
 
-pub fn render(frame: &mut Frame, area: Rect, state: &BulletinsState) {
-    render::render(frame, area, state);
+pub fn render(
+    frame: &mut Frame,
+    area: Rect,
+    state: &BulletinsState,
+    cfg: &crate::timestamp::TimestampConfig,
+) {
+    render::render(frame, area, state, cfg);
 }

@@ -28,6 +28,7 @@ pub struct BulletinsState {
     pub selected: usize,
     pub auto_scroll: bool,
     pub new_since_pause: u32,
+    pub group_consecutive: bool,
 }
 
 #[derive(Debug, Clone)]
@@ -71,6 +72,26 @@ impl ComponentType {
     }
 }
 
+/// A row in the grouped display. Produced by
+/// [`BulletinsState::grouped_view`] when `group_consecutive` is true,
+/// or (implicitly, as a vec of `count = 1` singletons) when flat.
+///
+/// Ring indices are stable for the lifetime of the ring buffer — the
+/// render layer dereferences them via `state.ring[latest_ring_idx]`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct GroupedRow {
+    /// Ring index of the first bulletin in the run (oldest in the
+    /// group). Used by `toggle_grouping` to find which group contains
+    /// a given pre-toggle ring index.
+    pub first_ring_idx: usize,
+    /// Ring index of the most-recent bulletin in the run. Render uses
+    /// this to fetch the displayed timestamp, source, and message.
+    pub latest_ring_idx: usize,
+    /// Number of bulletins folded into this group. `1` means no
+    /// grouping occurred; render skips the `[×N]` prefix.
+    pub count: usize,
+}
+
 impl BulletinsState {
     pub fn with_capacity(ring_capacity: usize) -> Self {
         Self {
@@ -84,6 +105,7 @@ impl BulletinsState {
             selected: 0,
             auto_scroll: true,
             new_since_pause: 0,
+            group_consecutive: false,
         }
     }
 
@@ -98,8 +120,48 @@ impl BulletinsState {
             .collect()
     }
 
+    /// Fold consecutive bulletins sharing the same `source_id` in the
+    /// filtered list into `GroupedRow`s. In flat mode (`group_consecutive`
+    /// is `false`) every filtered row is its own singleton with `count = 1`.
+    /// In grouped mode, consecutive same-source runs are folded.
+    pub fn grouped_view(&self) -> Vec<GroupedRow> {
+        let filtered = self.filtered_indices();
+        if !self.group_consecutive {
+            // Flat mode: each filtered row is its own "group" with count=1.
+            return filtered
+                .iter()
+                .map(|&ring_idx| GroupedRow {
+                    first_ring_idx: ring_idx,
+                    latest_ring_idx: ring_idx,
+                    count: 1,
+                })
+                .collect();
+        }
+        // Grouped mode: fold consecutive same-source runs.
+        let mut out: Vec<GroupedRow> = Vec::with_capacity(filtered.len());
+        for &ring_idx in &filtered {
+            let source_id = &self.ring[ring_idx].source_id;
+            match out.last_mut() {
+                Some(group) if self.ring[group.latest_ring_idx].source_id == *source_id => {
+                    group.latest_ring_idx = ring_idx;
+                    group.count += 1;
+                }
+                _ => {
+                    out.push(GroupedRow {
+                        first_ring_idx: ring_idx,
+                        latest_ring_idx: ring_idx,
+                        count: 1,
+                    });
+                }
+            }
+        }
+        out
+    }
+
     pub fn selected_ring_index(&self) -> Option<usize> {
-        self.filtered_indices().get(self.selected).copied()
+        self.grouped_view()
+            .get(self.selected)
+            .map(|g| g.latest_ring_idx)
     }
 
     fn row_matches(&self, b: &BulletinSnapshot) -> bool {
@@ -245,7 +307,7 @@ impl BulletinsState {
     }
     pub fn move_selection_down(&mut self) {
         ListNavigation::move_down(self);
-        let vis_len = self.filtered_indices().len();
+        let vis_len = self.grouped_view().len();
         if vis_len > 0 && self.selected == vis_len - 1 {
             self.auto_scroll = true;
             self.new_since_pause = 0;
@@ -263,51 +325,67 @@ impl BulletinsState {
     pub fn toggle_pause(&mut self) {
         self.auto_scroll = !self.auto_scroll;
         if self.auto_scroll {
-            let max = self.filtered_indices().len().saturating_sub(1);
+            let max = self.grouped_view().len().saturating_sub(1);
             self.selected = max;
             self.new_since_pause = 0;
         }
     }
 
-    /// Called whenever filters change. Snap `selected` to the nearest
-    /// still-visible filtered index based on its *previous* ring position.
-    /// Callers capture the ring index *before* mutating filters and pass
-    /// it in as `prev_ring_index`.
+    /// Called whenever filters or grouping change. Snap `selected` to
+    /// the group that contains `prev_ring_idx`, or the nearest surviving
+    /// group if that bulletin has been filtered out. Callers capture the
+    /// ring index *before* mutating filters/grouping and pass it in.
     pub fn reconcile_selection(&mut self, prev_ring_index: Option<usize>) {
-        let visible = self.filtered_indices();
-        if visible.is_empty() {
+        let groups = self.grouped_view();
+        if groups.is_empty() {
             self.selected = 0;
             return;
         }
         if let Some(prev) = prev_ring_index {
-            if let Some(pos) = visible.iter().position(|&i| i == prev) {
+            // Exact: any group whose run contains `prev`.
+            if let Some(pos) = groups
+                .iter()
+                .position(|g| g.first_ring_idx <= prev && prev <= g.latest_ring_idx)
+            {
                 self.selected = pos;
                 return;
             }
-            if let Some(pos) = visible.iter().rposition(|&i| i < prev) {
+            // Nearest older: last group entirely before `prev`.
+            if let Some(pos) = groups.iter().rposition(|g| g.latest_ring_idx < prev) {
                 self.selected = pos;
                 return;
             }
-            if let Some(pos) = visible.iter().position(|&i| i > prev) {
+            // Nearest newer: first group entirely after `prev`.
+            if let Some(pos) = groups.iter().position(|g| g.first_ring_idx > prev) {
                 self.selected = pos;
                 return;
             }
         }
         self.selected = if self.auto_scroll {
-            visible.len() - 1
+            groups.len() - 1
         } else {
             0
         };
+    }
+
+    /// Flip `group_consecutive` and remap `selected` so the user stays
+    /// on the same logical bulletin across the toggle. Spec reference:
+    /// `Feature 3 — Bulletins Grouping (Shift+B)` "Interactions with
+    /// existing features → Selection preservation on toggle".
+    pub fn toggle_grouping(&mut self) {
+        let prev = self.selected_ring_index();
+        self.group_consecutive = !self.group_consecutive;
+        self.reconcile_selection(prev);
     }
 }
 
 impl ListNavigation for BulletinsState {
     fn list_len(&self) -> usize {
-        self.filtered_indices().len()
+        self.grouped_view().len()
     }
 
     fn selected(&self) -> Option<usize> {
-        if self.filtered_indices().is_empty() {
+        if self.grouped_view().is_empty() {
             None
         } else {
             Some(self.selected)
@@ -355,7 +433,7 @@ pub fn apply_payload(state: &mut BulletinsState, payload: BulletinsPayload) {
     state.last_fetched_at = Some(payload.fetched_at);
 
     if state.auto_scroll {
-        let max = state.filtered_indices().len().saturating_sub(1);
+        let max = state.grouped_view().len().saturating_sub(1);
         state.selected = max;
         state.new_since_pause = 0;
     } else {
@@ -776,5 +854,230 @@ mod tests {
         s.move_selection_down();
         assert!(!s.auto_scroll, "auto_scroll must stay paused");
         assert_eq!(s.new_since_pause, 5, "badge count must not be cleared");
+    }
+
+    #[test]
+    fn grouped_view_returns_empty_when_ring_empty() {
+        let s = BulletinsState::with_capacity(10);
+        assert!(s.grouped_view().is_empty());
+    }
+
+    #[test]
+    fn grouped_view_no_consecutive_duplicates() {
+        let mut s = seed(
+            100,
+            vec![
+                b_full(1, "INFO", "PROCESSOR", "A", "m"),
+                b_full(2, "INFO", "PROCESSOR", "B", "m"),
+                b_full(3, "INFO", "PROCESSOR", "C", "m"),
+            ],
+        );
+        s.group_consecutive = true;
+        // Each bulletin has a distinct source_id via `src-{id}` — no grouping.
+        let out = s.grouped_view();
+        assert_eq!(out.len(), 3);
+        assert!(out.iter().all(|g| g.count == 1));
+        assert_eq!(out[0].first_ring_idx, 0);
+        assert_eq!(out[0].latest_ring_idx, 0);
+        assert_eq!(out[2].first_ring_idx, 2);
+    }
+
+    #[test]
+    fn grouped_view_collapses_same_source_run() {
+        // Build a seed with three bulletins sharing source_id "src-same".
+        let mut s = BulletinsState::with_capacity(100);
+        apply_payload(
+            &mut s,
+            payload(vec![
+                BulletinSnapshot {
+                    id: 1,
+                    level: "ERROR".into(),
+                    message: "first".into(),
+                    source_id: "src-same".into(),
+                    source_name: "P".into(),
+                    source_type: "PROCESSOR".into(),
+                    group_id: "root".into(),
+                    timestamp_iso: "2026-04-11T10:14:22Z".into(),
+                    timestamp_human: String::new(),
+                },
+                BulletinSnapshot {
+                    id: 2,
+                    level: "ERROR".into(),
+                    message: "second".into(),
+                    source_id: "src-same".into(),
+                    source_name: "P".into(),
+                    source_type: "PROCESSOR".into(),
+                    group_id: "root".into(),
+                    timestamp_iso: "2026-04-11T10:14:23Z".into(),
+                    timestamp_human: String::new(),
+                },
+                BulletinSnapshot {
+                    id: 3,
+                    level: "ERROR".into(),
+                    message: "third".into(),
+                    source_id: "src-same".into(),
+                    source_name: "P".into(),
+                    source_type: "PROCESSOR".into(),
+                    group_id: "root".into(),
+                    timestamp_iso: "2026-04-11T10:14:24Z".into(),
+                    timestamp_human: String::new(),
+                },
+            ]),
+        );
+        s.group_consecutive = true;
+        let out = s.grouped_view();
+        assert_eq!(out.len(), 1);
+        assert_eq!(out[0].count, 3);
+        assert_eq!(out[0].first_ring_idx, 0);
+        assert_eq!(out[0].latest_ring_idx, 2);
+    }
+
+    #[test]
+    fn grouped_view_interleaved_keeps_runs_separate() {
+        // A, B, A pattern — three groups, each count = 1.
+        let mut s = BulletinsState::with_capacity(100);
+        let mk = |id: i64, src: &str| BulletinSnapshot {
+            id,
+            level: "ERROR".into(),
+            message: "m".into(),
+            source_id: src.into(),
+            source_name: src.into(),
+            source_type: "PROCESSOR".into(),
+            group_id: "root".into(),
+            timestamp_iso: "2026-04-11T10:14:22Z".into(),
+            timestamp_human: String::new(),
+        };
+        apply_payload(
+            &mut s,
+            payload(vec![mk(1, "src-a"), mk(2, "src-b"), mk(3, "src-a")]),
+        );
+        s.group_consecutive = true;
+        let out = s.grouped_view();
+        assert_eq!(out.len(), 3);
+        assert!(out.iter().all(|g| g.count == 1));
+    }
+
+    #[test]
+    fn grouped_view_respects_filters() {
+        // ERROR + INFO + ERROR all with same source_id. Toggling INFO off
+        // should collapse the two ERRORs into a single group (they are
+        // consecutive in the filtered list).
+        let mut s = BulletinsState::with_capacity(100);
+        let mk = |id: i64, level: &str| BulletinSnapshot {
+            id,
+            level: level.into(),
+            message: format!("msg-{id}"),
+            source_id: "src-same".into(),
+            source_name: "P".into(),
+            source_type: "PROCESSOR".into(),
+            group_id: "root".into(),
+            timestamp_iso: "2026-04-11T10:14:22Z".into(),
+            timestamp_human: String::new(),
+        };
+        apply_payload(
+            &mut s,
+            payload(vec![mk(1, "ERROR"), mk(2, "INFO"), mk(3, "ERROR")]),
+        );
+        s.group_consecutive = true;
+        // All three share source_id; grouping folds them to one.
+        assert_eq!(s.grouped_view().len(), 1);
+        // Toggle INFO off — still one group because filtered list is
+        // ring[0] and ring[2], both same source_id.
+        s.toggle_info();
+        let out = s.grouped_view();
+        assert_eq!(out.len(), 1);
+        assert_eq!(out[0].count, 2);
+        assert_eq!(out[0].first_ring_idx, 0);
+        assert_eq!(out[0].latest_ring_idx, 2);
+    }
+
+    fn seed_grouping_fixture() -> BulletinsState {
+        // Ring layout by ring_idx and source_id:
+        //   0: src-a   (count group #0)
+        //   1: src-a   (count group #0)
+        //   2: src-b   (count group #1)
+        //   3: src-c   (count group #2)
+        //   4: src-c   (count group #2)
+        //   5: src-c   (count group #2)
+        let mut s = BulletinsState::with_capacity(100);
+        let mk = |id: i64, src: &str| BulletinSnapshot {
+            id,
+            level: "ERROR".into(),
+            message: format!("msg-{id}"),
+            source_id: src.into(),
+            source_name: src.into(),
+            source_type: "PROCESSOR".into(),
+            group_id: "root".into(),
+            timestamp_iso: format!("2026-04-11T10:14:{:02}Z", id),
+            timestamp_human: String::new(),
+        };
+        apply_payload(
+            &mut s,
+            payload(vec![
+                mk(1, "src-a"),
+                mk(2, "src-a"),
+                mk(3, "src-b"),
+                mk(4, "src-c"),
+                mk(5, "src-c"),
+                mk(6, "src-c"),
+            ]),
+        );
+        s.auto_scroll = false;
+        s
+    }
+
+    #[test]
+    fn toggle_grouping_on_preserves_selection_to_enclosing_group() {
+        let mut s = seed_grouping_fixture();
+        // Flat mode: 6 visible rows. Select ring_idx 4 (second "src-c").
+        assert_eq!(s.grouped_view().len(), 6);
+        s.selected = 4; // Points at ring_idx 4 in flat mode.
+        assert_eq!(s.selected_ring_index(), Some(4));
+
+        s.toggle_grouping();
+
+        // Grouped mode: 3 visible groups. Group #2 holds ring_idx 3..=5.
+        assert!(s.group_consecutive);
+        assert_eq!(s.grouped_view().len(), 3);
+        assert_eq!(s.selected, 2);
+        // selected_ring_index should now resolve to the LATEST of group #2.
+        assert_eq!(s.selected_ring_index(), Some(5));
+    }
+
+    #[test]
+    fn toggle_grouping_off_preserves_selection_to_latest_bulletin() {
+        let mut s = seed_grouping_fixture();
+        s.group_consecutive = true;
+        // Grouped mode: 3 visible groups. Select group #2 (src-c run).
+        s.selected = 2;
+        assert_eq!(s.selected_ring_index(), Some(5));
+
+        s.toggle_grouping();
+
+        // Flat mode: 6 visible rows. Selection should land on the latest
+        // bulletin of the previously-selected group — ring_idx 5, flat
+        // position 5.
+        assert!(!s.group_consecutive);
+        assert_eq!(s.selected, 5);
+        assert_eq!(s.selected_ring_index(), Some(5));
+    }
+
+    #[test]
+    fn toggle_grouping_from_first_row_stays_on_first_row() {
+        let mut s = seed_grouping_fixture();
+        s.selected = 0; // src-a flat ring_idx 0
+        s.toggle_grouping();
+        assert!(s.group_consecutive);
+        // Group #0 contains ring_idx 0 and 1; position 0.
+        assert_eq!(s.selected, 0);
+    }
+
+    #[test]
+    fn toggle_grouping_with_no_visible_rows_is_safe() {
+        let mut s = BulletinsState::with_capacity(100);
+        // Empty ring — nothing to preserve.
+        s.toggle_grouping();
+        assert!(s.group_consecutive);
+        assert_eq!(s.selected, 0);
     }
 }

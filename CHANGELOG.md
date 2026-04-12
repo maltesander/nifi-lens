@@ -138,9 +138,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   self-signed TLS, single-user auth, managed authorizer, and an
   `#[ignore]`-gated `tests/integration_connect.rs` that verifies
   `NifiClient::connect` and `about()` against a real NiFi 2.9.0 container.
+- Browser tree now shows per-processor run-state icons (● running,
+  ◌ stopped, ⚠ invalid, ⌀ disabled, ◐ validating) so component state is
+  visible without opening the detail pane.
+- Health Nodes table renders Load as a 4-character spark-bar gauge
+  coloured by severity (warning ≥ 1×cores, error ≥ 1.5×cores).
+- Bulletins tab supports `Shift+B` to collapse consecutive same-source
+  bulletins into a single row with a `[×N]` count badge.
+- New `[ui]` config section with `timestamp_format`
+  (`short` / `iso` / `human`) and `timestamp_tz` (`utc` / `local`). See
+  `README.md` for the reference.
 
 ### Changed
 
+- Bulletins and Tracer timestamp formatting now route through a shared
+  `timestamp` module backed by the `time` crate. This deduplicates two
+  fragile byte-sliced parsers and enables the new `[ui]` config.
+  (Implementation uses `time` rather than `chrono`; `time` is already a
+  dependency and covers every requirement.)
+- Inline `Color::*` / `Modifier::*` constructors across the view layer
+  have been replaced with calls into `src/theme.rs` helpers. Visual
+  output is unchanged except for a handful of principled improvements
+  (e.g. GC-delta errors now render bold red).
+- `theme::severity_by_pct` helper centralises percentage-threshold style
+  mapping.
 - **Phase 6 structural cleanup.** Split monolithic `app/state.rs`
   (2,535 lines) into per-view key handler modules behind a
   `ViewKeyHandler` trait. Extracted `ListNavigation` trait for shared
@@ -177,6 +198,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   info hint instead of silently doing nothing.
 - Help modal: removed stale "Phase 3/4 stub" annotations from
   keybinding descriptions.
+
+### Internal
+
+- New `src/timestamp.rs` module owns all wire-format timestamp
+  parsing and display formatting.
+- New `src/widget/gauge.rs` module owns `fill_bar` (moved from
+  `health::render`) and a new `spark_bar` helper.
+- `NodeDiagnostics` and `NodeHealthRow` gain an `available_processors`
+  field to drive the Health Load spark-bar max.
 
 ### Dependencies
 

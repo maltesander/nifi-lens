@@ -5,7 +5,7 @@
 
 use ratatui::Frame;
 use ratatui::layout::{Alignment, Constraint, Direction, Layout, Rect};
-use ratatui::style::{Color, Modifier, Style};
+use ratatui::style::{Color, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Borders, Paragraph};
 
@@ -67,7 +67,7 @@ fn render_left_strip(frame: &mut Frame, area: Rect, state: &HealthState) {
         let badge_span = if badge == 0 {
             Span::styled(format!("  {badge}"), theme::muted())
         } else {
-            Span::styled(format!("  {badge}"), Style::default().fg(Color::Yellow))
+            Span::styled(format!("  {badge}"), theme::warning())
         };
 
         let line = Line::from(vec![
@@ -76,7 +76,7 @@ fn render_left_strip(frame: &mut Frame, area: Rect, state: &HealthState) {
             Span::styled(
                 format!("{label:<14}"),
                 if selected {
-                    Style::default().add_modifier(Modifier::BOLD)
+                    theme::bold()
                 } else {
                     Style::default()
                 },
@@ -270,7 +270,7 @@ fn render_queue_row(frame: &mut Frame, area: Rect, y: u16, row: &QueuePressureRo
         truncate(&row.source_name, 15),
         truncate(&row.destination_name, 15)
     );
-    let bar = render_fill_bar(10, row.fill_percent);
+    let bar = crate::widget::gauge::fill_bar(10, row.fill_percent);
     let ttf = format_time_to_full(&row.time_to_full);
     let pct = format!("{:>3}%", row.fill_percent);
 
@@ -385,15 +385,12 @@ fn render_repo_aggregate_row(
         RepoKind::Provenance => "P",
     };
 
-    let fill = render_fill_bar(15, row.fill_percent);
+    let fill = crate::widget::gauge::fill_bar(15, row.fill_percent);
     let pct = format!("{:>3}%", row.fill_percent);
 
     let line1 = Line::from(vec![
         Span::raw(format!("{gutter} ")),
-        Span::styled(
-            format!("[{kind_prefix}] "),
-            Style::default().add_modifier(Modifier::BOLD),
-        ),
+        Span::styled(format!("[{kind_prefix}] "), theme::bold()),
         Span::styled(
             format!("{:<20}", truncate(&row.identifier, 18)),
             if selected {
@@ -452,15 +449,9 @@ fn render_repo_per_node_detail(frame: &mut Frame, area: Rect, state: &HealthStat
     // Header
     if y < max_y {
         let hdr = Line::from(vec![
-            Span::styled(
-                format!("  {:<22}", "Node"),
-                Style::default().add_modifier(Modifier::BOLD),
-            ),
-            Span::styled(
-                format!("{:<20}", "Used / Total"),
-                Style::default().add_modifier(Modifier::BOLD),
-            ),
-            Span::styled("Fill", Style::default().add_modifier(Modifier::BOLD)),
+            Span::styled(format!("  {:<22}", "Node"), theme::bold()),
+            Span::styled(format!("{:<20}", "Used / Total"), theme::bold()),
+            Span::styled("Fill", theme::bold()),
         ]);
         frame.render_widget(Paragraph::new(hdr), Rect::new(area.x, y, area.width, 1));
         y += 1;
@@ -477,7 +468,7 @@ fn render_repo_per_node_detail(frame: &mut Frame, area: Rect, state: &HealthStat
 
 /// Render one per-node repository row.
 fn render_node_repo_row(frame: &mut Frame, x: u16, y: u16, width: u16, node: &NodeRepoFillBar) {
-    let bar = render_fill_bar(10, node.utilization_percent);
+    let bar = crate::widget::gauge::fill_bar(10, node.utilization_percent);
     let pct = format!("{:>3}%", node.utilization_percent);
     let used = format_bytes(node.used_bytes);
     let total = format_bytes(node.total_bytes);
@@ -516,27 +507,12 @@ fn render_nodes(frame: &mut Frame, area: Rect, state: &HealthState) {
     if y < max_y {
         let hdr = Line::from(vec![
             Span::styled("  ", Style::default()),
-            Span::styled(
-                format!("{:<22}", "Node"),
-                Style::default().add_modifier(Modifier::BOLD),
-            ),
-            Span::styled(
-                format!("{:<18}", "Heap"),
-                Style::default().add_modifier(Modifier::BOLD),
-            ),
-            Span::styled(
-                format!("{:<14}", "GC"),
-                Style::default().add_modifier(Modifier::BOLD),
-            ),
-            Span::styled(
-                format!("{:<8}", "Load"),
-                Style::default().add_modifier(Modifier::BOLD),
-            ),
-            Span::styled(
-                format!("{:<10}", "Threads"),
-                Style::default().add_modifier(Modifier::BOLD),
-            ),
-            Span::styled("Uptime", Style::default().add_modifier(Modifier::BOLD)),
+            Span::styled(format!("{:<22}", "Node"), theme::bold()),
+            Span::styled(format!("{:<18}", "Heap"), theme::bold()),
+            Span::styled(format!("{:<14}", "GC"), theme::bold()),
+            Span::styled(format!("{:<10}", "Load"), theme::bold()),
+            Span::styled(format!("{:<10}", "Threads"), theme::bold()),
+            Span::styled("Uptime", theme::bold()),
         ]);
         frame.render_widget(Paragraph::new(hdr), Rect::new(area.x, y, area.width, 1));
         y += 1;
@@ -564,6 +540,20 @@ fn render_nodes(frame: &mut Frame, area: Rect, state: &HealthState) {
     }
 }
 
+fn load_style(load: f32, cpus: u32) -> Style {
+    if cpus == 0 {
+        return Style::default();
+    }
+    let busy = cpus as f32;
+    if load >= 1.5 * busy {
+        crate::theme::error()
+    } else if load >= busy {
+        crate::theme::warning()
+    } else {
+        Style::default()
+    }
+}
+
 fn render_node_row(
     frame: &mut Frame,
     x: u16,
@@ -573,7 +563,7 @@ fn render_node_row(
     selected: bool,
 ) {
     let gutter = if selected { ">" } else { " " };
-    let bar = render_fill_bar(10, node.heap_percent);
+    let bar = crate::widget::gauge::fill_bar(10, node.heap_percent);
     let pct = format!("{:>3}%", node.heap_percent);
 
     let gc_delta_str = match node.gc_delta {
@@ -582,13 +572,18 @@ fn render_node_row(
         None => format!("{}", node.gc_collection_count),
     };
     let gc_style = match node.gc_delta {
-        Some(d) if d > 5 => Style::default().fg(Color::Red),
+        Some(d) if d > 5 => theme::error(),
         _ => Style::default(),
     };
 
-    let load_str = match node.load_average {
-        Some(l) => format!("{l:.1}"),
-        None => "\u{2014}".to_string(),
+    let (load_str, style) = match (node.load_average, node.available_processors) {
+        (Some(l), Some(cpus)) if cpus > 0 => {
+            let max = (cpus as f32) * 2.0;
+            let gauge = crate::widget::gauge::spark_bar(l as f32, max, 4);
+            (format!("{gauge} {l:>4.1}"), load_style(l as f32, cpus))
+        }
+        (Some(l), _) => (format!("     {l:>4.1}"), Style::default()),
+        (None, _) => ("     \u{2014}   ".to_string(), Style::default()),
     };
 
     let line = Line::from(vec![
@@ -611,7 +606,7 @@ fn render_node_row(
             Style::default().fg(severity_color(&node.heap_severity)),
         ),
         Span::styled(format!("{gc_delta_str:<14}"), gc_style),
-        Span::raw(format!("{load_str:<8}")),
+        Span::styled(format!("{load_str:<10}"), style),
         Span::raw(format!("{:<10}", node.total_threads)),
         Span::raw(&node.uptime),
     ]);
@@ -639,23 +634,11 @@ fn render_processors(frame: &mut Frame, area: Rect, state: &HealthState) {
     if y < max_y {
         let hdr = Line::from(vec![
             Span::styled("  ", Style::default()),
-            Span::styled(
-                format!("{:<24}", "Processor"),
-                Style::default().add_modifier(Modifier::BOLD),
-            ),
-            Span::styled(
-                format!("{:<22}", "PG Path"),
-                Style::default().add_modifier(Modifier::BOLD),
-            ),
-            Span::styled(
-                format!("{:<10}", "Threads"),
-                Style::default().add_modifier(Modifier::BOLD),
-            ),
-            Span::styled(
-                format!("{:<12}", "Status"),
-                Style::default().add_modifier(Modifier::BOLD),
-            ),
-            Span::styled("CPU (5m)", Style::default().add_modifier(Modifier::BOLD)),
+            Span::styled(format!("{:<24}", "Processor"), theme::bold()),
+            Span::styled(format!("{:<22}", "PG Path"), theme::bold()),
+            Span::styled(format!("{:<10}", "Threads"), theme::bold()),
+            Span::styled(format!("{:<12}", "Status"), theme::bold()),
+            Span::styled("CPU (5m)", theme::bold()),
         ]);
         frame.render_widget(Paragraph::new(hdr), Rect::new(area.x, y, area.width, 1));
         y += 1;
@@ -708,13 +691,13 @@ fn render_processor_row(
         Span::raw(format!("{:<10}", proc.active_threads)),
         Span::styled(
             format!("{:<12}", proc.run_status),
-            Style::default().fg(match proc.run_status.as_str() {
-                "RUNNING" => Color::Green,
-                "STOPPED" => Color::Yellow,
-                "DISABLED" => Color::DarkGray,
-                "INVALID" => Color::Red,
-                _ => Color::White,
-            }),
+            match proc.run_status.as_str() {
+                "RUNNING" => theme::success(),
+                "STOPPED" => theme::warning(),
+                "DISABLED" => theme::disabled(),
+                "INVALID" => theme::error(),
+                _ => Style::default(),
+            },
         ),
         Span::raw(cpu),
     ]);
@@ -724,12 +707,6 @@ fn render_processor_row(
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
-
-fn render_fill_bar(width: u16, percent: u32) -> String {
-    let filled = (width as u32 * percent / 100).min(width as u32) as usize;
-    let empty = width as usize - filled;
-    format!("{}{}", "\u{2588}".repeat(filled), "\u{2591}".repeat(empty))
-}
 
 fn format_time_to_full(ttf: &TimeToFull) -> String {
     match ttf {
@@ -959,6 +936,7 @@ mod tests {
                 gc_delta: Some(3),
                 gc_millis: 5200,
                 load_average: Some(2.4),
+                available_processors: Some(8),
                 uptime: "4d 12h".into(),
                 total_threads: 287,
             },
@@ -972,6 +950,7 @@ mod tests {
                 gc_delta: Some(12),
                 gc_millis: 8900,
                 load_average: Some(5.1),
+                available_processors: Some(8),
                 uptime: "2d 3h".into(),
                 total_threads: 310,
             },
@@ -985,6 +964,7 @@ mod tests {
                 gc_delta: None,
                 gc_millis: 2100,
                 load_average: None,
+                available_processors: None,
                 uptime: "10d 0h".into(),
                 total_threads: 150,
             },

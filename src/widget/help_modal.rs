@@ -35,6 +35,7 @@ Bulletins Tab:
   c                 Clear all filters
   Enter             Jump to component in Browser
   t                 Trace component (latest events)
+  Shift+B           Toggle consecutive-source grouping
 ";
 
 const BROWSER_TEXT: &str = "\
@@ -50,6 +51,13 @@ Browser Tab:
   t                 Trace selected processor
   b                 Enter breadcrumb navigation
   Ctrl+F            Open fuzzy find
+
+Browser status icons:
+  ● (green)         Processor running
+  ◌ (yellow)        Processor stopped
+  ⚠ (red)           Processor invalid
+  ⌀ (gray)          Processor disabled
+  ◐ (blue)          Processor validating
 ";
 
 const HEALTH_TEXT: &str = "\
@@ -103,7 +111,7 @@ pub fn render(frame: &mut Frame, area: Rect, current_tab: ViewId) {
         ViewId::Health => HEALTH_TEXT,
     };
     let text = format!("{GLOBAL_TEXT}\n{per_view}");
-    let modal = center(area, 70, 25);
+    let modal = center(area, 70, 32);
     frame.render_widget(Clear, modal);
     let block = Block::default().title(" Help ").borders(Borders::ALL);
     let p = Paragraph::new(text).alignment(Alignment::Left).block(block);
@@ -136,7 +144,7 @@ mod tests {
     use ratatui::backend::TestBackend;
 
     fn render_with(tab: ViewId) -> String {
-        let backend = TestBackend::new(80, 30);
+        let backend = TestBackend::new(80, 40);
         let mut term = Terminal::new(backend).unwrap();
         term.draw(|f| render(f, f.area(), tab)).unwrap();
         format!("{}", term.backend())
@@ -154,5 +162,19 @@ mod tests {
     fn overview_help_does_not_list_bulletins_keys() {
         let out = render_with(ViewId::Overview);
         assert!(!out.contains("Toggle Error"));
+    }
+
+    #[test]
+    fn bulletins_help_mentions_shift_b_grouping() {
+        let out = render_with(ViewId::Bulletins);
+        assert!(out.contains("Shift+B"));
+        assert!(out.contains("Toggle consecutive-source grouping"));
+    }
+
+    #[test]
+    fn browser_help_shows_status_icon_legend() {
+        let out = render_with(ViewId::Browser);
+        assert!(out.contains("Processor running"));
+        assert!(out.contains("Processor invalid"));
     }
 }

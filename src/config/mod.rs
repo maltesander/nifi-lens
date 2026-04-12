@@ -14,6 +14,8 @@ pub struct Config {
     #[serde(default)]
     pub bulletins: BulletinsConfig,
     #[serde(default)]
+    pub ui: UiConfig,
+    #[serde(default)]
     pub contexts: Vec<Context>,
 }
 
@@ -33,6 +35,15 @@ impl Default for BulletinsConfig {
 
 fn default_ring_size() -> usize {
     5000
+}
+
+/// UI rendering preferences, set via `[ui]` in the TOML config.
+#[derive(Debug, Clone, Default, Deserialize, PartialEq, Eq)]
+pub struct UiConfig {
+    #[serde(default)]
+    pub timestamp_format: crate::timestamp::TimestampFormat,
+    #[serde(default)]
+    pub timestamp_tz: crate::timestamp::TimestampTz,
 }
 
 #[derive(Debug, Clone, Deserialize, PartialEq, Eq)]
@@ -305,5 +316,66 @@ mod tests {
             url = "https://nifi.example.com"
         "#;
         assert!(toml::from_str::<Context>(toml).is_err());
+    }
+
+    #[test]
+    fn ui_config_defaults_when_missing() {
+        let raw = r#"
+            current_context = "dev"
+            [[contexts]]
+            name = "dev"
+            url = "https://nifi.example.com"
+            [contexts.auth]
+            type = "token"
+            token = "tok"
+        "#;
+        let cfg: Config = toml::from_str(raw).unwrap();
+        assert_eq!(
+            cfg.ui.timestamp_format,
+            crate::timestamp::TimestampFormat::Short
+        );
+        assert_eq!(cfg.ui.timestamp_tz, crate::timestamp::TimestampTz::Utc);
+    }
+
+    #[test]
+    fn ui_config_parses_iso_and_local() {
+        let raw = r#"
+            current_context = "dev"
+            [ui]
+            timestamp_format = "iso"
+            timestamp_tz = "local"
+            [[contexts]]
+            name = "dev"
+            url = "https://nifi.example.com"
+            [contexts.auth]
+            type = "token"
+            token = "tok"
+        "#;
+        let cfg: Config = toml::from_str(raw).unwrap();
+        assert_eq!(
+            cfg.ui.timestamp_format,
+            crate::timestamp::TimestampFormat::Iso
+        );
+        assert_eq!(cfg.ui.timestamp_tz, crate::timestamp::TimestampTz::Local);
+    }
+
+    #[test]
+    fn ui_config_rejects_unknown_format() {
+        let raw = r#"
+            current_context = "dev"
+            [ui]
+            timestamp_format = "nope"
+            [[contexts]]
+            name = "dev"
+            url = "https://nifi.example.com"
+            [contexts.auth]
+            type = "token"
+            token = "tok"
+        "#;
+        let result: Result<Config, _> = toml::from_str(raw);
+        assert!(
+            result.is_err(),
+            "expected parse error for invalid timestamp_format"
+        );
     }
 }

@@ -20,6 +20,16 @@ current_context = "dev"
 # [bulletins]
 # ring_size = 5000
 
+# Timestamp display options for the Bulletins and Tracer tabs.
+# [ui]
+# # Timestamp display format:
+# #   "short"  — HH:MM:SS for today, "MMM DD HH:MM:SS" for older
+# #   "iso"    — 2026-04-12T14:32:18Z
+# #   "human"  — Apr 12 14:32:18
+# timestamp_format = "short"
+# # "utc" or "local" — "local" uses the host machine time zone.
+# timestamp_tz = "utc"
+
 # Example context. Duplicate this block for additional clusters.
 [[contexts]]
 # Human-readable name. Matches `current_context` above and `--context` on

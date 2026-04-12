@@ -23,15 +23,21 @@ use ratatui::layout::{Alignment, Constraint, Direction, Layout, Rect};
 use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Borders, Cell, Paragraph, Row, Table};
+use time;
 
 use crate::client::Severity;
 use crate::theme;
-use crate::view::bulletins::state::{BulletinsState, ComponentType};
+use crate::view::bulletins::state::{BulletinsState, ComponentType, GroupedRow};
 
 const FILTER_BAR_ROWS: u16 = 2;
 const DETAIL_PANE_ROWS: u16 = 6;
 
-pub fn render(frame: &mut Frame, area: Rect, state: &BulletinsState) {
+pub fn render(
+    frame: &mut Frame,
+    area: Rect,
+    state: &BulletinsState,
+    cfg: &crate::timestamp::TimestampConfig,
+) {
     let age_label = state
         .last_fetched_at
         .and_then(|fetched| SystemTime::now().duration_since(fetched).ok())
@@ -54,7 +60,7 @@ pub fn render(frame: &mut Frame, area: Rect, state: &BulletinsState) {
         .split(inner);
 
     render_filter_bar(frame, rows[0], state);
-    render_list(frame, rows[1], state);
+    render_list(frame, rows[1], state, cfg);
     render_detail(frame, rows[2], state);
 }
 
@@ -141,7 +147,12 @@ fn component_type_label(ct: Option<ComponentType>) -> String {
     }
 }
 
-fn render_list(frame: &mut Frame, area: Rect, state: &BulletinsState) {
+fn render_list(
+    frame: &mut Frame,
+    area: Rect,
+    state: &BulletinsState,
+    cfg: &crate::timestamp::TimestampConfig,
+) {
     if state.ring.is_empty() {
         let centered = Paragraph::new(Span::styled(
             "waiting for bulletins…".to_string(),
@@ -158,8 +169,8 @@ fn render_list(frame: &mut Frame, area: Rect, state: &BulletinsState) {
         frame.render_widget(centered, spot);
         return;
     }
-    let filtered = state.filtered_indices();
-    if filtered.is_empty() {
+    let groups: Vec<GroupedRow> = state.grouped_view();
+    if groups.is_empty() {
         let centered = Paragraph::new(Span::styled(
             "no bulletins match the current filters (press c to clear)".to_string(),
             theme::muted(),
@@ -183,24 +194,38 @@ fn render_list(frame: &mut Frame, area: Rect, state: &BulletinsState) {
     } else {
         0
     };
-    let window = &filtered[scroll_offset..filtered.len().min(scroll_offset + visible_rows)];
+    let window = &groups[scroll_offset..groups.len().min(scroll_offset + visible_rows)];
     let selected_in_window = state.selected.saturating_sub(scroll_offset);
+    let now = time::OffsetDateTime::now_utc();
     let rows: Vec<Row> = window
         .iter()
-        .map(|&i| &state.ring[i])
         .enumerate()
-        .map(|(idx, b)| {
+        .map(|(idx, group)| {
+            let b = &state.ring[group.latest_ring_idx];
             let style = if idx == selected_in_window {
                 theme::cursor_row()
             } else {
                 Style::default()
             };
+            let message_cell = if group.count > 1 {
+                Cell::from(Line::from(vec![
+                    Span::styled(format!("[\u{00D7}{}] ", group.count), theme::warning()),
+                    Span::raw(b.message.clone()),
+                ]))
+            } else {
+                Cell::from(b.message.clone())
+            };
             Row::new(vec![
-                Cell::from(format_hhmmss(&b.timestamp_iso, &b.timestamp_human)),
+                Cell::from(format_bulletin_time(
+                    &b.timestamp_iso,
+                    &b.timestamp_human,
+                    now,
+                    cfg,
+                )),
                 Cell::from(format_severity_label(&b.level)).style(severity_style(&b.level)),
                 Cell::from(truncate_right(&b.source_name, 20)),
                 Cell::from(truncate_left(&b.group_id, 24)),
-                Cell::from(b.message.clone()),
+                message_cell,
             ])
             .style(style)
         })
@@ -208,7 +233,7 @@ fn render_list(frame: &mut Frame, area: Rect, state: &BulletinsState) {
     let table = Table::new(
         rows,
         [
-            Constraint::Length(8),
+            Constraint::Length(15),
             Constraint::Length(5),
             Constraint::Length(20),
             Constraint::Length(24),
@@ -286,21 +311,18 @@ fn severity_style(level: &str) -> Style {
     }
 }
 
-fn format_hhmmss(iso: &str, human: &str) -> String {
-    // ISO-8601 / RFC-3339: "YYYY-MM-DDTHH:MM:SS…". Positions 11..19 are
-    // HH:MM:SS when the server emits a standard timestamp.
-    if iso.len() >= 19 && iso.as_bytes()[10] == b'T' {
-        return iso[11..19].to_string();
+fn format_bulletin_time(
+    iso: &str,
+    human: &str,
+    now: time::OffsetDateTime,
+    cfg: &crate::timestamp::TimestampConfig,
+) -> String {
+    let dt = crate::timestamp::parse_nifi_timestamp(iso)
+        .or_else(|| crate::timestamp::parse_nifi_timestamp(human));
+    match dt {
+        Some(dt) => crate::timestamp::format(dt, now, cfg, false),
+        None => "--:--:--".to_string(),
     }
-    // Fallback: NiFi < 2.8.0 only populates `timestamp` (human-readable),
-    // e.g. "04/12/2026 11:44:00 UTC". Extract HH:MM:SS from position 11..19.
-    if human.len() >= 19 {
-        let slice = &human[11..19];
-        if slice.as_bytes()[2] == b':' {
-            return slice.to_string();
-        }
-    }
-    "--:--:--".to_string()
 }
 
 fn truncate_right(s: &str, max: usize) -> String {
@@ -447,7 +469,8 @@ mod tests {
     fn render_to_string(state: &BulletinsState) -> String {
         let backend = TestBackend::new(120, 30);
         let mut term = Terminal::new(backend).unwrap();
-        term.draw(|f| render(f, f.area(), state)).unwrap();
+        let cfg = crate::timestamp::TimestampConfig::default();
+        term.draw(|f| render(f, f.area(), state, &cfg)).unwrap();
         format!("{}", term.backend())
     }
 

@@ -82,9 +82,9 @@ fn render_tab_bar(frame: &mut Frame, area: Rect, state: &AppState) {
 fn render_content(frame: &mut Frame, area: Rect, state: &AppState) {
     match state.current_tab {
         ViewId::Overview => overview::render(frame, area, &state.overview),
-        ViewId::Bulletins => bulletins::render(frame, area, &state.bulletins),
+        ViewId::Bulletins => bulletins::render(frame, area, &state.bulletins, &state.timestamp_cfg),
         ViewId::Browser => browser::render(frame, area, &state.browser, &state.flow_index),
-        ViewId::Tracer => tracer::render(frame, area, &state.tracer),
+        ViewId::Tracer => tracer::render(frame, area, &state.tracer, &state.timestamp_cfg),
         ViewId::Health => health::render(frame, area, &state.health),
     }
 }

@@ -2,7 +2,6 @@
 
 use ratatui::Frame;
 use ratatui::layout::{Constraint, Direction, Layout, Rect};
-use ratatui::style::{Color, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Borders, Clear, Paragraph};
 
@@ -47,7 +46,7 @@ pub fn render(frame: &mut Frame, area: Rect, state: &SaveEventContentState) {
     let block = Block::default()
         .title(" Save content ")
         .borders(Borders::ALL)
-        .border_style(Style::default().fg(Color::Cyan));
+        .border_style(crate::theme::accent());
 
     let inner = block.inner(modal);
     frame.render_widget(block, modal);
@@ -64,22 +63,22 @@ pub fn render(frame: &mut Frame, area: Rect, state: &SaveEventContentState) {
 
     let label = Paragraph::new(Line::from(vec![Span::styled(
         "Path: ",
-        Style::default().fg(Color::Gray),
+        crate::theme::muted(),
     )]));
     frame.render_widget(label, chunks[0]);
 
     // Render the editable path with a cursor indicator.
     let path_line = Line::from(vec![
         Span::raw(&state.path),
-        Span::styled("█", Style::default().fg(Color::Cyan)),
+        Span::styled("█", crate::theme::accent()),
     ]);
     let path_para = Paragraph::new(path_line);
     frame.render_widget(path_para, chunks[1]);
 
     let footer = Paragraph::new(Line::from(vec![
-        Span::styled("Enter", Style::default().fg(Color::Green)),
+        Span::styled("Enter", crate::theme::success()),
         Span::raw(" save  "),
-        Span::styled("Esc", Style::default().fg(Color::Yellow)),
+        Span::styled("Esc", crate::theme::warning()),
         Span::raw(" cancel"),
     ]));
     frame.render_widget(footer, chunks[3]);
