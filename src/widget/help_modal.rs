@@ -49,6 +49,19 @@ Browser Tab:
   Ctrl+F            Open fuzzy find
 ";
 
+const HEALTH_TEXT: &str = "\
+Health Tab:
+
+  1              Queues — backpressure leaderboard
+  2              Repositories — storage fill bars
+  3              Nodes — per-node heap / GC / load
+  4              Processors — thread leaderboard
+
+  j / k          scroll detail table
+  Enter          jump to Browser (Queues, Processors)
+  r              force refresh
+";
+
 const TRACER_TEXT: &str = "\
 Tracer Tab:
 
@@ -84,7 +97,7 @@ pub fn render(frame: &mut Frame, area: Rect, current_tab: ViewId) {
         ViewId::Bulletins => BULLETINS_TEXT,
         ViewId::Browser => BROWSER_TEXT,
         ViewId::Tracer => TRACER_TEXT,
-        ViewId::Health => "",
+        ViewId::Health => HEALTH_TEXT,
     };
     let text = format!("{GLOBAL_TEXT}\n{per_view}");
     let modal = center(area, 70, 22);

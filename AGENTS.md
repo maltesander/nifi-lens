@@ -196,8 +196,22 @@ ring exceeds its capacity.
   `t` always land on the 20 most recent events rather than events since
   the bulletin timestamp. Phase 5 polish item.
 - **Third `e` collision.** Phase 4 introduces a third override of the
-  `e` key for the Tracer event-detail expand. Phase 5 tracks a cleaner
+  `e` key for the Tracer event-detail expand. Phase 6 tracks a cleaner
   per-mode collision rule.
+
+**Accepted Phase 5 edge cases:**
+
+- **Node diagnostics show aggregate only when nodewise fetch fails.**
+  If NiFi returns an error for the per-node system-diagnostics call,
+  the Nodes pane falls back to showing no rows. A graceful aggregate
+  fallback is a Phase 6 polish item.
+- **Time-to-full estimate is zero when throughput is zero.** Connections
+  with a back-pressured queue but zero recent throughput show
+  `TimeToFull::Unknown` rather than infinity. The distinction is not
+  surfaced to the user. Phase 6 polish item.
+- **Health tab `Enter` cross-link is a stub for non-queue/processor rows.**
+  Pressing `Enter` on a repository or node row emits no cross-link intent;
+  the keybind is silently ignored. Phase 6 polish item.
 
 ## Dependency on `nifi-rust-client`
 
@@ -413,9 +427,15 @@ usable state.
    cross-links land on a latest-provenance-events mini list. Full
    provenance search mode (`POST /provenance` with time-range /
    relationship filters) deferred to a future phase.
-6. **Phase 5 — Polish and first release.** Help modal filled out, error
+6. **Phase 5 — Cluster Health tab.** *(shipped)* Two-pane ops dashboard
+   with four categories: queue backpressure leaderboard with server-
+   predicted time-to-full, repository fill bars, per-node heap/GC/load
+   strips, and processor thread leaderboard. Dual-cadence worker (10s
+   PG status, 30s system diagnostics). `Enter` on queue/processor rows
+   jumps to Browser.
+7. **Phase 6 — Polish and first release.** Help modal filled out, error
    surfacing reviewed, screencasts, `v0.1.0` to crates.io.
-7. **Phase 6 — Write-path scaffolding.** Dry-run mode, confirmation modal
+8. **Phase 7 — Write-path scaffolding.** Dry-run mode, confirmation modal
    primitive, audit log, `--allow-writes` flag. No writes enabled yet —
    this just lays the rails for v2.
 

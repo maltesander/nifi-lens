@@ -24,9 +24,10 @@ Pre-release. The tool is being built in phases; see the roadmap in
   lineage with attribute diffs and on-demand content previews.
 - **Cluster-wide bulletin tail** — live, filterable, with auto-scroll pause
   and severity / component / free-text filters.
-- **Health overview** *(shipped)* — cluster identity, component counts,
-  15-minute bulletin-rate sparkline, unhealthy-queue leaderboard, and
-  top noisy components on one screen, refreshed every 10 seconds.
+- **Cluster health dashboard** *(shipped)* — two-pane ops view with queue
+  backpressure leaderboard, repository fill bars, per-node heap/GC/load
+  strips, and processor thread leaderboard. Dual-cadence refresh (10 s
+  PG status, 30 s system diagnostics). `Enter` jumps to Browser.
 - **Flow browser** *(shipped)* — two-pane PG tree + per-node detail
   (Processor / Connection / ProcessGroup / Controller Service);
   `Ctrl+F` fuzzy find across all known components; `e` for a full
@@ -79,7 +80,7 @@ Press `?` inside the tool for a context-aware help modal.
 
 ## Core Components
 
-`nifilens` has four top-level tabs, each optimized for a specific
+`nifilens` has five top-level tabs, each optimized for a specific
 operational question.
 
 **Overview** — "Is this cluster OK right now?" Cluster identity, component
@@ -105,6 +106,15 @@ content on demand (text, JSON prettyprint, or hex dump for binary). Press `s`
 to save the raw content bytes to a file. Cross-links from the Bulletins tab
 (`t`) and Browser tab (`t`) land on a latest-provenance-events mini list for
 the selected component.
+
+**Health** *(shipped)* — "How healthy is my cluster right now?" Two-pane
+ops dashboard with four categories: queue backpressure leaderboard with
+server-predicted time-to-full, repository fill bars, per-node heap/GC/load
+strips, and processor thread leaderboard. Navigate categories with `1`–`4`
+and scroll detail rows with `j`/`k`. Press `Enter` on a queue or processor
+row to jump directly to that component in the Browser tab. Refreshes
+automatically (PG status every 10 s, system diagnostics every 30 s); press
+`r` to force an immediate refresh.
 
 ### Browser tab
 

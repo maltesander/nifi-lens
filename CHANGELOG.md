@@ -9,6 +9,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Health tab (Phase 5):** cluster-wide operational dashboard with four
+  categories — queue backpressure leaderboard with server-predicted
+  time-to-full, repository fill bars, per-node heap/GC/load strips,
+  and processor thread leaderboard. Two-pane layout with severity
+  indicators. `Enter` on a queue or processor row jumps to Browser.
 - **Tracer tab (Phase 4):** paste a flowfile UUID → lineage timeline →
   per-event attribute diff and input/output content preview. Bulletins
   and Browser `t` cross-links land on a latest-provenance-events mini
