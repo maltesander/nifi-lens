@@ -15,7 +15,7 @@ include!(concat!(env!("OUT_DIR"), "/fixture_versions.rs"));
 pub fn port_for(version: &str) -> u16 {
     match version {
         "2.6.0" => 8443,
-        "2.8.0" => 8444,
+        "2.9.0" => 8444,
         other => panic!(
             "unknown fixture version {other}: add a port_for match arm in \
              tests/common/versions.rs"
@@ -52,13 +52,13 @@ mod tests {
     #[test]
     fn context_for_converts_dots_to_dashes() {
         assert_eq!(context_for("2.6.0"), "dev-nifi-2-6-0");
-        assert_eq!(context_for("2.8.0"), "dev-nifi-2-8-0");
+        assert_eq!(context_for("2.9.0"), "dev-nifi-2-9-0");
     }
 
     #[test]
     fn port_for_known_versions() {
         assert_eq!(port_for("2.6.0"), 8443);
-        assert_eq!(port_for("2.8.0"), 8444);
+        assert_eq!(port_for("2.9.0"), 8444);
     }
 
     #[test]
