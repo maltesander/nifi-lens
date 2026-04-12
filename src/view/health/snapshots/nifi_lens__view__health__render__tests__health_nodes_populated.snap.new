@@ -1,5 +1,6 @@
 ---
 source: src/view/health/render.rs
+assertion_line: 1008
 expression: snap(&state)
 ---
 "  ● Queues            0    │┌──────────────────────────────────────────────────────────────────────────────────────────┐"

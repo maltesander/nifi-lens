@@ -529,7 +529,7 @@ fn render_nodes(frame: &mut Frame, area: Rect, state: &HealthState) {
                 Style::default().add_modifier(Modifier::BOLD),
             ),
             Span::styled(
-                format!("{:<8}", "Load"),
+                format!("{:<10}", "Load"),
                 Style::default().add_modifier(Modifier::BOLD),
             ),
             Span::styled(
@@ -564,6 +564,20 @@ fn render_nodes(frame: &mut Frame, area: Rect, state: &HealthState) {
     }
 }
 
+fn load_style(load: f32, cpus: u32) -> Style {
+    if cpus == 0 {
+        return Style::default();
+    }
+    let busy = cpus as f32;
+    if load >= 1.5 * busy {
+        crate::theme::error()
+    } else if load >= busy {
+        crate::theme::warning()
+    } else {
+        Style::default()
+    }
+}
+
 fn render_node_row(
     frame: &mut Frame,
     x: u16,
@@ -586,9 +600,14 @@ fn render_node_row(
         _ => Style::default(),
     };
 
-    let load_str = match node.load_average {
-        Some(l) => format!("{l:.1}"),
-        None => "\u{2014}".to_string(),
+    let (load_str, style) = match (node.load_average, node.available_processors) {
+        (Some(l), Some(cpus)) if cpus > 0 => {
+            let max = (cpus as f32) * 2.0;
+            let gauge = crate::widget::gauge::spark_bar(l as f32, max, 4);
+            (format!("{gauge} {l:>4.1}"), load_style(l as f32, cpus))
+        }
+        (Some(l), _) => (format!("     {l:>4.1}"), Style::default()),
+        (None, _) => ("     \u{2014}   ".to_string(), Style::default()),
     };
 
     let line = Line::from(vec![
@@ -611,7 +630,7 @@ fn render_node_row(
             Style::default().fg(severity_color(&node.heap_severity)),
         ),
         Span::styled(format!("{gc_delta_str:<14}"), gc_style),
-        Span::raw(format!("{load_str:<8}")),
+        Span::styled(format!("{load_str:<10}"), style),
         Span::raw(format!("{:<10}", node.total_threads)),
         Span::raw(&node.uptime),
     ]);
