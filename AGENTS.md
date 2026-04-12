@@ -172,13 +172,40 @@ ring exceeds its capacity.
   call. Per-row tree counts will be wired in a follow-up when an
   endpoint or library change exposes them.
 
+**Accepted Phase 4 edge cases:**
+
+- **LatestEvents cross-link uses a fixed limit of 20.** When the
+  Bulletins `t` or Browser `t` cross-link fires, the Tracer fetches the
+  20 most recent provenance events for the component. Events older than
+  the 20-event window are not shown. A configurable limit is a Phase 5
+  polish item.
+- **Full provenance search deferred.** The `POST /provenance` endpoint
+  (time-range / relationship / attribute filters) is not wired in Phase
+  4. The Tracer entry form only accepts a flowfile UUID. Full search mode
+  is a future phase item.
+- **Save-to-file overwrites without confirmation.** Pressing `s` on the
+  content pane writes the raw bytes to the default path immediately;
+  there is no overwrite prompt. A confirmation modal is a Phase 5 polish
+  item.
+- **Lineage poll timeout is not user-configurable.** The in-TUI lineage
+  poller retries up to a hard-coded limit before surfacing a timeout
+  banner. A `[tracer] lineage_timeout_secs` config knob is deferred to
+  Phase 5.
+- **`CrossLink::TraceComponent` carries no `since` field.** The field
+  was dropped during Phase 4 implementation; Bulletins `t` and Browser
+  `t` always land on the 20 most recent events rather than events since
+  the bulletin timestamp. Phase 5 polish item.
+- **Third `e` collision.** Phase 4 introduces a third override of the
+  `e` key for the Tracer event-detail expand. Phase 5 tracks a cleaner
+  per-mode collision rule.
+
 ## Dependency on `nifi-rust-client`
 
-`nifi-lens` depends on `nifi-rust-client = "0.5.0"` with the `dynamic`
+`nifi-lens` depends on `nifi-rust-client = "0.7.0"` with the `dynamic`
 feature, declared in `Cargo.toml`:
 
 ```toml
-nifi-rust-client = { version = "0.5.0", features = ["dynamic"] }
+nifi-rust-client = { version = "0.7.0", features = ["dynamic"] }
 ```
 
 At the bottom of `Cargo.toml` there is a **commented-out**
@@ -207,6 +234,10 @@ Phase 3 activates `arboard` 3 (clipboard support for the `c` keybind)
 and `nucleo` 0.5 (fuzzy matcher powering `Ctrl+F`). Both were added
 earlier in commit `021eadc build: add runtime and dev dependencies`
 and remained unused until Phase 3.
+
+Phase 4 activates `uuid` 1 (flowfile UUID parsing and validation in the
+Tracer entry form) and promotes `serde_json` 1 from a dev-dependency to
+a runtime dependency (JSON pretty-printing in the content preview pane).
 
 ## Build & Test
 
@@ -375,8 +406,13 @@ usable state.
    component instead of the Phase 3 stub banner. Properties modal (`e`)
    for Processor and Controller Service nodes. Clipboard copy (`c`) of
    the selected node id.
-5. **Phase 4 — Tracer tab.** Forensic flowfile investigation: provenance
-   search, lineage timeline, attribute diffs, on-demand content preview.
+5. **Phase 4 — Tracer tab.** *(shipped)* Paste a flowfile UUID → see
+   its full lineage as a chronological event timeline → expand any event
+   for the attribute diff and input/output content (text / JSON
+   prettyprint / hex) with save-to-file. Bulletins `t` and Browser `t`
+   cross-links land on a latest-provenance-events mini list. Full
+   provenance search mode (`POST /provenance` with time-range /
+   relationship filters) deferred to a future phase.
 6. **Phase 5 — Polish and first release.** Help modal filled out, error
    surfacing reviewed, screencasts, `v0.1.0` to crates.io.
 7. **Phase 6 — Write-path scaffolding.** Dry-run mode, confirmation modal

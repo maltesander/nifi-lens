@@ -9,6 +9,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Tracer tab (Phase 4):** paste a flowfile UUID → lineage timeline →
+  per-event attribute diff and input/output content preview. Bulletins
+  and Browser `t` cross-links land on a latest-provenance-events mini
+  list.
 - Browser tab: PG tree + per-node detail panes (Processor, Connection,
   Process Group, Controller Service) with 15-second recursive tree
   refresh and on-demand detail fetches.
@@ -113,6 +117,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- Bumped `nifi-rust-client` from 0.5.0 to 0.7.0 — adds typed provenance
+  content bodies, NiFi 2.9.0 support, and `Option<DetectedVersion>`.
+- Dropped the `since` field from `CrossLink::TraceComponent`.
 - `IntentOutcome::NotImplementedInPhase { phase: 3 }` is no longer
   emitted for `CrossLink::OpenInBrowser`; the dispatcher now returns
   `IntentOutcome::OpenInBrowserTarget` and the reducer handles the

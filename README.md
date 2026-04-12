@@ -98,9 +98,13 @@ Two-pane PG tree with drill-in, per-node detail pane, and global
 properties modal on Processor / Controller Service nodes; `c` to copy
 the selected node's id to the clipboard.
 
-**Tracer** — "Why did this flowfile fail?" Forensic provenance view: paste a
-UUID or component-scoped query, walk the event timeline, see attribute diffs
-per event, preview input and output content on demand (text or hex).
+**Tracer** *(shipped)* — "Why did this flowfile fail?" Paste a flowfile UUID
+to trace its full lineage as a chronological event timeline. Expand any event
+to see the attribute diff (All / Changed toggle) and fetch input or output
+content on demand (text, JSON prettyprint, or hex dump for binary). Press `s`
+to save the raw content bytes to a file. Cross-links from the Bulletins tab
+(`t`) and Browser tab (`t`) land on a latest-provenance-events mini list for
+the selected component.
 
 ### Browser tab
 
@@ -108,8 +112,28 @@ Two-pane view: PG tree on the left, per-node detail on the right.
 Selection fires an on-demand detail fetch (15 s cadence for the tree,
 on-select for detail). Press `e` on a processor or controller service
 to pop the full properties list in a modal. Press `c` to copy the
-selected node's id to the clipboard. Press `t` on a processor for a
-Tracer cross-link (Phase 4 target — still a stub banner).
+selected node's id to the clipboard. Press `t` on a processor to jump
+to the Tracer tab and see its latest provenance events.
+
+### Tracer tab
+
+Forensic flowfile investigation in four modes:
+
+- **Entry** — type or paste a flowfile UUID into the input bar and press
+  `Enter` to start a lineage query.
+- **Lineage running** — a progress bar shows the NiFi server's completion
+  percentage while the query is in flight.
+- **Lineage** — chronological event timeline. Navigate with `↑`/`↓` / `j`/`k`.
+  Press `Enter` or `Space` to expand an event into the detail pane.
+  - **Detail pane**: attribute diff table with `d` to toggle All / Changed
+    view. Press `i` or `o` to fetch input or output content respectively.
+  - **Content pane**: text rendered as-is, JSON pretty-printed
+    automatically, binary shown as a hex dump. Press `s` to save the raw
+    bytes to a file; press `Esc` to dismiss.
+- **Latest events** — when arriving via a cross-link (`t` in Bulletins or
+  Browser), the Tracer shows the 20 most recent provenance events for the
+  linked component. Press `Enter` on any event row to open it as a lineage
+  query.
 
 ## Keybindings
 
