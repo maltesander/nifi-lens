@@ -115,18 +115,27 @@ fn render_tree(frame: &mut Frame, area: Rect, state: &BrowserState) {
             (NodeKind::ProcessGroup, false) => "▸ ",
             _ => "  ",
         };
-        let glyph = kind_glyph(&node.kind);
+        // Build the glyph span content as an owned String so Processor rows
+        // can carry a per-status glyph char alongside a color style.
+        let (glyph_owned, glyph_style): (String, Style) = match (&node.kind, &node.status_summary) {
+            (NodeKind::Processor, NodeStatusSummary::Processor { run_status }) => {
+                let (c, s) = processor_run_icon(run_status);
+                (c.to_string(), s)
+            }
+            _ => (kind_glyph(&node.kind).to_owned(), Style::default()),
+        };
         let indent = "  ".repeat(depth);
         let right_summary = status_summary(&node.status_summary);
-        let left = format!("{indent}{marker}{glyph} {name}", name = node.name);
 
-        let style = if row_idx == state.selected {
+        let row_style = if row_idx == state.selected {
             theme::cursor_row()
         } else {
             Style::default()
         };
         lines.push(Line::from(vec![
-            Span::styled(left, style),
+            Span::styled(format!("{indent}{marker}"), row_style),
+            Span::styled(format!("{glyph_owned} "), glyph_style.patch(row_style)),
+            Span::styled(node.name.clone(), row_style),
             Span::raw("  "),
             Span::styled(right_summary, theme::muted()),
         ]));
@@ -159,8 +168,6 @@ fn kind_glyph(kind: &NodeKind) -> &'static str {
 /// Maps NiFi's `run_status` string to a (glyph, style) pair for the
 /// Browser tree Processor row. Unknown values fall back to the
 /// default ● glyph unstyled.
-// Wired into the tree row renderer in the next task (Task 14).
-#[allow(dead_code)]
 fn processor_run_icon(run_status: &str) -> (char, ratatui::style::Style) {
     // NiFi's DTO emits uppercase enum values, but be tolerant of both
     // cases in case a future schema change or a test fixture uses
