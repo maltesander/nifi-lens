@@ -225,6 +225,77 @@ pub enum Followup {
 
 // ── Reducer ───────────────────────────────────────────────────────────────────
 
+/// Moves the selection down by one row in Lineage mode, wrapping at the end.
+///
+/// Resets `event_detail` to [`EventDetail::NotLoaded`] on any selection change.
+pub fn lineage_move_down(state: &mut TracerState) {
+    if let TracerMode::Lineage(ref mut view) = state.mode {
+        let len = view.snapshot.events.len();
+        if len > 0 {
+            view.selected_event = (view.selected_event + 1) % len;
+            view.event_detail = EventDetail::NotLoaded;
+        }
+    }
+}
+
+/// Moves the selection up by one row in Lineage mode, wrapping at the start.
+///
+/// Resets `event_detail` to [`EventDetail::NotLoaded`] on any selection change.
+pub fn lineage_move_up(state: &mut TracerState) {
+    if let TracerMode::Lineage(ref mut view) = state.mode {
+        let len = view.snapshot.events.len();
+        if len > 0 {
+            view.selected_event = view.selected_event.checked_sub(1).unwrap_or(len - 1);
+            view.event_detail = EventDetail::NotLoaded;
+        }
+    }
+}
+
+/// Sets `event_detail` to [`EventDetail::Loading`] in Lineage mode.
+pub fn lineage_mark_detail_loading(state: &mut TracerState) {
+    if let TracerMode::Lineage(ref mut view) = state.mode {
+        view.event_detail = EventDetail::Loading;
+    }
+}
+
+/// Transitions the content pane to the appropriate loading state in Lineage mode.
+///
+/// Only acts when `event_detail` is [`EventDetail::Loaded`]. Sets `content` to
+/// [`ContentPane::LoadingInput`] or [`ContentPane::LoadingOutput`] depending on `side`.
+pub fn lineage_mark_content_loading(state: &mut TracerState, side: ContentSide) {
+    if let TracerMode::Lineage(ref mut view) = state.mode
+        && let EventDetail::Loaded {
+            ref mut content, ..
+        } = view.event_detail
+    {
+        *content = match side {
+            ContentSide::Input => ContentPane::LoadingInput,
+            ContentSide::Output => ContentPane::LoadingOutput,
+        };
+    }
+}
+
+/// Toggles the attribute diff mode between [`AttributeDiffMode::All`] and
+/// [`AttributeDiffMode::Changed`] in Lineage mode.
+pub fn lineage_toggle_diff_mode(state: &mut TracerState) {
+    if let TracerMode::Lineage(ref mut view) = state.mode {
+        view.diff_mode = view.diff_mode.toggle();
+    }
+}
+
+/// Returns the `event_id` of the currently selected event in Lineage mode,
+/// or `None` when not in that mode or the event list is empty.
+pub fn lineage_selected_event_id(state: &TracerState) -> Option<i64> {
+    if let TracerMode::Lineage(ref view) = state.mode {
+        view.snapshot
+            .events
+            .get(view.selected_event)
+            .map(|e| e.event_id)
+    } else {
+        None
+    }
+}
+
 /// Transitions to LatestEvents mode with loading=true and an empty event list.
 ///
 /// `component_label` is initially set to `component_id` and updated when the
@@ -386,8 +457,76 @@ pub fn apply_payload(state: &mut TracerState, payload: TracerPayload) -> Option<
             }
             None
         }
-        // Arms filled in by Task 13.
-        _ => None,
+        TracerPayload::EventDetail { event_id, detail } => {
+            if let TracerMode::Lineage(ref mut view) = state.mode {
+                let selected_id = view
+                    .snapshot
+                    .events
+                    .get(view.selected_event)
+                    .map(|e| e.event_id);
+                if selected_id == Some(event_id) {
+                    view.event_detail = EventDetail::Loaded {
+                        event: Box::new(detail),
+                        content: ContentPane::default(),
+                    };
+                }
+            }
+            None
+        }
+        TracerPayload::EventDetailFailed { event_id, error } => {
+            if let TracerMode::Lineage(ref mut view) = state.mode {
+                let selected_id = view
+                    .snapshot
+                    .events
+                    .get(view.selected_event)
+                    .map(|e| e.event_id);
+                if selected_id == Some(event_id) {
+                    view.event_detail = EventDetail::Failed(error);
+                }
+            }
+            None
+        }
+        TracerPayload::Content(snap) => {
+            if let TracerMode::Lineage(ref mut view) = state.mode
+                && let EventDetail::Loaded {
+                    ref event,
+                    ref mut content,
+                } = view.event_detail
+                && event.summary.event_id == snap.event_id
+            {
+                *content = ContentPane::Shown {
+                    side: snap.side,
+                    render: snap.render,
+                    total_bytes: snap.total_bytes,
+                    raw: snap.raw,
+                };
+            }
+            None
+        }
+        TracerPayload::ContentFailed {
+            event_id,
+            side: _,
+            error,
+        } => {
+            if let TracerMode::Lineage(ref mut view) = state.mode
+                && let EventDetail::Loaded {
+                    ref event,
+                    ref mut content,
+                } = view.event_detail
+                && event.summary.event_id == event_id
+            {
+                *content = ContentPane::Failed(error);
+            }
+            None
+        }
+        TracerPayload::ContentSaved { path } => {
+            state.last_error = Some(format!("saved to {}", path.display()));
+            None
+        }
+        TracerPayload::ContentSaveFailed { path, error } => {
+            state.last_error = Some(format!("save to {} failed: {}", path.display(), error));
+            None
+        }
     }
 }
 
@@ -912,5 +1051,213 @@ mod tests {
         };
         assert!(!view.loading);
         assert_eq!(state.last_error.as_deref(), Some("connection refused"));
+    }
+
+    // ── Lineage reducer tests ───────────────────────────────────────────────
+
+    fn fake_detail(event_id: i64) -> ProvenanceEventDetail {
+        ProvenanceEventDetail {
+            summary: fake_summary(event_id, "uuid-detail"),
+            attributes: vec![],
+            transit_uri: None,
+            input_available: false,
+            output_available: false,
+        }
+    }
+
+    fn seed_lineage(state: &mut TracerState, event_ids: &[i64]) {
+        use crate::client::LineageSnapshot;
+        let events = event_ids
+            .iter()
+            .map(|&id| fake_summary(id, &format!("uuid-{id}")))
+            .collect();
+        state.mode = TracerMode::Lineage(Box::new(LineageView {
+            uuid: TEST_UUID.to_string(),
+            snapshot: LineageSnapshot {
+                events,
+                percent_completed: 100,
+                finished: true,
+            },
+            selected_event: 0,
+            event_detail: EventDetail::default(),
+            diff_mode: AttributeDiffMode::default(),
+            fetched_at: SystemTime::now(),
+        }));
+    }
+
+    #[test]
+    fn lineage_j_k_moves_selection_and_resets_event_detail() {
+        let mut state = TracerState::new();
+        seed_lineage(&mut state, &[10, 20, 30]);
+
+        // Load detail on event 0
+        if let TracerMode::Lineage(ref mut view) = state.mode {
+            view.event_detail = EventDetail::Loaded {
+                event: Box::new(fake_detail(10)),
+                content: ContentPane::default(),
+            };
+        }
+        // Move down — detail should be reset
+        lineage_move_down(&mut state);
+        {
+            let TracerMode::Lineage(ref view) = state.mode else {
+                panic!("expected Lineage mode");
+            };
+            assert_eq!(view.selected_event, 1);
+            assert!(matches!(view.event_detail, EventDetail::NotLoaded));
+        }
+
+        // Move up back to 0
+        lineage_move_up(&mut state);
+        {
+            let TracerMode::Lineage(ref view) = state.mode else {
+                panic!("expected Lineage mode");
+            };
+            assert_eq!(view.selected_event, 0);
+            assert!(matches!(view.event_detail, EventDetail::NotLoaded));
+        }
+
+        // Wrap: move up from 0 lands at last (2)
+        lineage_move_up(&mut state);
+        {
+            let TracerMode::Lineage(ref view) = state.mode else {
+                panic!("expected Lineage mode");
+            };
+            assert_eq!(view.selected_event, 2);
+        }
+    }
+
+    #[test]
+    fn lineage_enter_marks_event_detail_loading() {
+        let mut state = TracerState::new();
+        seed_lineage(&mut state, &[10, 20]);
+
+        lineage_mark_detail_loading(&mut state);
+
+        let TracerMode::Lineage(ref view) = state.mode else {
+            panic!("expected Lineage mode");
+        };
+        assert!(matches!(view.event_detail, EventDetail::Loading));
+    }
+
+    #[test]
+    fn event_detail_payload_populates_when_event_id_matches_selection() {
+        let mut state = TracerState::new();
+        seed_lineage(&mut state, &[42, 99]);
+
+        lineage_mark_detail_loading(&mut state);
+
+        let followup = apply_payload(
+            &mut state,
+            TracerPayload::EventDetail {
+                event_id: 42,
+                detail: fake_detail(42),
+            },
+        );
+        assert!(followup.is_none());
+
+        let TracerMode::Lineage(ref view) = state.mode else {
+            panic!("expected Lineage mode");
+        };
+        assert!(matches!(
+            view.event_detail,
+            EventDetail::Loaded { ref event, .. } if event.summary.event_id == 42
+        ));
+    }
+
+    #[test]
+    fn event_detail_payload_stale_event_id_is_dropped() {
+        let mut state = TracerState::new();
+        seed_lineage(&mut state, &[42, 99]);
+
+        lineage_mark_detail_loading(&mut state);
+
+        // Deliver detail for event 99 while selection is at 42
+        apply_payload(
+            &mut state,
+            TracerPayload::EventDetail {
+                event_id: 99,
+                detail: fake_detail(99),
+            },
+        );
+
+        let TracerMode::Lineage(ref view) = state.mode else {
+            panic!("expected Lineage mode");
+        };
+        // Still Loading because the event_id didn't match
+        assert!(matches!(view.event_detail, EventDetail::Loading));
+    }
+
+    #[test]
+    fn content_payload_populates_content_pane_when_event_id_matches() {
+        use crate::client::{ContentRender, ContentSnapshot};
+
+        let mut state = TracerState::new();
+        seed_lineage(&mut state, &[42]);
+
+        // Set up Loaded event detail
+        if let TracerMode::Lineage(ref mut view) = state.mode {
+            view.event_detail = EventDetail::Loaded {
+                event: Box::new(fake_detail(42)),
+                content: ContentPane::LoadingOutput,
+            };
+        }
+
+        let snap = ContentSnapshot {
+            event_id: 42,
+            side: ContentSide::Output,
+            render: ContentRender::Text {
+                pretty: "hello".to_string(),
+            },
+            total_bytes: 5,
+            raw: std::sync::Arc::from(b"hello".as_slice()),
+        };
+        let followup = apply_payload(&mut state, TracerPayload::Content(snap));
+        assert!(followup.is_none());
+
+        let TracerMode::Lineage(ref view) = state.mode else {
+            panic!("expected Lineage mode");
+        };
+        assert!(matches!(
+            view.event_detail,
+            EventDetail::Loaded {
+                content: ContentPane::Shown {
+                    side: ContentSide::Output,
+                    total_bytes: 5,
+                    ..
+                },
+                ..
+            }
+        ));
+    }
+
+    #[test]
+    fn diff_mode_toggle_flips_all_and_changed() {
+        let mut state = TracerState::new();
+        seed_lineage(&mut state, &[1]);
+
+        // Default is All
+        {
+            let TracerMode::Lineage(ref view) = state.mode else {
+                panic!("expected Lineage mode");
+            };
+            assert_eq!(view.diff_mode, AttributeDiffMode::All);
+        }
+
+        lineage_toggle_diff_mode(&mut state);
+        {
+            let TracerMode::Lineage(ref view) = state.mode else {
+                panic!("expected Lineage mode");
+            };
+            assert_eq!(view.diff_mode, AttributeDiffMode::Changed);
+        }
+
+        lineage_toggle_diff_mode(&mut state);
+        {
+            let TracerMode::Lineage(ref view) = state.mode else {
+                panic!("expected Lineage mode");
+            };
+            assert_eq!(view.diff_mode, AttributeDiffMode::All);
+        }
     }
 }
