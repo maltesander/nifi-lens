@@ -630,20 +630,18 @@ fn render_event_table(frame: &mut Frame, area: Rect, view: &LatestEventsView) {
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
-fn format_hhmmss(iso: &str) -> String {
-    if iso.len() >= 19 && iso.as_bytes()[10] == b'T' {
-        iso[11..19].to_string()
-    } else {
-        "--:--:--".to_string()
+fn format_hhmmss(ts: &str) -> String {
+    if let Some(time) = extract_time_part(ts)
+        && time.len() >= 8
+    {
+        return time[..8].to_string();
     }
+    "--:--:--".to_string()
 }
 
-/// Format ISO timestamp as `HH:MM:SS.mmm`.  Falls back to `--:--:--.---`.
-fn format_hhmmss_ms(iso: &str) -> String {
-    // Typical format: 2026-01-15T12:34:56.789Z  (len >= 23)
-    // Also accept:    2026-01-15T12:34:56Z       (len >= 20, no ms)
-    if iso.len() >= 19 && iso.as_bytes()[10] == b'T' {
-        let time = &iso[11..]; // "12:34:56.789Z" or "12:34:56Z"
+/// Format timestamp as `HH:MM:SS.mmm`. Falls back to `--:--:--.---`.
+fn format_hhmmss_ms(ts: &str) -> String {
+    if let Some(time) = extract_time_part(ts) {
         let base = if time.len() >= 8 {
             &time[..8]
         } else {
@@ -657,6 +655,24 @@ fn format_hhmmss_ms(iso: &str) -> String {
         format!("{base}.{ms}")
     } else {
         "--:--:--.---".to_string()
+    }
+}
+
+/// Extracts the time portion from either ISO-8601 or NiFi's human-readable
+/// timestamp format.
+///
+/// Supported formats:
+/// - ISO-8601: `2026-01-15T12:34:56.789Z` → `"12:34:56.789Z"`
+/// - NiFi:     `04/12/2026 10:14:22.001 UTC` → `"10:14:22.001 UTC"`
+fn extract_time_part(ts: &str) -> Option<&str> {
+    if ts.len() >= 19 && ts.as_bytes()[10] == b'T' {
+        // ISO-8601: split at 'T'
+        Some(&ts[11..])
+    } else if ts.len() >= 19 && ts.as_bytes()[2] == b'/' && ts.as_bytes()[5] == b'/' {
+        // NiFi human-readable: MM/dd/yyyy HH:mm:ss.SSS TZ
+        Some(&ts[11..])
+    } else {
+        None
     }
 }
 
@@ -884,5 +900,43 @@ mod tests {
             };
         }
         insta::assert_snapshot!("lineage_view_diff_mode_changed", snap(&state));
+    }
+
+    // ── timestamp helper tests ─────────────────────────────────────────────
+
+    use super::{format_hhmmss, format_hhmmss_ms};
+
+    #[test]
+    fn format_hhmmss_ms_iso8601() {
+        assert_eq!(format_hhmmss_ms("2026-01-15T12:34:56.789Z"), "12:34:56.789");
+    }
+
+    #[test]
+    fn format_hhmmss_ms_nifi_human() {
+        assert_eq!(
+            format_hhmmss_ms("04/12/2026 10:14:22.001 UTC"),
+            "10:14:22.001"
+        );
+    }
+
+    #[test]
+    fn format_hhmmss_ms_fallback() {
+        assert_eq!(format_hhmmss_ms("garbage"), "--:--:--.---");
+        assert_eq!(format_hhmmss_ms(""), "--:--:--.---");
+    }
+
+    #[test]
+    fn format_hhmmss_iso8601() {
+        assert_eq!(format_hhmmss("2026-01-15T12:34:56.789Z"), "12:34:56");
+    }
+
+    #[test]
+    fn format_hhmmss_nifi_human() {
+        assert_eq!(format_hhmmss("04/12/2026 10:14:22.001 UTC"), "10:14:22");
+    }
+
+    #[test]
+    fn format_hhmmss_fallback() {
+        assert_eq!(format_hhmmss("garbage"), "--:--:--");
     }
 }
