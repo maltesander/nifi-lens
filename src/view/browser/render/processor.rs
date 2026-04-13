@@ -8,6 +8,7 @@ use ratatui::widgets::Paragraph;
 use crate::client::ProcessorDetail;
 use crate::theme;
 use crate::view::browser::state::BrowserState;
+use crate::widget::severity::{format_severity_label, severity_style};
 
 const INLINE_PROPERTY_ROWS: usize = 10;
 const INLINE_VALIDATION_ROWS: usize = 3;
@@ -112,26 +113,6 @@ pub fn render(
     )));
 
     frame.render_widget(Paragraph::new(lines), area);
-}
-
-/// Severity label + style helpers. Duplicated from `pg.rs` / bulletins
-/// render intentionally to keep this leaf file self-contained.
-fn format_severity_label(level: &str) -> String {
-    match crate::client::Severity::parse(level) {
-        crate::client::Severity::Error => "ERROR".to_string(),
-        crate::client::Severity::Warning => "WARN ".to_string(),
-        crate::client::Severity::Info => "INFO ".to_string(),
-        crate::client::Severity::Unknown => level.to_ascii_uppercase(),
-    }
-}
-
-fn severity_style(level: &str) -> ratatui::style::Style {
-    match crate::client::Severity::parse(level) {
-        crate::client::Severity::Error => theme::error(),
-        crate::client::Severity::Warning => theme::warning(),
-        crate::client::Severity::Info => theme::info(),
-        crate::client::Severity::Unknown => theme::muted(),
-    }
 }
 
 fn truncate(s: &str, max: usize) -> String {

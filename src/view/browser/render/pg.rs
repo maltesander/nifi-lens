@@ -8,6 +8,7 @@ use ratatui::widgets::Paragraph;
 use crate::client::ProcessGroupDetail;
 use crate::theme;
 use crate::view::browser::state::BrowserState;
+use crate::widget::severity::{format_severity_label, severity_style};
 
 pub fn render(
     frame: &mut Frame,
@@ -131,27 +132,6 @@ pub fn render(
     )));
 
     frame.render_widget(Paragraph::new(lines), area);
-}
-
-/// Maps a bulletin level string to a short display label. Duplicated from
-/// the Bulletins render module intentionally — this file is a leaf and
-/// should not import from `view::bulletins::render`.
-fn format_severity_label(level: &str) -> String {
-    match crate::client::Severity::parse(level) {
-        crate::client::Severity::Error => "ERROR".to_string(),
-        crate::client::Severity::Warning => "WARN ".to_string(),
-        crate::client::Severity::Info => "INFO ".to_string(),
-        crate::client::Severity::Unknown => level.to_ascii_uppercase(),
-    }
-}
-
-fn severity_style(level: &str) -> ratatui::style::Style {
-    match crate::client::Severity::parse(level) {
-        crate::client::Severity::Error => theme::error(),
-        crate::client::Severity::Warning => theme::warning(),
-        crate::client::Severity::Info => theme::info(),
-        crate::client::Severity::Unknown => theme::muted(),
-    }
 }
 
 #[cfg(test)]

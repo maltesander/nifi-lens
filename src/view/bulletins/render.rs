@@ -25,9 +25,9 @@ use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Borders, Cell, Paragraph, Row, Table};
 use time;
 
-use crate::client::Severity;
 use crate::theme;
 use crate::view::bulletins::state::{BulletinsState, ComponentType, GroupedRow};
+use crate::widget::severity::{format_severity_label, severity_style};
 
 const FILTER_BAR_ROWS: u16 = 2;
 const DETAIL_PANE_ROWS: u16 = 8;
@@ -379,24 +379,6 @@ fn render_detail(
     )));
 
     frame.render_widget(Paragraph::new(lines), inner);
-}
-
-fn format_severity_label(level: &str) -> String {
-    match Severity::parse(level) {
-        Severity::Error => "ERROR".to_string(),
-        Severity::Warning => "WARN ".to_string(),
-        Severity::Info => "INFO ".to_string(),
-        Severity::Unknown => level.to_ascii_uppercase(),
-    }
-}
-
-fn severity_style(level: &str) -> Style {
-    match Severity::parse(level) {
-        Severity::Error => theme::error(),
-        Severity::Warning => theme::warning(),
-        Severity::Info => theme::info(),
-        Severity::Unknown => theme::muted(),
-    }
 }
 
 fn format_bulletin_time(
