@@ -9,6 +9,7 @@ use ratatui::widgets::{Block, BorderType};
 
 use crate::theme;
 
+/// Builder for a titled, bordered ratatui panel used consistently across all nifi-lens views.
 pub struct Panel<'a> {
     title: Line<'a>,
     right_title: Option<Line<'a>>,
@@ -16,6 +17,7 @@ pub struct Panel<'a> {
 }
 
 impl<'a> Panel<'a> {
+    /// Creates a new panel with the given title rendered on the top-left of the border.
     pub fn new(title: impl Into<Line<'a>>) -> Self {
         Self {
             title: title.into(),
@@ -24,16 +26,19 @@ impl<'a> Panel<'a> {
         }
     }
 
+    /// Adds a right-aligned title on the top border; the left-aligned title from `new` is kept.
     pub fn right(mut self, content: impl Into<Line<'a>>) -> Self {
         self.right_title = Some(content.into());
         self
     }
 
+    /// Focused panels render with `BorderType::Thick` and accent color; unfocused use plain + dim border.
     pub fn focused(mut self, yes: bool) -> Self {
         self.focused = yes;
         self
     }
 
+    /// Consumes the builder and returns a styled `Block` ready for `Frame::render_widget`.
     pub fn into_block(self) -> Block<'a> {
         let border_type = if self.focused {
             BorderType::Thick
@@ -101,6 +106,14 @@ mod tests {
         assert_snapshot!(
             "panel_with_right_title",
             draw(" Properties ", false, Some(" 10/14 "))
+        );
+    }
+
+    #[test]
+    fn right_title_focused_renders() {
+        assert_snapshot!(
+            "panel_right_focused",
+            draw(" Properties ", true, Some(" 10/14 "))
         );
     }
 }
