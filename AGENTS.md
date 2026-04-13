@@ -235,6 +235,17 @@ ring exceeds its capacity.
   implementation uses `time` 0.3 because it is already a dependency and
   covers every requirement (parse + format + local-offset).
 
+**Accepted UI Reorg Phase 2 edge cases:**
+
+- **Text-input modes swallow bare-letter global chords.** After the
+  keybinding sweep, printable characters `f` / `K` / `[` / `]` / `B`
+  are captured by any text-input mode they reach (Bulletins `/` filter,
+  Tracer Entry UUID prompt, Browser breadcrumb-focus mode, Fuzzy find
+  modal query buffer). Users must press `Esc` to exit the text-input
+  mode before the bare-letter chord reaches the global handler. This
+  is consistent with vim-modal convention and is the same trade-off
+  that the old `Shift+B` already had.
+
 ## Dependency on `nifi-rust-client`
 
 `nifi-lens` depends on `nifi-rust-client = "0.8.0"` with the `dynamic`
@@ -489,7 +500,17 @@ usable state.
     it in UI Reorg Phase 3. Added the `Events` `ViewId` with a
     "coming in Phase 6" bordered placeholder so the tab bar has its final
     shape. Health tab still exists until UI Reorg Phase 3 removes it.
-11. **Phase 7 — Write-path scaffolding.** Dry-run mode, confirmation modal
+11. **UI Reorg Phase 2 — Keybinding rename sweep.** *(shipped)* Global
+    `Ctrl+F` → `f` (fuzzy find), `Ctrl+K` → `K` (context switcher),
+    `Alt+←` / `Alt+→` → `[` / `]` (tab history back/forward). Bulletins
+    `Shift+B` relabeled `B` in user-facing text (the handler already
+    matched `KeyCode::Char('B')`). `Ctrl+C` / `Ctrl+Q` quit stay
+    (universal terminal convention). `Ctrl+U` clear-line in Tracer entry
+    and `Ctrl+N` / `Ctrl+P` list-nav in the fuzzy-find modal stay
+    (emacs text-input conventions). Established rule: bare lowercase
+    for view-local, bare capital for app-wide, no Ctrl chords except
+    `Ctrl+C` or text-input helpers.
+12. **Phase 7 — Write-path scaffolding.** Dry-run mode, confirmation modal
     primitive, audit log, `--allow-writes` flag. No writes enabled yet —
     this just lays the rails for v2.
 
