@@ -106,6 +106,8 @@ fn truncate_to_width(s: &str, max_cols: usize) -> String {
     out
 }
 
+// Phase 1 layout. `Health` is deleted in Phase 3; all other tabs are
+// the final shape.
 const TAB_LABELS: &[&str] = &[
     "Overview",
     "Bulletins",
@@ -124,7 +126,12 @@ pub fn render(frame: &mut Frame, area: Rect, state: &AppState) {
         .constraints([Constraint::Length(tab_width), Constraint::Fill(1)])
         .split(area);
 
-    let idx = tab_index(state.current_tab);
+    render_tabs(frame, chunks[0], state.current_tab);
+    render_identity(frame, chunks[1], state);
+}
+
+fn render_tabs(frame: &mut Frame, area: Rect, current: ViewId) {
+    let idx = tab_index(current);
     let tabs = Tabs::new(
         TAB_LABELS
             .iter()
@@ -134,9 +141,11 @@ pub fn render(frame: &mut Frame, area: Rect, state: &AppState) {
     .select(idx)
     .highlight_style(theme::accent())
     .divider(" \u{2502} ");
-    frame.render_widget(tabs, chunks[0]);
+    frame.render_widget(tabs, area);
+}
 
-    let budget = chunks[1].width as usize;
+fn render_identity(frame: &mut Frame, area: Rect, state: &AppState) {
+    let budget = area.width as usize;
     let spans = build_identity_spans(
         &state.context_name,
         &state.detected_version,
@@ -144,7 +153,7 @@ pub fn render(frame: &mut Frame, area: Rect, state: &AppState) {
         budget,
     );
     let line = Line::from(spans);
-    frame.render_widget(Paragraph::new(line).alignment(Alignment::Right), chunks[1]);
+    frame.render_widget(Paragraph::new(line).alignment(Alignment::Right), area);
 }
 
 fn tab_index(view: ViewId) -> usize {
