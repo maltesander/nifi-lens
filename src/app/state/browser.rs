@@ -154,7 +154,7 @@ impl ViewKeyHandler for BrowserHandler {
                 })
             }
             KeyCode::Char('t') => {
-                // Emit the Phase 4 TraceComponent cross-link for Processors only.
+                // Emit the JumpToEvents cross-link for Processors only.
                 let Some(&arena_idx) = state.browser.visible.get(state.browser.selected) else {
                     return Some(UpdateResult::default());
                 };
@@ -162,7 +162,7 @@ impl ViewKeyHandler for BrowserHandler {
                 if !matches!(node.kind, crate::client::NodeKind::Processor) {
                     return Some(UpdateResult::default());
                 }
-                let link = crate::intent::CrossLink::TraceComponent {
+                let link = crate::intent::CrossLink::JumpToEvents {
                     component_id: node.id.clone(),
                 };
                 Some(UpdateResult {
@@ -234,7 +234,7 @@ impl ViewKeyHandler for BrowserHandler {
             },
             HintSpan {
                 key: "t",
-                action: "trace",
+                action: "events",
             },
         ]
     }
@@ -597,15 +597,15 @@ mod tests {
     }
 
     #[test]
-    fn t_on_processor_emits_trace_component_crosslink() {
+    fn t_on_processor_emits_jump_to_events_crosslink() {
         let (mut s, c) = seeded_browser_state();
         s.browser.selected = 1; // "gen" processor
         let r = update(&mut s, key(KeyCode::Char('t'), KeyModifiers::NONE), &c);
         match r.intent {
-            Some(PendingIntent::JumpTo(CrossLink::TraceComponent { component_id, .. })) => {
+            Some(PendingIntent::JumpTo(CrossLink::JumpToEvents { component_id, .. })) => {
                 assert_eq!(component_id, "gen");
             }
-            other => panic!("expected TraceComponent, got {other:?}"),
+            other => panic!("expected JumpToEvents, got {other:?}"),
         }
     }
 
