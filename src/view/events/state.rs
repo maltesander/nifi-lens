@@ -257,6 +257,55 @@ impl EventsState {
     pub fn selected_event(&self) -> Option<&crate::client::ProvenanceEventSummary> {
         self.selected_row.and_then(|i| self.events.get(i))
     }
+
+    /// Build a [`ProvenanceQuery`](crate::client::ProvenanceQuery) from the
+    /// current filter state. Projects `filters.time` into an ISO-8601
+    /// start date (best-effort — empty / unparseable input falls back
+    /// to no start filter).
+    pub fn build_query(&self) -> crate::client::ProvenanceQuery {
+        use time::OffsetDateTime;
+        use time::format_description::well_known::Rfc3339;
+
+        let start = parse_time_window(&self.filters.time)
+            .and_then(|d| OffsetDateTime::now_utc().checked_sub(d))
+            .and_then(|dt| dt.format(&Rfc3339).ok());
+
+        crate::client::ProvenanceQuery {
+            component_id: if self.filters.source.is_empty() {
+                None
+            } else {
+                Some(self.filters.source.clone())
+            },
+            flow_file_uuid: if self.filters.uuid.is_empty() {
+                None
+            } else {
+                Some(self.filters.uuid.clone())
+            },
+            start_time_iso: start,
+            end_time_iso: None,
+            max_results: self.cap,
+        }
+    }
+}
+
+/// Parse a `"last <N><unit>"` window string into a `time::Duration`.
+///
+/// Supported units: `m` (minutes), `h` (hours), `d` (days). Returns
+/// `None` on unparseable input. Empty / whitespace strings return
+/// `None` — the caller treats that as "no start filter".
+fn parse_time_window(s: &str) -> Option<time::Duration> {
+    let s = s.trim();
+    let rest = s.strip_prefix("last ")?;
+    // Last char is the unit; everything before is the number.
+    let unit_char = rest.chars().last()?;
+    let num_str = &rest[..rest.len() - unit_char.len_utf8()];
+    let n: i64 = num_str.trim().parse().ok()?;
+    match unit_char {
+        'm' => Some(time::Duration::minutes(n)),
+        'h' => Some(time::Duration::hours(n)),
+        'd' => Some(time::Duration::days(n)),
+        _ => None,
+    }
 }
 
 /// Reducer: fold an [`EventsPayload`](crate::event::EventsPayload) into state.
@@ -736,6 +785,38 @@ mod tests {
         s.move_selection_up();
         // Saturates at start.
         assert_eq!(s.selected_row, Some(0));
+    }
+
+    #[test]
+    fn parse_time_window_supports_minutes_hours_days() {
+        assert_eq!(
+            parse_time_window("last 15m"),
+            Some(time::Duration::minutes(15))
+        );
+        assert_eq!(parse_time_window("last 2h"), Some(time::Duration::hours(2)));
+        assert_eq!(parse_time_window("last 7d"), Some(time::Duration::days(7)));
+    }
+
+    #[test]
+    fn parse_time_window_returns_none_on_junk() {
+        assert_eq!(parse_time_window(""), None);
+        assert_eq!(parse_time_window("whenever"), None);
+        assert_eq!(parse_time_window("last xx"), None);
+    }
+
+    #[test]
+    fn build_query_respects_filters_and_cap() {
+        let mut s = EventsState::new();
+        s.filters.source = "proc-1".into();
+        s.cap = 1000;
+        let q = s.build_query();
+        assert_eq!(q.component_id.as_deref(), Some("proc-1"));
+        assert_eq!(q.flow_file_uuid, None);
+        assert_eq!(q.max_results, 1000);
+        assert!(
+            q.start_time_iso.is_some(),
+            "last 15m default should parse into a start date"
+        );
     }
 
     #[test]

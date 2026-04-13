@@ -246,6 +246,9 @@ pub enum PendingIntent {
     JumpTo(CrossLink),
     Dispatch(crate::intent::Intent),
     SaveEventContent(PendingSave),
+    RunProvenanceQuery {
+        query: crate::client::ProvenanceQuery,
+    },
     Quit,
 }
 

@@ -42,6 +42,11 @@ pub enum Intent {
         uuid: String,
     },
 
+    // Phase 6 events intent.
+    RunProvenanceQuery {
+        query: crate::client::ProvenanceQuery,
+    },
+
     // Write intents — declared; dispatcher refuses unconditionally in Phase 0.
     StartProcessor(String),
     StopProcessor(String),
@@ -98,6 +103,7 @@ impl Intent {
             Self::LoadEventDetail { .. } => "LoadEventDetail",
             Self::RefreshLatestEvents { .. } => "RefreshLatestEvents",
             Self::RefreshLineage { .. } => "RefreshLineage",
+            Self::RunProvenanceQuery { .. } => "run provenance query",
             Self::StartProcessor(_) => "StartProcessor",
             Self::StopProcessor(_) => "StopProcessor",
             Self::EnableControllerService(_) => "EnableControllerService",
@@ -262,6 +268,19 @@ impl IntentDispatcher {
             Intent::CancelLineageQuery => Ok(IntentOutcome::ViewRefreshed {
                 view: ViewId::Tracer,
             }),
+
+            // --- Phase 6 events intent ---
+            Intent::RunProvenanceQuery { query } => {
+                let _handle = crate::view::events::worker::spawn_query(
+                    self.client.clone(),
+                    self.tx.clone(),
+                    query,
+                );
+                // Fire-and-forget; the worker emits its own payloads.
+                Ok(IntentOutcome::ViewRefreshed {
+                    view: ViewId::Events,
+                })
+            }
 
             other => Ok(IntentOutcome::NotImplementedInPhase {
                 intent_name: other.name(),

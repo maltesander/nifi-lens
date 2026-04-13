@@ -172,9 +172,22 @@ fn handle_filter_nav(state: &mut AppState, key: KeyEvent) -> Option<UpdateResult
             redraw()
         }
         KeyCode::Enter => {
-            // Task 14 will attach the RunProvenanceQuery intent here.
-            // Phase 6 Task 9 leaves Enter as a redraw-only no-op.
-            redraw()
+            // Transition to Running immediately so the UI shows "running …"
+            // even before the worker's first payload arrives. The worker
+            // will replace the status with a real query_id shortly after.
+            state.events.status = crate::view::events::state::EventsQueryStatus::Running {
+                query_id: None,
+                submitted_at: std::time::SystemTime::now(),
+                percent: 0,
+            };
+            state.events.events.clear();
+            state.events.selected_row = None;
+            let query = state.events.build_query();
+            Some(UpdateResult {
+                redraw: true,
+                intent: Some(PendingIntent::RunProvenanceQuery { query }),
+                tracer_followup: None,
+            })
         }
         KeyCode::Down | KeyCode::Char('j') | KeyCode::Up | KeyCode::Char('k') => {
             state.events.enter_row_nav();
