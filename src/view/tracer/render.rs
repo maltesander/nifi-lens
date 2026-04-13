@@ -16,7 +16,7 @@ use ratatui::Frame;
 use ratatui::layout::{Alignment, Constraint, Direction, Layout, Rect};
 use ratatui::style::Style;
 use ratatui::text::{Line, Span};
-use ratatui::widgets::{Block, Borders, Cell, Gauge, Paragraph, Row, Table};
+use ratatui::widgets::{Cell, Gauge, Paragraph, Row, Table};
 
 use crate::client::tracer::{AttributeTriple, ContentRender, ContentSide};
 use crate::theme;
@@ -24,6 +24,7 @@ use crate::view::tracer::state::{
     AttributeDiffMode, ContentPane, EntryState, EventDetail, LatestEventsView, LineageRunningState,
     LineageView, TracerMode, TracerState,
 };
+use crate::widget::panel::Panel;
 
 pub fn render(
     frame: &mut Frame,
@@ -33,30 +34,45 @@ pub fn render(
 ) {
     let now = time::OffsetDateTime::now_utc();
 
-    let title = match &state.mode {
-        TracerMode::Entry(_) => " Tracer ",
-        TracerMode::LineageRunning(_) => " Tracer — Running Lineage Query ",
-        TracerMode::Lineage(_) => " Tracer — Lineage ",
-        TracerMode::LatestEvents(v) => {
-            // We borrow `v` temporarily but need a &'static-ish str for the title —
-            // instead we format dynamically and render the block manually below.
-            let _ = v;
-            " Tracer — Latest Events "
-        }
-    };
-
-    let block = Block::default()
-        .borders(Borders::ALL)
-        .title_top(Line::from(title));
-    let inner = block.inner(area);
-    frame.render_widget(block, area);
-
     match &state.mode {
-        TracerMode::Entry(entry) => render_entry(frame, inner, entry, state.last_error.as_deref()),
-        TracerMode::LineageRunning(running) => render_lineage_running(frame, inner, running),
-        TracerMode::Lineage(view) => render_lineage(frame, inner, view, now, cfg),
+        TracerMode::Entry(entry) => {
+            let block = Panel::new(" Tracer ").into_block();
+            let inner = block.inner(area);
+            frame.render_widget(block, area);
+            render_entry(frame, inner, entry, state.last_error.as_deref());
+        }
+        TracerMode::LineageRunning(running) => {
+            let block = Panel::new(" Tracer — Running Lineage Query ").into_block();
+            let inner = block.inner(area);
+            frame.render_widget(block, area);
+            render_lineage_running(frame, inner, running);
+        }
+        TracerMode::Lineage(view) => {
+            // Lineage mode has two stacked sub-panes: timeline + detail.
+            // Each gets its own bordered Panel.
+            let rows = Layout::default()
+                .direction(Direction::Vertical)
+                .constraints([
+                    Constraint::Min(1),                    // lineage timeline
+                    Constraint::Length(DETAIL_HEIGHT + 2), // detail pane (+2 for border)
+                ])
+                .split(area);
+
+            let lineage_block = Panel::new(" Lineage ").into_block();
+            let lineage_inner = lineage_block.inner(rows[0]);
+            frame.render_widget(lineage_block, rows[0]);
+            render_lineage_timeline(frame, lineage_inner, view, now, cfg);
+
+            let detail_block = Panel::new(" Detail ").into_block();
+            let detail_inner = detail_block.inner(rows[1]);
+            frame.render_widget(detail_block, rows[1]);
+            render_lineage_detail(frame, detail_inner, view);
+        }
         TracerMode::LatestEvents(view) => {
-            render_latest_events(frame, inner, view, state.last_error.as_deref(), now, cfg)
+            let block = Panel::new(" Tracer — Latest Events ").into_block();
+            let inner = block.inner(area);
+            frame.render_widget(block, area);
+            render_latest_events(frame, inner, view, state.last_error.as_deref(), now, cfg);
         }
     }
 }
@@ -168,25 +184,6 @@ fn render_lineage_running(frame: &mut Frame, area: Rect, running: &LineageRunnin
 
 const DETAIL_HEIGHT: u16 = 14;
 
-fn render_lineage(
-    frame: &mut Frame,
-    area: Rect,
-    view: &LineageView,
-    now: time::OffsetDateTime,
-    cfg: &crate::timestamp::TimestampConfig,
-) {
-    let rows = Layout::default()
-        .direction(Direction::Vertical)
-        .constraints([
-            Constraint::Min(1),                // timeline
-            Constraint::Length(DETAIL_HEIGHT), // detail pane
-        ])
-        .split(area);
-
-    render_lineage_timeline(frame, rows[0], view, now, cfg);
-    render_lineage_detail(frame, rows[1], view);
-}
-
 fn render_lineage_timeline(
     frame: &mut Frame,
     area: Rect,
@@ -262,10 +259,7 @@ fn render_lineage_timeline(
 }
 
 fn render_lineage_detail(frame: &mut Frame, area: Rect, view: &LineageView) {
-    // Draw a top border for the detail pane separator.
-    let block = Block::default().borders(Borders::TOP);
-    let inner = block.inner(area);
-    frame.render_widget(block, area);
+    let inner = area;
 
     match &view.event_detail {
         EventDetail::NotLoaded => {
