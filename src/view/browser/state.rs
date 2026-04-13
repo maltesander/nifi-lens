@@ -60,6 +60,7 @@ pub enum DetailSection {
 ///
 /// Returning a `&'static` slice keeps the per-call cost zero and
 /// makes the "no focusable sections" case an `.is_empty()` check.
+#[derive(Debug, Clone, Copy)]
 pub struct DetailSections(pub &'static [DetailSection]);
 
 impl DetailSections {
@@ -225,6 +226,7 @@ impl BrowserState {
             if let Some(pos) = self.visible.iter().position(|&i| i == arena_idx) {
                 self.selected = pos;
             }
+            self.reset_detail_focus();
             return;
         }
         // Otherwise, walk up to parent.
@@ -407,6 +409,7 @@ impl ListNavigation for BrowserState {
 
     fn set_selected(&mut self, index: Option<usize>) {
         self.selected = index.unwrap_or(0);
+        self.reset_detail_focus();
     }
 }
 
