@@ -1,15 +1,18 @@
 //! Ratatui renderer for the Overview tab.
 //!
-//! Layout:
+//! Layout 3:
 //!
 //! ```text
-//! ┌─ identity ────────────────────────────────────┐
-//! ├─ component counts ────────────────────────────┤
-//! ├─ bulletin-rate sparkline (last 15 minutes) ───┤
-//! │                                                │
-//! ├─ unhealthy queues ───── noisy components ─────┤
-//! │                     │                          │
-//! └────────────────────────────────────────────────┘
+//! ┌─ Overview ────────────────────────────────────────────────────────────────┐
+//! │ RUNNING 42   STOPPED 3   INVALID 0   DISABLED 1   THREADS 5              │ ← processor info line (1 row)
+//! ├─ Nodes (N connected) ─────────────────────────────────────────────────────┤ ← nodes zone (variable, capped)
+//! │   node-name   heap  N%   gc Nms/5m   load N.N                            │
+//! │   repositories  content  N%   flowfile  N%   provenance  N%              │
+//! ├─ Bulletins / min ──────────────┬─ Noisy components (top 5) ──────────────┤ ← bulletins+noisy (8 rows)
+//! │  sparkline                     │  cnt  source              worst          │
+//! ├─ Unhealthy queues ─────────────────────────────────────────────────────────┤ ← unhealthy queues (fills rest)
+//! │ fill  queue             src → dst                      ffiles             │
+//! └────────────────────────────────────────────────────────────────────────────┘
 //! ```
 
 use ratatui::Frame;
@@ -19,8 +22,7 @@ use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Borders, Cell, Paragraph, Row, Sparkline, Table};
 
 use super::state::{
-    BulletinBucket, NoisyComponent, OverviewSnapshot, OverviewState, SPARKLINE_MINUTES, Severity,
-    UnhealthyQueue,
+    BulletinBucket, NoisyComponent, OverviewSnapshot, OverviewState, Severity, UnhealthyQueue,
 };
 use crate::theme;
 
@@ -29,97 +31,232 @@ pub fn render(frame: &mut Frame, area: Rect, state: &OverviewState) {
     let inner = block.inner(area);
     frame.render_widget(block, area);
 
-    let rows = Layout::default()
+    // Vertical zones. Nodes zone height adapts to the number of nodes
+    // (1 row per node + 1 title + 1 repos row), capped to keep the
+    // bulletin/queue zones readable.
+    let nodes_height = nodes_zone_height(state);
+    let zones = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
-            Constraint::Length(1), // identity strip
-            Constraint::Length(1), // component counts
-            Constraint::Length(4), // sparkline (title + 3 rows of bars)
-            Constraint::Fill(1),   // bottom two-column leaderboards
+            Constraint::Length(1),            // processor info line
+            Constraint::Length(nodes_height), // nodes zone
+            Constraint::Length(8),            // bulletins/noisy zone
+            Constraint::Fill(1),              // unhealthy queues
         ])
         .split(inner);
 
-    render_identity(frame, rows[0], state.snapshot.as_ref());
-    render_counts(frame, rows[1], state.snapshot.as_ref());
-    render_sparkline(frame, rows[2], &state.sparkline);
-
-    let cols = Layout::default()
-        .direction(Direction::Horizontal)
-        .constraints([Constraint::Percentage(60), Constraint::Percentage(40)])
-        .split(rows[3]);
-
-    render_unhealthy(frame, cols[0], &state.unhealthy);
-    render_noisy(frame, cols[1], &state.noisy);
+    render_processor_info_line(frame, zones[0], state.snapshot.as_ref());
+    render_nodes_zone(frame, zones[1], state);
+    render_bulletins_and_noisy(frame, zones[2], state);
+    render_unhealthy_queues(frame, zones[3], &state.unhealthy);
 }
 
-fn render_identity(frame: &mut Frame, area: Rect, snapshot: Option<&OverviewSnapshot>) {
-    let line = match snapshot {
-        Some(s) => {
-            let title = if s.about.title.is_empty() {
-                "NiFi".to_string()
-            } else {
-                s.about.title.clone()
-            };
-            Line::from(vec![
-                Span::styled(title, theme::accent()),
-                Span::raw("   version "),
-                Span::styled(s.about.version.clone(), theme::accent()),
-                Span::raw("   flowfiles queued "),
-                Span::styled(s.controller.flow_files_queued.to_string(), theme::bold()),
-            ])
-        }
-        None => Line::from(Span::styled("loading cluster identity…", theme::muted())),
-    };
-    frame.render_widget(Paragraph::new(line), area);
+/// Compute how many rows the nodes zone needs. One title row + one row
+/// per visible node + one row for the repositories aggregate. Capped so
+/// the zone never starves the lower zones.
+fn nodes_zone_height(state: &OverviewState) -> u16 {
+    let visible_nodes = state.nodes.nodes.len().min(8) as u16;
+    // 1 title row + N node rows + 1 repositories row. Min 3 (loading
+    // state needs 1 title + 1 loading msg + 1 buffer).
+    let needed = 1 + visible_nodes.max(1) + 1;
+    needed.clamp(3, 12)
 }
 
-fn render_counts(frame: &mut Frame, area: Rect, snapshot: Option<&OverviewSnapshot>) {
+/// Format C — uppercase muted labels with severity-colored values.
+fn render_processor_info_line(frame: &mut Frame, area: Rect, snapshot: Option<&OverviewSnapshot>) {
     let line = match snapshot {
         Some(s) => {
             let c = &s.controller;
             Line::from(vec![
-                Span::raw("running "),
+                Span::styled("RUNNING", theme::muted()),
+                Span::raw(" "),
                 Span::styled(c.running.to_string(), theme::success()),
-                Span::raw("  stopped "),
+                Span::raw("   "),
+                Span::styled("STOPPED", theme::muted()),
+                Span::raw(" "),
                 Span::styled(c.stopped.to_string(), theme::warning()),
-                Span::raw("  invalid "),
+                Span::raw("   "),
+                Span::styled("INVALID", theme::muted()),
+                Span::raw(" "),
                 Span::styled(c.invalid.to_string(), theme::error()),
-                Span::raw("  disabled "),
+                Span::raw("   "),
+                Span::styled("DISABLED", theme::muted()),
+                Span::raw(" "),
                 Span::styled(c.disabled.to_string(), theme::muted()),
-                Span::raw("  threads "),
+                Span::raw("   "),
+                Span::styled("THREADS", theme::muted()),
+                Span::raw(" "),
                 Span::styled(c.active_threads.to_string(), theme::accent()),
             ])
         }
-        None => Line::from(Span::styled("loading component counts…", theme::muted())),
+        None => Line::from(Span::styled("loading…", theme::muted())),
     };
     frame.render_widget(Paragraph::new(line), area);
 }
 
-fn render_sparkline(frame: &mut Frame, area: Rect, buckets: &[BulletinBucket]) {
-    let title = {
-        let max_sev = buckets
-            .iter()
-            .map(|b| b.max_severity)
-            .max()
-            .unwrap_or(Severity::Unknown);
-        let style = severity_style(max_sev);
-        Line::from(vec![
-            Span::raw("bulletins/min (last "),
-            Span::styled(SPARKLINE_MINUTES.to_string(), theme::accent()),
-            Span::raw(" min, worst "),
-            Span::styled(format!("{max_sev:?}"), style),
-            Span::raw(")"),
-        ])
+fn render_nodes_zone(frame: &mut Frame, area: Rect, state: &OverviewState) {
+    let mut lines: Vec<Line> = Vec::new();
+
+    // Title row.
+    let total = state.nodes.nodes.len();
+    let title_text = if total == 0 {
+        "Nodes".to_string()
+    } else {
+        format!("Nodes ({total} connected)")
     };
+    lines.push(Line::from(Span::styled(title_text, theme::bold())));
+
+    if state.nodes.nodes.is_empty() {
+        lines.push(Line::from(Span::styled(
+            "  loading system diagnostics…",
+            theme::muted(),
+        )));
+    } else {
+        // Up to 8 node rows, then "+N more" if there are extras.
+        let max_visible = 8;
+        let visible = state.nodes.nodes.iter().take(max_visible);
+        for node in visible {
+            lines.push(format_node_row(node));
+        }
+        if total > max_visible {
+            lines.push(Line::from(Span::styled(
+                format!("  … +{} more", total - max_visible),
+                theme::muted(),
+            )));
+        }
+
+        // Repositories aggregate row.
+        let repos = &state.repositories_summary;
+        lines.push(Line::from(vec![
+            Span::styled("  repositories  ", theme::muted()),
+            Span::raw("content "),
+            Span::styled(
+                format!("{:>3}%", repos.content_percent),
+                fill_style(repos.content_percent),
+            ),
+            Span::raw("   flowfile "),
+            Span::styled(
+                format!("{:>3}%", repos.flowfile_percent),
+                fill_style(repos.flowfile_percent),
+            ),
+            Span::raw("   provenance "),
+            Span::styled(
+                format!("{:>3}%", repos.provenance_percent),
+                fill_style(repos.provenance_percent),
+            ),
+        ]));
+    }
+
+    frame.render_widget(Paragraph::new(lines), area);
+}
+
+/// Format a single node row using fields from `NodeHealthRow`.
+fn format_node_row(node: &crate::client::health::NodeHealthRow) -> Line<'static> {
+    // GC severity: treat > 5 new collections per poll as warning-level.
+    let gc_style = match node.gc_delta {
+        Some(d) if d > 5 => theme::error(),
+        Some(_) => theme::warning(),
+        None => Style::default(),
+    };
+    let gc_str = match node.gc_delta {
+        Some(d) => format!("{:>4}ms (+{})", node.gc_millis, d),
+        None => format!("{:>4}ms", node.gc_millis),
+    };
+
+    // Load severity derived from load_average vs available_processors.
+    let (load_str, load_style) = match (node.load_average, node.available_processors) {
+        (Some(l), Some(cpus)) if cpus > 0 => {
+            let ratio = l / cpus as f64;
+            let style = if ratio >= 2.0 {
+                theme::error()
+            } else if ratio >= 1.0 {
+                theme::warning()
+            } else {
+                theme::success()
+            };
+            (format!("{l:>4.1}"), style)
+        }
+        (Some(l), _) => (format!("{l:>4.1}"), Style::default()),
+        (None, _) => ("\u{2014}   ".to_string(), theme::muted()),
+    };
+
+    Line::from(vec![
+        Span::raw("  "),
+        Span::styled(node.node_address.clone(), theme::accent()),
+        Span::raw("   heap "),
+        Span::styled(
+            format!("{:>3}%", node.heap_percent),
+            health_severity_style(node.heap_severity.clone()),
+        ),
+        Span::raw("   gc "),
+        Span::styled(gc_str, gc_style),
+        Span::raw("   load "),
+        Span::styled(load_str, load_style),
+    ])
+}
+
+fn render_bulletins_and_noisy(frame: &mut Frame, area: Rect, state: &OverviewState) {
+    let cols = Layout::default()
+        .direction(Direction::Horizontal)
+        .constraints([Constraint::Percentage(50), Constraint::Percentage(50)])
+        .split(area);
+
+    render_bulletin_sparkline(frame, cols[0], &state.sparkline);
+    render_noisy_components(frame, cols[1], &state.noisy);
+}
+
+fn render_bulletin_sparkline(frame: &mut Frame, area: Rect, buckets: &[BulletinBucket]) {
+    let max_sev = buckets
+        .iter()
+        .map(|b| b.max_severity)
+        .max()
+        .unwrap_or(Severity::Unknown);
+    let title = Line::from(vec![
+        Span::raw("Bulletins / min "),
+        Span::styled(format!("(15m, worst {max_sev:?})"), theme::muted()),
+    ]);
     let data: Vec<u64> = buckets.iter().map(|b| b.count as u64).collect();
     let spark = Sparkline::default()
         .block(Block::default().title(title))
         .data(&data)
-        .style(theme::accent());
+        .style(severity_style(max_sev));
     frame.render_widget(spark, area);
 }
 
-fn render_unhealthy(frame: &mut Frame, area: Rect, queues: &[UnhealthyQueue]) {
+fn render_noisy_components(frame: &mut Frame, area: Rect, noisy: &[NoisyComponent]) {
+    let rows: Vec<Row> = if noisy.is_empty() {
+        vec![Row::new(vec![
+            Cell::from(""),
+            Cell::from(Span::styled("no bulletins yet", theme::muted())),
+            Cell::from(""),
+        ])]
+    } else {
+        noisy
+            .iter()
+            .map(|n| {
+                let sev_style = severity_style(n.max_severity);
+                Row::new(vec![
+                    Cell::from(format!("{:>3}", n.count)).style(theme::bold()),
+                    Cell::from(n.source_name.clone()),
+                    Cell::from(format!("{:?}", n.max_severity)).style(sev_style),
+                ])
+            })
+            .collect()
+    };
+    let table = Table::new(
+        rows,
+        [
+            Constraint::Length(4),
+            Constraint::Fill(1),
+            Constraint::Length(8),
+        ],
+    )
+    .header(Row::new(vec!["cnt", "source", "worst"]).style(theme::bold()))
+    .block(Block::default().title("Noisy components (top 5)"));
+    frame.render_widget(table, area);
+}
+
+fn render_unhealthy_queues(frame: &mut Frame, area: Rect, queues: &[UnhealthyQueue]) {
     let rows: Vec<Row> = if queues.is_empty() {
         vec![Row::new(vec![
             Cell::from(""),
@@ -159,43 +296,6 @@ fn render_unhealthy(frame: &mut Frame, area: Rect, queues: &[UnhealthyQueue]) {
     frame.render_widget(table, area);
 }
 
-fn render_noisy(frame: &mut Frame, area: Rect, noisy: &[NoisyComponent]) {
-    let rows: Vec<Row> = if noisy.is_empty() {
-        vec![Row::new(vec![
-            Cell::from(""),
-            Cell::from(Span::styled("no bulletins yet", theme::muted())),
-            Cell::from(""),
-        ])]
-    } else {
-        noisy
-            .iter()
-            .map(|n| {
-                let sev_style = severity_style(n.max_severity);
-                Row::new(vec![
-                    Cell::from(n.count.to_string()).style(theme::bold()),
-                    Cell::from(n.source_name.clone()),
-                    Cell::from(format!("{:?}", n.max_severity)).style(sev_style),
-                ])
-            })
-            .collect()
-    };
-    let table = Table::new(
-        rows,
-        [
-            Constraint::Length(6),
-            Constraint::Fill(1),
-            Constraint::Length(8),
-        ],
-    )
-    .header(Row::new(vec!["count", "source", "worst"]).style(theme::bold()))
-    .block(
-        Block::default()
-            .title(" Noisy components ")
-            .borders(Borders::ALL),
-    );
-    frame.render_widget(table, area);
-}
-
 fn fill_style(percent: u32) -> Style {
     match percent {
         0..=49 => theme::success(),
@@ -204,6 +304,17 @@ fn fill_style(percent: u32) -> Style {
     }
 }
 
+/// Convert a `client::health::Severity` (Green/Yellow/Red) into a theme style.
+fn health_severity_style(s: crate::client::health::Severity) -> Style {
+    use crate::client::health::Severity as H;
+    match s {
+        H::Green => theme::success(),
+        H::Yellow => theme::warning(),
+        H::Red => theme::error(),
+    }
+}
+
+/// Convert a bulletin `Severity` (Error/Warning/Info/Unknown) into a theme style.
 fn severity_style(s: Severity) -> Style {
     match s {
         Severity::Error => theme::error(),
@@ -339,5 +450,112 @@ mod tests {
         });
         apply_payload(&mut state, payload);
         insta::assert_snapshot!("overview_unhealthy", render_to_string(&state));
+    }
+
+    #[test]
+    fn snapshot_with_nodes_populated() {
+        use crate::client::health::{
+            GcSnapshot, NodeDiagnostics, RepoUsage, SystemDiagAggregate, SystemDiagSnapshot,
+        };
+        use std::time::Instant;
+
+        let mut state = OverviewState::new();
+
+        // First a PG-status payload so the processor info line has data.
+        apply_payload(
+            &mut state,
+            OverviewPayload::PgStatus(OverviewPgStatusPayload {
+                about: AboutSnapshot {
+                    version: "2.9.0".into(),
+                    title: "NiFi".into(),
+                },
+                controller: ControllerStatusSnapshot {
+                    running: 42,
+                    stopped: 3,
+                    invalid: 0,
+                    disabled: 1,
+                    active_threads: 5,
+                    flow_files_queued: 120,
+                    bytes_queued: 4096,
+                },
+                root_pg: RootPgStatusSnapshot {
+                    flow_files_queued: 120,
+                    bytes_queued: 4096,
+                    connections: vec![],
+                },
+                bulletin_board: BulletinBoardSnapshot::default(),
+                fetched_at: UNIX_EPOCH + Duration::from_secs(T0),
+            }),
+        );
+
+        // Then a SystemDiag payload with two nodes. Fixture copied from the
+        // reducer test in src/view/overview/state.rs.
+        let node = |address: &str| NodeDiagnostics {
+            address: address.into(),
+            heap_used_bytes: 512 * 1024 * 1024,
+            heap_max_bytes: 1024 * 1024 * 1024,
+            gc: vec![GcSnapshot {
+                name: "G1 Young".into(),
+                collection_count: 10,
+                collection_millis: 50,
+            }],
+            load_average: Some(1.5),
+            available_processors: Some(4),
+            total_threads: 50,
+            uptime: "1h".into(),
+            content_repos: vec![RepoUsage {
+                identifier: "content".into(),
+                used_bytes: 60,
+                total_bytes: 100,
+                free_bytes: 40,
+                utilization_percent: 60,
+            }],
+            flowfile_repo: Some(RepoUsage {
+                identifier: "flowfile".into(),
+                used_bytes: 30,
+                total_bytes: 100,
+                free_bytes: 70,
+                utilization_percent: 30,
+            }),
+            provenance_repos: vec![RepoUsage {
+                identifier: "provenance".into(),
+                used_bytes: 20,
+                total_bytes: 100,
+                free_bytes: 80,
+                utilization_percent: 20,
+            }],
+        };
+        apply_payload(
+            &mut state,
+            OverviewPayload::SystemDiag(SystemDiagSnapshot {
+                aggregate: SystemDiagAggregate {
+                    content_repos: vec![RepoUsage {
+                        identifier: "content".into(),
+                        used_bytes: 60,
+                        total_bytes: 100,
+                        free_bytes: 40,
+                        utilization_percent: 60,
+                    }],
+                    flowfile_repo: Some(RepoUsage {
+                        identifier: "flowfile".into(),
+                        used_bytes: 30,
+                        total_bytes: 100,
+                        free_bytes: 70,
+                        utilization_percent: 30,
+                    }),
+                    provenance_repos: vec![RepoUsage {
+                        identifier: "provenance".into(),
+                        used_bytes: 20,
+                        total_bytes: 100,
+                        free_bytes: 80,
+                        utilization_percent: 20,
+                    }],
+                },
+                nodes: vec![node("node1:8080"), node("node2:8080")],
+                fetched_at: Instant::now(),
+            }),
+        );
+
+        insta::assert_snapshot!("overview_with_nodes", render_to_string(&state));
     }
 }
