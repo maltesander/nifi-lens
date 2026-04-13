@@ -446,6 +446,74 @@ mod tests {
         }
     }
 
+    #[tokio::test]
+    async fn tracer_lineage_started_outcome_switches_to_tracer_tab() {
+        use crate::client::ProvenanceEventSummary;
+        use crate::event::{AppEvent, EventsPayload, IntentOutcome, ViewPayload};
+        use crate::intent::CrossLink;
+        use std::time::SystemTime;
+        let mut s = fresh_state();
+        let c = tiny_config();
+        s.current_tab = ViewId::Events;
+        // Seed one Events result and enter row-nav mode.
+        let e = ProvenanceEventSummary {
+            event_id: 1,
+            event_time_iso: "2026-04-13T10:00:00Z".into(),
+            event_type: "DROP".into(),
+            component_id: "p".into(),
+            component_name: "P".into(),
+            component_type: "PROCESSOR".into(),
+            group_id: "g".into(),
+            flow_file_uuid: "ffuuid-42".into(),
+            relationship: None,
+            details: None,
+        };
+        update(
+            &mut s,
+            AppEvent::Data(ViewPayload::Events(EventsPayload::QueryStarted {
+                query_id: "q".into(),
+            })),
+            &c,
+        );
+        update(
+            &mut s,
+            AppEvent::Data(ViewPayload::Events(EventsPayload::QueryDone {
+                query_id: "q".into(),
+                events: vec![e],
+                fetched_at: SystemTime::now(),
+                truncated: false,
+            })),
+            &c,
+        );
+        s.events.enter_row_nav();
+
+        // Press `t` on the selected row. The reducer emits a
+        // TraceByUuid cross-link but does NOT switch the tab on its
+        // own — the dispatcher spawns the lineage worker and returns
+        // TracerLineageStarted, which the reducer folds in to set
+        // state.current_tab.
+        let r = update(&mut s, key(KeyCode::Char('t'), KeyModifiers::NONE), &c);
+        assert!(matches!(
+            r.intent,
+            Some(crate::app::state::PendingIntent::JumpTo(
+                CrossLink::TraceByUuid { .. }
+            ))
+        ));
+        assert_eq!(s.current_tab, ViewId::Events);
+
+        // Simulate the dispatcher's outcome landing back in the
+        // reducer. An AbortHandle must come from a real task, so
+        // spawn a no-op future and reap its handle.
+        let join = tokio::spawn(async {});
+        let abort = join.abort_handle();
+        let outcome = IntentOutcome::TracerLineageStarted {
+            uuid: "ffuuid-42".to_string(),
+            abort,
+        };
+        update(&mut s, AppEvent::IntentOutcome(Ok(outcome)), &c);
+        assert_eq!(s.current_tab, ViewId::Tracer);
+    }
+
     #[test]
     fn row_g_emits_open_in_browser_cross_link() {
         use crate::client::ProvenanceEventSummary;

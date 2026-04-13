@@ -124,12 +124,6 @@ pub enum IntentOutcome {
     EventsLandingOn {
         component_id: String,
     },
-    /// Phase 6: cross-link from an Events result row `t` lands on
-    /// Tracer pre-filled with the flowfile uuid. Reuses the existing
-    /// Tracer UUID entry path.
-    TracerLandingOnUuid {
-        uuid: String,
-    },
 }
 
 /// Payload variants pushed from Tracer workers back into the UI loop.

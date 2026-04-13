@@ -446,12 +446,13 @@ ring exceeds its capacity.
   both `component_id` and `group_id` are available on
   `ProvenanceEventSummary`, the existing `CrossLink::OpenInBrowser`
   variant is a clean reuse.
-- **`TracerLandingOnUuid` outcome is a tab-switch only.** The
-  lineage worker for `CrossLink::TraceByUuid` is spawned by the
-  intent dispatcher arm, so the reducer's `TracerLandingOnUuid`
-  handler only needs to switch tabs. The tracer's own reducer
-  receives the `LineageStarted` / `LineagePartial` / `LineageDone`
-  payloads via the normal channel.
+- **Events row `t` switches tab via `TracerLineageStarted` reducer.**
+  The `CrossLink::TraceByUuid` dispatcher arm spawns `spawn_lineage`
+  and returns `IntentOutcome::TracerLineageStarted { uuid, abort }`.
+  Its reducer arm sets `state.current_tab = ViewId::Tracer` and
+  populates `state.tracer` via `start_lineage` — same path used by
+  the existing Tracer entry-form submission, where the tab switch
+  is a no-op because the user is already on Tracer.
 
 ## Dependency on `nifi-rust-client`
 

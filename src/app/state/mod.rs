@@ -1084,6 +1084,7 @@ fn handle_intent_outcome(
             }
         }
         Ok(IntentOutcome::TracerLineageStarted { uuid, abort }) => {
+            state.current_tab = ViewId::Tracer;
             use crate::view::tracer::state::start_lineage;
             start_lineage(&mut state.tracer, uuid, Some(abort));
             UpdateResult {
@@ -1120,18 +1121,6 @@ fn handle_intent_outcome(
             UpdateResult {
                 redraw: true,
                 intent: Some(PendingIntent::RunProvenanceQuery { query }),
-                tracer_followup: None,
-            }
-        }
-        Ok(IntentOutcome::TracerLandingOnUuid { uuid: _uuid }) => {
-            // The lineage worker was spawned by the dispatcher's
-            // CrossLink::TraceByUuid arm; its payload arrives shortly
-            // via the normal Tracer reducer. Just switch the tab so
-            // the user sees the loading state.
-            state.current_tab = ViewId::Tracer;
-            UpdateResult {
-                redraw: true,
-                intent: None,
                 tracer_followup: None,
             }
         }
@@ -1706,16 +1695,5 @@ mod tests {
             r.intent,
             Some(PendingIntent::RunProvenanceQuery { .. })
         ));
-    }
-
-    #[test]
-    fn tracer_landing_on_uuid_switches_to_tracer_tab() {
-        let mut s = fresh_state();
-        let c = tiny_config();
-        let outcome = crate::event::IntentOutcome::TracerLandingOnUuid {
-            uuid: "abc-123".into(),
-        };
-        let _r = update(&mut s, AppEvent::IntentOutcome(Ok(outcome)), &c);
-        assert_eq!(s.current_tab, ViewId::Tracer);
     }
 }
