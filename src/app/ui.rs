@@ -60,14 +60,7 @@ fn render_content(frame: &mut Frame, area: Rect, state: &AppState) {
         ViewId::Overview => overview::render(frame, area, &state.overview),
         ViewId::Bulletins => bulletins::render(frame, area, &state.bulletins, &state.timestamp_cfg),
         ViewId::Browser => browser::render(frame, area, &state.browser, &state.flow_index),
-        ViewId::Events => {
-            use ratatui::widgets::Paragraph;
-            let block = Block::default().title(" Events ").borders(Borders::ALL);
-            let p = Paragraph::new("(coming in Phase 6)")
-                .block(block)
-                .style(crate::theme::muted());
-            frame.render_widget(p, area);
-        }
+        ViewId::Events => crate::view::render_placeholder(frame, area, " Events ", "Phase 6"),
         ViewId::Tracer => tracer::render(frame, area, &state.tracer, &state.timestamp_cfg),
         ViewId::Health => health::render(frame, area, &state.health),
     }
