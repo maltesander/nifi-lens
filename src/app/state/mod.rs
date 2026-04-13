@@ -5,6 +5,7 @@
 
 mod browser;
 mod bulletins;
+mod events;
 mod overview;
 mod tracer;
 
@@ -21,6 +22,7 @@ use crate::view::browser::state::{
     BrowserState, FlowIndex, apply_tree_snapshot, build_flow_index, rebuild_visible,
 };
 use crate::view::bulletins::state::BulletinsState;
+use crate::view::events::state::EventsState;
 use crate::view::overview::{OverviewState, apply_payload as apply_overview_payload};
 use crate::view::tracer::state::TracerState;
 
@@ -96,6 +98,7 @@ pub struct AppState {
     pub overview: OverviewState,
     pub bulletins: BulletinsState,
     pub browser: BrowserState,
+    pub events: EventsState,
     pub tracer: TracerState,
     pub flow_index: Option<FlowIndex>,
     pub status: StatusLine,
@@ -121,6 +124,7 @@ impl AppState {
             overview: OverviewState::new(),
             bulletins: BulletinsState::with_capacity(config.bulletins.ring_size),
             browser: BrowserState::new(),
+            events: EventsState::new(),
             tracer: TracerState::new(),
             flow_index: None,
             status: StatusLine::default(),
@@ -327,7 +331,7 @@ pub fn collect_hints(state: &AppState) -> Vec<crate::widget::hint_bar::HintSpan>
         ViewId::Overview => overview::OverviewHandler::hints(state),
         ViewId::Bulletins => bulletins::BulletinsHandler::hints(state),
         ViewId::Browser => browser::BrowserHandler::hints(state),
-        ViewId::Events => vec![],
+        ViewId::Events => events::EventsHandler::hints(state),
         ViewId::Tracer => tracer::TracerHandler::hints(state),
     };
 
@@ -485,9 +489,14 @@ pub fn update(state: &mut AppState, event: AppEvent, config: &Config) -> UpdateR
                 tracer_followup: followup,
             }
         }
-        AppEvent::Data(ViewPayload::Events(_)) => {
-            // Phase 6 Task 17 will replace this stub
-            UpdateResult::default()
+        AppEvent::Data(ViewPayload::Events(payload)) => {
+            crate::view::events::state::apply_payload(&mut state.events, payload);
+            state.last_refresh = Instant::now();
+            UpdateResult {
+                redraw: true,
+                intent: None,
+                tracer_followup: None,
+            }
         }
         AppEvent::IntentOutcome(outcome) => handle_intent_outcome(state, outcome),
         AppEvent::Quit => {
@@ -751,7 +760,7 @@ fn handle_key(state: &mut AppState, key: KeyEvent, config: &Config) -> UpdateRes
             ViewId::Overview => overview::OverviewHandler::handle_key(state, key),
             ViewId::Bulletins => bulletins::BulletinsHandler::handle_key(state, key),
             ViewId::Browser => browser::BrowserHandler::handle_key(state, key),
-            ViewId::Events => None,
+            ViewId::Events => events::EventsHandler::handle_key(state, key),
             ViewId::Tracer => tracer::TracerHandler::handle_key(state, key),
         };
         if let Some(r) = consumed {
