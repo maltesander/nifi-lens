@@ -93,24 +93,11 @@ pub struct OverviewState {
 /// Cluster-aggregate repository fill bars shown in the Overview "Nodes"
 /// zone. Phase 3 displays only the aggregate; per-node breakdown was
 /// part of the old Health detail pane and is not in scope for Overview.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 pub struct RepositoriesSummary {
     pub content_percent: u32,
     pub flowfile_percent: u32,
     pub provenance_percent: u32,
-    /// Worst severity across the three repos. Drives the row color.
-    pub max_severity: Severity,
-}
-
-impl Default for RepositoriesSummary {
-    fn default() -> Self {
-        Self {
-            content_percent: 0,
-            flowfile_percent: 0,
-            provenance_percent: 0,
-            max_severity: Severity::Unknown,
-        }
-    }
 }
 
 impl OverviewState {
@@ -230,6 +217,8 @@ fn apply_pg_status(state: &mut OverviewState, payload: OverviewPgStatusPayload) 
         });
     }
 
+    state.last_pg_refresh = Some(std::time::Instant::now());
+
     state.snapshot = Some(OverviewSnapshot {
         about,
         controller,
@@ -271,9 +260,6 @@ fn build_repositories_summary(
         content_percent,
         flowfile_percent,
         provenance_percent,
-        max_severity: severity_for_pct(content_percent)
-            .max(severity_for_pct(flowfile_percent))
-            .max(severity_for_pct(provenance_percent)),
     }
 }
 
@@ -283,14 +269,6 @@ fn avg_repo_percent(repos: &[crate::client::health::RepoUsage]) -> u32 {
     }
     let sum: u32 = repos.iter().map(|r| r.utilization_percent).sum();
     sum / repos.len() as u32
-}
-
-fn severity_for_pct(percent: u32) -> Severity {
-    match percent {
-        0..=49 => Severity::Unknown,
-        50..=79 => Severity::Warning,
-        _ => Severity::Error,
-    }
 }
 
 /// Parse an ISO-8601 / RFC-3339 timestamp into seconds since the UNIX epoch.

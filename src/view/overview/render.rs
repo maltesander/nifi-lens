@@ -186,7 +186,7 @@ fn format_node_row(node: &crate::client::health::NodeHealthRow) -> Line<'static>
         Span::raw("   heap "),
         Span::styled(
             format!("{:>3}%", node.heap_percent),
-            health_severity_style(node.heap_severity.clone()),
+            health_severity_style(node.heap_severity),
         ),
         Span::raw("   gc "),
         Span::styled(gc_str, gc_style),

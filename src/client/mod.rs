@@ -436,9 +436,8 @@ pub use browser::{
     NodeStatusSummary, ProcessGroupDetail, ProcessorDetail, RawNode, RecursiveSnapshot,
 };
 pub use health::{
-    ConnectionStatusRow, FullPgStatusSnapshot, GcSnapshot, NodeDiagnostics, NodeHealthRow,
-    ProcessorStatusRow, ProcessorThreadRow, QueuePressureRow, RepoFillBar, RepoUsage,
-    Severity as HealthSeverity, SystemDiagAggregate, SystemDiagSnapshot, TimeToFull,
+    GcSnapshot, NodeDiagnostics, NodeHealthRow, RepoUsage, Severity as HealthSeverity,
+    SystemDiagAggregate, SystemDiagSnapshot,
 };
 pub use tracer::{
     AttributeTriple, ContentRender, ContentSide, ContentSnapshot, LatestEventsSnapshot,
