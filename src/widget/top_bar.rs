@@ -106,7 +106,14 @@ fn truncate_to_width(s: &str, max_cols: usize) -> String {
     out
 }
 
-const TAB_LABELS: &[&str] = &["Overview", "Bulletins", "Browser", "Events", "Tracer"];
+const TAB_LABELS: &[&str] = &[
+    "Overview",
+    "Bulletins",
+    "Health",
+    "Browser",
+    "Events",
+    "Tracer",
+];
 
 /// Render the 1-row top bar into `area`. Tabs left-aligned, identity
 /// strip right-aligned. No bordered box.
@@ -144,10 +151,10 @@ fn tab_index(view: ViewId) -> usize {
     match view {
         ViewId::Overview => 0,
         ViewId::Bulletins => 1,
-        ViewId::Browser => 2,
-        ViewId::Events => 3,
-        ViewId::Tracer => 4,
-        ViewId::Health => 5,
+        ViewId::Health => 2,
+        ViewId::Browser => 3,
+        ViewId::Events => 4,
+        ViewId::Tracer => 5,
     }
 }
 
@@ -252,6 +259,29 @@ mod tests {
     fn zero_budget_returns_empty() {
         let spans = build_identity_spans("dev", &ver(), &cluster_healthy(), 0);
         assert!(spans.is_empty());
+    }
+
+    #[test]
+    fn every_view_id_indexes_inside_tab_labels() {
+        use crate::app::state::ViewId;
+        // Ensures tab_index never returns an out-of-bounds index for any
+        // ViewId variant that still exists. Guards against the Phase 1
+        // Health-included tab layout drifting out of sync with TAB_LABELS.
+        for view in [
+            ViewId::Overview,
+            ViewId::Bulletins,
+            ViewId::Health,
+            ViewId::Browser,
+            ViewId::Events,
+            ViewId::Tracer,
+        ] {
+            let idx = super::tab_index(view);
+            assert!(
+                idx < super::TAB_LABELS.len(),
+                "tab_index({view:?}) = {idx} is out of bounds for TAB_LABELS (len {})",
+                super::TAB_LABELS.len()
+            );
+        }
     }
 
     #[test]
