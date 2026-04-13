@@ -46,6 +46,13 @@ mod tests {
     fn styles_are_stable() {
         let e = severity_style("ERROR");
         let w = severity_style("WARN");
+        let i = severity_style("INFO");
+        let u = severity_style("bogus");
         assert_ne!(e, w);
+        assert_ne!(e, i);
+        assert_ne!(e, u);
+        assert_ne!(w, i);
+        assert_ne!(w, u);
+        assert_ne!(i, u);
     }
 }
