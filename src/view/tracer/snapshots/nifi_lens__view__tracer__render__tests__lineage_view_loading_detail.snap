@@ -3,9 +3,9 @@ source: src/view/tracer/render.rs
 expression: snap(&state)
 ---
 "┌ Tracer — Lineage ────────────────────────────────────────────────────────────────────────────────────────────────────┐"
-"│  10:30:45.123         RECEIVE           LogAttribute            pg-root-aaaa-bbbb                                    │"
-"│> 10:30:45.123         CONTENT_MODIFIED  LogAttribute            pg-root-aaaa-bbbb                                    │"
-"│  10:30:45.123         SEND              LogAttribute            pg-root-aaaa-bbbb           ← fail                   │"
+"│  Apr 12 10:30:45.123  RECEIVE           LogAttribute            pg-root-aaaa-bbbb                                    │"
+"│> Apr 12 10:30:45.123  CONTENT_MODIFIED  LogAttribute            pg-root-aaaa-bbbb                                    │"
+"│  Apr 12 10:30:45.123  SEND              LogAttribute            pg-root-aaaa-bbbb           ← fail                   │"
 "│                                                                                                                      │"
 "│                                                                                                                      │"
 "│                                                                                                                      │"
