@@ -60,6 +60,28 @@ Browser status icons:
   ◐ (blue)          Processor validating
 ";
 
+const EVENTS_TEXT: &str = "\
+Events Tab:
+
+Filter bar:
+  t                edit time window
+  T                edit type list
+  s                edit source component
+  u                edit file uuid
+  a                edit attribute filter
+  Enter            run query
+  n                new query (clear filters + results)
+  r                reset filters
+  L                raise cap 500 → 5000
+
+Results list (j/k to enter row nav):
+  j / k            navigate rows
+  t                trace selected flowfile in Tracer
+  g                open selected component in Browser
+  c                copy flowfile uuid
+  Esc              back to filter bar
+";
+
 const TRACER_TEXT: &str = "\
 Tracer Tab:
 
@@ -94,7 +116,7 @@ pub fn render(frame: &mut Frame, area: Rect, current_tab: ViewId) {
         ViewId::Overview => OVERVIEW_TEXT,
         ViewId::Bulletins => BULLETINS_TEXT,
         ViewId::Browser => BROWSER_TEXT,
-        ViewId::Events => "",
+        ViewId::Events => EVENTS_TEXT,
         ViewId::Tracer => TRACER_TEXT,
     };
     let text = format!("{GLOBAL_TEXT}\n{per_view}");

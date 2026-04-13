@@ -9,6 +9,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **Bulletins `t` now lands on Events, not Tracer.** The cross-link
+  pre-fills `source = component` and `time = last 15m`, then
+  auto-runs the provenance query. The old Tracer latest-events
+  entry is still reachable from Tracer itself, just no longer from
+  Bulletins.
+- **Browser processor `t` now lands on Events** via the same
+  `JumpToEvents` cross-link.
+- **`CrossLink` enum grows two new variants**: `JumpToEvents` (used
+  by the retargeted `t` from Bulletins/Browser) and `TraceByUuid`
+  (used by the new Events-row `t`). `TraceComponent` stays in the
+  enum for backwards compatibility but is no longer emitted from
+  the UI.
 - **UI Reorg Phase 1 — Chrome refactor.** New 1-row top bar with tabs +
   right-aligned compact identity strip (`[ctx] vX.Y.Z · nodes N/M`).
   Two-row footer (banner + refresh age, then context-sensitive shortcuts
@@ -134,6 +146,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Events tab** *(UI Reorg Phase 6)* — new cluster-wide provenance
+  search tab. Filter bar with `t time` / `T type` / `s source` /
+  `u file uuid` / `a attr` inline editors; results list colored by
+  event type; detail pane for the selected row. `Enter` runs the
+  query, `n` clears, `r` resets filters, `L` raises the 500-event
+  cap to 5000. `j`/`k` navigate results; `Esc` returns to the
+  filter bar. From a selected row, `t` traces the flowfile in
+  Tracer, `g` jumps to the component in Browser, `c` copies the
+  uuid.
+- **`src/client/events.rs`** — new `ProvenanceQuery` helper wrapping
+  NiFi's `POST /provenance` + poll + delete lifecycle, following
+  the same `classify_or_fallback` pattern as the tracer client.
 - **`view::bulletins::state::recent_for_source_id` and
   `recent_for_group_id`** — pure ring filters returning up to N
   newest bulletins matching a source or group id. Used by the
