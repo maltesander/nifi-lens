@@ -276,7 +276,7 @@ pub fn collect_hints(state: &AppState) -> Vec<crate::widget::hint_bar::HintSpan>
             }],
             Modal::ContextSwitcher(_) => vec![
                 HintSpan {
-                    key: "j/k",
+                    key: "↑/↓",
                     action: "nav",
                 },
                 HintSpan {
@@ -304,7 +304,7 @@ pub fn collect_hints(state: &AppState) -> Vec<crate::widget::hint_bar::HintSpan>
             ],
             Modal::Properties(_) => vec![
                 HintSpan {
-                    key: "j/k",
+                    key: "↑/↓",
                     action: "scroll",
                 },
                 HintSpan {

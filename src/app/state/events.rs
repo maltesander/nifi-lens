@@ -60,7 +60,7 @@ impl ViewKeyHandler for EventsHandler {
         if state.events.selected_row.is_some() {
             return vec![
                 HintSpan {
-                    key: "j/k",
+                    key: "↑/↓",
                     action: "nav",
                 },
                 HintSpan {
@@ -100,7 +100,7 @@ impl ViewKeyHandler for EventsHandler {
                 action: "raise cap",
             },
             HintSpan {
-                key: "j/k",
+                key: "↑/↓",
                 action: "results",
             },
         ]

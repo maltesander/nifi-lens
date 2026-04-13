@@ -43,7 +43,7 @@ impl ViewKeyHandler for TracerHandler {
             ],
             TracerMode::LatestEvents(_) => vec![
                 HintSpan {
-                    key: "j/k",
+                    key: "↑/↓",
                     action: "nav",
                 },
                 HintSpan {
@@ -61,7 +61,7 @@ impl ViewKeyHandler for TracerHandler {
             }],
             TracerMode::Lineage(_) => vec![
                 HintSpan {
-                    key: "j/k",
+                    key: "↑/↓",
                     action: "nav",
                 },
                 HintSpan {

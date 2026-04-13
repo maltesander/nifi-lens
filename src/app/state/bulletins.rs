@@ -197,7 +197,7 @@ impl ViewKeyHandler for BulletinsHandler {
 
         vec![
             HintSpan {
-                key: "j/k",
+                key: "↑/↓",
                 action: "nav",
             },
             HintSpan {
