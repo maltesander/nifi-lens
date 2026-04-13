@@ -342,13 +342,13 @@ pub fn collect_hints(state: &AppState) -> Vec<crate::widget::hint_bar::HintSpan>
     // Global hints appended
     if state.history.can_go_back() {
         hints.push(HintSpan {
-            key: "Alt+\u{2190}",
+            key: "[",
             action: "back",
         });
     }
     if state.history.can_go_forward() {
         hints.push(HintSpan {
-            key: "Alt+\u{2192}",
+            key: "]",
             action: "fwd",
         });
     }
@@ -614,7 +614,7 @@ fn handle_key(state: &mut AppState, key: KeyEvent, config: &Config) -> UpdateRes
             }
             Modal::FuzzyFind(fs) => {
                 match (key.code, key.modifiers) {
-                    (KeyCode::Esc, _) | (KeyCode::Char('f'), KeyModifiers::NONE) => {
+                    (KeyCode::Esc, _) => {
                         state.modal = None;
                         return UpdateResult {
                             redraw: true,
@@ -911,7 +911,7 @@ fn handle_key(state: &mut AppState, key: KeyEvent, config: &Config) -> UpdateRes
                 tracer_followup: None,
             }
         }
-        (KeyCode::Char('K'), KeyModifiers::SHIFT) => {
+        (KeyCode::Char('K'), KeyModifiers::NONE | KeyModifiers::SHIFT) => {
             let cs = ContextSwitcherState::from_config(
                 config,
                 &state.context_name,
@@ -1496,5 +1496,69 @@ mod tests {
         let state = fresh_state();
         assert_eq!(state.cluster_summary.connected_nodes, None);
         assert_eq!(state.cluster_summary.total_nodes, None);
+    }
+
+    #[test]
+    fn fuzzy_find_modal_f_key_is_captured_as_query_character() {
+        // Regression: the FuzzyFind close arm used to include Char('f') which
+        // ate every search starting with `f`. Only Esc closes the modal now.
+        let mut s = fresh_state();
+        let c = tiny_config();
+        s.current_tab = ViewId::Browser;
+        // Seed the flow index so the fuzzy find modal can actually open.
+        s.flow_index = Some(crate::view::browser::state::FlowIndex { entries: vec![] });
+        // Open the modal via `f`.
+        update(&mut s, key(KeyCode::Char('f'), KeyModifiers::NONE), &c);
+        assert!(
+            matches!(s.modal, Some(Modal::FuzzyFind(_))),
+            "f should open the FuzzyFind modal"
+        );
+        // Type 'f' again — this should append to the query, NOT close the modal.
+        update(&mut s, key(KeyCode::Char('f'), KeyModifiers::NONE), &c);
+        assert!(
+            matches!(s.modal, Some(Modal::FuzzyFind(_))),
+            "second f should be captured as query char, not close the modal"
+        );
+        if let Some(Modal::FuzzyFind(ref fs)) = s.modal {
+            assert_eq!(fs.query, "f", "query buffer should contain 'f'");
+        }
+        // Esc closes it.
+        update(&mut s, key(KeyCode::Esc, KeyModifiers::NONE), &c);
+        assert!(s.modal.is_none(), "Esc should close the modal");
+    }
+
+    #[test]
+    fn collect_hints_advertises_new_bracket_chords_not_alt_arrows() {
+        let mut s = fresh_state();
+        // Put something in history so the back/fwd hints are emitted.
+        s.history.push(crate::app::history::HistoryEntry {
+            tab: ViewId::Bulletins,
+            anchor: None,
+        });
+        s.current_tab = ViewId::Browser;
+        let hints = collect_hints(&s);
+        let hint_text: String = hints
+            .iter()
+            .map(|h| format!("{} {}", h.key, h.action))
+            .collect::<Vec<_>>()
+            .join(" | ");
+        assert!(
+            !hint_text.contains("Alt+"),
+            "hint bar must not advertise old Alt+ chords: {hint_text}"
+        );
+    }
+
+    #[test]
+    fn capital_k_opens_context_switcher_without_explicit_shift_modifier() {
+        // Some terminals deliver capital letters as KeyCode::Char('K') with
+        // KeyModifiers::NONE instead of SHIFT. Match the loose pattern used by
+        // other capital handlers in the codebase.
+        let mut s = fresh_state();
+        let c = tiny_config();
+        update(&mut s, key(KeyCode::Char('K'), KeyModifiers::NONE), &c);
+        assert!(
+            matches!(s.modal, Some(Modal::ContextSwitcher(_))),
+            "K without SHIFT modifier should still open the context switcher"
+        );
     }
 }

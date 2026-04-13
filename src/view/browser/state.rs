@@ -379,7 +379,7 @@ fn push_visible_subtree(state: &mut BrowserState, idx: usize) {
     }
 }
 
-/// Fuzzy-find haystack shared between Browser and the Ctrl+F modal.
+/// Fuzzy-find haystack shared between Browser and the f-key modal.
 /// Rebuilt on every tree snapshot.
 #[derive(Debug, Clone)]
 pub struct FlowIndex {
