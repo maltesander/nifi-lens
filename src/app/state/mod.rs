@@ -1104,9 +1104,37 @@ fn handle_intent_outcome(
                 tracer_followup: None,
             }
         }
-        // Phase 6 Task 17 will replace this stub
-        Ok(IntentOutcome::EventsLandingOn { .. })
-        | Ok(IntentOutcome::TracerLandingOnUuid { .. }) => UpdateResult::default(),
+        Ok(IntentOutcome::EventsLandingOn { component_id }) => {
+            // Switch to Events, seed filters, and auto-run.
+            state.current_tab = ViewId::Events;
+            state.events.filters.source = component_id;
+            state.events.filters.time = "last 15m".to_string();
+            state.events.status = crate::view::events::state::EventsQueryStatus::Running {
+                query_id: None,
+                submitted_at: std::time::SystemTime::now(),
+                percent: 0,
+            };
+            state.events.events.clear();
+            state.events.selected_row = None;
+            let query = state.events.build_query();
+            UpdateResult {
+                redraw: true,
+                intent: Some(PendingIntent::RunProvenanceQuery { query }),
+                tracer_followup: None,
+            }
+        }
+        Ok(IntentOutcome::TracerLandingOnUuid { uuid: _uuid }) => {
+            // The lineage worker was spawned by the dispatcher's
+            // CrossLink::TraceByUuid arm; its payload arrives shortly
+            // via the normal Tracer reducer. Just switch the tab so
+            // the user sees the loading state.
+            state.current_tab = ViewId::Tracer;
+            UpdateResult {
+                redraw: true,
+                intent: None,
+                tracer_followup: None,
+            }
+        }
         Err(err) => {
             let msg = err.to_string();
             state.status.banner = Some(Banner {
@@ -1657,5 +1685,37 @@ mod tests {
         // Cluster summary should still be populated even on fallback.
         assert_eq!(s.cluster_summary.total_nodes, Some(2));
         assert_eq!(s.cluster_summary.connected_nodes, Some(2));
+    }
+
+    #[test]
+    fn events_landing_on_seeds_filters_and_switches_tab() {
+        let mut s = fresh_state();
+        let c = tiny_config();
+        let outcome = crate::event::IntentOutcome::EventsLandingOn {
+            component_id: "proc-42".into(),
+        };
+        let r = update(&mut s, AppEvent::IntentOutcome(Ok(outcome)), &c);
+        assert_eq!(s.current_tab, ViewId::Events);
+        assert_eq!(s.events.filters.source, "proc-42");
+        assert_eq!(s.events.filters.time, "last 15m");
+        assert!(matches!(
+            s.events.status,
+            crate::view::events::state::EventsQueryStatus::Running { .. }
+        ));
+        assert!(matches!(
+            r.intent,
+            Some(PendingIntent::RunProvenanceQuery { .. })
+        ));
+    }
+
+    #[test]
+    fn tracer_landing_on_uuid_switches_to_tracer_tab() {
+        let mut s = fresh_state();
+        let c = tiny_config();
+        let outcome = crate::event::IntentOutcome::TracerLandingOnUuid {
+            uuid: "abc-123".into(),
+        };
+        let _r = update(&mut s, AppEvent::IntentOutcome(Ok(outcome)), &c);
+        assert_eq!(s.current_tab, ViewId::Tracer);
     }
 }
