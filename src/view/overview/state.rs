@@ -6,7 +6,7 @@
 use std::time::SystemTime;
 
 use crate::client::{AboutSnapshot, ControllerStatusSnapshot, QueueSnapshot, RootPgStatusSnapshot};
-use crate::event::OverviewPayload;
+use crate::event::{OverviewPayload, OverviewPgStatusPayload};
 
 pub use crate::client::Severity;
 
@@ -92,7 +92,19 @@ impl OverviewState {
 
 /// Fold one poll result into the state. Pure; no I/O.
 pub fn apply_payload(state: &mut OverviewState, payload: OverviewPayload) {
-    let OverviewPayload {
+    match payload {
+        OverviewPayload::PgStatus(pg) => apply_pg_status(state, pg),
+        OverviewPayload::SystemDiag(_) | OverviewPayload::SystemDiagFallback { .. } => {
+            // System diagnostics handled in P3.T2. For T1 this arm is
+            // a no-op so the type-check passes.
+        }
+    }
+}
+
+/// Fold one PG-status poll into the existing Overview state.
+/// Pre-Phase-3 this was the entire body of `apply_payload`.
+fn apply_pg_status(state: &mut OverviewState, payload: OverviewPgStatusPayload) {
+    let OverviewPgStatusPayload {
         about,
         controller,
         root_pg,
@@ -215,7 +227,7 @@ mod tests {
         AboutSnapshot, BulletinBoardSnapshot, BulletinSnapshot, ControllerStatusSnapshot,
         QueueSnapshot, RootPgStatusSnapshot,
     };
-    use crate::event::OverviewPayload;
+    use crate::event::{OverviewPayload, OverviewPgStatusPayload};
     use std::time::{Duration, UNIX_EPOCH};
 
     // 2026-04-11T10:14:22Z in unix seconds.
@@ -226,7 +238,7 @@ mod tests {
         queues: Vec<QueueSnapshot>,
         bulletins: Vec<BulletinSnapshot>,
     ) -> OverviewPayload {
-        OverviewPayload {
+        OverviewPayload::PgStatus(OverviewPgStatusPayload {
             about: AboutSnapshot {
                 version: "2.8.0".into(),
                 title: "NiFi".into(),
@@ -239,7 +251,7 @@ mod tests {
             },
             bulletin_board: BulletinBoardSnapshot { bulletins },
             fetched_at: UNIX_EPOCH + Duration::from_secs(T0),
-        }
+        })
     }
 
     fn q(id: &str, pct: u32) -> QueueSnapshot {

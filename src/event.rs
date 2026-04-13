@@ -26,11 +26,33 @@ pub enum ViewPayload {
     Health(HealthPayload),
 }
 
-/// One poll cycle's worth of data for the Overview tab. Composed inside the
-/// worker from three parallel client calls, then pushed as a single event
-/// so the reducer treats the refresh as atomic.
+/// Payload variants pushed from the merged Overview worker. After
+/// Phase 3 the Overview worker runs two parallel pollers (PG status @
+/// 10s, system diagnostics @ 30s) and emits one of these variants per
+/// poll. The reducer in `view::overview::state::apply_payload` matches
+/// on the variant.
 #[derive(Debug, Clone)]
-pub struct OverviewPayload {
+pub enum OverviewPayload {
+    /// Result of the 10-second PG-status poll. Carries the
+    /// pre-Phase-3 set of fields.
+    PgStatus(OverviewPgStatusPayload),
+    /// Result of the 30-second system-diagnostics poll. Includes
+    /// per-node heap, GC, load, and repository fill data.
+    SystemDiag(crate::client::health::SystemDiagSnapshot),
+    /// Aggregate-only fallback when the nodewise system diagnostics
+    /// call failed. Carries the aggregate snapshot plus a warning
+    /// message for the banner. Mirrors the existing `HealthPayload`
+    /// fallback variant.
+    SystemDiagFallback {
+        diag: crate::client::health::SystemDiagSnapshot,
+        warning: String,
+    },
+}
+
+/// Inner payload for the PG-status poll. Same fields as the pre-Phase-3
+/// `OverviewPayload` struct.
+#[derive(Debug, Clone)]
+pub struct OverviewPgStatusPayload {
     pub about: crate::client::AboutSnapshot,
     pub controller: crate::client::ControllerStatusSnapshot,
     pub root_pg: crate::client::RootPgStatusSnapshot,

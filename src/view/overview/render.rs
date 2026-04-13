@@ -219,7 +219,7 @@ mod tests {
         AboutSnapshot, BulletinBoardSnapshot, BulletinSnapshot, ControllerStatusSnapshot,
         QueueSnapshot, RootPgStatusSnapshot,
     };
-    use crate::event::OverviewPayload;
+    use crate::event::{OverviewPayload, OverviewPgStatusPayload};
     use crate::view::overview::state::{OverviewState, apply_payload};
     use ratatui::Terminal;
     use ratatui::backend::TestBackend;
@@ -246,7 +246,7 @@ mod tests {
     #[test]
     fn snapshot_healthy_cluster() {
         let mut state = OverviewState::new();
-        let payload = OverviewPayload {
+        let payload = OverviewPayload::PgStatus(OverviewPgStatusPayload {
             about: AboutSnapshot {
                 version: "2.8.0".into(),
                 title: "NiFi".into(),
@@ -277,7 +277,7 @@ mod tests {
             },
             bulletin_board: BulletinBoardSnapshot::default(),
             fetched_at: UNIX_EPOCH + Duration::from_secs(T0),
-        };
+        });
         apply_payload(&mut state, payload);
         insta::assert_snapshot!("overview_healthy", render_to_string(&state));
     }
@@ -315,7 +315,7 @@ mod tests {
                 timestamp_human: String::new(),
             })
             .collect();
-        let payload = OverviewPayload {
+        let payload = OverviewPayload::PgStatus(OverviewPgStatusPayload {
             about: AboutSnapshot {
                 version: "2.8.0".into(),
                 title: "NiFi".into(),
@@ -336,7 +336,7 @@ mod tests {
             },
             bulletin_board: BulletinBoardSnapshot { bulletins },
             fetched_at: UNIX_EPOCH + Duration::from_secs(T0),
-        };
+        });
         apply_payload(&mut state, payload);
         insta::assert_snapshot!("overview_unhealthy", render_to_string(&state));
     }

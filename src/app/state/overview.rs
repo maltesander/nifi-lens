@@ -25,14 +25,14 @@ mod tests {
     use crate::client::{
         AboutSnapshot, BulletinBoardSnapshot, ControllerStatusSnapshot, RootPgStatusSnapshot,
     };
-    use crate::event::{AppEvent, OverviewPayload, ViewPayload};
+    use crate::event::{AppEvent, OverviewPayload, OverviewPgStatusPayload, ViewPayload};
     use std::time::SystemTime;
 
     #[test]
     fn overview_data_event_updates_state_and_triggers_redraw() {
         let mut s = fresh_state();
         let c = tiny_config();
-        let payload = OverviewPayload {
+        let payload = OverviewPayload::PgStatus(OverviewPgStatusPayload {
             about: AboutSnapshot {
                 version: "2.8.0".into(),
                 title: "NiFi".into(),
@@ -49,7 +49,7 @@ mod tests {
             root_pg: RootPgStatusSnapshot::default(),
             bulletin_board: BulletinBoardSnapshot::default(),
             fetched_at: SystemTime::now(),
-        };
+        });
         let r = update(&mut s, AppEvent::Data(ViewPayload::Overview(payload)), &c);
         assert!(r.redraw);
         let snap = s.overview.snapshot.as_ref().unwrap();

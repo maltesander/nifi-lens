@@ -22,7 +22,7 @@ use tokio::task::JoinHandle;
 
 use crate::app::worker::spawn_polling_worker;
 use crate::client::NifiClient;
-use crate::event::{AppEvent, OverviewPayload, ViewPayload};
+use crate::event::{AppEvent, OverviewPayload, OverviewPgStatusPayload, ViewPayload};
 
 const POLL_INTERVAL: Duration = Duration::from_secs(10);
 
@@ -56,11 +56,11 @@ async fn poll_once(
     let controller = guard.controller_status().await?;
     let root_pg = guard.root_pg_status().await?;
     let bulletin_board = guard.bulletin_board(None, Some(200)).await?;
-    Ok(OverviewPayload {
+    Ok(OverviewPayload::PgStatus(OverviewPgStatusPayload {
         about,
         controller,
         root_pg,
         bulletin_board,
         fetched_at: SystemTime::now(),
-    })
+    }))
 }
