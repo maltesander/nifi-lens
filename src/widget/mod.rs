@@ -7,3 +7,4 @@ pub mod help_modal;
 pub mod hint_bar;
 pub mod save_modal;
 pub mod status_bar;
+pub mod top_bar;
