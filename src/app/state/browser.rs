@@ -193,7 +193,7 @@ impl ViewKeyHandler for BrowserHandler {
         if state.browser.breadcrumb_focus.is_some() {
             return vec![
                 HintSpan {
-                    key: "h/l",
+                    key: "←/→",
                     action: "nav",
                 },
                 HintSpan {
@@ -209,7 +209,7 @@ impl ViewKeyHandler for BrowserHandler {
 
         vec![
             HintSpan {
-                key: "j/k",
+                key: "↑/↓",
                 action: "nav",
             },
             HintSpan {
@@ -217,7 +217,7 @@ impl ViewKeyHandler for BrowserHandler {
                 action: "expand",
             },
             HintSpan {
-                key: "h",
+                key: "←",
                 action: "back",
             },
             HintSpan {
@@ -764,6 +764,10 @@ mod tests {
             s.browser.selected, before,
             "k should no longer move the cursor"
         );
+
+        // Up still works.
+        update(&mut s, key(KeyCode::Up, KeyModifiers::NONE), &c);
+        assert!(s.browser.selected < before, "Up should move the cursor");
     }
 
     #[test]
