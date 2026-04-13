@@ -169,6 +169,43 @@ impl BrowserState {
         segments.reverse();
         segments
     }
+
+    /// Resolve a `group_id` (PG UUID) to a human-readable breadcrumb
+    /// path by walking the flow arena upward, e.g. `"noisy-pipeline"` or
+    /// `"healthy-pipeline / ingest"`. The root PG name is dropped from
+    /// the output because every path would otherwise start with the
+    /// same redundant prefix.
+    ///
+    /// Returns `None` when the PG is not present in the current
+    /// snapshot (Browser tab not yet visited, stale id, etc.). Callers
+    /// must render their own fallback in that case.
+    pub fn pg_path(&self, group_id: &str) -> Option<String> {
+        // Find the PG node whose `id` matches `group_id`. A non-PG node
+        // with a matching id is a programming error — PGs have unique
+        // ids in NiFi.
+        let start = self
+            .nodes
+            .iter()
+            .position(|n| matches!(n.kind, NodeKind::ProcessGroup) && n.id == group_id)?;
+        // Walk parents, collecting names, stopping before the root.
+        let mut names: Vec<&str> = Vec::new();
+        let mut cursor = Some(start);
+        while let Some(idx) = cursor {
+            let node = &self.nodes[idx];
+            // Stop at the root: a node whose parent is None. Its name
+            // is intentionally excluded.
+            if node.parent.is_none() {
+                break;
+            }
+            names.push(node.name.as_str());
+            cursor = node.parent;
+        }
+        if names.is_empty() {
+            return None;
+        }
+        names.reverse();
+        Some(names.join(" / "))
+    }
 }
 
 impl ListNavigation for BrowserState {
@@ -1012,5 +1049,59 @@ mod tests {
     fn breadcrumb_focus_default_is_none() {
         let state = BrowserState::default();
         assert!(state.breadcrumb_focus.is_none());
+    }
+
+    #[test]
+    fn pg_path_returns_none_for_unknown_group_id() {
+        let s = BrowserState::new();
+        assert!(s.pg_path("nonexistent").is_none());
+    }
+
+    #[test]
+    fn pg_path_joins_ancestor_pg_names_excluding_root() {
+        // Build a minimal tree: Root → noisy-pipeline → inner
+        let fixture = snap(vec![
+            pg("root-id", None, 0),
+            RawNode {
+                parent_idx: Some(0),
+                kind: NodeKind::ProcessGroup,
+                id: "noisy-pipeline".into(),
+                group_id: "root-id".into(),
+                name: "noisy-pipeline".into(),
+                status_summary: NodeStatusSummary::ProcessGroup {
+                    running: 0,
+                    stopped: 0,
+                    invalid: 0,
+                    disabled: 0,
+                },
+            },
+            RawNode {
+                parent_idx: Some(1),
+                kind: NodeKind::ProcessGroup,
+                id: "inner".into(),
+                group_id: "noisy-pipeline".into(),
+                name: "inner".into(),
+                status_summary: NodeStatusSummary::ProcessGroup {
+                    running: 0,
+                    stopped: 0,
+                    invalid: 0,
+                    disabled: 0,
+                },
+            },
+        ]);
+        let mut s = BrowserState::new();
+        apply_tree_snapshot(&mut s, fixture);
+        // PG path for the inner PG should be "noisy-pipeline / inner".
+        assert_eq!(
+            s.pg_path("inner").as_deref(),
+            Some("noisy-pipeline / inner"),
+        );
+        // PG path for the noisy-pipeline itself is just "noisy-pipeline".
+        assert_eq!(
+            s.pg_path("noisy-pipeline").as_deref(),
+            Some("noisy-pipeline"),
+        );
+        // Root PG has no path (root name is intentionally dropped).
+        assert_eq!(s.pg_path("root-id"), None);
     }
 }
