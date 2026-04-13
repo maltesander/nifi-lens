@@ -21,7 +21,7 @@ use ratatui::widgets::{Block, Borders, Paragraph};
 
 use crate::client::{NodeKind, NodeStatusSummary};
 use crate::theme;
-use crate::view::browser::state::{BrowserState, FlowIndex, NodeDetail};
+use crate::view::browser::state::{BrowserState, FlowIndex, NodeDetail, PgHealth};
 
 /// Entry point called from `app::ui`.
 pub fn render(
@@ -132,8 +132,22 @@ fn render_tree(frame: &mut Frame, area: Rect, state: &BrowserState) {
         } else {
             Style::default()
         };
+        // Indent uses the neutral row style; marker uses the PG
+        // rollup color (PG rows only) patched onto the row style.
+        let marker_style = match node.kind {
+            NodeKind::ProcessGroup => {
+                let rollup_style = match state.pg_health_rollup(arena_idx) {
+                    PgHealth::Green => theme::success(),
+                    PgHealth::Yellow => theme::warning(),
+                    PgHealth::Red => theme::error(),
+                };
+                rollup_style.patch(row_style)
+            }
+            _ => row_style,
+        };
         lines.push(Line::from(vec![
-            Span::styled(format!("{indent}{marker}"), row_style),
+            Span::styled(indent.clone(), row_style),
+            Span::styled(marker.to_string(), marker_style),
             Span::styled(format!("{glyph_owned} "), glyph_style.patch(row_style)),
             Span::styled(node.name.clone(), row_style),
         ]));
