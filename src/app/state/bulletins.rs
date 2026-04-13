@@ -112,7 +112,7 @@ impl ViewKeyHandler for BulletinsHandler {
                     tracer_followup: None,
                 })
             }
-            KeyCode::Up | KeyCode::Char('k') => {
+            KeyCode::Up => {
                 state.bulletins.move_selection_up();
                 Some(UpdateResult {
                     redraw: true,
@@ -120,7 +120,7 @@ impl ViewKeyHandler for BulletinsHandler {
                     tracer_followup: None,
                 })
             }
-            KeyCode::Down | KeyCode::Char('j') => {
+            KeyCode::Down => {
                 state.bulletins.move_selection_down();
                 Some(UpdateResult {
                     redraw: true,
@@ -603,5 +603,60 @@ mod tests {
         let spans = BulletinsHandler::hints(&s);
         assert!(!spans.iter().any(|h| h.key == "B"));
         assert!(!spans.iter().any(|h| h.action.contains("bundle")));
+    }
+
+    #[test]
+    fn bulletin_list_nav_uses_arrows_only_no_jk() {
+        let mut s = fresh_state();
+        let c = tiny_config();
+        s.current_tab = ViewId::Bulletins;
+        // Seed two bulletins so row nav has room to move.
+        let payload = BulletinsPayload {
+            bulletins: vec![
+                BulletinSnapshot {
+                    id: 1,
+                    level: "INFO".into(),
+                    message: "first".into(),
+                    source_id: "a".into(),
+                    source_name: "A".into(),
+                    source_type: "PROCESSOR".into(),
+                    group_id: "root".into(),
+                    timestamp_iso: "2026-04-11T10:14:22Z".into(),
+                    timestamp_human: String::new(),
+                },
+                BulletinSnapshot {
+                    id: 2,
+                    level: "INFO".into(),
+                    message: "second".into(),
+                    source_id: "b".into(),
+                    source_name: "B".into(),
+                    source_type: "PROCESSOR".into(),
+                    group_id: "root".into(),
+                    timestamp_iso: "2026-04-11T10:14:23Z".into(),
+                    timestamp_human: String::new(),
+                },
+            ],
+            fetched_at: SystemTime::now(),
+        };
+        update(&mut s, AppEvent::Data(ViewPayload::Bulletins(payload)), &c);
+        s.bulletins.auto_scroll = false;
+        s.bulletins.selected = 0;
+
+        // j is a no-op.
+        update(&mut s, key(KeyCode::Char('j'), KeyModifiers::NONE), &c);
+        assert_eq!(s.bulletins.selected, 0, "j dropped");
+
+        // Down still works.
+        update(&mut s, key(KeyCode::Down, KeyModifiers::NONE), &c);
+        assert!(s.bulletins.selected > 0, "Down still works");
+
+        let before = s.bulletins.selected;
+        // k is a no-op.
+        update(&mut s, key(KeyCode::Char('k'), KeyModifiers::NONE), &c);
+        assert_eq!(s.bulletins.selected, before, "k dropped");
+
+        // Up still works.
+        update(&mut s, key(KeyCode::Up, KeyModifiers::NONE), &c);
+        assert!(s.bulletins.selected < before, "Up still works");
     }
 }
