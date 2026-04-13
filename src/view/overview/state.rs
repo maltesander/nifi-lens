@@ -82,6 +82,35 @@ pub struct OverviewState {
     /// Highest bulletin id we've seen so the sparkline does not double-count
     /// across polls. The reducer keeps this updated whenever a poll arrives.
     pub last_bulletin_id: Option<i64>,
+
+    // New in Phase 3 — populated by the SystemDiag payload variant.
+    pub nodes: crate::client::health::NodesState,
+    pub repositories_summary: RepositoriesSummary,
+    pub last_pg_refresh: Option<std::time::Instant>,
+    pub last_sysdiag_refresh: Option<std::time::Instant>,
+}
+
+/// Cluster-aggregate repository fill bars shown in the Overview "Nodes"
+/// zone. Phase 3 displays only the aggregate; per-node breakdown was
+/// part of the old Health detail pane and is not in scope for Overview.
+#[derive(Debug, Clone)]
+pub struct RepositoriesSummary {
+    pub content_percent: u32,
+    pub flowfile_percent: u32,
+    pub provenance_percent: u32,
+    /// Worst severity across the three repos. Drives the row color.
+    pub max_severity: Severity,
+}
+
+impl Default for RepositoriesSummary {
+    fn default() -> Self {
+        Self {
+            content_percent: 0,
+            flowfile_percent: 0,
+            provenance_percent: 0,
+            max_severity: Severity::Unknown,
+        }
+    }
 }
 
 impl OverviewState {
@@ -94,9 +123,12 @@ impl OverviewState {
 pub fn apply_payload(state: &mut OverviewState, payload: OverviewPayload) {
     match payload {
         OverviewPayload::PgStatus(pg) => apply_pg_status(state, pg),
-        OverviewPayload::SystemDiag(_) | OverviewPayload::SystemDiagFallback { .. } => {
-            // System diagnostics handled in P3.T2. For T1 this arm is
-            // a no-op so the type-check passes.
+        OverviewPayload::SystemDiag(diag) => apply_system_diagnostics(state, diag),
+        OverviewPayload::SystemDiagFallback { diag, warning: _ } => {
+            // The warning is surfaced via a banner by the AppState dispatch
+            // in P3.T3. For the reducer, both variants update the same
+            // fields the same way.
+            apply_system_diagnostics(state, diag);
         }
     }
 }
@@ -204,6 +236,61 @@ fn apply_pg_status(state: &mut OverviewState, payload: OverviewPgStatusPayload) 
         root_pg,
         fetched_at: Some(fetched_at),
     });
+}
+
+fn apply_system_diagnostics(
+    state: &mut OverviewState,
+    diag: crate::client::health::SystemDiagSnapshot,
+) {
+    // Build the per-node row set from the diagnostics snapshot.
+    crate::client::health::update_nodes(&mut state.nodes, &diag);
+
+    // Build the cluster-aggregate repository summary (NOT per-node).
+    state.repositories_summary = build_repositories_summary(&diag);
+
+    state.last_sysdiag_refresh = Some(std::time::Instant::now());
+}
+
+/// Compute cluster-aggregate fill percentages from the server-provided
+/// aggregate (already summed/averaged across nodes by NiFi).
+/// We use the average utilization across the repos within each repo type.
+fn build_repositories_summary(
+    diag: &crate::client::health::SystemDiagSnapshot,
+) -> RepositoriesSummary {
+    let agg = &diag.aggregate;
+
+    let content_percent = avg_repo_percent(&agg.content_repos);
+    let flowfile_percent = agg
+        .flowfile_repo
+        .as_ref()
+        .map(|r| r.utilization_percent)
+        .unwrap_or(0);
+    let provenance_percent = avg_repo_percent(&agg.provenance_repos);
+
+    RepositoriesSummary {
+        content_percent,
+        flowfile_percent,
+        provenance_percent,
+        max_severity: severity_for_pct(content_percent)
+            .max(severity_for_pct(flowfile_percent))
+            .max(severity_for_pct(provenance_percent)),
+    }
+}
+
+fn avg_repo_percent(repos: &[crate::client::health::RepoUsage]) -> u32 {
+    if repos.is_empty() {
+        return 0;
+    }
+    let sum: u32 = repos.iter().map(|r| r.utilization_percent).sum();
+    sum / repos.len() as u32
+}
+
+fn severity_for_pct(percent: u32) -> Severity {
+    match percent {
+        0..=49 => Severity::Unknown,
+        50..=79 => Severity::Warning,
+        _ => Severity::Error,
+    }
 }
 
 /// Parse an ISO-8601 / RFC-3339 timestamp into seconds since the UNIX epoch.
@@ -466,5 +553,89 @@ mod tests {
             ),
         );
         assert_eq!(state.last_bulletin_id, Some(9));
+    }
+
+    #[test]
+    fn apply_system_diagnostics_populates_nodes_and_repositories() {
+        use crate::client::health::{
+            GcSnapshot, NodeDiagnostics, RepoUsage, SystemDiagAggregate, SystemDiagSnapshot,
+        };
+        use std::time::Instant;
+
+        let node = |address: &str| NodeDiagnostics {
+            address: address.into(),
+            heap_used_bytes: 512 * 1024 * 1024,
+            heap_max_bytes: 1024 * 1024 * 1024,
+            gc: vec![GcSnapshot {
+                name: "G1 Young".into(),
+                collection_count: 10,
+                collection_millis: 50,
+            }],
+            load_average: Some(1.5),
+            available_processors: Some(4),
+            total_threads: 50,
+            uptime: "1h".into(),
+            content_repos: vec![RepoUsage {
+                identifier: "content".into(),
+                used_bytes: 60,
+                total_bytes: 100,
+                free_bytes: 40,
+                utilization_percent: 60,
+            }],
+            flowfile_repo: Some(RepoUsage {
+                identifier: "flowfile".into(),
+                used_bytes: 30,
+                total_bytes: 100,
+                free_bytes: 70,
+                utilization_percent: 30,
+            }),
+            provenance_repos: vec![RepoUsage {
+                identifier: "provenance".into(),
+                used_bytes: 20,
+                total_bytes: 100,
+                free_bytes: 80,
+                utilization_percent: 20,
+            }],
+        };
+
+        let diag = SystemDiagSnapshot {
+            aggregate: SystemDiagAggregate {
+                content_repos: vec![RepoUsage {
+                    identifier: "content".into(),
+                    used_bytes: 60,
+                    total_bytes: 100,
+                    free_bytes: 40,
+                    utilization_percent: 60,
+                }],
+                flowfile_repo: Some(RepoUsage {
+                    identifier: "flowfile".into(),
+                    used_bytes: 30,
+                    total_bytes: 100,
+                    free_bytes: 70,
+                    utilization_percent: 30,
+                }),
+                provenance_repos: vec![RepoUsage {
+                    identifier: "provenance".into(),
+                    used_bytes: 20,
+                    total_bytes: 100,
+                    free_bytes: 80,
+                    utilization_percent: 20,
+                }],
+            },
+            nodes: vec![node("node1:8080"), node("node2:8080")],
+            fetched_at: Instant::now(),
+        };
+
+        let mut state = OverviewState::new();
+        apply_payload(&mut state, OverviewPayload::SystemDiag(diag));
+
+        // The nodes state should have 2 entries.
+        assert_eq!(state.nodes.nodes.len(), 2, "nodes should be populated");
+
+        // Repository aggregates come from the aggregate field.
+        assert_eq!(state.repositories_summary.content_percent, 60);
+        assert_eq!(state.repositories_summary.flowfile_percent, 30);
+        assert_eq!(state.repositories_summary.provenance_percent, 20);
+        assert!(state.last_sysdiag_refresh.is_some());
     }
 }
