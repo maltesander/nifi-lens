@@ -1,0 +1,9 @@
+---
+source: src/widget/panel.rs
+expression: "draw(\" Properties \", false, Some(\" 10/14 \"))"
+---
+"┌ Properties ─────────── 10/14 ┐"
+"│                              │"
+"│                              │"
+"│                              │"
+"└──────────────────────────────┘"
