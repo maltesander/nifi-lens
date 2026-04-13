@@ -263,7 +263,9 @@ fn render_detail(
         Some(NodeDetail::Processor(d)) => {
             processor::render(frame, detail_area, d, state, bulletins, &state.detail_focus);
         }
-        Some(NodeDetail::Connection(d)) => connection::render(frame, detail_area, d, state),
+        Some(NodeDetail::Connection(d)) => {
+            connection::render(frame, detail_area, d, state, &state.detail_focus);
+        }
         Some(NodeDetail::ControllerService(d)) => {
             controller_service::render(frame, detail_area, d, state, &state.detail_focus);
         }
