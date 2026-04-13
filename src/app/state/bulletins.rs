@@ -80,14 +80,6 @@ impl ViewKeyHandler for BulletinsHandler {
                     tracer_followup: None,
                 })
             }
-            KeyCode::Char('B') => {
-                state.bulletins.cycle_group_mode();
-                Some(UpdateResult {
-                    redraw: true,
-                    intent: None,
-                    tracer_followup: None,
-                })
-            }
             KeyCode::Char('/') => {
                 state.bulletins.enter_text_input_mode();
                 Some(UpdateResult {
@@ -96,7 +88,15 @@ impl ViewKeyHandler for BulletinsHandler {
                     tracer_followup: None,
                 })
             }
-            KeyCode::Char('g') | KeyCode::Home => {
+            KeyCode::Char('g') => {
+                state.bulletins.cycle_group_mode();
+                Some(UpdateResult {
+                    redraw: true,
+                    intent: None,
+                    tracer_followup: None,
+                })
+            }
+            KeyCode::Home => {
                 state.bulletins.jump_to_oldest();
                 Some(UpdateResult {
                     redraw: true,
@@ -142,6 +142,14 @@ impl ViewKeyHandler for BulletinsHandler {
                     });
                 }
                 Some(UpdateResult::default())
+            }
+            KeyCode::Char('m') => {
+                state.bulletins.mute_selected_source();
+                Some(UpdateResult {
+                    redraw: true,
+                    intent: None,
+                    tracer_followup: None,
+                })
             }
             KeyCode::Char('t') => {
                 if let Some(idx) = state.bulletins.selected_ring_index() {
@@ -402,5 +410,146 @@ mod tests {
             Some("fK"),
             "Shift+K should be appended to the filter buffer as a literal K"
         );
+    }
+
+    #[test]
+    fn on_bulletins_tab_g_cycles_group_mode() {
+        use crate::view::bulletins::state::GroupMode;
+        let mut s = fresh_state();
+        let c = tiny_config();
+        s.current_tab = ViewId::Bulletins;
+        assert_eq!(s.bulletins.group_mode, GroupMode::SourceAndMessage);
+        update(&mut s, key(KeyCode::Char('g'), KeyModifiers::NONE), &c);
+        assert_eq!(s.bulletins.group_mode, GroupMode::Source);
+        update(&mut s, key(KeyCode::Char('g'), KeyModifiers::NONE), &c);
+        assert_eq!(s.bulletins.group_mode, GroupMode::Off);
+        update(&mut s, key(KeyCode::Char('g'), KeyModifiers::NONE), &c);
+        assert_eq!(s.bulletins.group_mode, GroupMode::SourceAndMessage);
+    }
+
+    #[test]
+    fn on_bulletins_tab_m_mutes_selected_source() {
+        let mut s = fresh_state();
+        let c = tiny_config();
+        s.current_tab = ViewId::Bulletins;
+        let payload = BulletinsPayload {
+            bulletins: vec![BulletinSnapshot {
+                id: 1,
+                level: "ERROR".into(),
+                message: "P[id=a] boom".into(),
+                source_id: "src-muted".into(),
+                source_name: "P".into(),
+                source_type: "PROCESSOR".into(),
+                group_id: "g".into(),
+                timestamp_iso: "2026-04-11T10:14:22Z".into(),
+                timestamp_human: String::new(),
+            }],
+            fetched_at: SystemTime::now(),
+        };
+        update(&mut s, AppEvent::Data(ViewPayload::Bulletins(payload)), &c);
+        assert!(s.bulletins.mutes.is_empty());
+        update(&mut s, key(KeyCode::Char('m'), KeyModifiers::NONE), &c);
+        assert!(s.bulletins.mutes.contains("src-muted"));
+    }
+
+    #[test]
+    fn on_bulletins_tab_shift_b_is_now_unbound() {
+        // Regression guard: the old consecutive-group toggle is gone.
+        let mut s = fresh_state();
+        let c = tiny_config();
+        s.current_tab = ViewId::Bulletins;
+        let r = update(&mut s, key(KeyCode::Char('B'), KeyModifiers::SHIFT), &c);
+        // `B` should be a no-op inside Bulletins now (the global handler
+        // has no meaning for it either).
+        assert!(!r.redraw);
+    }
+
+    #[test]
+    fn on_bulletins_tab_lowercase_g_no_longer_jumps_home() {
+        // Regression guard: `g` is now cycle-group-mode, not jump-oldest.
+        let mut s = fresh_state();
+        let c = tiny_config();
+        s.current_tab = ViewId::Bulletins;
+        // Seed >1 bulletin so a jump would be observable.
+        let payload = BulletinsPayload {
+            bulletins: vec![
+                BulletinSnapshot {
+                    id: 1,
+                    level: "ERROR".into(),
+                    message: "P[id=a] one".into(),
+                    source_id: "s1".into(),
+                    source_name: "P".into(),
+                    source_type: "PROCESSOR".into(),
+                    group_id: "g".into(),
+                    timestamp_iso: "2026-04-11T10:14:22Z".into(),
+                    timestamp_human: String::new(),
+                },
+                BulletinSnapshot {
+                    id: 2,
+                    level: "ERROR".into(),
+                    message: "Q[id=b] two".into(),
+                    source_id: "s2".into(),
+                    source_name: "Q".into(),
+                    source_type: "PROCESSOR".into(),
+                    group_id: "g".into(),
+                    timestamp_iso: "2026-04-11T10:14:23Z".into(),
+                    timestamp_human: String::new(),
+                },
+            ],
+            fetched_at: SystemTime::now(),
+        };
+        update(&mut s, AppEvent::Data(ViewPayload::Bulletins(payload)), &c);
+        let before_selected = s.bulletins.selected;
+        update(&mut s, key(KeyCode::Char('g'), KeyModifiers::NONE), &c);
+        // `g` cycles mode; selection is preserved via reconcile_selection.
+        // It MUST NOT have been reset to 0 unless that happens to be the
+        // reconciled position. Assert that mode changed — that's the
+        // definitive test that `g` no longer jumps home.
+        assert_ne!(
+            s.bulletins.group_mode,
+            crate::view::bulletins::state::GroupMode::SourceAndMessage
+        );
+        let _ = before_selected;
+    }
+
+    #[test]
+    fn on_bulletins_tab_home_still_jumps_oldest() {
+        // Regression guard: Home key still works as an alternative.
+        let mut s = fresh_state();
+        let c = tiny_config();
+        s.current_tab = ViewId::Bulletins;
+        // Seed two and move selection off the oldest.
+        let payload = BulletinsPayload {
+            bulletins: vec![
+                BulletinSnapshot {
+                    id: 1,
+                    level: "INFO".into(),
+                    message: "a".into(),
+                    source_id: "s1".into(),
+                    source_name: "A".into(),
+                    source_type: "PROCESSOR".into(),
+                    group_id: "g".into(),
+                    timestamp_iso: "2026-04-11T10:14:22Z".into(),
+                    timestamp_human: String::new(),
+                },
+                BulletinSnapshot {
+                    id: 2,
+                    level: "INFO".into(),
+                    message: "b".into(),
+                    source_id: "s2".into(),
+                    source_name: "B".into(),
+                    source_type: "PROCESSOR".into(),
+                    group_id: "g".into(),
+                    timestamp_iso: "2026-04-11T10:14:23Z".into(),
+                    timestamp_human: String::new(),
+                },
+            ],
+            fetched_at: SystemTime::now(),
+        };
+        update(&mut s, AppEvent::Data(ViewPayload::Bulletins(payload)), &c);
+        s.bulletins.auto_scroll = false;
+        s.bulletins.selected = 1;
+        update(&mut s, key(KeyCode::Home, KeyModifiers::NONE), &c);
+        assert_eq!(s.bulletins.selected, 0);
     }
 }
