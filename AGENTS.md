@@ -488,9 +488,22 @@ ring exceeds its capacity.
   box — on terminals narrower than ~80 columns the Nodes panel's
   inner content wraps badly. No resize-aware fallback; nifi-lens
   already assumes ≥100×30.
-- **Clipboard corruption inherited.** Phase 7 does not fix the `c`-key
-  TUI corruption on Linux. That bug is tracked as a separate
-  debugging task; Phase 7 consumes whatever wrapper it lands.
+- **Clipboard content only survives while the TUI is running.** The
+  `c` handler reuses a single persistent `arboard::Clipboard` held
+  in `AppState::clipboard` (lazily initialized on first press). This
+  fixes the earlier TUI-corruption bug (`arboard-3.6.1/src/platform/
+  linux/x11.rs:1167` used to write a debug warning to stderr when the
+  `Clipboard` was dropped within 100 ms of `set_text`, corrupting the
+  ratatui alt-screen grid). The persistent handle also keeps the X11
+  server thread alive so clipboard managers have time to grab the
+  content — but only while the TUI is running. Quitting the TUI
+  still tears down the server thread, so users who need to paste
+  after quitting should paste from the clipboard manager history
+  (if one is configured) or copy again from their regular terminal.
+  A future polish task could wire `SetExtLinux::wait()` or a
+  daemonized helper for survive-after-exit, but for a forensics TUI
+  that stays open while investigating, the current behavior is
+  acceptable.
 - **Properties modal (`e`) retained.** The in-pane Properties sub-panel
   caps at whatever fits vertically; the `e` key still opens the full
   Properties modal for users who want the complete list. No behavior
