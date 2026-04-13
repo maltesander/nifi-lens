@@ -220,14 +220,119 @@ fn render_body(frame: &mut Frame, area: Rect, state: &EventsState) {
         frame.render_widget(centered, spot);
         return;
     }
-    // Otherwise (Done with events), stub rendering — Task 11 will land the real list.
-    render_results_list_stub(frame, area, state);
+    // Otherwise (Done with events), render the real results list.
+    render_results_list(frame, area, state);
 }
 
-fn render_results_list_stub(frame: &mut Frame, area: Rect, state: &EventsState) {
-    let msg = format!("{} events (list rendering in Task 11)", state.events.len());
-    let p = Paragraph::new(Span::styled(msg, theme::muted())).alignment(Alignment::Center);
-    frame.render_widget(p, area);
+fn render_results_list(frame: &mut Frame, area: Rect, state: &EventsState) {
+    use ratatui::style::Style;
+    use ratatui::widgets::{Cell, Row, Table};
+
+    if state.events.is_empty() {
+        let centered = Paragraph::new(Span::styled(
+            "no events matched the query".to_string(),
+            theme::muted(),
+        ))
+        .alignment(Alignment::Center);
+        let mid = area.height.saturating_sub(1) / 2;
+        let spot = Rect {
+            x: area.x,
+            y: area.y + mid,
+            width: area.width,
+            height: 1,
+        };
+        frame.render_widget(centered, spot);
+        return;
+    }
+
+    let visible_rows = area.height.saturating_sub(1) as usize; // header row
+    let selected = state.selected_row.unwrap_or(0);
+    let scroll_offset = if visible_rows == 0 {
+        0
+    } else if selected >= visible_rows {
+        selected + 1 - visible_rows
+    } else {
+        0
+    };
+    let end = state.events.len().min(scroll_offset + visible_rows);
+    let window = &state.events[scroll_offset..end];
+
+    let rows: Vec<Row> = window
+        .iter()
+        .enumerate()
+        .map(|(idx, e)| {
+            let abs_idx = scroll_offset + idx;
+            let row_style = if Some(abs_idx) == state.selected_row {
+                theme::cursor_row()
+            } else {
+                Style::default()
+            };
+            Row::new(vec![
+                Cell::from(short_time(&e.event_time_iso)),
+                Cell::from(e.event_type.clone()).style(event_type_style(&e.event_type)),
+                Cell::from(e.component_name.clone()),
+                Cell::from(short_uuid(&e.flow_file_uuid)),
+                Cell::from(e.relationship.clone().unwrap_or_default()),
+            ])
+            .style(row_style)
+        })
+        .collect();
+
+    let table = Table::new(
+        rows,
+        [
+            Constraint::Length(10), // time (HH:MM:SS)
+            Constraint::Length(12), // type
+            Constraint::Length(24), // component
+            Constraint::Length(14), // file uuid
+            Constraint::Fill(1),    // relationship / attrs
+        ],
+    )
+    .header(
+        Row::new(vec!["time", "type", "component", "uuid", "rel"])
+            .style(Style::default().add_modifier(Modifier::BOLD)),
+    );
+    frame.render_widget(table, area);
+}
+
+fn short_uuid(uuid: &str) -> String {
+    let n = uuid.chars().count();
+    if n <= 10 {
+        uuid.to_string()
+    } else {
+        let head: String = uuid.chars().take(8).collect();
+        let tail: String = uuid.chars().skip(n.saturating_sub(2)).collect();
+        format!("{head}\u{2026}{tail}")
+    }
+}
+
+fn short_time(iso: &str) -> String {
+    if iso.len() >= 19 {
+        let t = &iso[11..19];
+        if t.as_bytes().get(2) == Some(&b':') && t.as_bytes().get(5) == Some(&b':') {
+            return t.to_string();
+        }
+    }
+    "--:--:--".to_string()
+}
+
+/// Colorize event types by category.
+/// - DROP / EXPIRE → error
+/// - ROUTE → accent
+/// - RECEIVE / SEND / FETCH / DOWNLOAD → success
+/// - FORK / JOIN / CREATE / CLONE / ATTRIBUTES_MODIFIED / CONTENT_MODIFIED → muted
+/// - anything else → default
+fn event_type_style(event_type: &str) -> ratatui::style::Style {
+    use ratatui::style::Style;
+    match event_type {
+        "DROP" | "EXPIRE" => theme::error().add_modifier(Modifier::BOLD),
+        "ROUTE" => theme::accent(),
+        "RECEIVE" | "SEND" | "FETCH" | "DOWNLOAD" => theme::success(),
+        "FORK" | "JOIN" | "CREATE" | "CLONE" | "ATTRIBUTES_MODIFIED" | "CONTENT_MODIFIED" => {
+            theme::muted()
+        }
+        _ => Style::default(),
+    }
 }
 
 fn render_empty_state(frame: &mut Frame, area: Rect) {
@@ -312,5 +417,43 @@ mod tests {
             error: "connection refused".into(),
         };
         assert_snapshot!("events_failed_state", render_to_string(&state));
+    }
+
+    #[test]
+    fn events_done_with_results_renders() {
+        use crate::client::ProvenanceEventSummary;
+        let mut state = EventsState::new();
+        state.status = EventsQueryStatus::Done {
+            fetched_at: SystemTime::UNIX_EPOCH,
+            truncated: false,
+            took_ms: 842,
+        };
+        state.events = vec![
+            ProvenanceEventSummary {
+                event_id: 1,
+                event_time_iso: "2026-04-13T08:12:15Z".into(),
+                event_type: "DROP".into(),
+                component_id: "proc-1".into(),
+                component_name: "ControlRate".into(),
+                component_type: "PROCESSOR".into(),
+                group_id: "noisy-pipeline".into(),
+                flow_file_uuid: "8f2ce90a-019d-1000-ffff-ffffe8c7c7a9".into(),
+                relationship: Some("failure".into()),
+                details: None,
+            },
+            ProvenanceEventSummary {
+                event_id: 2,
+                event_time_iso: "2026-04-13T08:12:16Z".into(),
+                event_type: "ROUTE".into(),
+                component_id: "proc-2".into(),
+                component_name: "UpdateRecord".into(),
+                component_type: "PROCESSOR".into(),
+                group_id: "healthy-pipeline".into(),
+                flow_file_uuid: "3b0e1234-019d-1000-ffff-ffffabcd1212".into(),
+                relationship: Some("matched".into()),
+                details: None,
+            },
+        ];
+        assert_snapshot!("events_done_with_results", render_to_string(&state));
     }
 }
