@@ -126,7 +126,6 @@ fn render_tree(frame: &mut Frame, area: Rect, state: &BrowserState) {
             _ => (kind_glyph(&node.kind).to_owned(), Style::default()),
         };
         let indent = "  ".repeat(depth);
-        let right_summary = status_summary(&node.status_summary);
 
         let row_style = if row_idx == state.selected {
             theme::cursor_row()
@@ -137,8 +136,6 @@ fn render_tree(frame: &mut Frame, area: Rect, state: &BrowserState) {
             Span::styled(format!("{indent}{marker}"), row_style),
             Span::styled(format!("{glyph_owned} "), glyph_style.patch(row_style)),
             Span::styled(node.name.clone(), row_style),
-            Span::raw("  "),
-            Span::styled(right_summary, theme::muted()),
         ]));
     }
     let p = Paragraph::new(lines);
@@ -180,25 +177,6 @@ fn processor_run_icon(run_status: &str) -> (char, ratatui::style::Style) {
         "DISABLED" => ('\u{2300}', crate::theme::disabled()),
         "VALIDATING" => ('\u{25D0}', crate::theme::info()),
         _ => ('\u{25CF}', ratatui::style::Style::default()),
-    }
-}
-
-fn status_summary(summary: &NodeStatusSummary) -> String {
-    match summary {
-        NodeStatusSummary::ProcessGroup {
-            running,
-            stopped,
-            invalid,
-            disabled,
-        } => format!("● {running} ○ {stopped} ⚠ {invalid} ⌀ {disabled}"),
-        NodeStatusSummary::Processor { run_status: _ } => String::new(),
-        NodeStatusSummary::Connection {
-            fill_percent,
-            flow_files_queued,
-            queued_display,
-        } => format!("{fill_percent}% {flow_files_queued}/{queued_display}"),
-        NodeStatusSummary::ControllerService { state } => state.clone(),
-        NodeStatusSummary::Port => String::new(),
     }
 }
 
