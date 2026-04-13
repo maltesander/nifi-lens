@@ -52,6 +52,7 @@ pub enum ViewId {
     Bulletins,
     Health,
     Browser,
+    Events,
     Tracer,
 }
 
@@ -61,7 +62,8 @@ impl ViewId {
             Self::Overview => Self::Bulletins,
             Self::Bulletins => Self::Health,
             Self::Health => Self::Browser,
-            Self::Browser => Self::Tracer,
+            Self::Browser => Self::Events,
+            Self::Events => Self::Tracer,
             Self::Tracer => Self::Overview,
         }
     }
@@ -72,7 +74,8 @@ impl ViewId {
             Self::Bulletins => Self::Overview,
             Self::Health => Self::Bulletins,
             Self::Browser => Self::Health,
-            Self::Tracer => Self::Browser,
+            Self::Events => Self::Browser,
+            Self::Tracer => Self::Events,
         }
     }
 }
@@ -332,6 +335,7 @@ pub fn collect_hints(state: &AppState) -> Vec<crate::widget::hint_bar::HintSpan>
         ViewId::Bulletins => bulletins::BulletinsHandler::hints(state),
         ViewId::Health => health::HealthHandler::hints(state),
         ViewId::Browser => browser::BrowserHandler::hints(state),
+        ViewId::Events => vec![],
         ViewId::Tracer => tracer::TracerHandler::hints(state),
     };
 
@@ -388,7 +392,7 @@ fn capture_anchor(state: &AppState) -> Option<crate::app::history::SelectionAnch
             };
             Some(SelectionAnchor::RowIndex(idx))
         }
-        ViewId::Overview | ViewId::Tracer => None,
+        ViewId::Overview | ViewId::Events | ViewId::Tracer => None,
     }
 }
 
@@ -783,6 +787,7 @@ fn handle_key(state: &mut AppState, key: KeyEvent, config: &Config) -> UpdateRes
             ViewId::Bulletins => bulletins::BulletinsHandler::handle_key(state, key),
             ViewId::Health => health::HealthHandler::handle_key(state, key),
             ViewId::Browser => browser::BrowserHandler::handle_key(state, key),
+            ViewId::Events => None,
             ViewId::Tracer => tracer::TracerHandler::handle_key(state, key),
         };
         if let Some(r) = consumed {
@@ -1289,6 +1294,8 @@ mod tests {
         assert_eq!(s.current_tab, ViewId::Health);
         update(&mut s, key(KeyCode::Tab, KeyModifiers::NONE), &c);
         assert_eq!(s.current_tab, ViewId::Browser);
+        update(&mut s, key(KeyCode::Tab, KeyModifiers::NONE), &c);
+        assert_eq!(s.current_tab, ViewId::Events);
         update(&mut s, key(KeyCode::Tab, KeyModifiers::NONE), &c);
         assert_eq!(s.current_tab, ViewId::Tracer);
         update(&mut s, key(KeyCode::Tab, KeyModifiers::NONE), &c);

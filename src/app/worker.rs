@@ -119,6 +119,10 @@ impl WorkerRegistry {
                     force_rx,
                 ))
             }
+            ViewId::Events => {
+                tracing::debug!(?view, "worker registry: no worker for this view");
+                None
+            }
             ViewId::Tracer => {
                 tracing::debug!(?view, "worker registry: no worker for this view");
                 None

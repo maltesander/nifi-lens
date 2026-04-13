@@ -107,6 +107,7 @@ pub fn render(frame: &mut Frame, area: Rect, current_tab: ViewId) {
         ViewId::Overview => OVERVIEW_TEXT,
         ViewId::Bulletins => BULLETINS_TEXT,
         ViewId::Browser => BROWSER_TEXT,
+        ViewId::Events => "",
         ViewId::Tracer => TRACER_TEXT,
         ViewId::Health => HEALTH_TEXT,
     };

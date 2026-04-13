@@ -11,11 +11,14 @@
 //!
 //! Minimum renderable form is `[ctx] nodes N/M`.
 
-use ratatui::text::Span;
+use ratatui::Frame;
+use ratatui::layout::{Alignment, Constraint, Direction, Layout, Rect};
+use ratatui::text::{Line, Span};
+use ratatui::widgets::{Paragraph, Tabs};
 use semver::Version;
 use unicode_width::UnicodeWidthStr;
 
-use crate::app::state::ClusterSummary;
+use crate::app::state::{AppState, ClusterSummary, ViewId};
 use crate::theme;
 
 /// Build the right-aligned identity spans for a given budget in columns.
@@ -101,6 +104,57 @@ fn truncate_to_width(s: &str, max_cols: usize) -> String {
     }
     out.push('\u{2026}');
     out
+}
+
+const TAB_LABELS: &[&str] = &["Overview", "Bulletins", "Browser", "Events", "Tracer"];
+
+/// Render the 1-row top bar into `area`. Tabs left-aligned, identity
+/// strip right-aligned. No bordered box.
+pub fn render(frame: &mut Frame, area: Rect, state: &AppState) {
+    let tab_width = tab_bar_width() as u16;
+    let chunks = Layout::default()
+        .direction(Direction::Horizontal)
+        .constraints([Constraint::Length(tab_width), Constraint::Fill(1)])
+        .split(area);
+
+    let idx = tab_index(state.current_tab);
+    let tabs = Tabs::new(
+        TAB_LABELS
+            .iter()
+            .map(|label| Line::from(*label))
+            .collect::<Vec<_>>(),
+    )
+    .select(idx)
+    .highlight_style(theme::accent())
+    .divider(" \u{2502} ");
+    frame.render_widget(tabs, chunks[0]);
+
+    let budget = chunks[1].width as usize;
+    let spans = build_identity_spans(
+        &state.context_name,
+        &state.detected_version,
+        &state.cluster_summary,
+        budget,
+    );
+    let line = Line::from(spans);
+    frame.render_widget(Paragraph::new(line).alignment(Alignment::Right), chunks[1]);
+}
+
+fn tab_index(view: ViewId) -> usize {
+    match view {
+        ViewId::Overview => 0,
+        ViewId::Bulletins => 1,
+        ViewId::Browser => 2,
+        ViewId::Events => 3,
+        ViewId::Tracer => 4,
+        ViewId::Health => 5,
+    }
+}
+
+fn tab_bar_width() -> usize {
+    let labels: usize = TAB_LABELS.iter().map(|l| l.width()).sum();
+    let separators = (TAB_LABELS.len() - 1) * 3;
+    labels + separators + 1
 }
 
 #[cfg(test)]
@@ -198,5 +252,34 @@ mod tests {
     fn zero_budget_returns_empty() {
         let spans = build_identity_spans("dev", &ver(), &cluster_healthy(), 0);
         assert!(spans.is_empty());
+    }
+
+    #[test]
+    fn renders_tab_bar_with_right_aligned_identity() {
+        use crate::app::state::{ClusterSummary, ViewId};
+        use crate::test_support::fresh_state;
+        use ratatui::Terminal;
+        use ratatui::backend::TestBackend;
+
+        let mut state = fresh_state();
+        state.context_name = "dev-nifi-2-9-0".into();
+        state.current_tab = ViewId::Bulletins;
+        state.cluster_summary = ClusterSummary {
+            connected_nodes: Some(3),
+            total_nodes: Some(3),
+        };
+
+        let backend = TestBackend::new(100, 1);
+        let mut term = Terminal::new(backend).unwrap();
+        term.draw(|f| super::render(f, f.area(), &state)).unwrap();
+        let rendered = format!("{}", term.backend());
+
+        // Tab bar appears on the left.
+        assert!(rendered.contains("Overview"));
+        assert!(rendered.contains("Bulletins"));
+        // Identity strip appears somewhere on the row.
+        assert!(rendered.contains("[dev-nifi-2-9-0]"));
+        assert!(rendered.contains("v2.9.0"));
+        assert!(rendered.contains("nodes 3/3"));
     }
 }

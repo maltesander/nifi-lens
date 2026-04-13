@@ -18,6 +18,9 @@ pub mod timestamp;
 pub mod view;
 pub mod widget;
 
+#[cfg(test)]
+mod test_support;
+
 pub use error::NifiLensError;
 
 use clap::Parser;

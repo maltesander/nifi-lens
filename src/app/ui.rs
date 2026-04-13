@@ -70,7 +70,8 @@ fn render_tab_bar(frame: &mut Frame, area: Rect, state: &AppState) {
         ViewId::Bulletins => 1,
         ViewId::Health => 2,
         ViewId::Browser => 3,
-        ViewId::Tracer => 4,
+        ViewId::Events => 4,
+        ViewId::Tracer => 5,
     };
     let tabs = Tabs::new(titles)
         .block(Block::default().borders(Borders::ALL).title(" nifi-lens "))
@@ -84,6 +85,7 @@ fn render_content(frame: &mut Frame, area: Rect, state: &AppState) {
         ViewId::Overview => overview::render(frame, area, &state.overview),
         ViewId::Bulletins => bulletins::render(frame, area, &state.bulletins, &state.timestamp_cfg),
         ViewId::Browser => browser::render(frame, area, &state.browser, &state.flow_index),
+        ViewId::Events => {}
         ViewId::Tracer => tracer::render(frame, area, &state.tracer, &state.timestamp_cfg),
         ViewId::Health => health::render(frame, area, &state.health),
     }
