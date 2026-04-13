@@ -12,9 +12,10 @@
 //! ││ ...scrollable Table...        │       │
 //! │└───────────────────────────────┘       │
 //! │ (optional) N validation errors         │
-//! │ ↑/↓ nav · l enter detail · ...         │
 //! └────────────────────────────────────────┘
 //! ```
+//!
+//! Key hints live in the sticky footer hint bar, not inside the pane.
 
 use ratatui::Frame;
 use ratatui::layout::{Constraint, Direction, Layout, Rect};
@@ -42,19 +43,13 @@ pub fn render(
     // 2. Inner vertical layout.
     //    identity: 5 rows (2 borders + 3 content lines)
     //    properties (and optional validation line): fill
-    //    hints: 1 line
     let rows = Layout::default()
         .direction(Direction::Vertical)
-        .constraints([
-            Constraint::Length(5),
-            Constraint::Fill(1),
-            Constraint::Length(1),
-        ])
+        .constraints([Constraint::Length(5), Constraint::Fill(1)])
         .split(inner);
 
     render_identity_panel(frame, rows[0], d);
     render_properties_and_validation(frame, rows[1], d, detail_focus);
-    render_hints_strip(frame, rows[2], detail_focus);
 }
 
 /// Build the outer panel title: ` <name> · controller service · <state> `.
@@ -197,22 +192,6 @@ fn render_properties_panel(
         state.select(Some(rows[props_idx]));
     }
     frame.render_stateful_widget(table, inner, &mut state);
-}
-
-fn render_hints_strip(frame: &mut Frame, area: Rect, detail_focus: &DetailFocus) {
-    let text = match detail_focus {
-        DetailFocus::Tree => "↑/↓ nav · l enter detail · Enter drill in · e properties · c copy id",
-        DetailFocus::Section { idx, .. } => {
-            let sections = DetailSections::for_node(NodeKind::ControllerService);
-            match sections.0.get(*idx) {
-                Some(DetailSection::Properties) => {
-                    "↑/↓ row · l next section · h back · c copy value · e full list"
-                }
-                _ => "",
-            }
-        }
-    };
-    frame.render_widget(Paragraph::new(text).style(theme::muted()), area);
 }
 
 fn truncate(s: &str, max: usize) -> String {

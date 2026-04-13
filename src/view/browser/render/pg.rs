@@ -7,7 +7,7 @@
 //! ignored.
 
 use ratatui::Frame;
-use ratatui::layout::{Constraint, Direction, Layout, Rect};
+use ratatui::layout::Rect;
 use ratatui::style::Modifier;
 use ratatui::text::{Line, Span};
 use ratatui::widgets::Paragraph;
@@ -31,14 +31,7 @@ pub fn render(
     let inner = outer.inner(area);
     frame.render_widget(outer, area);
 
-    // Split: content (fill) + hints strip (1 line).
-    let rows = Layout::default()
-        .direction(Direction::Vertical)
-        .constraints([Constraint::Fill(1), Constraint::Length(1)])
-        .split(inner);
-
-    render_content(frame, rows[0], d, state, bulletins);
-    render_hints_strip(frame, rows[1]);
+    render_content(frame, inner, d, state, bulletins);
 }
 
 /// Build the outer panel title: ` <name> · process group `.
@@ -161,11 +154,6 @@ fn render_content(
     }
 
     frame.render_widget(Paragraph::new(lines), area);
-}
-
-fn render_hints_strip(frame: &mut Frame, area: Rect) {
-    let text = "↑/↓ nav · Enter drill in · e properties · c copy id";
-    frame.render_widget(Paragraph::new(text).style(theme::muted()), area);
 }
 
 #[cfg(test)]

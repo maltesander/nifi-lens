@@ -7,7 +7,7 @@
 //! renderers and currently ignored.
 
 use ratatui::Frame;
-use ratatui::layout::{Constraint, Direction, Layout, Rect};
+use ratatui::layout::Rect;
 use ratatui::style::Modifier;
 use ratatui::text::{Line, Span};
 use ratatui::widgets::Paragraph;
@@ -29,14 +29,7 @@ pub fn render(
     let inner = outer.inner(area);
     frame.render_widget(outer, area);
 
-    // Split: content (fill) + hints strip (1 line).
-    let rows = Layout::default()
-        .direction(Direction::Vertical)
-        .constraints([Constraint::Fill(1), Constraint::Length(1)])
-        .split(inner);
-
-    render_content(frame, rows[0], d);
-    render_hints_strip(frame, rows[1]);
+    render_content(frame, inner, d);
 }
 
 /// Build the outer panel title: ` <name> · connection `.
@@ -119,11 +112,6 @@ fn render_content(frame: &mut Frame, area: Rect, d: &ConnectionDetail) {
     ]));
 
     frame.render_widget(Paragraph::new(lines), area);
-}
-
-fn render_hints_strip(frame: &mut Frame, area: Rect) {
-    let text = "↑/↓ nav · c copy id";
-    frame.render_widget(Paragraph::new(text).style(theme::muted()), area);
 }
 
 /// Fill-percent → gauge color. Mirrors the Overview repositories

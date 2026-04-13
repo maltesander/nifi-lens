@@ -336,6 +336,7 @@ impl ViewKeyHandler for BrowserHandler {
     }
 
     fn hints(state: &AppState) -> Vec<crate::widget::hint_bar::HintSpan> {
+        use crate::view::browser::state::{DetailFocus, DetailSection, DetailSections};
         use crate::widget::hint_bar::HintSpan;
 
         if state.browser.breadcrumb_focus.is_some() {
@@ -355,36 +356,98 @@ impl ViewKeyHandler for BrowserHandler {
             ];
         }
 
-        vec![
-            HintSpan {
-                key: "↑/↓",
-                action: "nav",
-            },
-            HintSpan {
-                key: "Enter",
-                action: "expand",
-            },
-            HintSpan {
-                key: "←",
-                action: "back",
-            },
-            HintSpan {
-                key: "e",
-                action: "props",
-            },
-            HintSpan {
-                key: "c",
-                action: "copy",
-            },
-            HintSpan {
-                key: "b",
-                action: "crumb",
-            },
-            HintSpan {
-                key: "t",
-                action: "events",
-            },
-        ]
+        match &state.browser.detail_focus {
+            DetailFocus::Tree => vec![
+                HintSpan {
+                    key: "↑/↓",
+                    action: "nav",
+                },
+                HintSpan {
+                    key: "Enter",
+                    action: "drill",
+                },
+                HintSpan {
+                    key: "l",
+                    action: "detail",
+                },
+                HintSpan {
+                    key: "e",
+                    action: "props",
+                },
+                HintSpan {
+                    key: "c",
+                    action: "copy id",
+                },
+                HintSpan {
+                    key: "t",
+                    action: "events",
+                },
+                HintSpan {
+                    key: "b",
+                    action: "crumb",
+                },
+            ],
+            DetailFocus::Section { idx, .. } => {
+                let Some(&arena_idx) = state.browser.visible.get(state.browser.selected) else {
+                    return vec![HintSpan {
+                        key: "h",
+                        action: "back",
+                    }];
+                };
+                let kind = state.browser.nodes[arena_idx].kind;
+                let sections = DetailSections::for_node(kind);
+                match sections.0.get(*idx).copied() {
+                    Some(DetailSection::Properties) => vec![
+                        HintSpan {
+                            key: "↑/↓",
+                            action: "row",
+                        },
+                        HintSpan {
+                            key: "l",
+                            action: "next",
+                        },
+                        HintSpan {
+                            key: "h",
+                            action: "back",
+                        },
+                        HintSpan {
+                            key: "c",
+                            action: "copy value",
+                        },
+                        HintSpan {
+                            key: "e",
+                            action: "full list",
+                        },
+                    ],
+                    Some(DetailSection::RecentBulletins) => vec![
+                        HintSpan {
+                            key: "↑/↓",
+                            action: "row",
+                        },
+                        HintSpan {
+                            key: "l",
+                            action: "next",
+                        },
+                        HintSpan {
+                            key: "h",
+                            action: "back",
+                        },
+                        HintSpan {
+                            key: "c",
+                            action: "copy msg",
+                        },
+                        HintSpan {
+                            key: "t",
+                            action: "trace",
+                        },
+                    ],
+                    _ => vec![HintSpan {
+                        key: "h",
+                        action: "back",
+                    }],
+                }
+            }
+        }
     }
 }
 

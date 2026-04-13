@@ -14,13 +14,13 @@
 //! │┌ Recent bulletins  N ────────────┐     │  ← focusable
 //! ││ ...scrollable Table...          │     │
 //! │└─────────────────────────────────┘     │
-//! │ ↑/↓ nav · l enter detail · ...         │  ← hints strip (no box)
 //! └────────────────────────────────────────┘
 //! ```
 //!
 //! The Properties and Recent bulletins sub-panels flip their border to
 //! thick + accent when the corresponding `DetailSection` holds focus, and
 //! their Table widget selects the row from `DetailFocus::rows[idx]`.
+//! Key hints live in the sticky footer hint bar, not inside the pane.
 
 use std::collections::VecDeque;
 
@@ -53,21 +53,18 @@ pub fn render(
     //    identity: 4 rows (2 borders + 2 content lines)
     //    properties: fill — takes the bulk
     //    recent bulletins: 8 rows (2 borders + 6 content rows)
-    //    hints: 1 line, no border
     let rows = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
             Constraint::Length(4),
             Constraint::Fill(1),
             Constraint::Length(8),
-            Constraint::Length(1),
         ])
         .split(inner);
 
     render_identity_panel(frame, rows[0], d);
     render_properties_and_validation(frame, rows[1], d, detail_focus);
     render_recent_bulletins_panel(frame, rows[2], d, bulletins, detail_focus);
-    render_hints_strip(frame, rows[3], detail_focus);
 }
 
 /// Build the outer panel title: ` <name> · processor · <run_status> `.
@@ -289,25 +286,6 @@ fn short_time(iso: &str, human: &str) -> String {
         }
     }
     "--:--:--".to_string()
-}
-
-fn render_hints_strip(frame: &mut Frame, area: Rect, detail_focus: &DetailFocus) {
-    let text = match detail_focus {
-        DetailFocus::Tree => "↑/↓ nav · l enter detail · Enter drill in · e properties · c copy id",
-        DetailFocus::Section { idx, .. } => {
-            let sections = DetailSections::for_node(NodeKind::Processor);
-            match sections.0.get(*idx) {
-                Some(DetailSection::Properties) => {
-                    "↑/↓ row · l next section · h back · c copy value · e full list"
-                }
-                Some(DetailSection::RecentBulletins) => {
-                    "↑/↓ row · l next section · h back · c copy msg · t trace"
-                }
-                _ => "",
-            }
-        }
-    };
-    frame.render_widget(Paragraph::new(text).style(theme::muted()), area);
 }
 
 fn truncate(s: &str, max: usize) -> String {
