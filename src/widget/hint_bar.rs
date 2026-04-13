@@ -11,7 +11,7 @@ use crate::theme;
 /// A single key-action pair displayed in the hint bar.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct HintSpan {
-    /// The key or key combination (e.g. `"j/k"`, `"Enter"`).
+    /// The key or key combination (e.g. `"↑/↓"`, `"Enter"`).
     pub key: &'static str,
     /// The action description (e.g. `"nav"`, `"expand"`).
     pub action: &'static str,
@@ -125,19 +125,19 @@ mod tests {
     #[test]
     fn single_hint_renders_key_and_action() {
         let hints = [HintSpan {
-            key: "j/k",
+            key: "↑/↓",
             action: "nav",
         }];
         let spans = build_spans(&hints);
         let line = Line::from(spans);
-        assert_eq!(line_text(&line), "j/k nav");
+        assert_eq!(line_text(&line), "↑/↓ nav");
     }
 
     #[test]
     fn multiple_hints_separated_by_dot() {
         let hints = [
             HintSpan {
-                key: "j/k",
+                key: "↑/↓",
                 action: "nav",
             },
             HintSpan {
@@ -147,14 +147,14 @@ mod tests {
         ];
         let spans = build_spans(&hints);
         let line = Line::from(spans);
-        assert_eq!(line_text(&line), "j/k nav \u{00B7} Enter expand");
+        assert_eq!(line_text(&line), "↑/↓ nav \u{00B7} Enter expand");
     }
 
     #[test]
     fn truncation_when_too_wide() {
         let hints = [
             HintSpan {
-                key: "j/k",
+                key: "↑/↓",
                 action: "nav",
             },
             HintSpan {

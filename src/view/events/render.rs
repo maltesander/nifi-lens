@@ -381,7 +381,7 @@ fn render_detail_pane(frame: &mut Frame, area: Rect, state: &EventsState) {
         let hint = if state.events.is_empty() {
             "".to_string()
         } else {
-            "press j/k to select a row for detail".to_string()
+            "press ↑/↓ to select a row for detail".to_string()
         };
         let p = Paragraph::new(Span::styled(hint, theme::muted())).alignment(Alignment::Center);
         frame.render_widget(p, inner);

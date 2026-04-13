@@ -108,7 +108,7 @@ impl BrowserState {
         ListNavigation::jump_end(self);
     }
 
-    /// `Enter` / `→` / `l` behavior. On a collapsed PG, expands and moves
+    /// `Enter` / `→` behavior. On a collapsed PG, expands and moves
     /// selection to the first child. On an expanded PG, moves to the
     /// first child (drill-in). On a leaf, no-op.
     pub fn enter_selection(&mut self) {
@@ -133,7 +133,7 @@ impl BrowserState {
         }
     }
 
-    /// `Backspace` / `←` / `h` behavior. On an expanded PG with its row
+    /// `Backspace` / `←` behavior. On an expanded PG with its row
     /// selected: collapses. On any other node: moves selection to the
     /// parent.
     pub fn backspace_selection(&mut self) {

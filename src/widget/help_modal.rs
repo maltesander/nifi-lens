@@ -24,8 +24,8 @@ Overview Tab:
 
 const BULLETINS_TEXT: &str = "\
 Bulletins Tab:
-  j / ↓             Move selection down
-  k / ↑             Move selection up
+  ↓                 Move selection down
+  ↑                 Move selection up
   g / Home          Jump to oldest
   G / End           Jump to newest (resume auto-scroll)
   p                 Toggle auto-scroll pause
@@ -40,11 +40,11 @@ Bulletins Tab:
 
 const BROWSER_TEXT: &str = "\
 Browser Tab:
-  ↑/↓ or j/k       Move selection
+  ↑/↓               Move selection
   PgUp/PgDn         Page scroll
   Home/End          Jump to first / last row
-  Enter / → / l     Expand PG and drill in (leaf: no-op)
-  Backspace / ← / h Collapse PG / move to parent
+  Enter / →         Expand PG and drill in (leaf: no-op)
+  Backspace / ←     Collapse PG / move to parent
   r                 Force-refresh tree
   e                 Expand properties (Processor/CS with detail)
   c                 Copy selected node id to clipboard
@@ -74,8 +74,8 @@ Filter bar:
   r                reset filters
   L                raise cap 500 → 5000
 
-Results list (j/k to enter row nav):
-  j / k            navigate rows
+Results list (↑/↓ to enter row nav):
+  ↑ / ↓            navigate rows
   t                trace selected flowfile in Tracer
   g                open selected component in Browser
   c                copy flowfile uuid
@@ -90,7 +90,7 @@ Entry mode (empty paste form):
   Esc / Ctrl+U   clear input
 
 Latest events mode (from Bulletins/Browser):
-  j / k          move selection
+  ↑ / ↓          move selection
   Enter          trace selected flowfile
   r              refresh list
   c              copy selected uuid
@@ -100,7 +100,7 @@ Lineage running mode:
   Esc            cancel query
 
 Lineage view mode:
-  j / k          move selection (resets event detail)
+  ↑ / ↓          move selection (resets event detail)
   Enter          load event detail
   i              load input content
   o              load output content
