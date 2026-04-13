@@ -485,6 +485,10 @@ pub fn update(state: &mut AppState, event: AppEvent, config: &Config) -> UpdateR
                 tracer_followup: followup,
             }
         }
+        AppEvent::Data(ViewPayload::Events(_)) => {
+            // Phase 6 Task 17 will replace this stub
+            UpdateResult::default()
+        }
         AppEvent::IntentOutcome(outcome) => handle_intent_outcome(state, outcome),
         AppEvent::Quit => {
             state.should_quit = true;
@@ -1088,6 +1092,9 @@ fn handle_intent_outcome(
                 tracer_followup: None,
             }
         }
+        // Phase 6 Task 17 will replace this stub
+        Ok(IntentOutcome::EventsLandingOn { .. })
+        | Ok(IntentOutcome::TracerLandingOnUuid { .. }) => UpdateResult::default(),
         Err(err) => {
             let msg = err.to_string();
             state.status.banner = Some(Banner {

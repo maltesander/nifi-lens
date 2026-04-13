@@ -23,6 +23,7 @@ pub enum ViewPayload {
     Bulletins(BulletinsPayload),
     Browser(BrowserPayload),
     Tracer(TracerPayload),
+    Events(EventsPayload),
 }
 
 /// Payload variants pushed from the merged Overview worker. After
@@ -116,6 +117,19 @@ pub enum IntentOutcome {
     TracerInputInvalid {
         raw: String,
     },
+    /// Phase 6: cross-link from Bulletins/Browser `t` lands on Events
+    /// pre-filled with the component and a 15-minute time window. The
+    /// reducer switches tabs, seeds `filters.source`, and kicks off a
+    /// query submission.
+    EventsLandingOn {
+        component_id: String,
+    },
+    /// Phase 6: cross-link from an Events result row `t` lands on
+    /// Tracer pre-filled with the flowfile uuid. Reuses the existing
+    /// Tracer UUID entry path.
+    TracerLandingOnUuid {
+        uuid: String,
+    },
 }
 
 /// Payload variants pushed from Tracer workers back into the UI loop.
@@ -165,6 +179,35 @@ pub enum TracerPayload {
     },
     ContentSaveFailed {
         path: std::path::PathBuf,
+        error: String,
+    },
+}
+
+/// Payload variants pushed from the Events tab worker back into the UI loop.
+///
+/// The full lifecycle:
+/// 1. User submits a query → worker emits `QueryStarted { query_id }`.
+/// 2. Worker polls and emits `QueryProgress { percent }` until the server
+///    reports `finished = true`.
+/// 3. Worker emits `QueryDone { events, fetched_at, truncated }` on success.
+/// 4. Worker emits `QueryFailed { error }` on any error during the above.
+#[derive(Debug, Clone)]
+pub enum EventsPayload {
+    QueryStarted {
+        query_id: String,
+    },
+    QueryProgress {
+        query_id: String,
+        percent: u8,
+    },
+    QueryDone {
+        query_id: String,
+        events: Vec<crate::client::ProvenanceEventSummary>,
+        fetched_at: std::time::SystemTime,
+        truncated: bool,
+    },
+    QueryFailed {
+        query_id: Option<String>,
         error: String,
     },
 }
