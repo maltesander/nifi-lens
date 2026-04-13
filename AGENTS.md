@@ -454,6 +454,53 @@ ring exceeds its capacity.
   the existing Tracer entry-form submission, where the tab switch
   is a no-op because the user is already on Tracer.
 
+**Accepted UI Reorg Phase 7 edge cases:**
+
+- **`l` with no focusable sections.** Pressing `l` on a PG, Connection,
+  Port, or Funnel row emits an Info banner `"no focusable sections for
+  this node"` and leaves focus on the tree. Deliberate — a silent
+  no-op reads as broken.
+- **Detail-focus row cursors reset on tree move.** `select_tree` (and
+  every other selection-mutating method on `BrowserState`, including
+  `move_up/down`, `page_up/down`, `jump_home/end`, `enter_selection`,
+  `backspace_selection`, and the free function `apply_tree_snapshot`)
+  resets `detail_focus` to `Tree`, so the per-section row cursors in
+  `DetailFocus::Section { rows, .. }` are lost whenever the tree
+  cursor moves. Acceptable — a `(node_id, section_idx) → row` cache
+  would bloat state for little gain.
+- **`l` empty-section fall-through.** On a Processor whose Recent
+  bulletins section is empty, `l`-cycling still includes that section
+  and the user sees a zero-row sub-panel. The banner feedback is not
+  emitted in this case — the empty panel is the feedback. Polish
+  item if it proves confusing.
+- **`h` unbound in tree focus.** With the drill-out `h` alias removed,
+  `h` has no binding when the tree is focused. It is a deliberate
+  no-op rather than a banner.
+- **`t` on Properties section falls through to tree handler.** Inside
+  the detail-focus branch, `t` is only matched on Recent bulletins.
+  Pressing `t` on a focused Properties row falls through to the tree
+  match, where the existing Browser `t` handler emits
+  `CrossLink::JumpToEvents` for the processor under the cursor. The
+  two code paths produce identical outcomes — harmless, but not
+  documented in the Phase 7 keybindings table. Pinned by the test
+  `t_in_focused_properties_section_falls_through_to_tree_t`.
+- **Narrow terminals lose readability.** Every zone is now a bordered
+  box — on terminals narrower than ~80 columns the Nodes panel's
+  inner content wraps badly. No resize-aware fallback; nifi-lens
+  already assumes ≥100×30.
+- **Clipboard corruption inherited.** Phase 7 does not fix the `c`-key
+  TUI corruption on Linux. That bug is tracked as a separate
+  debugging task; Phase 7 consumes whatever wrapper it lands.
+- **Properties modal (`e`) retained.** The in-pane Properties sub-panel
+  caps at whatever fits vertically; the `e` key still opens the full
+  Properties modal for users who want the complete list. No behavior
+  change from Phase 3.
+- **Sticky footer is the single source of hints.** Task 16 originally
+  added an inline hints strip at the bottom of each detail pane;
+  Task 23 removed it in favor of the `browser::hints()` context
+  switch. All per-focus hints now live in the bottom status bar, not
+  inside the detail panes themselves.
+
 ## Dependency on `nifi-rust-client`
 
 `nifi-lens` depends on `nifi-rust-client = "0.8.0"` with the `dynamic`
@@ -793,7 +840,32 @@ usable state.
     tab-completion on `T type`, attribute regex, realtime follow,
     saved queries, per-node scope, bulk export, parent/child uuid
     display — all tracked as edge cases.
-16. **Phase 7 — Write-path scaffolding.** Dry-run mode, confirmation modal
+16. **UI Reorg Phase 7 — Visual language & Browser detail interactivity.**
+    *(shipped)* Single project-wide bordered-box visual language via a new
+    `widget::panel::Panel` helper. Overview zones, Browser detail panes,
+    and the outer sub-panes of Bulletins / Events / Tracer all route
+    through `Panel` — focused panels flip to `BorderType::Thick` +
+    accent color, unfocused use plain + `theme::border_dim()`. New
+    `BrowserState::detail_focus` state machine adds a focus cycle: `l`
+    from the tree on a Processor/CS enters detail focus at section 0,
+    `l` cycles sections (wraps), `h`/`Esc` returns to the tree. Arrow
+    keys navigate rows inside the focused section; the Properties sub-
+    panel uses a real ratatui `Table` widget with row highlighting
+    driven by `TableState`. `c` copies the focused row's property
+    value or bulletin message; `t` on a focused Recent-bulletins row
+    emits `CrossLink::JumpToEvents`. All `j`/`k` row-nav aliases
+    removed app-wide (Browser tree, Bulletins, Events, Tracer, fuzzy
+    find modal, context switcher, Properties modal scroll) —
+    arrow keys are the single row-nav idiom. Tree drill-in/out drops
+    its `h`/`l` aliases (now `Enter`/`Right` and `Backspace`/`Left`
+    only); breadcrumb mode drops its `h`/`l` aliases likewise. This
+    frees `h`/`l` for detail-focus mode. `format_severity_label` /
+    `severity_style` consolidated into `src/widget/severity.rs`
+    (resolves the Phase 5 accepted edge case). `browser::hints(state)`
+    rewritten to switch on `DetailFocus` so the sticky footer shows
+    context-appropriate hint spans. `Cargo.toml` unchanged — no new
+    dependencies.
+17. **Phase 7 — Write-path scaffolding.** Dry-run mode, confirmation modal
     primitive, audit log, `--allow-writes` flag. No writes enabled yet —
     this just lays the rails for v2.
 
