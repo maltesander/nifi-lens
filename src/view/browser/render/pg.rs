@@ -9,7 +9,13 @@ use crate::client::ProcessGroupDetail;
 use crate::theme;
 use crate::view::browser::state::BrowserState;
 
-pub fn render(frame: &mut Frame, area: Rect, d: &ProcessGroupDetail, _state: &BrowserState) {
+pub fn render(
+    frame: &mut Frame,
+    area: Rect,
+    d: &ProcessGroupDetail,
+    _state: &BrowserState,
+    _bulletins: &std::collections::VecDeque<crate::client::BulletinSnapshot>,
+) {
     let mut lines: Vec<Line> = Vec::new();
     lines.push(Line::from(Span::styled(
         format!("Process Group — {}", d.name),
@@ -96,8 +102,12 @@ mod snapshots {
             ],
         };
         let state = BrowserState::new();
+        let bulletins: std::collections::VecDeque<crate::client::BulletinSnapshot> =
+            std::collections::VecDeque::new();
         let mut terminal = Terminal::new(TestBackend::new(100, 20)).unwrap();
-        terminal.draw(|f| render(f, f.area(), &d, &state)).unwrap();
+        terminal
+            .draw(|f| render(f, f.area(), &d, &state, &bulletins))
+            .unwrap();
         assert_snapshot!("pg_detail_with_cs_list", format!("{}", terminal.backend()));
     }
 }

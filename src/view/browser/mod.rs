@@ -9,6 +9,12 @@ use ratatui::layout::Rect;
 
 use crate::view::browser::state::{BrowserState, FlowIndex};
 
-pub fn render(frame: &mut Frame, area: Rect, state: &BrowserState, flow_index: &Option<FlowIndex>) {
-    render::render(frame, area, state, flow_index);
+pub fn render(
+    frame: &mut Frame,
+    area: Rect,
+    state: &BrowserState,
+    flow_index: &Option<FlowIndex>,
+    bulletins: &std::collections::VecDeque<crate::client::BulletinSnapshot>,
+) {
+    render::render(frame, area, state, flow_index, bulletins);
 }

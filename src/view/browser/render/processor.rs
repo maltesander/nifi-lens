@@ -12,7 +12,13 @@ use crate::view::browser::state::BrowserState;
 const INLINE_PROPERTY_ROWS: usize = 10;
 const INLINE_VALIDATION_ROWS: usize = 3;
 
-pub fn render(frame: &mut Frame, area: Rect, d: &ProcessorDetail, _state: &BrowserState) {
+pub fn render(
+    frame: &mut Frame,
+    area: Rect,
+    d: &ProcessorDetail,
+    _state: &BrowserState,
+    _bulletins: &std::collections::VecDeque<crate::client::BulletinSnapshot>,
+) {
     let mut lines: Vec<Line> = Vec::new();
     lines.push(Line::from(Span::styled(
         format!("Processor — {}", d.name),
@@ -114,8 +120,12 @@ mod snapshots {
             validation_errors: vec!["'Kafka Key' invalid".into()],
         };
         let state = BrowserState::new();
+        let bulletins: std::collections::VecDeque<crate::client::BulletinSnapshot> =
+            std::collections::VecDeque::new();
         let mut terminal = Terminal::new(TestBackend::new(100, 24)).unwrap();
-        terminal.draw(|f| render(f, f.area(), &d, &state)).unwrap();
+        terminal
+            .draw(|f| render(f, f.area(), &d, &state, &bulletins))
+            .unwrap();
         assert_snapshot!(
             "processor_detail_with_many_properties",
             format!("{}", terminal.backend())

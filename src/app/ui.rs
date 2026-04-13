@@ -65,7 +65,13 @@ fn render_content(frame: &mut Frame, area: Rect, state: &AppState) {
             &state.browser,
             &state.timestamp_cfg,
         ),
-        ViewId::Browser => browser::render(frame, area, &state.browser, &state.flow_index),
+        ViewId::Browser => browser::render(
+            frame,
+            area,
+            &state.browser,
+            &state.flow_index,
+            &state.bulletins.ring,
+        ),
         ViewId::Events => crate::view::render_placeholder(frame, area, " Events ", "Phase 6"),
         ViewId::Tracer => tracer::render(frame, area, &state.tracer, &state.timestamp_cfg),
     }

@@ -29,6 +29,7 @@ pub fn render(
     area: Rect,
     state: &BrowserState,
     _flow_index: &Option<FlowIndex>,
+    bulletins: &std::collections::VecDeque<crate::client::BulletinSnapshot>,
 ) {
     let block = Block::default()
         .borders(Borders::ALL)
@@ -67,7 +68,7 @@ pub fn render(
         .border_style(theme::muted());
     frame.render_widget(sep, chunks[1]);
 
-    render_detail(frame, chunks[2], state);
+    render_detail(frame, chunks[2], state, bulletins);
 }
 
 fn tab_title(state: &BrowserState) -> String {
@@ -230,7 +231,12 @@ fn build_breadcrumb_line(state: &BrowserState) -> Line<'static> {
     Line::from(spans)
 }
 
-fn render_detail(frame: &mut Frame, area: Rect, state: &BrowserState) {
+fn render_detail(
+    frame: &mut Frame,
+    area: Rect,
+    state: &BrowserState,
+    bulletins: &std::collections::VecDeque<crate::client::BulletinSnapshot>,
+) {
     let Some(&arena_idx) = state.visible.get(state.selected) else {
         return;
     };
@@ -259,8 +265,10 @@ fn render_detail(frame: &mut Frame, area: Rect, state: &BrowserState) {
     let header_line = Line::from(Span::styled(header, theme::accent()));
 
     match state.details.get(&arena_idx) {
-        Some(NodeDetail::ProcessGroup(d)) => pg::render(frame, detail_area, d, state),
-        Some(NodeDetail::Processor(d)) => processor::render(frame, detail_area, d, state),
+        Some(NodeDetail::ProcessGroup(d)) => pg::render(frame, detail_area, d, state, bulletins),
+        Some(NodeDetail::Processor(d)) => {
+            processor::render(frame, detail_area, d, state, bulletins);
+        }
         Some(NodeDetail::Connection(d)) => connection::render(frame, detail_area, d, state),
         Some(NodeDetail::ControllerService(d)) => {
             controller_service::render(frame, detail_area, d, state);
@@ -494,10 +502,12 @@ mod snapshots {
     use std::time::SystemTime;
 
     fn render_to_string(state: &BrowserState) -> String {
+        let bulletins: std::collections::VecDeque<crate::client::BulletinSnapshot> =
+            std::collections::VecDeque::new();
         let mut terminal = Terminal::new(TestBackend::new(120, 30)).unwrap();
         terminal
             .draw(|f| {
-                super::render(f, f.area(), state, &None);
+                super::render(f, f.area(), state, &None, &bulletins);
             })
             .unwrap();
         format!("{}", terminal.backend())
