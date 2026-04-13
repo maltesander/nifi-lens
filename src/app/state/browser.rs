@@ -3,7 +3,9 @@
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 
 use super::{AppState, Banner, BannerSeverity, Modal, PendingIntent, UpdateResult, ViewKeyHandler};
-use crate::view::browser::state::{DetailFocus, DetailSections, MAX_DETAIL_SECTIONS};
+use crate::view::browser::state::{
+    DetailFocus, DetailSection, DetailSections, MAX_DETAIL_SECTIONS,
+};
 
 /// Zero-sized dispatch struct for the Browser tab.
 pub(crate) struct BrowserHandler;
@@ -112,8 +114,24 @@ impl ViewKeyHandler for BrowserHandler {
                         tracer_followup: None,
                     });
                 }
+                KeyCode::Char('t')
+                    if sections.0.get(idx) == Some(&DetailSection::RecentBulletins) =>
+                {
+                    let Some(&arena_idx) = state.browser.visible.get(state.browser.selected) else {
+                        return Some(UpdateResult::default());
+                    };
+                    let source_id = state.browser.nodes[arena_idx].id.clone();
+                    let link = crate::intent::CrossLink::JumpToEvents {
+                        component_id: source_id,
+                    };
+                    return Some(UpdateResult {
+                        redraw: true,
+                        intent: Some(PendingIntent::JumpTo(link)),
+                        tracer_followup: None,
+                    });
+                }
                 _ => {
-                    // Fall through — Task 14 adds t handling here.
+                    // Fall through to the tree-focused match.
                 }
             }
         }
@@ -1119,6 +1137,68 @@ mod tests {
             "banner = {}",
             banner.message
         );
+    }
+
+    // -----------------------------------------------------------------------
+    // Task 14: t cross-link on focused bulletin rows
+    // -----------------------------------------------------------------------
+
+    /// AppState with selection on "gen" Processor, a populated NodeDetail, and
+    /// one matching bulletin in the ring.
+    fn fresh_browser_on_processor_with_bulletins() -> (AppState, crate::config::Config) {
+        use crate::client::BulletinSnapshot;
+
+        let (mut s, c) = fresh_browser_on_processor_with_properties();
+        s.bulletins.ring.push_back(BulletinSnapshot {
+            id: 1,
+            message: "test bulletin".into(),
+            source_id: "gen".into(),
+            source_name: "Gen".into(),
+            group_id: "root".into(),
+            source_type: "PROCESSOR".into(),
+            level: "WARNING".into(),
+            timestamp_iso: String::new(),
+            timestamp_human: "00:00:00".into(),
+        });
+        (s, c)
+    }
+
+    #[test]
+    fn t_in_focused_recent_bulletins_emits_jump_to_events_crosslink() {
+        let (mut s, c) = fresh_browser_on_processor_with_bulletins();
+        // Enter detail focus on Properties (section 0), then cycle to
+        // RecentBulletins (section 1).
+        update(&mut s, key(KeyCode::Char('l'), KeyModifiers::NONE), &c);
+        update(&mut s, key(KeyCode::Char('l'), KeyModifiers::NONE), &c);
+
+        let r = update(&mut s, key(KeyCode::Char('t'), KeyModifiers::NONE), &c);
+        match r.intent {
+            Some(PendingIntent::JumpTo(CrossLink::JumpToEvents { component_id })) => {
+                assert_eq!(component_id, "gen");
+            }
+            other => panic!("expected JumpToEvents cross-link, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn t_in_focused_properties_section_falls_through_to_tree_t() {
+        // When focus is on Properties (not RecentBulletins), t should fall
+        // through and emit the same JumpToEvents cross-link the tree-level
+        // t handler emits (since the processor is selected in the tree).
+        let (mut s, c) = fresh_browser_on_processor_with_properties();
+        // Enter detail focus on Properties (section 0 — NOT RecentBulletins).
+        update(&mut s, key(KeyCode::Char('l'), KeyModifiers::NONE), &c);
+
+        let r = update(&mut s, key(KeyCode::Char('t'), KeyModifiers::NONE), &c);
+        // The guard `sections.0.get(idx) == Some(&DetailSection::RecentBulletins)`
+        // is false on section 0 (Properties), so t falls through to the tree
+        // handler which also emits JumpToEvents for the selected Processor.
+        match r.intent {
+            Some(PendingIntent::JumpTo(CrossLink::JumpToEvents { component_id })) => {
+                assert_eq!(component_id, "gen");
+            }
+            other => panic!("expected JumpToEvents from tree handler, got {other:?}"),
+        }
     }
 
     #[test]
