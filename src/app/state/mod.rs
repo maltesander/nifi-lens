@@ -565,7 +565,7 @@ fn handle_key(state: &mut AppState, key: KeyEvent, config: &Config) -> UpdateRes
                             tracer_followup: None,
                         };
                     }
-                    KeyCode::Down | KeyCode::Char('j') => {
+                    KeyCode::Down => {
                         cs.move_cursor_down();
                         return UpdateResult {
                             redraw: true,
@@ -573,7 +573,7 @@ fn handle_key(state: &mut AppState, key: KeyEvent, config: &Config) -> UpdateRes
                             tracer_followup: None,
                         };
                     }
-                    KeyCode::Up | KeyCode::Char('k') => {
+                    KeyCode::Up => {
                         cs.move_cursor_up();
                         return UpdateResult {
                             redraw: true,
@@ -684,7 +684,7 @@ fn handle_key(state: &mut AppState, key: KeyEvent, config: &Config) -> UpdateRes
                             tracer_followup: None,
                         };
                     }
-                    KeyCode::Down | KeyCode::Char('j') => {
+                    KeyCode::Down => {
                         // The renderer reconciles `scroll` against the
                         // actual flattened row count; we use a large
                         // placeholder max here and let the renderer clamp.
@@ -695,7 +695,7 @@ fn handle_key(state: &mut AppState, key: KeyEvent, config: &Config) -> UpdateRes
                             tracer_followup: None,
                         };
                     }
-                    KeyCode::Up | KeyCode::Char('k') => {
+                    KeyCode::Up => {
                         ps.scroll_up();
                         return UpdateResult {
                             redraw: true,
@@ -1683,6 +1683,95 @@ mod tests {
         // Cluster summary should still be populated even on fallback.
         assert_eq!(s.cluster_summary.total_nodes, Some(2));
         assert_eq!(s.cluster_summary.connected_nodes, Some(2));
+    }
+
+    #[test]
+    fn context_switcher_row_nav_uses_arrows_only_no_jk() {
+        // Open the context switcher (2 entries via tiny_config).
+        let mut s = fresh_state();
+        let c = tiny_config();
+        update(&mut s, key(KeyCode::Char('K'), KeyModifiers::SHIFT), &c);
+        let before = match s.modal.as_ref().unwrap() {
+            Modal::ContextSwitcher(cs) => cs.cursor,
+            _ => panic!("expected ContextSwitcher"),
+        };
+
+        // j is a no-op inside the modal.
+        update(&mut s, key(KeyCode::Char('j'), KeyModifiers::NONE), &c);
+        let after_j = match s.modal.as_ref().unwrap() {
+            Modal::ContextSwitcher(cs) => cs.cursor,
+            _ => panic!("expected ContextSwitcher"),
+        };
+        assert_eq!(after_j, before, "j dropped");
+
+        // Down still moves the cursor.
+        update(&mut s, key(KeyCode::Down, KeyModifiers::NONE), &c);
+        let after_down = match s.modal.as_ref().unwrap() {
+            Modal::ContextSwitcher(cs) => cs.cursor,
+            _ => panic!("expected ContextSwitcher"),
+        };
+        assert!(after_down > before, "Down still works");
+
+        let before = after_down;
+        // k is a no-op.
+        update(&mut s, key(KeyCode::Char('k'), KeyModifiers::NONE), &c);
+        let after_k = match s.modal.as_ref().unwrap() {
+            Modal::ContextSwitcher(cs) => cs.cursor,
+            _ => panic!("expected ContextSwitcher"),
+        };
+        assert_eq!(after_k, before, "k dropped");
+
+        // Up still moves the cursor back.
+        update(&mut s, key(KeyCode::Up, KeyModifiers::NONE), &c);
+        let after_up = match s.modal.as_ref().unwrap() {
+            Modal::ContextSwitcher(cs) => cs.cursor,
+            _ => panic!("expected ContextSwitcher"),
+        };
+        assert!(after_up < before, "Up still works");
+    }
+
+    #[test]
+    fn properties_modal_scroll_uses_arrows_only_no_jk() {
+        use crate::app::state::Modal;
+        use crate::view::browser::state::PropertiesModalState;
+
+        let mut s = fresh_state();
+        let c = tiny_config();
+        // Seed the Properties modal with scroll at 0.
+        s.modal = Some(Modal::Properties(PropertiesModalState::new(1)));
+
+        // j is a no-op inside the modal.
+        update(&mut s, key(KeyCode::Char('j'), KeyModifiers::NONE), &c);
+        let scroll_after_j = match s.modal.as_ref().unwrap() {
+            Modal::Properties(ps) => ps.scroll,
+            _ => panic!("expected Properties modal"),
+        };
+        assert_eq!(scroll_after_j, 0, "j dropped");
+
+        // Down still scrolls.
+        update(&mut s, key(KeyCode::Down, KeyModifiers::NONE), &c);
+        let scroll_after_down = match s.modal.as_ref().unwrap() {
+            Modal::Properties(ps) => ps.scroll,
+            _ => panic!("expected Properties modal"),
+        };
+        assert!(scroll_after_down > 0, "Down still works");
+
+        let before = scroll_after_down;
+        // k is a no-op.
+        update(&mut s, key(KeyCode::Char('k'), KeyModifiers::NONE), &c);
+        let scroll_after_k = match s.modal.as_ref().unwrap() {
+            Modal::Properties(ps) => ps.scroll,
+            _ => panic!("expected Properties modal"),
+        };
+        assert_eq!(scroll_after_k, before, "k dropped");
+
+        // Up still scrolls back.
+        update(&mut s, key(KeyCode::Up, KeyModifiers::NONE), &c);
+        let scroll_after_up = match s.modal.as_ref().unwrap() {
+            Modal::Properties(ps) => ps.scroll,
+            _ => panic!("expected Properties modal"),
+        };
+        assert!(scroll_after_up < before, "Up still works");
     }
 
     #[test]
