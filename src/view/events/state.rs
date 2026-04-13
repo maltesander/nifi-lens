@@ -226,6 +226,37 @@ impl EventsState {
             self.cap = 5000;
         }
     }
+
+    /// Enter Mode B (row navigation). Does nothing if the results list
+    /// is empty.
+    pub fn enter_row_nav(&mut self) {
+        if !self.events.is_empty() {
+            self.selected_row = Some(0);
+        }
+    }
+
+    /// Leave Mode B back to Mode A (filter bar). Clears selection.
+    pub fn leave_row_nav(&mut self) {
+        self.selected_row = None;
+    }
+
+    pub fn move_selection_down(&mut self) {
+        if let Some(idx) = self.selected_row {
+            let max = self.events.len().saturating_sub(1);
+            self.selected_row = Some((idx + 1).min(max));
+        }
+    }
+
+    pub fn move_selection_up(&mut self) {
+        if let Some(idx) = self.selected_row {
+            self.selected_row = Some(idx.saturating_sub(1));
+        }
+    }
+
+    /// Accessor for the currently-selected event, if any.
+    pub fn selected_event(&self) -> Option<&crate::client::ProvenanceEventSummary> {
+        self.selected_row.and_then(|i| self.events.get(i))
+    }
 }
 
 /// Reducer: fold an [`EventsPayload`](crate::event::EventsPayload) into state.
@@ -611,5 +642,137 @@ mod tests {
         // Pressing L again clamps to 5000 (no further raise).
         s.raise_cap();
         assert_eq!(s.cap, 5000);
+    }
+
+    #[test]
+    fn enter_row_nav_from_empty_results_is_noop() {
+        let mut s = EventsState::new();
+        s.enter_row_nav();
+        assert_eq!(s.selected_row, None);
+    }
+
+    #[test]
+    fn enter_row_nav_with_results_selects_first_row() {
+        use crate::client::ProvenanceEventSummary;
+        use crate::event::EventsPayload;
+        use std::time::SystemTime;
+        let mut s = EventsState::new();
+        let e = ProvenanceEventSummary {
+            event_id: 1,
+            event_time_iso: "2026-04-13T10:00:00Z".into(),
+            event_type: "DROP".into(),
+            component_id: "p".into(),
+            component_name: "P".into(),
+            component_type: "PROCESSOR".into(),
+            group_id: "g".into(),
+            flow_file_uuid: "u".into(),
+            relationship: None,
+            details: None,
+        };
+        apply_payload(
+            &mut s,
+            EventsPayload::QueryStarted {
+                query_id: "q".into(),
+            },
+        );
+        apply_payload(
+            &mut s,
+            EventsPayload::QueryDone {
+                query_id: "q".into(),
+                events: vec![e.clone(), e.clone(), e],
+                fetched_at: SystemTime::now(),
+                truncated: false,
+            },
+        );
+        s.enter_row_nav();
+        assert_eq!(s.selected_row, Some(0));
+    }
+
+    #[test]
+    fn move_selection_down_and_up_cycles_within_results() {
+        use crate::client::ProvenanceEventSummary;
+        use crate::event::EventsPayload;
+        use std::time::SystemTime;
+        let mut s = EventsState::new();
+        let e = ProvenanceEventSummary {
+            event_id: 1,
+            event_time_iso: "2026-04-13T10:00:00Z".into(),
+            event_type: "DROP".into(),
+            component_id: "p".into(),
+            component_name: "P".into(),
+            component_type: "PROCESSOR".into(),
+            group_id: "g".into(),
+            flow_file_uuid: "u".into(),
+            relationship: None,
+            details: None,
+        };
+        apply_payload(
+            &mut s,
+            EventsPayload::QueryStarted {
+                query_id: "q".into(),
+            },
+        );
+        apply_payload(
+            &mut s,
+            EventsPayload::QueryDone {
+                query_id: "q".into(),
+                events: vec![e.clone(), e.clone(), e],
+                fetched_at: SystemTime::now(),
+                truncated: false,
+            },
+        );
+        s.enter_row_nav();
+        assert_eq!(s.selected_row, Some(0));
+        s.move_selection_down();
+        assert_eq!(s.selected_row, Some(1));
+        s.move_selection_down();
+        assert_eq!(s.selected_row, Some(2));
+        s.move_selection_down();
+        // Saturates at end.
+        assert_eq!(s.selected_row, Some(2));
+        s.move_selection_up();
+        assert_eq!(s.selected_row, Some(1));
+        s.move_selection_up();
+        s.move_selection_up();
+        // Saturates at start.
+        assert_eq!(s.selected_row, Some(0));
+    }
+
+    #[test]
+    fn leave_row_nav_clears_selection() {
+        use crate::client::ProvenanceEventSummary;
+        use crate::event::EventsPayload;
+        use std::time::SystemTime;
+        let mut s = EventsState::new();
+        let e = ProvenanceEventSummary {
+            event_id: 1,
+            event_time_iso: "2026-04-13T10:00:00Z".into(),
+            event_type: "DROP".into(),
+            component_id: "p".into(),
+            component_name: "P".into(),
+            component_type: "PROCESSOR".into(),
+            group_id: "g".into(),
+            flow_file_uuid: "u".into(),
+            relationship: None,
+            details: None,
+        };
+        apply_payload(
+            &mut s,
+            EventsPayload::QueryStarted {
+                query_id: "q".into(),
+            },
+        );
+        apply_payload(
+            &mut s,
+            EventsPayload::QueryDone {
+                query_id: "q".into(),
+                events: vec![e],
+                fetched_at: SystemTime::now(),
+                truncated: false,
+            },
+        );
+        s.enter_row_nav();
+        s.leave_row_nav();
+        assert_eq!(s.selected_row, None);
     }
 }
