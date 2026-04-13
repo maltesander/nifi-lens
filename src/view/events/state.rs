@@ -259,16 +259,21 @@ impl EventsState {
     }
 
     /// Build a [`ProvenanceQuery`](crate::client::ProvenanceQuery) from the
-    /// current filter state. Projects `filters.time` into an ISO-8601
-    /// start date (best-effort — empty / unparseable input falls back
-    /// to no start filter).
+    /// current filter state. Projects `filters.time` into a NiFi-native
+    /// `MM/dd/yyyy HH:mm:ss` start date (best-effort — empty /
+    /// unparseable input falls back to no start filter). The time is
+    /// computed in the local timezone so the server interprets it in
+    /// whatever zone both sides share (typical for dev fixtures);
+    /// falls back to UTC if the local offset is indeterminate.
     pub fn build_query(&self) -> crate::client::ProvenanceQuery {
         use time::OffsetDateTime;
-        use time::format_description::well_known::Rfc3339;
+        use time::macros::format_description;
 
+        let nifi_fmt = format_description!("[month]/[day]/[year] [hour]:[minute]:[second]");
+        let now = OffsetDateTime::now_local().unwrap_or_else(|_| OffsetDateTime::now_utc());
         let start = parse_time_window(&self.filters.time)
-            .and_then(|d| OffsetDateTime::now_utc().checked_sub(d))
-            .and_then(|dt| dt.format(&Rfc3339).ok());
+            .and_then(|d| now.checked_sub(d))
+            .and_then(|dt| dt.format(&nifi_fmt).ok());
 
         crate::client::ProvenanceQuery {
             component_id: if self.filters.source.is_empty() {

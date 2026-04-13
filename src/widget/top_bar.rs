@@ -160,7 +160,9 @@ fn tab_index(view: ViewId) -> usize {
 fn tab_bar_width() -> usize {
     let labels: usize = TAB_LABELS.iter().map(|l| l.width()).sum();
     let separators = (TAB_LABELS.len() - 1) * 3;
-    labels + separators + 1
+    // ratatui's Tabs widget adds 1-cell padding on each side of every tab.
+    let padding = TAB_LABELS.len() * 2;
+    labels + separators + padding + 1
 }
 
 #[cfg(test)]

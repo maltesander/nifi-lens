@@ -493,6 +493,15 @@ pub fn update(state: &mut AppState, event: AppEvent, config: &Config) -> UpdateR
             }
         }
         AppEvent::Data(ViewPayload::Events(payload)) => {
+            // Mirror QueryFailed errors into the global status banner so
+            // the footer surfaces them the same way other tab errors do.
+            if let crate::event::EventsPayload::QueryFailed { error, .. } = &payload {
+                state.status.banner = Some(Banner {
+                    severity: BannerSeverity::Error,
+                    message: format!("Events query failed: {error}"),
+                    detail: None,
+                });
+            }
             crate::view::events::state::apply_payload(&mut state.events, payload);
             state.last_refresh = Instant::now();
             UpdateResult {
