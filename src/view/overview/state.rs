@@ -88,6 +88,12 @@ pub struct OverviewState {
     pub repositories_summary: RepositoriesSummary,
     pub last_pg_refresh: Option<std::time::Instant>,
     pub last_sysdiag_refresh: Option<std::time::Instant>,
+
+    /// Last observed sysdiag mode. `None` until the first sysdiag
+    /// poll resolves. Driven by the app-level reducer in
+    /// `src/app/state/mod.rs`, not by `apply_payload`, because the
+    /// warn-once banner write is an AppState-level side effect.
+    pub sysdiag_mode: Option<SysdiagMode>,
 }
 
 /// Cluster-aggregate repository fill bars shown in the Overview "Nodes"
@@ -98,6 +104,17 @@ pub struct RepositoriesSummary {
     pub content_percent: u32,
     pub flowfile_percent: u32,
     pub provenance_percent: u32,
+}
+
+/// Whether the last successful system-diagnostics poll came from the
+/// nodewise endpoint or the aggregate-only fallback. Used by the
+/// app-level reducer to fire the "nodewise unavailable" warning banner
+/// only when the mode *transitions* into `Aggregate`, not on every
+/// fallback tick.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SysdiagMode {
+    Nodewise,
+    Aggregate,
 }
 
 impl OverviewState {

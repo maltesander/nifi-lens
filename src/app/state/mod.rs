@@ -493,6 +493,8 @@ fn update_inner(state: &mut AppState, event: AppEvent, config: &Config) -> Updat
             // `NodeDiagnostics` has no `status` field that distinguishes
             // connected from disconnected nodes, so both totals are set to
             // `diag.nodes.len()` until upstream adds that field.
+            use crate::view::overview::state::SysdiagMode;
+
             match &payload {
                 crate::event::OverviewPayload::SystemDiag(diag)
                 | crate::event::OverviewPayload::SystemDiagFallback { diag, .. } => {
@@ -502,12 +504,34 @@ fn update_inner(state: &mut AppState, event: AppEvent, config: &Config) -> Updat
                 crate::event::OverviewPayload::PgStatus(_) => {}
             }
 
-            if let crate::event::OverviewPayload::SystemDiagFallback { warning, .. } = &payload {
-                state.status.banner = Some(crate::app::state::Banner {
-                    severity: crate::app::state::BannerSeverity::Warning,
-                    message: warning.clone(),
-                    detail: None,
-                });
+            let new_mode = match &payload {
+                crate::event::OverviewPayload::SystemDiag(_) => Some(SysdiagMode::Nodewise),
+                crate::event::OverviewPayload::SystemDiagFallback { .. } => {
+                    Some(SysdiagMode::Aggregate)
+                }
+                crate::event::OverviewPayload::PgStatus(_) => None,
+            };
+
+            if let (
+                Some(SysdiagMode::Aggregate),
+                crate::event::OverviewPayload::SystemDiagFallback { warning, .. },
+            ) = (new_mode, &payload)
+            {
+                // Only emit the banner when the mode transitions into
+                // Aggregate. Steady-state aggregate polls are silent.
+                let previous = state.overview.sysdiag_mode;
+                let transitioning = !matches!(previous, Some(SysdiagMode::Aggregate));
+                if transitioning {
+                    state.status.banner = Some(crate::app::state::Banner {
+                        severity: crate::app::state::BannerSeverity::Warning,
+                        message: warning.clone(),
+                        detail: None,
+                    });
+                }
+            }
+
+            if let Some(mode) = new_mode {
+                state.overview.sysdiag_mode = Some(mode);
             }
 
             apply_overview_payload(&mut state.overview, payload);
@@ -1776,6 +1800,71 @@ mod tests {
         // Cluster summary should still be populated even on fallback.
         assert_eq!(s.cluster_summary.total_nodes, Some(2));
         assert_eq!(s.cluster_summary.connected_nodes, Some(2));
+    }
+
+    #[test]
+    fn overview_sysdiag_fallback_banner_fires_only_on_mode_transition() {
+        use crate::event::{OverviewPayload, ViewPayload};
+        use crate::view::overview::state::SysdiagMode;
+
+        let mut s = fresh_state();
+        let c = tiny_config();
+        let diag = build_test_sysdiag_with_two_nodes();
+
+        // First fallback payload: mode transitions from None → Aggregate.
+        // Banner must be set.
+        update(
+            &mut s,
+            AppEvent::Data(ViewPayload::Overview(OverviewPayload::SystemDiagFallback {
+                diag: diag.clone(),
+                warning: "nodewise diagnostics unavailable".into(),
+            })),
+            &c,
+        );
+        assert!(s.status.banner.is_some(), "first fallback must set banner");
+        assert_eq!(s.overview.sysdiag_mode, Some(SysdiagMode::Aggregate));
+
+        // User dismisses the banner (simulating Task 4's Esc path).
+        s.status.banner = None;
+
+        // Second fallback payload: mode stays Aggregate → Aggregate.
+        // Banner must NOT be re-armed.
+        update(
+            &mut s,
+            AppEvent::Data(ViewPayload::Overview(OverviewPayload::SystemDiagFallback {
+                diag: diag.clone(),
+                warning: "nodewise diagnostics unavailable".into(),
+            })),
+            &c,
+        );
+        assert!(
+            s.status.banner.is_none(),
+            "second consecutive fallback must not re-arm the banner"
+        );
+
+        // Recovery: a successful SystemDiag payload flips the mode back.
+        update(
+            &mut s,
+            AppEvent::Data(ViewPayload::Overview(OverviewPayload::SystemDiag(
+                diag.clone(),
+            ))),
+            &c,
+        );
+        assert_eq!(s.overview.sysdiag_mode, Some(SysdiagMode::Nodewise));
+
+        // Another fallback after recovery: mode transitions again → re-fires.
+        update(
+            &mut s,
+            AppEvent::Data(ViewPayload::Overview(OverviewPayload::SystemDiagFallback {
+                diag,
+                warning: "nodewise diagnostics unavailable".into(),
+            })),
+            &c,
+        );
+        assert!(
+            s.status.banner.is_some(),
+            "fallback after a recovered Nodewise mode must re-fire the banner"
+        );
     }
 
     #[test]
