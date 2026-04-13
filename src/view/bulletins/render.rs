@@ -733,4 +733,66 @@ mod tests {
             }
         );
     }
+
+    #[test]
+    fn snapshot_dedups_identical_stems_across_sources() {
+        // Four bulletins: three from src-a (same stem "boom", should fold ×3),
+        // interleaved with one from src-b. Dedup produces 2 rows.
+        let rows = vec![
+            BulletinSnapshot {
+                id: 1,
+                level: "ERROR".into(),
+                message: "ProcA[id=a] boom".into(),
+                source_id: "src-a".into(),
+                source_name: "ProcA".into(),
+                source_type: "PROCESSOR".into(),
+                group_id: "root".into(),
+                timestamp_iso: "2026-04-11T10:14:22Z".into(),
+                timestamp_human: String::new(),
+            },
+            BulletinSnapshot {
+                id: 2,
+                level: "ERROR".into(),
+                message: "ProcB[id=b] crash".into(),
+                source_id: "src-b".into(),
+                source_name: "ProcB".into(),
+                source_type: "PROCESSOR".into(),
+                group_id: "root".into(),
+                timestamp_iso: "2026-04-11T10:14:23Z".into(),
+                timestamp_human: String::new(),
+            },
+            BulletinSnapshot {
+                id: 3,
+                level: "ERROR".into(),
+                message: "ProcA[id=a] boom".into(),
+                source_id: "src-a".into(),
+                source_name: "ProcA".into(),
+                source_type: "PROCESSOR".into(),
+                group_id: "root".into(),
+                timestamp_iso: "2026-04-11T10:14:24Z".into(),
+                timestamp_human: String::new(),
+            },
+            BulletinSnapshot {
+                id: 4,
+                level: "ERROR".into(),
+                message: "ProcA[id=a] boom".into(),
+                source_id: "src-a".into(),
+                source_name: "ProcA".into(),
+                source_type: "PROCESSOR".into(),
+                group_id: "root".into(),
+                timestamp_iso: "2026-04-11T10:14:25Z".into(),
+                timestamp_human: String::new(),
+            },
+        ];
+        let state = seed_state(rows);
+        insta::with_settings!(
+            { filters => vec![(r"last [^\s]+ ago", "last <DUR> ago")] },
+            {
+                insta::assert_snapshot!(
+                    "bulletins_dedups_identical_stems_across_sources",
+                    render_to_string(&state)
+                );
+            }
+        );
+    }
 }
