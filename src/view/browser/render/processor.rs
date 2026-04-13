@@ -17,13 +17,19 @@ pub fn render(
     area: Rect,
     d: &ProcessorDetail,
     _state: &BrowserState,
-    _bulletins: &std::collections::VecDeque<crate::client::BulletinSnapshot>,
+    bulletins: &std::collections::VecDeque<crate::client::BulletinSnapshot>,
 ) {
     let mut lines: Vec<Line> = Vec::new();
-    lines.push(Line::from(Span::styled(
-        format!("Processor — {}", d.name),
-        theme::accent(),
-    )));
+
+    // Header: "<name>  processor"
+    lines.push(Line::from(vec![
+        Span::styled(
+            d.name.clone(),
+            theme::accent().add_modifier(ratatui::style::Modifier::BOLD),
+        ),
+        Span::raw("  "),
+        Span::styled("processor".to_string(), theme::muted()),
+    ]));
     lines.push(Line::from(format!("Type:   {}", d.type_name)));
     lines.push(Line::from(format!("Bundle: {}", d.bundle)));
     lines.push(Line::from(format!(
@@ -56,8 +62,6 @@ pub fn render(
             format!("  …{} more, press e to expand", m - INLINE_PROPERTY_ROWS),
             theme::muted(),
         )));
-    } else {
-        lines.push(Line::from(""));
     }
 
     let ve = d.validation_errors.len();
@@ -80,7 +84,54 @@ pub fn render(
         }
     }
 
+    // Recent bulletins section.
+    let recent = crate::view::bulletins::state::recent_for_source_id(bulletins, &d.id, 3);
+    let total = bulletins.iter().filter(|b| b.source_id == d.id).count();
+    lines.push(Line::from(""));
+    lines.push(Line::from(Span::styled(
+        format!("Recent bulletins ({total} for this processor)"),
+        theme::accent(),
+    )));
+    for b in &recent {
+        let sev = format_severity_label(&b.level);
+        let sev_style = severity_style(&b.level);
+        let stripped = crate::view::bulletins::state::strip_component_prefix(&b.message);
+        lines.push(Line::from(vec![
+            Span::raw("  "),
+            Span::styled(sev, sev_style),
+            Span::raw("  "),
+            Span::raw(stripped.to_string()),
+        ]));
+    }
+
+    // Action hints.
+    lines.push(Line::from(""));
+    lines.push(Line::from(Span::styled(
+        "e properties · c copy id · t trace lineage".to_string(),
+        theme::muted(),
+    )));
+
     frame.render_widget(Paragraph::new(lines), area);
+}
+
+/// Severity label + style helpers. Duplicated from `pg.rs` / bulletins
+/// render intentionally to keep this leaf file self-contained.
+fn format_severity_label(level: &str) -> String {
+    match crate::client::Severity::parse(level) {
+        crate::client::Severity::Error => "ERROR".to_string(),
+        crate::client::Severity::Warning => "WARN ".to_string(),
+        crate::client::Severity::Info => "INFO ".to_string(),
+        crate::client::Severity::Unknown => level.to_ascii_uppercase(),
+    }
+}
+
+fn severity_style(level: &str) -> ratatui::style::Style {
+    match crate::client::Severity::parse(level) {
+        crate::client::Severity::Error => theme::error(),
+        crate::client::Severity::Warning => theme::warning(),
+        crate::client::Severity::Info => theme::info(),
+        crate::client::Severity::Unknown => theme::muted(),
+    }
 }
 
 fn truncate(s: &str, max: usize) -> String {
