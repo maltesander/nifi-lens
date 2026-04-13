@@ -16,6 +16,22 @@ use crate::client::browser::{
     ProcessorDetail, RawNode, RecursiveSnapshot,
 };
 
+/// Rolled-up health color for a Process Group's tree marker glyph.
+/// Red beats Yellow beats Green: any descendant processor with
+/// `INVALID` run-state promotes to Red; else any with `STOPPED`
+/// promotes to Yellow; else Green.
+///
+/// Ports, Connections, Controller Services do not contribute.
+/// This is a shallow-semantic rollup driving the tree's
+/// at-a-glance marker color; it does not consider bulletin
+/// severity or validation errors on non-processor nodes.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PgHealth {
+    Green,
+    Yellow,
+    Red,
+}
+
 #[derive(Debug, Default)]
 pub struct BrowserState {
     pub nodes: Vec<TreeNode>,
@@ -205,6 +221,43 @@ impl BrowserState {
         }
         names.reverse();
         Some(names.join(" / "))
+    }
+
+    /// Compute the rolled-up health color for the PG at `arena_idx`
+    /// by walking its descendants in the arena.
+    ///
+    /// Returns `PgHealth::Red` if any descendant processor has
+    /// `run_status == "INVALID"`, else `Yellow` if any has
+    /// `"STOPPED"`, else `Green`.
+    ///
+    /// Safe on any arena index — non-PG indices return `Green`
+    /// (a PG's rollup is only asked for PG nodes in practice).
+    pub fn pg_health_rollup(&self, arena_idx: usize) -> PgHealth {
+        let mut saw_stopped = false;
+        // DFS over descendants.
+        let mut stack: Vec<usize> = self
+            .nodes
+            .get(arena_idx)
+            .map(|n| n.children.clone())
+            .unwrap_or_default();
+        while let Some(idx) = stack.pop() {
+            let Some(node) = self.nodes.get(idx) else {
+                continue;
+            };
+            if let NodeStatusSummary::Processor { run_status } = &node.status_summary {
+                match run_status.to_ascii_uppercase().as_str() {
+                    "INVALID" => return PgHealth::Red,
+                    "STOPPED" => saw_stopped = true,
+                    _ => {}
+                }
+            }
+            stack.extend(node.children.iter().copied());
+        }
+        if saw_stopped {
+            PgHealth::Yellow
+        } else {
+            PgHealth::Green
+        }
     }
 }
 
@@ -1103,5 +1156,204 @@ mod tests {
         );
         // Root PG has no path (root name is intentionally dropped).
         assert_eq!(s.pg_path("root-id"), None);
+    }
+
+    #[test]
+    fn pg_health_rollup_green_when_all_running() {
+        // Root PG → one processor with RUNNING.
+        let snap = RecursiveSnapshot {
+            fetched_at: UNIX_EPOCH,
+            nodes: vec![
+                RawNode {
+                    parent_idx: None,
+                    kind: NodeKind::ProcessGroup,
+                    id: "root".into(),
+                    group_id: "root".into(),
+                    name: "Root".into(),
+                    status_summary: NodeStatusSummary::ProcessGroup {
+                        running: 1,
+                        stopped: 0,
+                        invalid: 0,
+                        disabled: 0,
+                    },
+                },
+                RawNode {
+                    parent_idx: Some(0),
+                    kind: NodeKind::Processor,
+                    id: "p1".into(),
+                    group_id: "root".into(),
+                    name: "P1".into(),
+                    status_summary: NodeStatusSummary::Processor {
+                        run_status: "RUNNING".into(),
+                    },
+                },
+            ],
+        };
+        let mut s = BrowserState::new();
+        apply_tree_snapshot(&mut s, snap);
+        assert_eq!(s.pg_health_rollup(0), PgHealth::Green);
+    }
+
+    #[test]
+    fn pg_health_rollup_yellow_when_any_stopped() {
+        let snap = RecursiveSnapshot {
+            fetched_at: UNIX_EPOCH,
+            nodes: vec![
+                RawNode {
+                    parent_idx: None,
+                    kind: NodeKind::ProcessGroup,
+                    id: "root".into(),
+                    group_id: "root".into(),
+                    name: "Root".into(),
+                    status_summary: NodeStatusSummary::ProcessGroup {
+                        running: 1,
+                        stopped: 1,
+                        invalid: 0,
+                        disabled: 0,
+                    },
+                },
+                RawNode {
+                    parent_idx: Some(0),
+                    kind: NodeKind::Processor,
+                    id: "p1".into(),
+                    group_id: "root".into(),
+                    name: "P1".into(),
+                    status_summary: NodeStatusSummary::Processor {
+                        run_status: "RUNNING".into(),
+                    },
+                },
+                RawNode {
+                    parent_idx: Some(0),
+                    kind: NodeKind::Processor,
+                    id: "p2".into(),
+                    group_id: "root".into(),
+                    name: "P2".into(),
+                    status_summary: NodeStatusSummary::Processor {
+                        run_status: "STOPPED".into(),
+                    },
+                },
+            ],
+        };
+        let mut s = BrowserState::new();
+        apply_tree_snapshot(&mut s, snap);
+        assert_eq!(s.pg_health_rollup(0), PgHealth::Yellow);
+    }
+
+    #[test]
+    fn pg_health_rollup_red_when_any_invalid_even_if_some_stopped() {
+        let snap = RecursiveSnapshot {
+            fetched_at: UNIX_EPOCH,
+            nodes: vec![
+                RawNode {
+                    parent_idx: None,
+                    kind: NodeKind::ProcessGroup,
+                    id: "root".into(),
+                    group_id: "root".into(),
+                    name: "Root".into(),
+                    status_summary: NodeStatusSummary::ProcessGroup {
+                        running: 0,
+                        stopped: 1,
+                        invalid: 1,
+                        disabled: 0,
+                    },
+                },
+                RawNode {
+                    parent_idx: Some(0),
+                    kind: NodeKind::Processor,
+                    id: "p1".into(),
+                    group_id: "root".into(),
+                    name: "P1".into(),
+                    status_summary: NodeStatusSummary::Processor {
+                        run_status: "STOPPED".into(),
+                    },
+                },
+                RawNode {
+                    parent_idx: Some(0),
+                    kind: NodeKind::Processor,
+                    id: "p2".into(),
+                    group_id: "root".into(),
+                    name: "P2".into(),
+                    status_summary: NodeStatusSummary::Processor {
+                        run_status: "INVALID".into(),
+                    },
+                },
+            ],
+        };
+        let mut s = BrowserState::new();
+        apply_tree_snapshot(&mut s, snap);
+        assert_eq!(s.pg_health_rollup(0), PgHealth::Red);
+    }
+
+    #[test]
+    fn pg_health_rollup_recurses_into_child_pgs() {
+        // Root PG → inner PG → processor INVALID.
+        let snap = RecursiveSnapshot {
+            fetched_at: UNIX_EPOCH,
+            nodes: vec![
+                RawNode {
+                    parent_idx: None,
+                    kind: NodeKind::ProcessGroup,
+                    id: "root".into(),
+                    group_id: "root".into(),
+                    name: "Root".into(),
+                    status_summary: NodeStatusSummary::ProcessGroup {
+                        running: 0,
+                        stopped: 0,
+                        invalid: 1,
+                        disabled: 0,
+                    },
+                },
+                RawNode {
+                    parent_idx: Some(0),
+                    kind: NodeKind::ProcessGroup,
+                    id: "inner".into(),
+                    group_id: "root".into(),
+                    name: "inner".into(),
+                    status_summary: NodeStatusSummary::ProcessGroup {
+                        running: 0,
+                        stopped: 0,
+                        invalid: 1,
+                        disabled: 0,
+                    },
+                },
+                RawNode {
+                    parent_idx: Some(1),
+                    kind: NodeKind::Processor,
+                    id: "p1".into(),
+                    group_id: "inner".into(),
+                    name: "P1".into(),
+                    status_summary: NodeStatusSummary::Processor {
+                        run_status: "INVALID".into(),
+                    },
+                },
+            ],
+        };
+        let mut s = BrowserState::new();
+        apply_tree_snapshot(&mut s, snap);
+        // Rollup at root PG finds the invalid grandchild → Red.
+        assert_eq!(s.pg_health_rollup(0), PgHealth::Red);
+    }
+
+    #[test]
+    fn pg_health_rollup_green_for_empty_pg() {
+        let snap = RecursiveSnapshot {
+            fetched_at: UNIX_EPOCH,
+            nodes: vec![RawNode {
+                parent_idx: None,
+                kind: NodeKind::ProcessGroup,
+                id: "root".into(),
+                group_id: "root".into(),
+                name: "Root".into(),
+                status_summary: NodeStatusSummary::ProcessGroup {
+                    running: 0,
+                    stopped: 0,
+                    invalid: 0,
+                    disabled: 0,
+                },
+            }],
+        };
+        let mut s = BrowserState::new();
+        apply_tree_snapshot(&mut s, snap);
+        assert_eq!(s.pg_health_rollup(0), PgHealth::Green);
     }
 }
