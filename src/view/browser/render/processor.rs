@@ -1,121 +1,319 @@
 //! Processor detail renderer.
+//!
+//! Phase 7 layout:
+//!
+//! ```text
+//! ┌ <name> · processor · <state> ──────────┐
+//! │┌ Identity ───────────────────────┐     │
+//! ││ type / bundle / schedule        │     │
+//! │└─────────────────────────────────┘     │
+//! │┌ Properties  N ──────────────────┐     │  ← focusable
+//! ││ KEY              VALUE          │     │
+//! ││ ...scrollable Table...          │     │
+//! │└─────────────────────────────────┘     │
+//! │┌ Recent bulletins  N ────────────┐     │  ← focusable
+//! ││ ...scrollable Table...          │     │
+//! │└─────────────────────────────────┘     │
+//! │ ↑/↓ nav · l enter detail · ...         │  ← hints strip (no box)
+//! └────────────────────────────────────────┘
+//! ```
+//!
+//! The Properties and Recent bulletins sub-panels flip their border to
+//! thick + accent when the corresponding `DetailSection` holds focus, and
+//! their Table widget selects the row from `DetailFocus::rows[idx]`.
+
+use std::collections::VecDeque;
 
 use ratatui::Frame;
-use ratatui::layout::Rect;
+use ratatui::layout::{Constraint, Direction, Layout, Rect};
+use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
-use ratatui::widgets::Paragraph;
+use ratatui::widgets::{Cell, Paragraph, Row, Table, TableState};
 
-use crate::client::ProcessorDetail;
+use crate::client::{BulletinSnapshot, NodeKind, ProcessorDetail};
 use crate::theme;
-use crate::view::browser::state::BrowserState;
+use crate::view::browser::state::{BrowserState, DetailFocus, DetailSection, DetailSections};
+use crate::widget::panel::Panel;
 use crate::widget::severity::{format_severity_label, severity_style};
-
-const INLINE_PROPERTY_ROWS: usize = 10;
-const INLINE_VALIDATION_ROWS: usize = 3;
 
 pub fn render(
     frame: &mut Frame,
     area: Rect,
     d: &ProcessorDetail,
     _state: &BrowserState,
-    bulletins: &std::collections::VecDeque<crate::client::BulletinSnapshot>,
+    bulletins: &VecDeque<BulletinSnapshot>,
+    detail_focus: &DetailFocus,
 ) {
-    let mut lines: Vec<Line> = Vec::new();
+    // 1. Outer panel: " <name> · processor · <state> "
+    let outer = Panel::new(build_header_title(d)).into_block();
+    let inner = outer.inner(area);
+    frame.render_widget(outer, area);
 
-    // Header: "<name>  processor"
-    lines.push(Line::from(vec![
-        Span::styled(
-            d.name.clone(),
-            theme::accent().add_modifier(ratatui::style::Modifier::BOLD),
-        ),
-        Span::raw("  "),
-        Span::styled("processor".to_string(), theme::muted()),
-    ]));
-    lines.push(Line::from(format!("Type:   {}", d.type_name)));
-    lines.push(Line::from(format!("Bundle: {}", d.bundle)));
-    lines.push(Line::from(format!(
-        "State: {}   Concurrent: {}",
-        d.run_status, d.concurrent_tasks
-    )));
-    lines.push(Line::from(format!(
-        "Schedule: {} every {}",
-        d.scheduling_strategy, d.scheduling_period
-    )));
-    lines.push(Line::from(format!(
-        "Run duration: {} ms    Penalty: {}    Yield: {}",
-        d.run_duration_ms, d.penalty_duration, d.yield_duration
-    )));
-    lines.push(Line::from(""));
+    // 2. Inner vertical layout.
+    //    identity: 4 rows (2 borders + 2 content lines)
+    //    properties: fill — takes the bulk
+    //    recent bulletins: 8 rows (2 borders + 6 content rows)
+    //    hints: 1 line, no border
+    let rows = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([
+            Constraint::Length(4),
+            Constraint::Fill(1),
+            Constraint::Length(8),
+            Constraint::Length(1),
+        ])
+        .split(inner);
 
-    let m = d.properties.len();
-    let n = INLINE_PROPERTY_ROWS.min(m);
-    lines.push(Line::from(Span::styled(
-        format!("Properties (showing {n} of {m})"),
-        theme::accent(),
-    )));
-    for (k, v) in d.properties.iter().take(n) {
-        let key = format!("  {:28}", truncate(k, 28));
-        let val = truncate(v, 60);
-        lines.push(Line::from(format!("{key} {val}")));
+    render_identity_panel(frame, rows[0], d);
+    render_properties_and_validation(frame, rows[1], d, detail_focus);
+    render_recent_bulletins_panel(frame, rows[2], d, bulletins, detail_focus);
+    render_hints_strip(frame, rows[3], detail_focus);
+}
+
+/// Build the outer panel title: ` <name> · processor · <run_status> `.
+fn build_header_title(d: &ProcessorDetail) -> Line<'_> {
+    Line::from(vec![
+        Span::raw(" "),
+        Span::styled(d.name.as_str(), theme::accent()),
+        Span::raw(" "),
+        Span::styled("·", theme::muted()),
+        Span::raw(" "),
+        Span::styled("processor", theme::muted()),
+        Span::raw(" "),
+        Span::styled("·", theme::muted()),
+        Span::raw(" "),
+        Span::styled(d.run_status.as_str(), run_state_style(&d.run_status)),
+        Span::raw(" "),
+    ])
+}
+
+fn run_state_style(run_status: &str) -> Style {
+    match run_status.to_ascii_uppercase().as_str() {
+        "RUNNING" => theme::success(),
+        "STOPPED" => theme::warning(),
+        "INVALID" => theme::error(),
+        "DISABLED" => theme::disabled(),
+        "VALIDATING" => theme::info(),
+        _ => Style::default(),
     }
-    if m > INLINE_PROPERTY_ROWS {
-        lines.push(Line::from(Span::styled(
-            format!("  …{} more, press e to expand", m - INLINE_PROPERTY_ROWS),
-            theme::muted(),
-        )));
-    }
+}
 
-    let ve = d.validation_errors.len();
-    if ve == 0 {
-        lines.push(Line::from("Validation errors: none"));
+fn render_identity_panel(frame: &mut Frame, area: Rect, d: &ProcessorDetail) {
+    let block = Panel::new(" Identity ").into_block();
+    let inner = block.inner(area);
+    frame.render_widget(block, area);
+
+    let lines = vec![
+        Line::from(vec![
+            Span::styled("type   ", theme::muted()),
+            Span::raw(truncate(
+                &d.type_name,
+                inner.width.saturating_sub(7) as usize,
+            )),
+        ]),
+        Line::from(vec![
+            Span::styled("bundle ", theme::muted()),
+            Span::raw(truncate(&d.bundle, inner.width.saturating_sub(7) as usize)),
+        ]),
+    ];
+    frame.render_widget(Paragraph::new(lines), inner);
+}
+
+/// Renders the Properties sub-panel and, when the processor has
+/// validation errors, a single-line summary below it. The middle "fill"
+/// row is split here so the validation line lives between Properties
+/// and Recent bulletins without needing a fifth row in the outer layout.
+fn render_properties_and_validation(
+    frame: &mut Frame,
+    area: Rect,
+    d: &ProcessorDetail,
+    detail_focus: &DetailFocus,
+) {
+    let has_validation = !d.validation_errors.is_empty();
+    let constraints: Vec<Constraint> = if has_validation {
+        vec![Constraint::Fill(1), Constraint::Length(1)]
     } else {
-        lines.push(Line::from(Span::styled(
-            format!("Validation errors: {ve}"),
-            theme::error(),
-        )));
-        let max_err_width = (area.width as usize).saturating_sub(4);
-        for err in d.validation_errors.iter().take(INLINE_VALIDATION_ROWS) {
-            lines.push(Line::from(format!("  {}", truncate(err, max_err_width))));
-        }
-        if ve > INLINE_VALIDATION_ROWS {
-            lines.push(Line::from(Span::styled(
-                format!("  …{} more", ve - INLINE_VALIDATION_ROWS),
-                theme::muted(),
-            )));
+        vec![Constraint::Fill(1)]
+    };
+    let chunks = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints(constraints)
+        .split(area);
+
+    render_properties_panel(frame, chunks[0], d, detail_focus);
+    if has_validation {
+        render_validation_line(frame, chunks[1], d);
+    }
+}
+
+fn render_validation_line(frame: &mut Frame, area: Rect, d: &ProcessorDetail) {
+    let count = d.validation_errors.len();
+    let line = if count == 0 {
+        Line::from(Span::styled("validation errors: none", theme::muted()))
+    } else {
+        let first = d
+            .validation_errors
+            .first()
+            .map(String::as_str)
+            .unwrap_or("");
+        let width = area.width.saturating_sub(24) as usize;
+        Line::from(vec![
+            Span::styled(format!("validation errors: {count} "), theme::error()),
+            Span::styled(truncate(first, width), theme::error()),
+        ])
+    };
+    frame.render_widget(Paragraph::new(line), area);
+}
+
+fn render_properties_panel(
+    frame: &mut Frame,
+    area: Rect,
+    d: &ProcessorDetail,
+    detail_focus: &DetailFocus,
+) {
+    let sections = DetailSections::for_node(NodeKind::Processor);
+    let props_idx = sections
+        .0
+        .iter()
+        .position(|s| *s == DetailSection::Properties)
+        .unwrap_or(0);
+    let is_focused = matches!(
+        detail_focus,
+        DetailFocus::Section { idx, .. } if *idx == props_idx
+    );
+
+    let total = d.properties.len();
+    let panel = Panel::new(" Properties ")
+        .right(Line::from(format!(" {total} ")))
+        .focused(is_focused)
+        .into_block();
+    let inner = panel.inner(area);
+    frame.render_widget(panel, area);
+
+    let header = Row::new(vec![Cell::from("KEY"), Cell::from("VALUE")])
+        .style(theme::muted().add_modifier(Modifier::BOLD));
+
+    let rows_data: Vec<Row> = d
+        .properties
+        .iter()
+        .map(|(k, v)| Row::new(vec![Cell::from(k.clone()), Cell::from(v.clone())]))
+        .collect();
+    let widths = [Constraint::Length(30), Constraint::Fill(1)];
+    let table = Table::new(rows_data, widths)
+        .header(header)
+        .row_highlight_style(theme::cursor_row());
+
+    let mut state = TableState::default();
+    if let DetailFocus::Section { rows, .. } = detail_focus
+        && is_focused
+    {
+        state.select(Some(rows[props_idx]));
+    }
+    frame.render_stateful_widget(table, inner, &mut state);
+}
+
+fn render_recent_bulletins_panel(
+    frame: &mut Frame,
+    area: Rect,
+    d: &ProcessorDetail,
+    bulletins: &VecDeque<BulletinSnapshot>,
+    detail_focus: &DetailFocus,
+) {
+    let sections = DetailSections::for_node(NodeKind::Processor);
+    let bul_idx = sections
+        .0
+        .iter()
+        .position(|s| *s == DetailSection::RecentBulletins)
+        .unwrap_or(1);
+    let is_focused = matches!(
+        detail_focus,
+        DetailFocus::Section { idx, .. } if *idx == bul_idx
+    );
+
+    // Collect ALL matching bulletins (no cap) — the Table scrolls.
+    let matching: Vec<&BulletinSnapshot> =
+        bulletins.iter().filter(|b| b.source_id == d.id).collect();
+    let total = matching.len();
+
+    let panel = Panel::new(" Recent bulletins ")
+        .right(Line::from(format!(" {total} ")))
+        .focused(is_focused)
+        .into_block();
+    let inner = panel.inner(area);
+    frame.render_widget(panel, area);
+
+    let rows_data: Vec<Row> = matching
+        .iter()
+        .map(|b| {
+            let sev_label = format_severity_label(&b.level);
+            let sev_style = severity_style(&b.level);
+            Row::new(vec![
+                Cell::from(short_time(&b.timestamp_iso, &b.timestamp_human)),
+                Cell::from(sev_label).style(sev_style),
+                Cell::from(
+                    crate::view::bulletins::state::strip_component_prefix(&b.message).to_string(),
+                ),
+            ])
+        })
+        .collect();
+    let widths = [
+        Constraint::Length(8),
+        Constraint::Length(6),
+        Constraint::Fill(1),
+    ];
+    let table = Table::new(rows_data, widths).row_highlight_style(theme::cursor_row());
+
+    let mut state = TableState::default();
+    if let DetailFocus::Section { rows, .. } = detail_focus
+        && is_focused
+    {
+        state.select(Some(rows[bul_idx]));
+    }
+    frame.render_stateful_widget(table, inner, &mut state);
+}
+
+/// Extract `HH:MM:SS` from an ISO-8601 timestamp, falling back to a
+/// short slice of the human-readable form when the ISO field is empty.
+fn short_time(iso: &str, human: &str) -> String {
+    if iso.len() >= 19 {
+        let t = &iso[11..19];
+        if t.as_bytes().get(2) == Some(&b':') && t.as_bytes().get(5) == Some(&b':') {
+            return t.to_string();
         }
     }
-
-    // Recent bulletins section.
-    let recent = crate::view::bulletins::state::recent_for_source_id(bulletins, &d.id, 3);
-    let total = bulletins.iter().filter(|b| b.source_id == d.id).count();
-    lines.push(Line::from(""));
-    lines.push(Line::from(Span::styled(
-        format!("Recent bulletins ({total} for this processor)"),
-        theme::accent(),
-    )));
-    for b in &recent {
-        let sev = format_severity_label(&b.level);
-        let sev_style = severity_style(&b.level);
-        let stripped = crate::view::bulletins::state::strip_component_prefix(&b.message);
-        lines.push(Line::from(vec![
-            Span::raw("  "),
-            Span::styled(sev, sev_style),
-            Span::raw("  "),
-            Span::raw(stripped.to_string()),
-        ]));
+    // Fallback: if the human string has `HH:MM:SS` somewhere, grab it.
+    for i in 0..human.len().saturating_sub(7) {
+        let slice = &human[i..i + 8];
+        if slice.as_bytes()[2] == b':' && slice.as_bytes()[5] == b':' {
+            return slice.to_string();
+        }
     }
+    "--:--:--".to_string()
+}
 
-    // Action hints.
-    lines.push(Line::from(""));
-    lines.push(Line::from(Span::styled(
-        "e properties · c copy id · t trace lineage".to_string(),
-        theme::muted(),
-    )));
-
-    frame.render_widget(Paragraph::new(lines), area);
+fn render_hints_strip(frame: &mut Frame, area: Rect, detail_focus: &DetailFocus) {
+    let text = match detail_focus {
+        DetailFocus::Tree => "↑/↓ nav · l enter detail · Enter drill in · e properties · c copy id",
+        DetailFocus::Section { idx, .. } => {
+            let sections = DetailSections::for_node(NodeKind::Processor);
+            match sections.0.get(*idx) {
+                Some(DetailSection::Properties) => {
+                    "↑/↓ row · l next section · h back · c copy value · e full list"
+                }
+                Some(DetailSection::RecentBulletins) => {
+                    "↑/↓ row · l next section · h back · c copy msg · t trace"
+                }
+                _ => "",
+            }
+        }
+    };
+    frame.render_widget(Paragraph::new(text).style(theme::muted()), area);
 }
 
 fn truncate(s: &str, max: usize) -> String {
+    if max == 0 {
+        return String::new();
+    }
     if s.chars().count() <= max {
         s.to_string()
     } else {
@@ -127,12 +325,12 @@ fn truncate(s: &str, max: usize) -> String {
 #[cfg(test)]
 mod snapshots {
     use super::*;
+    use crate::client::BulletinSnapshot;
     use insta::assert_snapshot;
     use ratatui::Terminal;
     use ratatui::backend::TestBackend;
 
-    #[test]
-    fn processor_detail_with_many_properties() {
+    fn seeded_detail() -> (ProcessorDetail, BrowserState, VecDeque<BulletinSnapshot>) {
         let d = ProcessorDetail {
             id: "put-kafka-1".into(),
             name: "PutKafka".into(),
@@ -146,21 +344,62 @@ mod snapshots {
             penalty_duration: "30 sec".into(),
             yield_duration: "1 sec".into(),
             bulletin_level: "WARN".into(),
-            properties: (0..13)
+            properties: (0..8)
                 .map(|i| (format!("Property-{i}"), format!("value-{i}")))
                 .collect(),
-            validation_errors: vec!["'Kafka Key' invalid".into()],
+            validation_errors: vec![],
         };
         let state = BrowserState::new();
-        let bulletins: std::collections::VecDeque<crate::client::BulletinSnapshot> =
-            std::collections::VecDeque::new();
-        let mut terminal = Terminal::new(TestBackend::new(100, 24)).unwrap();
-        terminal
-            .draw(|f| render(f, f.area(), &d, &state, &bulletins))
-            .unwrap();
-        assert_snapshot!(
-            "processor_detail_with_many_properties",
-            format!("{}", terminal.backend())
-        );
+        let mut bulletins: VecDeque<BulletinSnapshot> = VecDeque::new();
+        for (i, level) in ["ERROR", "WARN", "INFO", "WARN"].iter().enumerate() {
+            bulletins.push_back(BulletinSnapshot {
+                id: (100 + i) as i64,
+                level: (*level).into(),
+                message: format!("PutKafka[id=abc] message {i} with details"),
+                source_id: "put-kafka-1".into(),
+                source_name: "PutKafka".into(),
+                source_type: "PROCESSOR".into(),
+                group_id: "root".into(),
+                timestamp_iso: format!("2026-04-13T10:14:{:02}.000Z", 10 + i),
+                timestamp_human: format!("04/13/2026 10:14:{:02} UTC", 10 + i),
+            });
+        }
+        (d, state, bulletins)
+    }
+
+    fn render_snapshot(detail_focus: &DetailFocus) -> String {
+        let (d, state, bulletins) = seeded_detail();
+        let mut term = Terminal::new(TestBackend::new(120, 30)).unwrap();
+        term.draw(|f| {
+            render(f, f.area(), &d, &state, &bulletins, detail_focus);
+        })
+        .unwrap();
+        format!("{}", term.backend())
+    }
+
+    #[test]
+    fn processor_detail_tree_focused() {
+        let out = render_snapshot(&DetailFocus::Tree);
+        assert_snapshot!("processor_detail_tree_focused", out);
+    }
+
+    #[test]
+    fn processor_detail_properties_focused() {
+        let focus = DetailFocus::Section {
+            idx: 0,
+            rows: [1, 0, 0, 0],
+        };
+        let out = render_snapshot(&focus);
+        assert_snapshot!("processor_detail_properties_focused", out);
+    }
+
+    #[test]
+    fn processor_detail_recent_bulletins_focused() {
+        let focus = DetailFocus::Section {
+            idx: 1,
+            rows: [0, 0, 0, 0],
+        };
+        let out = render_snapshot(&focus);
+        assert_snapshot!("processor_detail_recent_bulletins_focused", out);
     }
 }

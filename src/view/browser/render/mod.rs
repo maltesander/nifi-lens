@@ -259,7 +259,7 @@ fn render_detail(
     match state.details.get(&arena_idx) {
         Some(NodeDetail::ProcessGroup(d)) => pg::render(frame, detail_area, d, state, bulletins),
         Some(NodeDetail::Processor(d)) => {
-            processor::render(frame, detail_area, d, state, bulletins);
+            processor::render(frame, detail_area, d, state, bulletins, &state.detail_focus);
         }
         Some(NodeDetail::Connection(d)) => connection::render(frame, detail_area, d, state),
         Some(NodeDetail::ControllerService(d)) => {
