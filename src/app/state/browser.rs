@@ -84,8 +84,36 @@ impl ViewKeyHandler for BrowserHandler {
                         tracer_followup: None,
                     });
                 }
+                KeyCode::Char('c') => {
+                    let Some(value) = state.browser.focused_row_copy_value(&state.bulletins.ring)
+                    else {
+                        return Some(UpdateResult::default());
+                    };
+                    let preview: String = value.chars().take(40).collect();
+                    match arboard::Clipboard::new().and_then(|mut cb| cb.set_text(value.clone())) {
+                        Ok(()) => {
+                            state.status.banner = Some(Banner {
+                                severity: BannerSeverity::Info,
+                                message: format!("copied: {preview}"),
+                                detail: None,
+                            });
+                        }
+                        Err(err) => {
+                            state.status.banner = Some(Banner {
+                                severity: BannerSeverity::Warning,
+                                message: format!("clipboard: {err}"),
+                                detail: None,
+                            });
+                        }
+                    }
+                    return Some(UpdateResult {
+                        redraw: true,
+                        intent: None,
+                        tracer_followup: None,
+                    });
+                }
                 _ => {
-                    // Fall through — Tasks 13-14 add c/t handling here.
+                    // Fall through — Task 14 adds t handling here.
                 }
             }
         }
@@ -1068,6 +1096,29 @@ mod tests {
             }
             _ => panic!("expected Section focus"),
         }
+    }
+
+    // -----------------------------------------------------------------------
+    // Task 13: c copy in focused sections
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn c_in_focused_properties_copies_value_and_emits_banner() {
+        let (mut s, c) = fresh_browser_on_processor_with_properties();
+        // Enter detail focus on Properties (section 0).
+        update(&mut s, key(KeyCode::Char('l'), KeyModifiers::NONE), &c);
+
+        update(&mut s, key(KeyCode::Char('c'), KeyModifiers::NONE), &c);
+
+        // The banner must start with "copied" (success) or "clipboard" (failure).
+        // We can't assert the clipboard was set in a headless test, but we can
+        // assert the reducer produced an Info or Warning banner.
+        let banner = s.status.banner.as_ref().expect("banner set after c");
+        assert!(
+            banner.message.starts_with("copied") || banner.message.starts_with("clipboard"),
+            "banner = {}",
+            banner.message
+        );
     }
 
     #[test]

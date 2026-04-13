@@ -383,6 +383,44 @@ impl BrowserState {
         }
     }
 
+    /// Returns the clipboard-ready string for the currently-focused detail
+    /// row, or `None` if focus is in the tree, no row is selected, or the
+    /// section is empty.
+    ///
+    /// - Properties rows return the raw value string.
+    /// - RecentBulletins rows return the full bulletin message.
+    pub fn focused_row_copy_value(
+        &self,
+        bulletins: &std::collections::VecDeque<crate::client::BulletinSnapshot>,
+    ) -> Option<String> {
+        let DetailFocus::Section { idx, rows } = &self.detail_focus else {
+            return None;
+        };
+        let arena_idx = *self.visible.get(self.selected)?;
+        let detail = self.details.get(&arena_idx)?;
+        let kind = self.nodes[arena_idx].kind;
+        let sections = DetailSections::for_node(kind);
+        let section = *sections.0.get(*idx)?;
+        let row = rows[*idx];
+        match (section, detail) {
+            (DetailSection::Properties, NodeDetail::Processor(p)) => {
+                p.properties.get(row).map(|(_k, v)| v.clone())
+            }
+            (DetailSection::Properties, NodeDetail::ControllerService(cs)) => {
+                cs.properties.get(row).map(|(_k, v)| v.clone())
+            }
+            (DetailSection::RecentBulletins, NodeDetail::Processor(_)) => {
+                let source_id = &self.nodes[arena_idx].id;
+                bulletins
+                    .iter()
+                    .filter(|b| b.source_id == *source_id)
+                    .nth(row)
+                    .map(|b| b.message.clone())
+            }
+            _ => None,
+        }
+    }
+
     /// List the direct child Process Groups of the PG with the
     /// given `group_id`, in arena order. Non-PG children are
     /// excluded. Returns an empty vec if the PG is not present
