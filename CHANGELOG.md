@@ -7,6 +7,94 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- **UI Reorg Phase 1 — Chrome refactor.** New 1-row top bar with tabs +
+  right-aligned compact identity strip (`[ctx] vX.Y.Z · nodes N/M`).
+  Two-row footer (banner + refresh age, then context-sensitive shortcuts
+  hint bar). The bordered `" nifi-lens "` title box is gone.
+- **UI Reorg Phase 2 — Keybinding rename sweep.** `Ctrl+F` → `f`,
+  `Ctrl+K` → `K`, `Alt+←` / `Alt+→` → `[` / `]`, `Shift+B` relabeled
+  `B` (handler unchanged). `Ctrl+C` / `Ctrl+Q` quit and emacs
+  text-input helpers (`Ctrl+U`, `Ctrl+N`, `Ctrl+P`) preserved. Rule:
+  bare lowercase for view-local, bare capital for app-wide, no Ctrl
+  chords except quit / text-input helpers.
+- **UI Reorg Phase 3 — Overview merge.** Health tab's data and
+  presentation merged into Overview as the new Layout 3 dashboard:
+  Format-C processor info line, nodes hero zone (per-node heap/GC/load,
+  cluster-aggregate repository fill bars), bulletins/noisy 50/50
+  split, and unhealthy queues full-width. Overview worker rewritten for
+  dual cadence (10s PG status + 30s system diagnostics with nodewise →
+  aggregate fallback). Top-bar identity strip now shows real
+  `nodes N/M` from the SystemDiag payload.
+- **F-key remap.** F1=Overview, F2=Bulletins, F3=Browser, F4=Events,
+  F5=Tracer (was: F3=Health, F4=Browser, F5=Tracer).
+- Bulletins and Tracer timestamp formatting now route through a shared
+  `timestamp` module backed by the `time` crate. This deduplicates two
+  fragile byte-sliced parsers and enables the new `[ui]` config.
+  (Implementation uses `time` rather than `chrono`; `time` is already a
+  dependency and covers every requirement.)
+- Inline `Color::*` / `Modifier::*` constructors across the view layer
+  have been replaced with calls into `src/theme.rs` helpers. Visual
+  output is unchanged except for a handful of principled improvements
+  (e.g. GC-delta errors now render bold red).
+- `theme::severity_by_pct` helper centralises percentage-threshold style
+  mapping.
+- **Phase 6 structural cleanup.** Split monolithic `app/state.rs`
+  (2,535 lines) into per-view key handler modules behind a
+  `ViewKeyHandler` trait. Extracted `ListNavigation` trait for shared
+  list navigation math. Genericized worker polling loop for Overview and
+  Bulletins. Consolidated inline styles into semantic theme helpers.
+- Bumped `nifi-rust-client` from 0.5.0 to 0.7.0 — adds typed provenance
+  content bodies, NiFi 2.9.0 support, and `Option<DetectedVersion>`.
+- Dropped the `since` field from `CrossLink::TraceComponent`.
+- `IntentOutcome::NotImplementedInPhase { phase: 3 }` is no longer
+  emitted for `CrossLink::OpenInBrowser`; the dispatcher now returns
+  `IntentOutcome::OpenInBrowserTarget` and the reducer handles the
+  tab switch + ancestor expansion.
+- **`IntentOutcome::NotImplementedInPhase0` → `NotImplementedInPhase {
+  phase }`.** Internal refactor; the banner now reports the phase a
+  stubbed intent is waiting on.
+- **`CrossLink::ComponentId(String)` → `OpenInBrowser { .. }` /
+  `TraceComponent { .. }`.** Stronger typing around cross-tab jumps.
+- **Crate is now lib + bin.** `src/lib.rs` holds every module;
+  `src/main.rs` is a thin wrapper calling `nifi_lens::run()`. Integration
+  tests can `use nifi_lens::...` without spawning the binary.
+- **MSRV raised to 1.88** (from 1.85) so `time >= 0.3.47` can land and
+  fix [RUSTSEC-2026-0009](https://rustsec.org/advisories/RUSTSEC-2026-0009).
+- **`deny.toml`** now allows `BSL-1.0` (clipboard-win / error-code via
+  arboard) and ignores `RUSTSEC-2024-0436` (unmaintained `paste`
+  transitive via ratatui — no safe upgrade available).
+
+### Removed
+
+- **Health tab.** Merged into Overview. The `view/health/` directory,
+  `app/state/health.rs`, the `HealthPayload` / `ViewPayload::Health`
+  variants, the `ViewId::Health` variant, and the `health: HealthState`
+  field on `AppState` are all gone. F3 → Health binding replaced with
+  F3 → Browser.
+- **Per-node repository breakdown.** The old Health "Repositories"
+  detail pane showed per-node fill bars on row selection. Layout 3
+  shows only the cluster aggregate row. Per-node drill-in is a future
+  detail-pane feature.
+- **Processor thread leaderboard.** The old Health "Processors"
+  category showed a top-N processor-by-active-threads leaderboard.
+  Layout 3 has no equivalent panel — the processor info line shows
+  aggregate counts only.
+- **Queue time-to-full predictions and stalled badge.** The old Health
+  "Queues" category showed `~30s` / `~2m` / `stable` / `∞ (stalled)`
+  hints derived from server-side backpressure timestamps. The Layout
+  3 unhealthy queues table shows fill / queue / src→dst / ffile count
+  only. The data is still in the API; restoring the column is a
+  future polish item.
+- **Queue Enter-cross-link to Browser.** The old Health queue rows
+  supported `Enter` to jump to the connection in Browser. The Layout
+  3 unhealthy queues table is non-interactive.
+- **Bordered tab bar with `" nifi-lens "` title.** Replaced by the
+  Phase 1 1-row top bar.
+- **Old Ctrl/Alt chord bindings.** Replaced by Phase 2 bare-letter
+  equivalents.
+
 ### Added
 
 - Tab history with `Alt+Left`/`Alt+Right` for cross-link back/forward
@@ -148,45 +236,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - New `[ui]` config section with `timestamp_format`
   (`short` / `iso` / `human`) and `timestamp_tz` (`utc` / `local`). See
   `README.md` for the reference.
-
-### Changed
-
-- Bulletins and Tracer timestamp formatting now route through a shared
-  `timestamp` module backed by the `time` crate. This deduplicates two
-  fragile byte-sliced parsers and enables the new `[ui]` config.
-  (Implementation uses `time` rather than `chrono`; `time` is already a
-  dependency and covers every requirement.)
-- Inline `Color::*` / `Modifier::*` constructors across the view layer
-  have been replaced with calls into `src/theme.rs` helpers. Visual
-  output is unchanged except for a handful of principled improvements
-  (e.g. GC-delta errors now render bold red).
-- `theme::severity_by_pct` helper centralises percentage-threshold style
-  mapping.
-- **Phase 6 structural cleanup.** Split monolithic `app/state.rs`
-  (2,535 lines) into per-view key handler modules behind a
-  `ViewKeyHandler` trait. Extracted `ListNavigation` trait for shared
-  list navigation math. Genericized worker polling loop for Overview and
-  Bulletins. Consolidated inline styles into semantic theme helpers.
-- Bumped `nifi-rust-client` from 0.5.0 to 0.7.0 — adds typed provenance
-  content bodies, NiFi 2.9.0 support, and `Option<DetectedVersion>`.
-- Dropped the `since` field from `CrossLink::TraceComponent`.
-- `IntentOutcome::NotImplementedInPhase { phase: 3 }` is no longer
-  emitted for `CrossLink::OpenInBrowser`; the dispatcher now returns
-  `IntentOutcome::OpenInBrowserTarget` and the reducer handles the
-  tab switch + ancestor expansion.
-- **`IntentOutcome::NotImplementedInPhase0` → `NotImplementedInPhase {
-  phase }`.** Internal refactor; the banner now reports the phase a
-  stubbed intent is waiting on.
-- **`CrossLink::ComponentId(String)` → `OpenInBrowser { .. }` /
-  `TraceComponent { .. }`.** Stronger typing around cross-tab jumps.
-- **Crate is now lib + bin.** `src/lib.rs` holds every module;
-  `src/main.rs` is a thin wrapper calling `nifi_lens::run()`. Integration
-  tests can `use nifi_lens::...` without spawning the binary.
-- **MSRV raised to 1.88** (from 1.85) so `time >= 0.3.47` can land and
-  fix [RUSTSEC-2026-0009](https://rustsec.org/advisories/RUSTSEC-2026-0009).
-- **`deny.toml`** now allows `BSL-1.0` (clipboard-win / error-code via
-  arboard) and ignores `RUSTSEC-2024-0436` (unmaintained `paste`
-  transitive via ratatui — no safe upgrade available).
 
 ### Fixed
 

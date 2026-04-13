@@ -274,6 +274,25 @@ ring exceeds its capacity.
   auto-clear (it persists until dismissed), so under sustained
   failure the user sees the same warning until they press Esc.
   Auto-suppress on repeat is a polish item.
+- **Queue time-to-full predictions dropped from the UI.** The old Health
+  "Queues" category showed server-predicted `~30s` / `~2m` / `stable`
+  hints in a `time-to-full` column, and a red `∞ (stalled)` badge for
+  connections with queued items but zero throughput (Phase 6 polish).
+  Layout 3's unhealthy-queues table shows fill / queue / src→dst /
+  ffile count only. The prediction data is still available via
+  `connections[i].predicted_millis_until_backpressure`; restoring the
+  column is tracked as a future polish item.
+- **Queue Enter-cross-link dropped.** The old Health queue rows
+  supported `Enter` → Browser jump for the selected connection.
+  Layout 3's unhealthy-queues table is non-interactive — `Enter` on
+  a queue row is a no-op. Restoring the cross-link is a future
+  polish item.
+- **`spawn_polling_worker` retained as orphan helper.** The
+  `app::worker::spawn_polling_worker` helper is still used by the
+  Bulletins worker. The Overview worker no longer uses it after the
+  Phase 3 dual-cadence rewrite. Keeping the helper is acceptable for
+  now (one consumer earns it); deletion would land in a polish pass
+  if Bulletins ever moves to a dual-cadence pattern.
 
 ## Dependency on `nifi-rust-client`
 
