@@ -11,7 +11,7 @@ pub fn render(frame: &mut Frame, area: Rect, state: &ContextSwitcherState) {
     let modal = center(area, 70, height);
     frame.render_widget(Clear, modal);
     let block = Block::default()
-        .title(" Switch Context (Ctrl+K) ")
+        .title(" Switch Context (K) ")
         .borders(Borders::ALL);
 
     let lines: Vec<Line> = state
