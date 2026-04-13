@@ -835,7 +835,7 @@ fn handle_key(state: &mut AppState, key: KeyEvent, config: &Config) -> UpdateRes
 
     // Global key handling.
     match (key.code, key.modifiers) {
-        (KeyCode::Esc, KeyModifiers::NONE) => {
+        (KeyCode::Esc, _) => {
             if state.status.banner.is_some() {
                 state.status.banner = None;
                 return UpdateResult {
