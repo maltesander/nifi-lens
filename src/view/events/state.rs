@@ -201,6 +201,31 @@ impl EventsState {
             *self.filters.get_mut(field) = restored;
         }
     }
+
+    /// Reset filters to defaults (`r` key). Does not touch cap, status,
+    /// or results.
+    pub fn reset_filters(&mut self) {
+        self.filters = EventsFilters::default();
+    }
+
+    /// New query (`n` key): clears filters, results, and status back
+    /// to idle. Cap resets to default.
+    pub fn new_query(&mut self) {
+        self.filters = EventsFilters::default();
+        self.events.clear();
+        self.selected_row = None;
+        self.status = EventsQueryStatus::Idle;
+        self.cap = 500;
+        self.filter_edit = None;
+        self.pre_edit_value = None;
+    }
+
+    /// Raise the cap (`L` key) from 500 to 5000. Idempotent once at 5000.
+    pub fn raise_cap(&mut self) {
+        if self.cap < 5000 {
+            self.cap = 5000;
+        }
+    }
 }
 
 /// Reducer: fold an [`EventsPayload`](crate::event::EventsPayload) into state.
@@ -534,5 +559,57 @@ mod tests {
         assert_eq!(s.filter_edit.as_ref().unwrap().0, FilterField::Uuid);
         // Source retains its edit.
         assert_eq!(s.filters.source, "a");
+    }
+
+    #[test]
+    fn reset_filters_restores_defaults_only() {
+        let mut s = EventsState::new();
+        s.filters.source = "proc-1".into();
+        s.filters.uuid = "abc".into();
+        s.cap = 5000;
+        s.reset_filters();
+        assert_eq!(s.filters, EventsFilters::default());
+        // cap is NOT reset by `r` — only filters. Cap is changed by `L`
+        // and by explicit interactions.
+        assert_eq!(s.cap, 5000);
+    }
+
+    #[test]
+    fn new_query_clears_filters_results_and_status() {
+        use crate::event::EventsPayload;
+        use std::time::SystemTime;
+        let mut s = EventsState::new();
+        s.filters.source = "proc-1".into();
+        apply_payload(
+            &mut s,
+            EventsPayload::QueryStarted {
+                query_id: "q".into(),
+            },
+        );
+        apply_payload(
+            &mut s,
+            EventsPayload::QueryDone {
+                query_id: "q".into(),
+                events: vec![],
+                fetched_at: SystemTime::now(),
+                truncated: false,
+            },
+        );
+        s.new_query();
+        assert_eq!(s.filters, EventsFilters::default());
+        assert!(matches!(s.status, EventsQueryStatus::Idle));
+        assert!(s.events.is_empty());
+        assert_eq!(s.selected_row, None);
+    }
+
+    #[test]
+    fn raise_cap_toggles_between_500_and_5000() {
+        let mut s = EventsState::new();
+        assert_eq!(s.cap, 500);
+        s.raise_cap();
+        assert_eq!(s.cap, 5000);
+        // Pressing L again clamps to 5000 (no further raise).
+        s.raise_cap();
+        assert_eq!(s.cap, 5000);
     }
 }
