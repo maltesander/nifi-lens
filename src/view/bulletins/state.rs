@@ -10,6 +10,33 @@ use crate::app::navigation::ListNavigation;
 use crate::client::BulletinSnapshot;
 use crate::event::BulletinsPayload;
 
+/// Strip NiFi's `ComponentName[id=<uuid>] ` boilerplate prefix from a
+/// bulletin message. NiFi emits this prefix on every bulletin; it eats
+/// ~50 characters of horizontal space and hides the signal.
+///
+/// Returns the suffix after the first `[id=<anything>] ` group found at
+/// the start of the string (after an arbitrary name). On any mismatch
+/// (no `[id=`, no matching `]`, no trailing space) the full original
+/// string is returned.
+pub fn strip_component_prefix(msg: &str) -> &str {
+    let Some(id_start) = msg.find("[id=") else {
+        return msg;
+    };
+    // Everything before `[id=` is the component name. Any content is fine;
+    // we don't validate it.
+    let after_id = &msg[id_start + "[id=".len()..];
+    let Some(close_rel) = after_id.find(']') else {
+        return msg;
+    };
+    let rest = &after_id[close_rel + 1..];
+    // Require exactly one trailing ASCII whitespace after the `]`.
+    let mut chars = rest.chars();
+    match chars.next() {
+        Some(c) if c.is_ascii_whitespace() => chars.as_str(),
+        _ => msg,
+    }
+}
+
 #[derive(Debug)]
 pub struct BulletinsState {
     pub ring: VecDeque<BulletinSnapshot>,
@@ -1079,5 +1106,54 @@ mod tests {
         s.toggle_grouping();
         assert!(s.group_consecutive);
         assert_eq!(s.selected, 0);
+    }
+
+    #[test]
+    fn strip_component_prefix_strips_standard_nifi_format() {
+        let msg = "UpdateRecord[id=85cecfc6-019d-1000-ffff-ffffe8c7c778] field 'customer.id' missing in input record";
+        assert_eq!(
+            strip_component_prefix(msg),
+            "field 'customer.id' missing in input record"
+        );
+    }
+
+    #[test]
+    fn strip_component_prefix_returns_original_when_prefix_absent() {
+        let msg = "plain message with no brackets";
+        assert_eq!(
+            strip_component_prefix(msg),
+            "plain message with no brackets"
+        );
+    }
+
+    #[test]
+    fn strip_component_prefix_handles_name_with_spaces() {
+        let msg = "Route On Attribute[id=aaaaaaaa-1111-2222-3333-444444444444] routed to failure";
+        assert_eq!(strip_component_prefix(msg), "routed to failure");
+    }
+
+    #[test]
+    fn strip_component_prefix_returns_original_when_id_bracket_missing() {
+        let msg = "Garbled[no-id-here] still garbled";
+        assert_eq!(
+            strip_component_prefix(msg),
+            "Garbled[no-id-here] still garbled"
+        );
+    }
+
+    #[test]
+    fn strip_component_prefix_returns_original_when_no_trailing_space() {
+        // Malformed: no space after the closing bracket.
+        let msg = "Proc[id=aaaaaaaa-1111-2222-3333-444444444444]no-space";
+        assert_eq!(
+            strip_component_prefix(msg),
+            "Proc[id=aaaaaaaa-1111-2222-3333-444444444444]no-space"
+        );
+    }
+
+    #[test]
+    fn strip_component_prefix_is_idempotent_on_already_clean_message() {
+        let msg = "already clean";
+        assert_eq!(strip_component_prefix(msg), "already clean");
     }
 }
