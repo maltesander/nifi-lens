@@ -13,27 +13,50 @@ pub fn render(
     frame: &mut Frame,
     area: Rect,
     d: &ProcessGroupDetail,
-    _state: &BrowserState,
-    _bulletins: &std::collections::VecDeque<crate::client::BulletinSnapshot>,
+    state: &BrowserState,
+    bulletins: &std::collections::VecDeque<crate::client::BulletinSnapshot>,
 ) {
     let mut lines: Vec<Line> = Vec::new();
-    lines.push(Line::from(Span::styled(
-        format!("Process Group — {}", d.name),
-        theme::accent(),
-    )));
-    lines.push(Line::from(format!(
-        "ID: {}   Parent: {}",
-        d.id,
-        d.parent_group_id.as_deref().unwrap_or("(root)")
-    )));
-    lines.push(Line::from(format!(
-        "Running: {} · Stopped: {} · Invalid: {} · Disabled: {} · Active threads: {}",
-        d.running, d.stopped, d.invalid, d.disabled, d.active_threads
-    )));
-    lines.push(Line::from(format!(
-        "Flow files queued: {} · Bytes queued: {}",
-        d.flow_files_queued, d.queued_display
-    )));
+
+    // Header: "<name>  process group"
+    lines.push(Line::from(vec![
+        Span::styled(
+            d.name.clone(),
+            theme::accent().add_modifier(ratatui::style::Modifier::BOLD),
+        ),
+        Span::raw("  "),
+        Span::styled("process group".to_string(), theme::muted()),
+    ]));
+    lines.push(Line::from(""));
+
+    // Processors line: counts by state.
+    lines.push(Line::from(vec![
+        Span::styled("Processors  ".to_string(), theme::muted()),
+        Span::raw(format!("{} running", d.running)),
+        Span::raw("  "),
+        Span::raw(format!("{} stopped", d.stopped)),
+        Span::raw("  "),
+        Span::raw(format!("{} invalid", d.invalid)),
+        Span::raw("  "),
+        Span::raw(format!("{} disabled", d.disabled)),
+    ]));
+
+    // Threads line.
+    lines.push(Line::from(vec![
+        Span::styled("Threads     ".to_string(), theme::muted()),
+        Span::raw(format!("{} active", d.active_threads)),
+    ]));
+
+    // Queued line.
+    lines.push(Line::from(vec![
+        Span::styled("Queued      ".to_string(), theme::muted()),
+        Span::raw(format!(
+            "{} ffiles · {}",
+            d.flow_files_queued, d.queued_display
+        )),
+    ]));
+
+    // Controller services section.
     lines.push(Line::from(""));
     lines.push(Line::from(Span::styled(
         format!("Controller services ({})", d.controller_services.len()),
@@ -53,16 +76,82 @@ pub fn render(
             theme::muted(),
         )));
     }
+
+    // Child groups section.
+    let kids = state.child_process_groups(&d.id);
     lines.push(Line::from(""));
-    // Rendering PG-scoped bulletins requires access to `AppState.bulletins`,
-    // which is not in `BrowserState`. For Phase 3 v1 we render the block
-    // header with a zero count; threading the real ring is flagged as a
-    // Phase 5 polish item.
     lines.push(Line::from(Span::styled(
-        "Recent bulletins (0 in this PG)",
+        format!("Child groups ({})", kids.len()),
         theme::accent(),
     )));
+    for kid in kids.iter().take(8) {
+        lines.push(Line::from(format!(
+            "  {name}   {running} run · {stopped} stop · {invalid} invalid",
+            name = kid.name,
+            running = kid.running,
+            stopped = kid.stopped,
+            invalid = kid.invalid,
+        )));
+    }
+    if kids.len() > 8 {
+        lines.push(Line::from(Span::styled(
+            format!("  …{} more", kids.len() - 8),
+            theme::muted(),
+        )));
+    }
+
+    // Recent bulletins section.
+    let recent = crate::view::bulletins::state::recent_for_group_id(bulletins, &d.id, 3);
+    // Total count for the header (walks the ring once more — small ring, cheap).
+    let total_in_pg = bulletins.iter().filter(|b| b.group_id == d.id).count();
+    lines.push(Line::from(""));
+    lines.push(Line::from(Span::styled(
+        format!("Recent bulletins ({total_in_pg} in this PG)"),
+        theme::accent(),
+    )));
+    for b in &recent {
+        let sev = format_severity_label(&b.level);
+        let sev_style = severity_style(&b.level);
+        let stripped = crate::view::bulletins::state::strip_component_prefix(&b.message);
+        lines.push(Line::from(vec![
+            Span::raw("  "),
+            Span::styled(sev, sev_style),
+            Span::raw("  "),
+            Span::raw(b.source_name.clone()),
+            Span::raw("  "),
+            Span::raw(stripped.to_string()),
+        ]));
+    }
+
+    // Action hints.
+    lines.push(Line::from(""));
+    lines.push(Line::from(Span::styled(
+        "e properties · c copy id · Enter drill in".to_string(),
+        theme::muted(),
+    )));
+
     frame.render_widget(Paragraph::new(lines), area);
+}
+
+/// Maps a bulletin level string to a short display label. Duplicated from
+/// the Bulletins render module intentionally — this file is a leaf and
+/// should not import from `view::bulletins::render`.
+fn format_severity_label(level: &str) -> String {
+    match crate::client::Severity::parse(level) {
+        crate::client::Severity::Error => "ERROR".to_string(),
+        crate::client::Severity::Warning => "WARN ".to_string(),
+        crate::client::Severity::Info => "INFO ".to_string(),
+        crate::client::Severity::Unknown => level.to_ascii_uppercase(),
+    }
+}
+
+fn severity_style(level: &str) -> ratatui::style::Style {
+    match crate::client::Severity::parse(level) {
+        crate::client::Severity::Error => theme::error(),
+        crate::client::Severity::Warning => theme::warning(),
+        crate::client::Severity::Info => theme::info(),
+        crate::client::Severity::Unknown => theme::muted(),
+    }
 }
 
 #[cfg(test)]
