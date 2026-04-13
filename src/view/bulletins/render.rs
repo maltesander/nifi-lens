@@ -36,6 +36,7 @@ pub fn render(
     frame: &mut Frame,
     area: Rect,
     state: &BulletinsState,
+    browser: &crate::view::browser::state::BrowserState,
     cfg: &crate::timestamp::TimestampConfig,
 ) {
     let age_label = state
@@ -60,8 +61,8 @@ pub fn render(
         .split(inner);
 
     render_filter_bar(frame, rows[0], state);
-    render_list(frame, rows[1], state, cfg);
-    render_detail(frame, rows[2], state);
+    render_list(frame, rows[1], state, browser, cfg);
+    render_detail(frame, rows[2], state, browser);
 }
 
 fn format_age(secs: u64) -> String {
@@ -170,6 +171,7 @@ fn render_list(
     frame: &mut Frame,
     area: Rect,
     state: &BulletinsState,
+    browser: &crate::view::browser::state::BrowserState,
     cfg: &crate::timestamp::TimestampConfig,
 ) {
     if state.ring.is_empty() {
@@ -226,13 +228,27 @@ fn render_list(
             } else {
                 Style::default()
             };
-            let message_cell = if group.count > 1 {
-                Cell::from(Line::from(vec![
-                    Span::styled(format!("[\u{00D7}{}] ", group.count), theme::warning()),
-                    Span::raw(b.message.clone()),
-                ]))
+            let count_cell = if group.count > 1 {
+                Cell::from(format!("\u{00D7}{}", group.count))
+                    .style(theme::warning().add_modifier(Modifier::BOLD))
             } else {
-                Cell::from(b.message.clone())
+                Cell::from("")
+            };
+            let stripped = crate::view::bulletins::state::strip_component_prefix(&b.message);
+            let pg_cell = match browser.pg_path(&b.group_id) {
+                Some(path) => Cell::from(truncate_left(&path, 24)),
+                None => {
+                    let tail: String = b
+                        .group_id
+                        .chars()
+                        .rev()
+                        .take(8)
+                        .collect::<String>()
+                        .chars()
+                        .rev()
+                        .collect();
+                    Cell::from(format!("\u{2026}{tail}")).style(theme::muted())
+                }
             };
             Row::new(vec![
                 Cell::from(format_bulletin_time(
@@ -242,9 +258,10 @@ fn render_list(
                     cfg,
                 )),
                 Cell::from(format_severity_label(&b.level)).style(severity_style(&b.level)),
+                count_cell,
                 Cell::from(truncate_right(&b.source_name, 20)),
-                Cell::from(truncate_left(&b.group_id, 24)),
-                message_cell,
+                pg_cell,
+                Cell::from(stripped.to_string()),
             ])
             .style(style)
         })
@@ -252,21 +269,28 @@ fn render_list(
     let table = Table::new(
         rows,
         [
-            Constraint::Length(15),
-            Constraint::Length(5),
-            Constraint::Length(20),
-            Constraint::Length(24),
-            Constraint::Fill(1),
+            Constraint::Length(15), // time
+            Constraint::Length(5),  // sev
+            Constraint::Length(4),  // count (×999)
+            Constraint::Length(20), // source
+            Constraint::Length(24), // pg path
+            Constraint::Fill(1),    // message
         ],
     )
     .header(
-        Row::new(vec!["time", "sev", "source", "group", "message"])
+        Row::new(vec!["time", "sev", "#", "source", "pg path", "message"])
             .style(Style::default().add_modifier(Modifier::BOLD)),
     );
     frame.render_widget(table, area);
 }
 
-fn render_detail(frame: &mut Frame, area: Rect, state: &BulletinsState) {
+fn render_detail(
+    frame: &mut Frame,
+    area: Rect,
+    state: &BulletinsState,
+    browser: &crate::view::browser::state::BrowserState,
+) {
+    let _ = browser; // unused until Task 11
     let block = Block::default().borders(Borders::TOP);
     let inner = block.inner(area);
     frame.render_widget(block, area);
@@ -489,7 +513,9 @@ mod tests {
         let backend = TestBackend::new(120, 30);
         let mut term = Terminal::new(backend).unwrap();
         let cfg = crate::timestamp::TimestampConfig::default();
-        term.draw(|f| render(f, f.area(), state, &cfg)).unwrap();
+        let browser = crate::view::browser::state::BrowserState::new();
+        term.draw(|f| render(f, f.area(), state, &browser, &cfg))
+            .unwrap();
         format!("{}", term.backend())
     }
 
