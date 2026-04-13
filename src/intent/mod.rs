@@ -64,9 +64,20 @@ pub enum CrossLink {
         component_id: String,
         group_id: String,
     },
-    /// From Bulletins `t`: open Tracer with a component-filtered query
-    /// seeded from the bulletin's component. Phase 4 wires this.
+    /// From Bulletins/Browser `t` (pre-Phase 6): Tracer latest-events
+    /// landing with a component-filtered query.
+    ///
+    /// Phase 6 retargets Bulletins/Browser `t` to
+    /// [`CrossLink::JumpToEvents`] instead. This variant is retained
+    /// for backwards compatibility and is still wired through the
+    /// dispatcher; future phases may prune it.
     TraceComponent { component_id: String },
+    /// From Bulletins/Browser `t` (Phase 6+): open Events pre-filled
+    /// with a component-sourced query and a 15-minute time window.
+    JumpToEvents { component_id: String },
+    /// From Events result row `t`: open Tracer and auto-run a lineage
+    /// query on the selected event's flowfile uuid.
+    TraceByUuid { uuid: String },
 }
 
 impl Intent {
@@ -80,6 +91,8 @@ impl Intent {
             Self::FetchEventContent { .. } => "FetchEventContent",
             Self::JumpTo(CrossLink::OpenInBrowser { .. }) => "jump to Browser",
             Self::JumpTo(CrossLink::TraceComponent { .. }) => "trace component",
+            Self::JumpTo(CrossLink::JumpToEvents { .. }) => "jump to Events",
+            Self::JumpTo(CrossLink::TraceByUuid { .. }) => "trace by uuid",
             Self::CancelLineageQuery => "CancelLineageQuery",
             Self::DeleteLineageQuery { .. } => "DeleteLineageQuery",
             Self::LoadEventDetail { .. } => "LoadEventDetail",
@@ -135,6 +148,13 @@ impl IntentDispatcher {
             // TraceComponent is dispatched in `dispatch()` to spawn the
             // latest-events worker alongside the tab switch.
             Intent::JumpTo(CrossLink::TraceComponent { .. }) => None,
+            Intent::JumpTo(CrossLink::JumpToEvents { component_id }) => {
+                Some(Ok(IntentOutcome::EventsLandingOn {
+                    component_id: component_id.clone(),
+                }))
+            }
+            // TraceByUuid spawns the lineage worker; not pure.
+            Intent::JumpTo(CrossLink::TraceByUuid { .. }) => None,
             _ => None,
         }
     }
@@ -157,6 +177,17 @@ impl IntentDispatcher {
                     component_id.clone(),
                 );
                 Ok(IntentOutcome::TracerLandingOn { component_id })
+            }
+            Intent::JumpTo(CrossLink::TraceByUuid { uuid }) => {
+                let handle = crate::view::tracer::worker::spawn_lineage(
+                    self.client.clone(),
+                    self.tx.clone(),
+                    uuid.clone(),
+                );
+                Ok(IntentOutcome::TracerLineageStarted {
+                    uuid,
+                    abort: handle.abort_handle(),
+                })
             }
             Intent::TraceFlowfile(uuid) => {
                 let handle = crate::view::tracer::worker::spawn_lineage(
@@ -387,6 +418,30 @@ mod tests {
             "DisableControllerService"
         );
         assert_eq!(Intent::EmptyQueue("x".into()).name(), "EmptyQueue");
+    }
+
+    #[test]
+    fn handle_pure_returns_events_landing_on_for_jump_to_events() {
+        let outcome = IntentDispatcher::handle_pure(&Intent::JumpTo(CrossLink::JumpToEvents {
+            component_id: "proc-42".into(),
+        }))
+        .expect("arm is pure")
+        .expect("no error");
+        match outcome {
+            IntentOutcome::EventsLandingOn { component_id } => {
+                assert_eq!(component_id, "proc-42");
+            }
+            other => panic!("expected EventsLandingOn, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn handle_pure_returns_none_for_trace_by_uuid() {
+        // TraceByUuid requires the worker to spawn, so it's not pure.
+        let outcome = IntentDispatcher::handle_pure(&Intent::JumpTo(CrossLink::TraceByUuid {
+            uuid: "abc-123".into(),
+        }));
+        assert!(outcome.is_none(), "TraceByUuid is not pure; must dispatch");
     }
 
     #[test]
