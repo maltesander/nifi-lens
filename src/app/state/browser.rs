@@ -92,7 +92,7 @@ impl ViewKeyHandler for BrowserHandler {
                         return Some(UpdateResult::default());
                     };
                     let preview: String = value.chars().take(40).collect();
-                    match arboard::Clipboard::new().and_then(|mut cb| cb.set_text(value.clone())) {
+                    match state.copy_to_clipboard(value) {
                         Ok(()) => {
                             state.status.banner = Some(Banner {
                                 severity: BannerSeverity::Info,
@@ -249,7 +249,7 @@ impl ViewKeyHandler for BrowserHandler {
                     return Some(UpdateResult::default());
                 };
                 let id = state.browser.nodes[arena_idx].id.clone();
-                match arboard::Clipboard::new().and_then(|mut cb| cb.set_text(id.clone())) {
+                match state.copy_to_clipboard(id.clone()) {
                     Ok(()) => {
                         state.status.banner = Some(Banner {
                             severity: BannerSeverity::Info,
@@ -1199,6 +1199,43 @@ mod tests {
             banner.message.starts_with("copied") || banner.message.starts_with("clipboard"),
             "banner = {}",
             banner.message
+        );
+    }
+
+    /// Regression test for the arboard X11 `Drop` teardown bug that
+    /// corrupted the ratatui alt-screen grid on every `c` keypress.
+    /// Verifies that `AppState::clipboard` starts as `None` (lazy
+    /// init), the reducer sets a banner on `c`, and the second `c`
+    /// press does not panic — the handle is reused if the first
+    /// succeeded, and re-attempted if the first failed (e.g. headless
+    /// CI with no X display).
+    #[test]
+    fn c_lazily_initializes_and_reuses_persistent_clipboard_handle() {
+        let (mut s, c) = seeded_browser_state();
+
+        // Before any c press, the clipboard handle is None.
+        assert!(
+            s.clipboard.is_none(),
+            "clipboard should be lazily initialized, not eager",
+        );
+
+        // First c press: a banner should appear (Info on success or
+        // Warning on failure). In headless CI with no X display the
+        // arboard call may fail — that's fine, we're testing lazy
+        // init and banner emission, not clipboard success.
+        update(&mut s, key(KeyCode::Char('c'), KeyModifiers::NONE), &c);
+        assert!(
+            s.status.banner.is_some(),
+            "banner should be set after first c press",
+        );
+
+        // Second c press: the reducer reuses the handle if the first
+        // succeeded, retries lazy init if the first failed. Either
+        // path must not panic and must still produce a banner.
+        update(&mut s, key(KeyCode::Char('c'), KeyModifiers::NONE), &c);
+        assert!(
+            s.status.banner.is_some(),
+            "banner should still be set after second c press",
         );
     }
 

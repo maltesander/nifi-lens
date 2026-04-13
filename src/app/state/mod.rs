@@ -87,6 +87,16 @@ pub struct ClusterSummary {
     pub total_nodes: Option<usize>,
 }
 
+/// Wrapper around `arboard::Clipboard` so `AppState` can still derive
+/// `Debug`. The real clipboard handle has no `Debug` impl.
+pub struct ClipboardHandle(pub arboard::Clipboard);
+
+impl std::fmt::Debug for ClipboardHandle {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("ClipboardHandle").finish_non_exhaustive()
+    }
+}
+
 #[derive(Debug)]
 pub struct AppState {
     pub current_tab: ViewId,
@@ -110,6 +120,13 @@ pub struct AppState {
     pub pending_worker_restart: bool,
     /// Cross-link back/forward history.
     pub history: crate::app::history::TabHistory,
+    /// Persistent arboard clipboard handle, lazily initialized on first
+    /// use. Kept alive for the life of the TUI to prevent arboard's
+    /// X11 `Drop` teardown from running on every keypress — that teardown
+    /// writes a debug-mode warning to stderr (`x11.rs:1167`) which
+    /// corrupts the ratatui alt-screen grid, and tears down the X11
+    /// server thread before clipboard managers can grab the content.
+    pub clipboard: Option<ClipboardHandle>,
 }
 
 impl AppState {
@@ -136,7 +153,34 @@ impl AppState {
             should_quit: false,
             pending_worker_restart: false,
             history: crate::app::history::TabHistory::default(),
+            clipboard: None,
         }
+    }
+
+    /// Copy `text` to the system clipboard, using a persistent
+    /// `arboard` handle held in `self.clipboard`. Lazily initializes
+    /// the handle on first use. Returns `Ok(())` on success or
+    /// `Err(String)` describing the clipboard failure (which the
+    /// caller should surface as a Warning banner).
+    ///
+    /// Holding a single long-lived handle keeps arboard's X11
+    /// `strong_count` at `MIN_OWNERS` forever, so the teardown branch
+    /// in its `Drop` impl (which writes to stderr and corrupts the
+    /// ratatui alt-screen grid) never runs until the TUI exits.
+    pub fn copy_to_clipboard(&mut self, text: String) -> Result<(), String> {
+        if self.clipboard.is_none() {
+            match arboard::Clipboard::new() {
+                Ok(cb) => {
+                    self.clipboard = Some(ClipboardHandle(cb));
+                }
+                Err(err) => return Err(err.to_string()),
+            }
+        }
+        let handle = self
+            .clipboard
+            .as_mut()
+            .ok_or_else(|| "clipboard handle unavailable".to_string())?;
+        handle.0.set_text(text).map_err(|e| e.to_string())
     }
 }
 
@@ -1154,12 +1198,16 @@ fn handle_intent_outcome(
 }
 
 /// Copies `text` to the system clipboard, setting a banner on success or failure.
+///
+/// Routes through [`AppState::copy_to_clipboard`] so every clipboard
+/// write in the app shares the same persistent `arboard` handle.
 fn clipboard_copy(state: &mut AppState, text: &str) {
-    match arboard::Clipboard::new().and_then(|mut cb| cb.set_text(text.to_string())) {
+    let preview = text.to_string();
+    match state.copy_to_clipboard(text.to_string()) {
         Ok(()) => {
             state.status.banner = Some(Banner {
                 severity: BannerSeverity::Info,
-                message: format!("copied: {text}"),
+                message: format!("copied: {preview}"),
                 detail: None,
             });
         }
