@@ -372,10 +372,67 @@ fn render_empty_state(frame: &mut Frame, area: Rect) {
     frame.render_widget(Paragraph::new(lines), area);
 }
 
-fn render_detail_pane(frame: &mut Frame, area: Rect, _state: &EventsState) {
-    // Task 12 will fill this in. For now, render a top border and empty body.
+fn render_detail_pane(frame: &mut Frame, area: Rect, state: &EventsState) {
     let block = Block::default().borders(Borders::TOP);
+    let inner = block.inner(area);
     frame.render_widget(block, area);
+
+    let Some(e) = state.selected_event() else {
+        let hint = if state.events.is_empty() {
+            "".to_string()
+        } else {
+            "press j/k to select a row for detail".to_string()
+        };
+        let p = Paragraph::new(Span::styled(hint, theme::muted())).alignment(Alignment::Center);
+        frame.render_widget(p, inner);
+        return;
+    };
+
+    let type_style = event_type_style(&e.event_type);
+    let header = Line::from(vec![
+        Span::styled(
+            e.event_type.clone(),
+            type_style.add_modifier(Modifier::BOLD),
+        ),
+        Span::raw(" \u{00b7} "),
+        Span::styled(e.component_name.clone(), theme::accent()),
+        Span::raw(" \u{00b7} "),
+        Span::styled(short_time(&e.event_time_iso), theme::muted()),
+        Span::raw(" \u{00b7} "),
+        Span::styled(format!("flowfile {}", e.flow_file_uuid), theme::muted()),
+    ]);
+
+    let relationship_line = Line::from(vec![
+        Span::styled("relationship".to_string(), theme::muted()),
+        Span::raw("   "),
+        Span::raw(
+            e.relationship
+                .clone()
+                .unwrap_or_else(|| "(none)".to_string()),
+        ),
+    ]);
+    let component_line = Line::from(vec![
+        Span::styled("component  ".to_string(), theme::muted()),
+        Span::raw(e.component_name.clone()),
+        Span::raw("   "),
+        Span::styled("group  ".to_string(), theme::muted()),
+        Span::raw(e.group_id.clone()),
+    ]);
+    let hints_line = Line::from(Span::styled(
+        "t trace lineage \u{00b7} g open in browser \u{00b7} Esc back \u{00b7} c copy uuid"
+            .to_string(),
+        theme::muted(),
+    ));
+
+    let lines = vec![
+        header,
+        Line::from(""),
+        relationship_line,
+        component_line,
+        Line::from(""),
+        hints_line,
+    ];
+    frame.render_widget(Paragraph::new(lines), inner);
 }
 
 #[cfg(test)]
@@ -455,5 +512,33 @@ mod tests {
             },
         ];
         assert_snapshot!("events_done_with_results", render_to_string(&state));
+    }
+
+    #[test]
+    fn events_detail_pane_with_selected_row_renders() {
+        use crate::client::ProvenanceEventSummary;
+        let mut state = EventsState::new();
+        state.status = EventsQueryStatus::Done {
+            fetched_at: SystemTime::UNIX_EPOCH,
+            truncated: false,
+            took_ms: 100,
+        };
+        state.events = vec![ProvenanceEventSummary {
+            event_id: 1,
+            event_time_iso: "2026-04-13T08:12:15Z".into(),
+            event_type: "DROP".into(),
+            component_id: "proc-1".into(),
+            component_name: "ControlRate".into(),
+            component_type: "PROCESSOR".into(),
+            group_id: "noisy-pipeline".into(),
+            flow_file_uuid: "8f2ce90a-019d-1000-ffff-ffffe8c7c7a9".into(),
+            relationship: Some("failure".into()),
+            details: None,
+        }];
+        state.selected_row = Some(0);
+        assert_snapshot!(
+            "events_detail_pane_with_selected_row",
+            render_to_string(&state)
+        );
     }
 }
