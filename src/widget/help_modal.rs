@@ -7,11 +7,11 @@ use crate::app::state::ViewId;
 const GLOBAL_TEXT: &str = "\
 Global Keys:
   Tab / Shift+Tab   Cycle tabs
-  F1..F4            Jump to tab
-  Ctrl+K            Switch context
-  Ctrl+F            Global fuzzy find (requires Browser seed)
-  Alt+Left          Navigate back through cross-link history
-  Alt+Right         Navigate forward through cross-link history
+  F1..F5            Jump to tab
+  K                 Switch context
+  f                 Global fuzzy find (requires Browser seed)
+  [                 Navigate back through cross-link history
+  ]                 Navigate forward through cross-link history
   ?                 Toggle this help
   q / Ctrl+Q        Quit
   Esc               Close modal
@@ -35,7 +35,7 @@ Bulletins Tab:
   c                 Clear all filters
   Enter             Jump to component in Browser
   t                 Trace component (latest events)
-  Shift+B           Toggle consecutive-source grouping
+  B                 Toggle consecutive-source grouping
 ";
 
 const BROWSER_TEXT: &str = "\
@@ -50,7 +50,7 @@ Browser Tab:
   c                 Copy selected node id to clipboard
   t                 Trace selected processor
   b                 Enter breadcrumb navigation
-  Ctrl+F            Open fuzzy find
+  f                 Open fuzzy find
 
 Browser status icons:
   ● (green)         Processor running
@@ -168,7 +168,6 @@ mod tests {
     #[test]
     fn bulletins_help_mentions_shift_b_grouping() {
         let out = render_with(ViewId::Bulletins);
-        assert!(out.contains("Shift+B"));
         assert!(out.contains("Toggle consecutive-source grouping"));
     }
 
