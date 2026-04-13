@@ -27,6 +27,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   dual cadence (10s PG status + 30s system diagnostics with nodewise →
   aggregate fallback). Top-bar identity strip now shows real
   `nodes N/M` from the SystemDiag payload.
+- **UI Reorg Phase 4 — Bulletins redesign.** The Bulletins tab is
+  now Layout L: list on top with a multi-line detail pane on the
+  bottom. The reducer deduplicates by
+  `(source_id, strip_component_prefix(message))`, collapsing
+  NiFi's noisy repeat errors into a single row with an `×N` count
+  column. Severity chips now display ring counts
+  (`[E 87] [W 32] [I 0]`). The list columns changed to
+  `time / sev / # / source / pg path / message`; the PG path
+  column is resolved via the new `BrowserState::pg_path` helper
+  and falls back to a muted UUID tail when the Browser tree has
+  not yet been populated. The detail pane shows source name, PG
+  path, occurrence count, first-seen / last-seen timestamps, raw
+  message (unstripped), source id, group id, and per-row action
+  hints.
 - **F-key remap.** F1=Overview, F2=Bulletins, F3=Browser, F4=Events,
   F5=Tracer (was: F3=Health, F4=Browser, F5=Tracer).
 - Bulletins and Tracer timestamp formatting now route through a shared
@@ -94,9 +108,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   Phase 1 1-row top bar.
 - **Old Ctrl/Alt chord bindings.** Replaced by Phase 2 bare-letter
   equivalents.
+- **Bulletins `B` (consecutive-group toggle).** Replaced by `g`
+  cycling through group-by modes (`source+msg` / `source` / `off`).
+  `source+msg` is the new default and handles non-consecutive
+  dedup that the old `B` toggle missed.
+- **Bulletins `g` vim jump-to-oldest.** `g` is now the group-mode
+  cycle. `Home` still works for jump-to-oldest; the vim `g`/`G`
+  pair is deliberately asymmetric now.
 
 ### Added
 
+- **Bulletins `g` (cycle group mode).** Cycles
+  `source+msg` → `source` → `off` → wrap. Default is `source+msg`.
+- **Bulletins `m` (mute source).** Toggles the selected row's
+  `source_id` in a session-scoped mute list. Muted rows are
+  hidden from the list and counted in a `muted: N` badge on the
+  chip row.
+- **`BrowserState::pg_path`** — new helper that resolves a
+  `group_id` to a human-readable breadcrumb path by walking the
+  flow arena. Used by the new Bulletins PG path column.
 - Tab history with `Alt+Left`/`Alt+Right` for cross-link back/forward
   navigation, including selection restore (Browser remembers which
   component was selected).

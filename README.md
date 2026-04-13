@@ -96,7 +96,12 @@ status, per-node health strips, and noisiest components. Dual-cadence refresh
 **Bulletins** *(shipped)* — cluster-wide bulletin tail with severity,
 component-type, and free-text filters; auto-scroll pause with a new-
 bulletin badge; `Enter` on a row jumps directly to the component in
-the Browser tab.
+the Browser tab. Rows are deduplicated by
+`(source_id, message_stem)` — repeating errors collapse into a
+single row with an `×N` count column. `g` cycles group-by modes
+(`source+msg` / `source` / `off`), `m` mutes the selected row's
+source for the session, and severity chips carry live ring counts
+(`[E 87] [W 32] [I 0]`).
 
 **Browser** *(shipped)* — "Where does X live and what is it doing?"
 Two-pane PG tree with drill-in, per-node detail pane, and global

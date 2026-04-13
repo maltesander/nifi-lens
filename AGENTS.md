@@ -294,6 +294,52 @@ ring exceeds its capacity.
   now (one consumer earns it); deletion would land in a polish pass
   if Bulletins ever moves to a dual-cadence pattern.
 
+**Accepted UI Reorg Phase 4 edge cases:**
+
+- **Stem extraction is name-agnostic.** `strip_component_prefix`
+  accepts any text before `[id=<anything>]` and requires exactly
+  one trailing ASCII whitespace. Messages whose prefix is malformed
+  (missing `]`, no trailing space, embedded newlines before the
+  bracket) fall through unchanged and dedup by the full raw
+  message — they will not collapse with correctly-prefixed
+  variants. Acceptable because NiFi's own emission is consistent
+  in practice.
+- **Dedup key is stem-only, not attribute-aware.** Two bulletins
+  from the same processor with the same stem but different bound
+  attribute values in the stem (e.g. `… uuid=A` vs `… uuid=B`)
+  are distinct rows because the attribute values are part of the
+  stem. Collapse-across-attrs is a future polish item.
+- **PG path fallback to UUID tail.** When the Browser tree has not
+  yet been populated (user lands on Bulletins first), the PG path
+  column shows `…d59706` (last 8 chars of the group UUID) in
+  muted style. No warning banner. Opening Browser once seeds the
+  arena and subsequent Bulletins refreshes render the real path.
+- **Mute is session-scoped.** Mutes live in `BulletinsState.mutes`
+  and reset on every TUI restart. No config persistence. Pressing
+  `m` on an already-muted source unmutes it via the toggle path —
+  but since muted rows are hidden, the user can't reach them
+  through normal navigation; the primary unmute path is TUI
+  restart. A "muted sources" modal is a future polish item.
+- **Severity chip counts ignore other filters.** `[E 87]` means
+  "87 ERROR rows exist in the ring right now", not "87 ERROR rows
+  pass the current component-type / text / mute filters". The chip
+  tells the user what hiding that severity would hide from the
+  total ring, not the currently-filtered view. Re-reading as
+  current-filter-scoped is a future polish item.
+- **`t` still lands on Tracer, not Events.** The spec calls for
+  `t` → Events (with component + last-15m prefilter). Phase 6 adds
+  the Events tab and retargets `t` then. Phase 4 deliberately did
+  not regress the existing Tracer cross-link.
+- **Old Phase 2 `B` consecutive-group toggle is gone.** Users who
+  had muscle memory for `Shift+B` → "bundle consecutive" must now
+  cycle `g` through `source+msg` (equivalent and stronger) or
+  `off` (raw timeline).
+- **`g` no longer jumps to oldest.** The vim-style `g`/`G` pair is
+  now asymmetric — `g` cycles group modes while `G` still jumps to
+  newest. Use `Home` to jump to oldest. The asymmetry is
+  acceptable because `g` delivers more value as a mode cycler than
+  as a vim jump.
+
 ## Dependency on `nifi-rust-client`
 
 `nifi-lens` depends on `nifi-rust-client = "0.8.0"` with the `dynamic`
@@ -571,7 +617,25 @@ usable state.
     `view/health/` directory, `app/state/health.rs`, and the F3 →
     Health binding all removed. F-keys remap to F1..F5 =
     Overview/Bulletins/Browser/Events/Tracer.
-13. **Phase 7 — Write-path scaffolding.** Dry-run mode, confirmation modal
+13. **UI Reorg Phase 4 — Bulletins redesign.** *(shipped)* Rewrote
+    the Bulletins tab as Layout L. The reducer now strips NiFi's
+    `ComponentName[id=<uuid>]` prefix and dedups by
+    `(source_id, message_stem)`; a new `GroupMode` enum replaces
+    the old consecutive-group toggle and cycles
+    `source+msg` / `source` / `off` via the `g` key. New `m`
+    mutes the selected row's `source_id` session-scoped. Severity
+    chips now carry ring counts (`[E 87] [W 32] [I 0]`). List
+    columns are `time / sev / # / source / pg path / message`,
+    with the PG path resolved via a new
+    `BrowserState::pg_path` helper (falls back to `…tail8` when
+    the Browser tree has not yet been indexed). Detail pane is
+    multi-line full-width with source, pg path, count, first-seen,
+    last-seen, raw message, source id, pg id, and per-row action
+    hints. The old `B` consecutive-group toggle and `g` / `G`
+    vim-jump bindings were removed (`Home` / `End` still work).
+    Bulletins `t` keeps its current Tracer cross-link; retargeting
+    to the Events tab is deferred to Phase 6.
+14. **Phase 7 — Write-path scaffolding.** Dry-run mode, confirmation modal
     primitive, audit log, `--allow-writes` flag. No writes enabled yet —
     this just lays the rails for v2.
 
