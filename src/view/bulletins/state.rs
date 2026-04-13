@@ -182,10 +182,13 @@ impl BulletinsState {
             .collect()
     }
 
-    /// Fold bulletins in the filtered list into `GroupedRow`s according to
-    /// `group_mode`. In `Off` mode every filtered row is its own singleton
-    /// with `count = 1`. `SourceAndMessage` and `Source` both use a
-    /// temporary consecutive-run fold (Task 3 replaces with real dedup).
+    /// Fold the filtered ring into display rows according to `group_mode`.
+    ///
+    /// - `Off`: one row per filtered bulletin.
+    /// - `SourceAndMessage`: dedup by `(source_id, strip_component_prefix(message))`.
+    ///   Groups appear in order of first-seen ring index.
+    /// - `Source`: fold all bulletins from a single `source_id`. Groups
+    ///   appear in order of first-seen source.
     pub fn grouped_view(&self) -> Vec<GroupedRow> {
         let filtered = self.filtered_indices();
         if self.group_mode == GroupMode::Off {
@@ -198,17 +201,30 @@ impl BulletinsState {
                 })
                 .collect();
         }
-        // Temporary: old consecutive-run fold. Task 3 replaces this with
-        // the real dedup logic.
-        let mut out: Vec<GroupedRow> = Vec::with_capacity(filtered.len());
+        // For both dedup modes we walk filtered rows in order and keep a
+        // map from key → position-in-`out` so duplicates fold into the
+        // existing row while preserving first-seen order.
+        let mut out: Vec<GroupedRow> = Vec::new();
+        let mut positions: std::collections::HashMap<String, usize> =
+            std::collections::HashMap::new();
         for &ring_idx in &filtered {
-            let source_id = &self.ring[ring_idx].source_id;
-            match out.last_mut() {
-                Some(group) if self.ring[group.latest_ring_idx].source_id == *source_id => {
+            let b = &self.ring[ring_idx];
+            let key = match self.group_mode {
+                GroupMode::SourceAndMessage => {
+                    let stem = strip_component_prefix(&b.message);
+                    format!("{}\x1f{stem}", b.source_id)
+                }
+                GroupMode::Source => b.source_id.clone(),
+                GroupMode::Off => unreachable!("handled above"),
+            };
+            match positions.get(&key) {
+                Some(&pos) => {
+                    let group = &mut out[pos];
                     group.latest_ring_idx = ring_idx;
                     group.count += 1;
                 }
-                _ => {
+                None => {
+                    positions.insert(key, out.len());
                     out.push(GroupedRow {
                         first_ring_idx: ring_idx,
                         latest_ring_idx: ring_idx,
@@ -994,8 +1010,9 @@ mod tests {
     }
 
     #[test]
-    fn grouped_view_interleaved_keeps_runs_separate() {
-        // A, B, A pattern — three groups, each count = 1.
+    fn grouped_view_interleaved_folds_non_consecutive() {
+        // A, B, A pattern — non-consecutive dedup folds into 2 groups:
+        // src-a (ring_idx 0 and 2) and src-b (ring_idx 1).
         let mut s = BulletinsState::with_capacity(100);
         let mk = |id: i64, src: &str| BulletinSnapshot {
             id,
@@ -1014,8 +1031,13 @@ mod tests {
         );
         s.group_mode = GroupMode::Source;
         let out = s.grouped_view();
-        assert_eq!(out.len(), 3);
-        assert!(out.iter().all(|g| g.count == 1));
+        // Non-consecutive dedup: src-a (ring_idx 0+2) folds into one group.
+        assert_eq!(out.len(), 2);
+        assert_eq!(out[0].count, 2);
+        assert_eq!(out[0].first_ring_idx, 0);
+        assert_eq!(out[0].latest_ring_idx, 2);
+        assert_eq!(out[1].count, 1);
+        assert_eq!(out[1].first_ring_idx, 1);
     }
 
     #[test]
@@ -1090,7 +1112,7 @@ mod tests {
     #[test]
     fn cycle_group_mode_on_preserves_selection_to_enclosing_group() {
         let mut s = seed_grouping_fixture();
-        // Off mode: 6 visible rows. Select ring_idx 4 (second "src-c").
+        // Off mode: 6 visible rows. Select ring_idx 4 (second "src-c", msg-5).
         s.group_mode = GroupMode::Off;
         assert_eq!(s.grouped_view().len(), 6);
         s.selected = 4; // Points at ring_idx 4 in flat mode.
@@ -1098,13 +1120,14 @@ mod tests {
 
         s.cycle_group_mode();
 
-        // SourceAndMessage mode (consecutive fold stop-gap): 3 visible groups.
-        // Group #2 holds ring_idx 3..=5.
+        // SourceAndMessage mode: fixture messages are msg-1..msg-6 (all distinct),
+        // so each (source_id, message) pair is its own group → 6 groups.
+        // Selection reconciles to the group whose latest_ring_idx == 4 (singleton),
+        // which is at position 4.
         assert_eq!(s.group_mode, GroupMode::SourceAndMessage);
-        assert_eq!(s.grouped_view().len(), 3);
-        assert_eq!(s.selected, 2);
-        // selected_ring_index should now resolve to the LATEST of group #2.
-        assert_eq!(s.selected_ring_index(), Some(5));
+        assert_eq!(s.grouped_view().len(), 6);
+        assert_eq!(s.selected, 4);
+        assert_eq!(s.selected_ring_index(), Some(4));
     }
 
     #[test]
@@ -1132,7 +1155,8 @@ mod tests {
         s.selected = 0; // src-a flat ring_idx 0
         s.cycle_group_mode();
         assert_eq!(s.group_mode, GroupMode::SourceAndMessage);
-        // Group #0 contains ring_idx 0 and 1; position 0.
+        // Fixture messages are all distinct, so ring_idx 0 is its own group
+        // at position 0; selection stays at 0.
         assert_eq!(s.selected, 0);
     }
 
@@ -1192,6 +1216,169 @@ mod tests {
     fn strip_component_prefix_is_idempotent_on_already_clean_message() {
         let msg = "already clean";
         assert_eq!(strip_component_prefix(msg), "already clean");
+    }
+
+    #[test]
+    fn source_and_message_mode_dedups_identical_stems_across_ring() {
+        let mut s = BulletinsState::with_capacity(100);
+        // Three bulletins from src-1 with an identical stripped stem
+        // interleaved with one bulletin from src-2.
+        let prefix_a = "ProcA[id=aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa] ";
+        let prefix_b = "ProcB[id=bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb] ";
+        let rows = vec![
+            BulletinSnapshot {
+                id: 1,
+                level: "ERROR".into(),
+                message: format!("{prefix_a}same stem"),
+                source_id: "src-1".into(),
+                source_name: "ProcA".into(),
+                source_type: "PROCESSOR".into(),
+                group_id: "g1".into(),
+                timestamp_iso: "2026-04-11T10:14:22Z".into(),
+                timestamp_human: String::new(),
+            },
+            BulletinSnapshot {
+                id: 2,
+                level: "ERROR".into(),
+                message: format!("{prefix_b}other stem"),
+                source_id: "src-2".into(),
+                source_name: "ProcB".into(),
+                source_type: "PROCESSOR".into(),
+                group_id: "g1".into(),
+                timestamp_iso: "2026-04-11T10:14:23Z".into(),
+                timestamp_human: String::new(),
+            },
+            BulletinSnapshot {
+                id: 3,
+                level: "ERROR".into(),
+                message: format!("{prefix_a}same stem"),
+                source_id: "src-1".into(),
+                source_name: "ProcA".into(),
+                source_type: "PROCESSOR".into(),
+                group_id: "g1".into(),
+                timestamp_iso: "2026-04-11T10:14:24Z".into(),
+                timestamp_human: String::new(),
+            },
+            BulletinSnapshot {
+                id: 4,
+                level: "ERROR".into(),
+                message: format!("{prefix_a}same stem"),
+                source_id: "src-1".into(),
+                source_name: "ProcA".into(),
+                source_type: "PROCESSOR".into(),
+                group_id: "g1".into(),
+                timestamp_iso: "2026-04-11T10:14:25Z".into(),
+                timestamp_human: String::new(),
+            },
+        ];
+        apply_payload(&mut s, payload(rows));
+        assert_eq!(s.group_mode, GroupMode::SourceAndMessage);
+        let rows = s.grouped_view();
+        // Two unique groups: src-1/"same stem" ×3, src-2/"other stem" ×1.
+        assert_eq!(rows.len(), 2);
+        // Stable ordering: groups appear in order of first-seen ring index.
+        assert_eq!(rows[0].count, 3, "src-1 group should fold 3 bulletins");
+        assert_eq!(rows[0].first_ring_idx, 0);
+        assert_eq!(rows[0].latest_ring_idx, 3);
+        assert_eq!(rows[1].count, 1);
+        assert_eq!(rows[1].first_ring_idx, 1);
+        assert_eq!(rows[1].latest_ring_idx, 1);
+    }
+
+    #[test]
+    fn source_mode_folds_all_messages_from_one_source() {
+        let mut s = BulletinsState::with_capacity(100);
+        s.group_mode = GroupMode::Source;
+        let rows = vec![
+            BulletinSnapshot {
+                id: 1,
+                level: "ERROR".into(),
+                message: "ProcA[id=a] msg one".into(),
+                source_id: "src-1".into(),
+                source_name: "ProcA".into(),
+                source_type: "PROCESSOR".into(),
+                group_id: "g1".into(),
+                timestamp_iso: "2026-04-11T10:14:22Z".into(),
+                timestamp_human: String::new(),
+            },
+            BulletinSnapshot {
+                id: 2,
+                level: "WARN".into(),
+                message: "ProcA[id=a] msg two".into(),
+                source_id: "src-1".into(),
+                source_name: "ProcA".into(),
+                source_type: "PROCESSOR".into(),
+                group_id: "g1".into(),
+                timestamp_iso: "2026-04-11T10:14:23Z".into(),
+                timestamp_human: String::new(),
+            },
+        ];
+        apply_payload(&mut s, payload(rows));
+        let rows = s.grouped_view();
+        assert_eq!(rows.len(), 1, "Source mode collapses different stems");
+        assert_eq!(rows[0].count, 2);
+    }
+
+    #[test]
+    fn off_mode_emits_one_row_per_bulletin() {
+        let mut s = BulletinsState::with_capacity(100);
+        s.group_mode = GroupMode::Off;
+        let rows = vec![
+            b(1, "INFO"),
+            b(2, "INFO"), // note: `b()` test helper gives different source_ids
+        ];
+        apply_payload(&mut s, payload(rows));
+        let rows = s.grouped_view();
+        assert_eq!(rows.len(), 2);
+        assert!(rows.iter().all(|g| g.count == 1));
+    }
+
+    #[test]
+    fn dedup_is_non_consecutive() {
+        // Regression guard vs the old consecutive-only grouping.
+        let mut s = BulletinsState::with_capacity(100);
+        let rows = vec![
+            BulletinSnapshot {
+                id: 1,
+                level: "ERROR".into(),
+                message: "P[id=a] boom".into(),
+                source_id: "src-1".into(),
+                source_name: "P".into(),
+                source_type: "PROCESSOR".into(),
+                group_id: "g".into(),
+                timestamp_iso: "2026-04-11T10:14:22Z".into(),
+                timestamp_human: String::new(),
+            },
+            BulletinSnapshot {
+                id: 2,
+                level: "ERROR".into(),
+                message: "Q[id=b] boom".into(),
+                source_id: "src-2".into(),
+                source_name: "Q".into(),
+                source_type: "PROCESSOR".into(),
+                group_id: "g".into(),
+                timestamp_iso: "2026-04-11T10:14:23Z".into(),
+                timestamp_human: String::new(),
+            },
+            BulletinSnapshot {
+                id: 3,
+                level: "ERROR".into(),
+                message: "P[id=a] boom".into(),
+                source_id: "src-1".into(),
+                source_name: "P".into(),
+                source_type: "PROCESSOR".into(),
+                group_id: "g".into(),
+                timestamp_iso: "2026-04-11T10:14:24Z".into(),
+                timestamp_human: String::new(),
+            },
+        ];
+        apply_payload(&mut s, payload(rows));
+        let rows = s.grouped_view();
+        // Old code would have produced 3 groups (P, Q, P). New dedup
+        // collapses P across the interruption → 2 groups.
+        assert_eq!(rows.len(), 2);
+        assert_eq!(rows[0].count, 2, "P rows fold across the Q interruption");
+        assert_eq!(rows[1].count, 1);
     }
 
     #[test]
