@@ -37,6 +37,44 @@ pub fn strip_component_prefix(msg: &str) -> &str {
     }
 }
 
+/// Return up to `limit` most-recent bulletins from `ring` whose
+/// `source_id` matches `source_id`, in newest-first order.
+///
+/// The ring is monotonically append-only, so the back is newest.
+/// This walks in reverse and filters.
+pub fn recent_for_source_id<'a>(
+    ring: &'a VecDeque<BulletinSnapshot>,
+    source_id: &str,
+    limit: usize,
+) -> Vec<&'a BulletinSnapshot> {
+    if limit == 0 {
+        return Vec::new();
+    }
+    ring.iter()
+        .rev()
+        .filter(|b| b.source_id == source_id)
+        .take(limit)
+        .collect()
+}
+
+/// Return up to `limit` most-recent bulletins from `ring` whose
+/// `group_id` matches `group_id`, in newest-first order. Same
+/// iteration pattern as [`recent_for_source_id`].
+pub fn recent_for_group_id<'a>(
+    ring: &'a VecDeque<BulletinSnapshot>,
+    group_id: &str,
+    limit: usize,
+) -> Vec<&'a BulletinSnapshot> {
+    if limit == 0 {
+        return Vec::new();
+    }
+    ring.iter()
+        .rev()
+        .filter(|b| b.group_id == group_id)
+        .take(limit)
+        .collect()
+}
+
 #[derive(Debug)]
 pub struct BulletinsState {
     pub ring: VecDeque<BulletinSnapshot>,
@@ -1592,5 +1630,122 @@ mod tests {
         assert_eq!(d.group_id, "g");
         assert_eq!(d.stripped_message, "same stem");
         assert_eq!(d.raw_message, "P[id=a] same stem");
+    }
+
+    #[test]
+    fn recent_for_source_id_returns_newest_first_up_to_limit() {
+        let mut s = BulletinsState::with_capacity(100);
+        let rows = vec![
+            BulletinSnapshot {
+                id: 1,
+                level: "INFO".into(),
+                message: "a".into(),
+                source_id: "p1".into(),
+                source_name: "P".into(),
+                source_type: "PROCESSOR".into(),
+                group_id: "g".into(),
+                timestamp_iso: "2026-04-11T10:00:00Z".into(),
+                timestamp_human: String::new(),
+            },
+            BulletinSnapshot {
+                id: 2,
+                level: "ERROR".into(),
+                message: "b".into(),
+                source_id: "p2".into(),
+                source_name: "Q".into(),
+                source_type: "PROCESSOR".into(),
+                group_id: "g".into(),
+                timestamp_iso: "2026-04-11T10:01:00Z".into(),
+                timestamp_human: String::new(),
+            },
+            BulletinSnapshot {
+                id: 3,
+                level: "WARN".into(),
+                message: "c".into(),
+                source_id: "p1".into(),
+                source_name: "P".into(),
+                source_type: "PROCESSOR".into(),
+                group_id: "g".into(),
+                timestamp_iso: "2026-04-11T10:02:00Z".into(),
+                timestamp_human: String::new(),
+            },
+            BulletinSnapshot {
+                id: 4,
+                level: "WARN".into(),
+                message: "d".into(),
+                source_id: "p1".into(),
+                source_name: "P".into(),
+                source_type: "PROCESSOR".into(),
+                group_id: "g".into(),
+                timestamp_iso: "2026-04-11T10:03:00Z".into(),
+                timestamp_human: String::new(),
+            },
+        ];
+        apply_payload(&mut s, payload(rows));
+        let hits = recent_for_source_id(&s.ring, "p1", 2);
+        assert_eq!(hits.len(), 2);
+        assert_eq!(hits[0].id, 4, "newest first");
+        assert_eq!(hits[1].id, 3);
+    }
+
+    #[test]
+    fn recent_for_source_id_limit_zero_returns_empty() {
+        let mut s = BulletinsState::with_capacity(100);
+        apply_payload(&mut s, payload(vec![b(1, "INFO")]));
+        let hits = recent_for_source_id(&s.ring, "src-1", 0);
+        assert!(hits.is_empty());
+    }
+
+    #[test]
+    fn recent_for_source_id_no_match_returns_empty() {
+        let mut s = BulletinsState::with_capacity(100);
+        apply_payload(&mut s, payload(vec![b(1, "INFO"), b(2, "INFO")]));
+        let hits = recent_for_source_id(&s.ring, "nonexistent", 10);
+        assert!(hits.is_empty());
+    }
+
+    #[test]
+    fn recent_for_group_id_filters_by_group_id() {
+        let mut s = BulletinsState::with_capacity(100);
+        let rows = vec![
+            BulletinSnapshot {
+                id: 1,
+                level: "INFO".into(),
+                message: "a".into(),
+                source_id: "p1".into(),
+                source_name: "P".into(),
+                source_type: "PROCESSOR".into(),
+                group_id: "noisy".into(),
+                timestamp_iso: "2026-04-11T10:00:00Z".into(),
+                timestamp_human: String::new(),
+            },
+            BulletinSnapshot {
+                id: 2,
+                level: "ERROR".into(),
+                message: "b".into(),
+                source_id: "p2".into(),
+                source_name: "Q".into(),
+                source_type: "PROCESSOR".into(),
+                group_id: "healthy".into(),
+                timestamp_iso: "2026-04-11T10:01:00Z".into(),
+                timestamp_human: String::new(),
+            },
+            BulletinSnapshot {
+                id: 3,
+                level: "WARN".into(),
+                message: "c".into(),
+                source_id: "p3".into(),
+                source_name: "R".into(),
+                source_type: "PROCESSOR".into(),
+                group_id: "noisy".into(),
+                timestamp_iso: "2026-04-11T10:02:00Z".into(),
+                timestamp_human: String::new(),
+            },
+        ];
+        apply_payload(&mut s, payload(rows));
+        let hits = recent_for_group_id(&s.ring, "noisy", 10);
+        assert_eq!(hits.len(), 2);
+        assert_eq!(hits[0].id, 3, "newest first");
+        assert_eq!(hits[1].id, 1);
     }
 }
