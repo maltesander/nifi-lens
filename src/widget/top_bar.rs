@@ -106,16 +106,7 @@ fn truncate_to_width(s: &str, max_cols: usize) -> String {
     out
 }
 
-// Phase 1 layout. `Health` is deleted in Phase 3; all other tabs are
-// the final shape.
-const TAB_LABELS: &[&str] = &[
-    "Overview",
-    "Bulletins",
-    "Health",
-    "Browser",
-    "Events",
-    "Tracer",
-];
+const TAB_LABELS: &[&str] = &["Overview", "Bulletins", "Browser", "Events", "Tracer"];
 
 /// Render the 1-row top bar into `area`. Tabs left-aligned, identity
 /// strip right-aligned. No bordered box.
@@ -160,10 +151,9 @@ fn tab_index(view: ViewId) -> usize {
     match view {
         ViewId::Overview => 0,
         ViewId::Bulletins => 1,
-        ViewId::Health => 2,
-        ViewId::Browser => 3,
-        ViewId::Events => 4,
-        ViewId::Tracer => 5,
+        ViewId::Browser => 2,
+        ViewId::Events => 3,
+        ViewId::Tracer => 4,
     }
 }
 
@@ -274,12 +264,11 @@ mod tests {
     fn every_view_id_indexes_inside_tab_labels() {
         use crate::app::state::ViewId;
         // Ensures tab_index never returns an out-of-bounds index for any
-        // ViewId variant that still exists. Guards against the Phase 1
-        // Health-included tab layout drifting out of sync with TAB_LABELS.
+        // ViewId variant. Guards against TAB_LABELS drifting out of sync
+        // with the ViewId enum.
         for view in [
             ViewId::Overview,
             ViewId::Bulletins,
-            ViewId::Health,
             ViewId::Browser,
             ViewId::Events,
             ViewId::Tracer,

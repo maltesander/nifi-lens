@@ -23,7 +23,6 @@ pub enum ViewPayload {
     Bulletins(BulletinsPayload),
     Browser(BrowserPayload),
     Tracer(TracerPayload),
-    Health(HealthPayload),
 }
 
 /// Payload variants pushed from the merged Overview worker. After
@@ -41,8 +40,7 @@ pub enum OverviewPayload {
     SystemDiag(crate::client::health::SystemDiagSnapshot),
     /// Aggregate-only fallback when the nodewise system diagnostics
     /// call failed. Carries the aggregate snapshot plus a warning
-    /// message for the banner. Mirrors the existing `HealthPayload`
-    /// fallback variant.
+    /// message for the banner.
     SystemDiagFallback {
         diag: crate::client::health::SystemDiagSnapshot,
         warning: String,
@@ -117,19 +115,6 @@ pub enum IntentOutcome {
     /// Phase 4: user submitted input that is not a valid UUID.
     TracerInputInvalid {
         raw: String,
-    },
-}
-
-/// Payload variants pushed from the Health worker back into the UI loop.
-#[derive(Debug, Clone)]
-pub enum HealthPayload {
-    PgStatus(crate::client::health::FullPgStatusSnapshot),
-    SystemDiag(crate::client::health::SystemDiagSnapshot),
-    /// Aggregate-only fallback when nodewise diagnostics failed.
-    /// Carries the aggregate snapshot plus a warning message for the banner.
-    SystemDiagFallback {
-        diag: crate::client::health::SystemDiagSnapshot,
-        warning: String,
     },
 }
 

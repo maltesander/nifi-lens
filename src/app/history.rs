@@ -9,7 +9,7 @@ const MAX_HISTORY: usize = 20;
 pub enum SelectionAnchor {
     /// Browser: node's component_id.
     ComponentId(String),
-    /// Bulletins, Health: best-effort row index.
+    /// Bulletins: best-effort row index.
     RowIndex(usize),
 }
 
@@ -144,7 +144,7 @@ mod tests {
 
         // Push again should clear forward
         history.push(HistoryEntry {
-            tab: ViewId::Health,
+            tab: ViewId::Browser,
             anchor: None,
         });
         assert!(!history.can_go_forward());

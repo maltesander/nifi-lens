@@ -7,7 +7,7 @@ use crate::app::state::ViewId;
 const GLOBAL_TEXT: &str = "\
 Global Keys:
   Tab / Shift+Tab   Cycle tabs
-  F1..F5            Jump to tab
+  F1..F5            Jump to tab (Overview/Bulletins/Browser/Events/Tracer)
   K                 Switch context
   f                 Global fuzzy find (requires Browser seed)
   [                 Navigate back through cross-link history
@@ -60,19 +60,6 @@ Browser status icons:
   ◐ (blue)          Processor validating
 ";
 
-const HEALTH_TEXT: &str = "\
-Health Tab:
-
-  1              Queues — backpressure leaderboard
-  2              Repositories — storage fill bars
-  3              Nodes — per-node heap / GC / load
-  4              Processors — thread leaderboard
-
-  j / k          scroll detail table
-  Enter          jump to Browser (Queues, Processors)
-  r              force refresh
-";
-
 const TRACER_TEXT: &str = "\
 Tracer Tab:
 
@@ -109,7 +96,6 @@ pub fn render(frame: &mut Frame, area: Rect, current_tab: ViewId) {
         ViewId::Browser => BROWSER_TEXT,
         ViewId::Events => "",
         ViewId::Tracer => TRACER_TEXT,
-        ViewId::Health => HEALTH_TEXT,
     };
     let text = format!("{GLOBAL_TEXT}\n{per_view}");
     let modal = center(area, 70, 32);

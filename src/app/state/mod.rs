@@ -5,7 +5,6 @@
 
 mod browser;
 mod bulletins;
-mod health;
 mod overview;
 mod tracer;
 
@@ -22,7 +21,6 @@ use crate::view::browser::state::{
     BrowserState, FlowIndex, apply_tree_snapshot, build_flow_index, rebuild_visible,
 };
 use crate::view::bulletins::state::BulletinsState;
-use crate::view::health::state::HealthState;
 use crate::view::overview::{OverviewState, apply_payload as apply_overview_payload};
 use crate::view::tracer::state::TracerState;
 
@@ -50,7 +48,6 @@ pub(crate) trait ViewKeyHandler {
 pub enum ViewId {
     Overview,
     Bulletins,
-    Health,
     Browser,
     Events,
     Tracer,
@@ -60,8 +57,7 @@ impl ViewId {
     pub fn next(self) -> Self {
         match self {
             Self::Overview => Self::Bulletins,
-            Self::Bulletins => Self::Health,
-            Self::Health => Self::Browser,
+            Self::Bulletins => Self::Browser,
             Self::Browser => Self::Events,
             Self::Events => Self::Tracer,
             Self::Tracer => Self::Overview,
@@ -72,8 +68,7 @@ impl ViewId {
         match self {
             Self::Overview => Self::Tracer,
             Self::Bulletins => Self::Overview,
-            Self::Health => Self::Bulletins,
-            Self::Browser => Self::Health,
+            Self::Browser => Self::Bulletins,
             Self::Events => Self::Browser,
             Self::Tracer => Self::Events,
         }
@@ -101,7 +96,6 @@ pub struct AppState {
     pub overview: OverviewState,
     pub bulletins: BulletinsState,
     pub browser: BrowserState,
-    pub health: HealthState,
     pub tracer: TracerState,
     pub flow_index: Option<FlowIndex>,
     pub status: StatusLine,
@@ -127,7 +121,6 @@ impl AppState {
             overview: OverviewState::new(),
             bulletins: BulletinsState::with_capacity(config.bulletins.ring_size),
             browser: BrowserState::new(),
-            health: HealthState::new(),
             tracer: TracerState::new(),
             flow_index: None,
             status: StatusLine::default(),
@@ -333,7 +326,6 @@ pub fn collect_hints(state: &AppState) -> Vec<crate::widget::hint_bar::HintSpan>
     let mut hints = match state.current_tab {
         ViewId::Overview => overview::OverviewHandler::hints(state),
         ViewId::Bulletins => bulletins::BulletinsHandler::hints(state),
-        ViewId::Health => health::HealthHandler::hints(state),
         ViewId::Browser => browser::BrowserHandler::hints(state),
         ViewId::Events => vec![],
         ViewId::Tracer => tracer::TracerHandler::hints(state),
@@ -382,16 +374,6 @@ fn capture_anchor(state: &AppState) -> Option<crate::app::history::SelectionAnch
                 })
         }
         ViewId::Bulletins => Some(SelectionAnchor::RowIndex(state.bulletins.selected)),
-        ViewId::Health => {
-            use crate::view::health::state::HealthCategory;
-            let idx = match state.health.selected_category {
-                HealthCategory::Queues => state.health.queues.selected,
-                HealthCategory::Repositories => state.health.repositories.selected,
-                HealthCategory::Nodes => state.health.nodes.selected,
-                HealthCategory::Processors => state.health.processors.selected,
-            };
-            Some(SelectionAnchor::RowIndex(idx))
-        }
         ViewId::Overview | ViewId::Events | ViewId::Tracer => None,
     }
 }
@@ -419,29 +401,6 @@ fn restore_anchor(state: &mut AppState, entry: &crate::app::history::HistoryEntr
             let max = state.bulletins.filtered_indices().len().saturating_sub(1);
             state.bulletins.selected = (*idx).min(max);
         }
-        (Some(SelectionAnchor::RowIndex(idx)), ViewId::Health) => {
-            use crate::app::navigation::ListNavigation;
-            use crate::view::health::state::HealthCategory;
-            // Best-effort: clamp to current category's row count.
-            match state.health.selected_category {
-                HealthCategory::Queues => {
-                    let max = state.health.queues.list_len().saturating_sub(1);
-                    state.health.queues.selected = (*idx).min(max);
-                }
-                HealthCategory::Repositories => {
-                    let max = state.health.repositories.list_len().saturating_sub(1);
-                    state.health.repositories.selected = (*idx).min(max);
-                }
-                HealthCategory::Nodes => {
-                    let max = state.health.nodes.list_len().saturating_sub(1);
-                    state.health.nodes.selected = (*idx).min(max);
-                }
-                HealthCategory::Processors => {
-                    let max = state.health.processors.list_len().saturating_sub(1);
-                    state.health.processors.selected = (*idx).min(max);
-                }
-            }
-        }
         _ => {}
     }
 }
@@ -466,8 +425,7 @@ pub fn update(state: &mut AppState, event: AppEvent, config: &Config) -> UpdateR
         },
         AppEvent::Data(ViewPayload::Overview(payload)) => {
             // Side-effects on AppState that need fields outside OverviewState
-            // happen here, before delegating to the per-view reducer. Mirrors
-            // the existing HealthPayload dispatch pattern.
+            // happen here, before delegating to the per-view reducer.
             //
             // Populate the cluster_summary placeholder added in Phase 1.
             // This drives the top-bar identity strip's `nodes N/M`.
@@ -525,30 +483,6 @@ pub fn update(state: &mut AppState, event: AppEvent, config: &Config) -> UpdateR
                 redraw: true,
                 intent: None,
                 tracer_followup: followup,
-            }
-        }
-        AppEvent::Data(ViewPayload::Health(payload)) => {
-            match payload {
-                crate::event::HealthPayload::PgStatus(snap) => {
-                    crate::view::health::state::apply_pg_status(&mut state.health, snap);
-                }
-                crate::event::HealthPayload::SystemDiag(diag) => {
-                    crate::view::health::state::apply_system_diagnostics(&mut state.health, diag);
-                }
-                crate::event::HealthPayload::SystemDiagFallback { diag, warning } => {
-                    crate::view::health::state::apply_system_diagnostics(&mut state.health, diag);
-                    state.status.banner = Some(Banner {
-                        severity: BannerSeverity::Warning,
-                        message: warning,
-                        detail: None,
-                    });
-                }
-            }
-            state.last_refresh = Instant::now();
-            UpdateResult {
-                redraw: true,
-                intent: None,
-                tracer_followup: None,
             }
         }
         AppEvent::IntentOutcome(outcome) => handle_intent_outcome(state, outcome),
@@ -812,7 +746,6 @@ fn handle_key(state: &mut AppState, key: KeyEvent, config: &Config) -> UpdateRes
         let consumed = match state.current_tab {
             ViewId::Overview => overview::OverviewHandler::handle_key(state, key),
             ViewId::Bulletins => bulletins::BulletinsHandler::handle_key(state, key),
-            ViewId::Health => health::HealthHandler::handle_key(state, key),
             ViewId::Browser => browser::BrowserHandler::handle_key(state, key),
             ViewId::Events => None,
             ViewId::Tracer => tracer::TracerHandler::handle_key(state, key),
@@ -907,7 +840,7 @@ fn handle_key(state: &mut AppState, key: KeyEvent, config: &Config) -> UpdateRes
             }
         }
         (KeyCode::F(3), _) => {
-            state.current_tab = ViewId::Health;
+            state.current_tab = ViewId::Browser;
             UpdateResult {
                 redraw: true,
                 intent: None,
@@ -915,7 +848,7 @@ fn handle_key(state: &mut AppState, key: KeyEvent, config: &Config) -> UpdateRes
             }
         }
         (KeyCode::F(4), _) => {
-            state.current_tab = ViewId::Browser;
+            state.current_tab = ViewId::Events;
             UpdateResult {
                 redraw: true,
                 intent: None,
@@ -1031,7 +964,6 @@ fn handle_intent_outcome(
             state.overview = OverviewState::new();
             state.bulletins = BulletinsState::with_capacity(ring_cap);
             state.browser = BrowserState::new();
-            state.health = HealthState::new();
             state.tracer = TracerState::new();
             state.flow_index = None;
 
@@ -1318,8 +1250,6 @@ mod tests {
         update(&mut s, key(KeyCode::Tab, KeyModifiers::NONE), &c);
         assert_eq!(s.current_tab, ViewId::Bulletins);
         update(&mut s, key(KeyCode::Tab, KeyModifiers::NONE), &c);
-        assert_eq!(s.current_tab, ViewId::Health);
-        update(&mut s, key(KeyCode::Tab, KeyModifiers::NONE), &c);
         assert_eq!(s.current_tab, ViewId::Browser);
         update(&mut s, key(KeyCode::Tab, KeyModifiers::NONE), &c);
         assert_eq!(s.current_tab, ViewId::Events);
@@ -1342,9 +1272,9 @@ mod tests {
         let mut s = fresh_state();
         let c = tiny_config();
         update(&mut s, key(KeyCode::F(3), KeyModifiers::NONE), &c);
-        assert_eq!(s.current_tab, ViewId::Health);
-        update(&mut s, key(KeyCode::F(4), KeyModifiers::NONE), &c);
         assert_eq!(s.current_tab, ViewId::Browser);
+        update(&mut s, key(KeyCode::F(4), KeyModifiers::NONE), &c);
+        assert_eq!(s.current_tab, ViewId::Events);
     }
 
     #[test]
