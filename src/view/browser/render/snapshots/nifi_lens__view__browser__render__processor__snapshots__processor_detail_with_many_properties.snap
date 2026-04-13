@@ -2,7 +2,7 @@
 source: src/view/browser/render/processor.rs
 expression: "format!(\"{}\", terminal.backend())"
 ---
-"Processor — PutKafka                                                                                "
+"PutKafka  processor                                                                                 "
 "Type:   org.apache.nifi.processors.kafka.pubsub.PublishKafka_2_6                                    "
 "Bundle: org.apache.nifi:nifi-kafka-2-6-nar:2.8.0                                                    "
 "State: RUNNING   Concurrent: 2                                                                      "
@@ -24,5 +24,5 @@ expression: "format!(\"{}\", terminal.backend())"
 "Validation errors: 1                                                                                "
 "  'Kafka Key' invalid                                                                               "
 "                                                                                                    "
-"                                                                                                    "
+"Recent bulletins (0 for this processor)                                                             "
 "                                                                                                    "
