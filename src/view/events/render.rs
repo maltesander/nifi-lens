@@ -453,7 +453,11 @@ mod tests {
     #[test]
     fn events_empty_state_renders() {
         let state = EventsState::new();
-        assert_snapshot!("events_empty_state", render_to_string(&state));
+        insta::with_settings!({
+            filters => vec![(r"last \d+[smhd] ago", "last __ ago")],
+        }, {
+            assert_snapshot!("events_empty_state", render_to_string(&state));
+        });
     }
 
     #[test]
@@ -464,7 +468,11 @@ mod tests {
             submitted_at: SystemTime::UNIX_EPOCH,
             percent: 45,
         };
-        assert_snapshot!("events_running_state", render_to_string(&state));
+        insta::with_settings!({
+            filters => vec![(r"last \d+[smhd] ago", "last __ ago")],
+        }, {
+            assert_snapshot!("events_running_state", render_to_string(&state));
+        });
     }
 
     #[test]
@@ -473,7 +481,11 @@ mod tests {
         state.status = EventsQueryStatus::Failed {
             error: "connection refused".into(),
         };
-        assert_snapshot!("events_failed_state", render_to_string(&state));
+        insta::with_settings!({
+            filters => vec![(r"last \d+[smhd] ago", "last __ ago")],
+        }, {
+            assert_snapshot!("events_failed_state", render_to_string(&state));
+        });
     }
 
     #[test]
@@ -511,7 +523,11 @@ mod tests {
                 details: None,
             },
         ];
-        assert_snapshot!("events_done_with_results", render_to_string(&state));
+        insta::with_settings!({
+            filters => vec![(r"last \d+[smhd] ago", "last __ ago")],
+        }, {
+            assert_snapshot!("events_done_with_results", render_to_string(&state));
+        });
     }
 
     #[test]
@@ -536,9 +552,13 @@ mod tests {
             details: None,
         }];
         state.selected_row = Some(0);
-        assert_snapshot!(
-            "events_detail_pane_with_selected_row",
-            render_to_string(&state)
-        );
+        insta::with_settings!({
+            filters => vec![(r"last \d+[smhd] ago", "last __ ago")],
+        }, {
+            assert_snapshot!(
+                "events_detail_pane_with_selected_row",
+                render_to_string(&state)
+            );
+        });
     }
 }
