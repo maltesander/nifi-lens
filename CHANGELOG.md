@@ -9,6 +9,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- Row navigation is now arrow-keys only. `j`/`k` aliases removed from
+  every interactive list: Browser tree, Bulletins list, Events list, Tracer
+  lineage + latest-events, fuzzy-find modal, context switcher, Browser
+  Properties modal scroll. Arrow keys (↑/↓) plus Home / End are the single
+  row-nav idiom.
+- Browser tree drill-in is now `Enter` / `Right` only; drill-out is
+  `Backspace` / `Left` only. The `h` / `l` aliases were dropped so those
+  keys can drive the new detail-focus cycle. Breadcrumb mode likewise
+  drops its `h`/`l` aliases in favor of arrows.
+- Hint bar hints for the Browser tab now switch with detail focus — the
+  sticky footer shows tree-context / properties-focused / recent-bulletins-
+  focused hint sets via a rewritten `browser::hints(state)`.
 - **Bulletins `t` now lands on Events, not Tracer.** The cross-link
   pre-fills `source = component` and `time = last 15m`, then
   auto-runs the provenance query. The old Tracer latest-events
@@ -146,6 +158,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Single project-wide bordered-box visual language via `widget::panel::Panel`.
+  Overview zones, Browser detail panes, and the outer sub-panes of Bulletins /
+  Events / Tracer all render inside titled bordered `Panel`s. Focused panels
+  flip to thick borders in the accent color.
+- Browser detail focus cycle — `l` from the tree on a Processor or Controller
+  Service enters detail focus at section 0, `l` cycles sections (wraps),
+  `h` or `Esc` returns to the tree. Arrow keys navigate rows in the focused
+  section.
+- `c` in detail focus copies the focused row's property value or bulletin
+  message to the clipboard.
+- `t` on a focused Recent-bulletins row opens the Events tab pre-filtered
+  to that processor (reuses the existing Bulletins `t` cross-link).
+- `widget::severity` consolidates the previously-duplicated
+  `format_severity_label` / `severity_style` helpers from three render
+  leaves (`pg`, `processor`, `bulletins/render`).
+- `widget::panel::Panel` — a builder on top of `ratatui::widgets::Block` that
+  centralises the Phase 7 panel style.
 - **Events tab** *(UI Reorg Phase 6)* — new cluster-wide provenance
   search tab. Filter bar with `t time` / `T type` / `s source` /
   `u file uuid` / `a attr` inline editors; results list colored by

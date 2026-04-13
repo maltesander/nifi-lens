@@ -125,7 +125,21 @@ Selection fires an on-demand detail fetch (15 s cadence for the tree,
 on-select for detail). Press `e` on a processor or controller service
 to pop the full properties list in a modal. Press `c` to copy the
 selected node's id to the clipboard. Press `t` on a processor to jump
-to the Tracer tab and see its latest provenance events.
+to the Events tab and see its latest provenance events.
+
+**Tree navigation:** `↑`/`↓` move the cursor; `Enter` or `→` drill
+into a process group; `Backspace` or `←` drill out.
+
+**Detail focus (Processor / Controller Service only):**
+
+| Key | Action |
+|---|---|
+| `l` | Enter detail focus (first focusable section) |
+| `l` (in detail focus) | Cycle to next focusable section (wraps) |
+| `h` / `Esc` (in detail focus) | Return focus to the tree |
+| `↑` / `↓` (in detail focus) | Navigate rows in the focused section |
+| `c` (in detail focus) | Copy focused row's property value or bulletin message |
+| `t` (focused Recent bulletins) | Open in Events tab pre-filtered to this component |
 
 ### Tracer tab
 
@@ -135,7 +149,7 @@ Forensic flowfile investigation in four modes:
   `Enter` to start a lineage query.
 - **Lineage running** — a progress bar shows the NiFi server's completion
   percentage while the query is in flight.
-- **Lineage** — chronological event timeline. Navigate with `↑`/`↓` / `j`/`k`.
+- **Lineage** — chronological event timeline. Navigate with `↑`/`↓`.
   Press `Enter` or `Space` to expand an event into the detail pane.
   - **Detail pane**: attribute diff table with `d` to toggle All / Changed
     view. Press `i` or `o` to fetch input or output content respectively.
@@ -166,6 +180,7 @@ tool.
 | `?` | Context-aware help modal |
 | `q` / `Ctrl+Q` | Quit |
 | `b` (Browser) | Enter breadcrumb navigation |
+| `l` (Browser tree) | Enter detail focus on Processor / Controller Service |
 
 ## Configuration
 

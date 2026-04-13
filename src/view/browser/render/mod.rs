@@ -257,13 +257,17 @@ fn render_detail(
     let header_line = Line::from(Span::styled(header, theme::accent()));
 
     match state.details.get(&arena_idx) {
-        Some(NodeDetail::ProcessGroup(d)) => pg::render(frame, detail_area, d, state, bulletins),
-        Some(NodeDetail::Processor(d)) => {
-            processor::render(frame, detail_area, d, state, bulletins);
+        Some(NodeDetail::ProcessGroup(d)) => {
+            pg::render(frame, detail_area, d, state, bulletins, &state.detail_focus);
         }
-        Some(NodeDetail::Connection(d)) => connection::render(frame, detail_area, d, state),
+        Some(NodeDetail::Processor(d)) => {
+            processor::render(frame, detail_area, d, state, bulletins, &state.detail_focus);
+        }
+        Some(NodeDetail::Connection(d)) => {
+            connection::render(frame, detail_area, d, state, &state.detail_focus);
+        }
         Some(NodeDetail::ControllerService(d)) => {
-            controller_service::render(frame, detail_area, d, state);
+            controller_service::render(frame, detail_area, d, state, &state.detail_focus);
         }
         None => {
             let lines = vec![

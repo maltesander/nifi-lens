@@ -1,0 +1,9 @@
+---
+source: src/widget/panel.rs
+expression: "draw(\" Nodes \", false, None)"
+---
+"┌ Nodes ───────────────────────┐"
+"│                              │"
+"│                              │"
+"│                              │"
+"└──────────────────────────────┘"

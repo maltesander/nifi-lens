@@ -3,14 +3,14 @@
 //! Layout 3:
 //!
 //! ```text
-//! ┌─ Overview ────────────────────────────────────────────────────────────────┐
-//! │ RUNNING 42   STOPPED 3   INVALID 0   DISABLED 1   THREADS 5              │ ← processor info line (1 row)
-//! ├─ Nodes (N connected) ─────────────────────────────────────────────────────┤ ← nodes zone (variable, capped)
+//! ┌─ Processors ──────────────────────────────────────────────────────────────┐
+//! │ RUNNING 42   STOPPED 3   INVALID 0   DISABLED 1   THREADS 5              │ ← processor info panel (3 rows)
+//! ├─ Nodes (N connected) ─────────────────────────────────────────────────────┤ ← nodes panel (variable, capped)
 //! │   node-name   heap  N%   gc Nms/5m   load N.N                            │
 //! │   repositories  content  N%   flowfile  N%   provenance  N%              │
-//! ├─ Bulletins / min ──────────────┬─ Noisy components (top 5) ──────────────┤ ← bulletins+noisy (8 rows)
+//! ├─ Bulletins / min ──────────────┬─ Noisy components ─────────────────────┤ ← bulletins+noisy panel (10 rows)
 //! │  sparkline                     │  cnt  source              worst          │
-//! ├─ Unhealthy queues ─────────────────────────────────────────────────────────┤ ← unhealthy queues (fills rest)
+//! ├─ Unhealthy queues ─────────────────────────────────────────────────────────┤ ← unhealthy queues panel (fills rest)
 //! │ fill  queue             src → dst                      ffiles             │
 //! └────────────────────────────────────────────────────────────────────────────┘
 //! ```
@@ -19,48 +19,71 @@ use ratatui::Frame;
 use ratatui::layout::{Constraint, Direction, Layout, Rect};
 use ratatui::style::Style;
 use ratatui::text::{Line, Span};
-use ratatui::widgets::{Block, Borders, Cell, Paragraph, Row, Sparkline, Table};
+use ratatui::widgets::{Cell, Paragraph, Row, Sparkline, Table};
 
 use super::state::{
     BulletinBucket, NoisyComponent, OverviewSnapshot, OverviewState, Severity, UnhealthyQueue,
 };
 use crate::theme;
 use crate::widget::gauge::{fill_bar, spark_bar};
+use crate::widget::panel::Panel;
 
 pub fn render(frame: &mut Frame, area: Rect, state: &OverviewState) {
-    let block = Block::default().title(" Overview ").borders(Borders::ALL);
-    let inner = block.inner(area);
-    frame.render_widget(block, area);
-
-    // Vertical zones. Nodes zone height adapts to the number of nodes
-    // (1 row per node + 1 title + 1 repos row), capped to keep the
-    // bulletin/queue zones readable.
+    // Vertical panels. Nodes panel height adapts to the number of nodes
+    // (1 row per node + 1 repos row), capped to keep the
+    // bulletin/queue panels readable. +2 for the top/bottom border.
     let nodes_height = nodes_zone_height(state);
     let zones = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
-            Constraint::Length(1),            // processor info line
-            Constraint::Length(nodes_height), // nodes zone
-            Constraint::Length(8),            // bulletins/noisy zone
-            Constraint::Fill(1),              // unhealthy queues
+            Constraint::Length(3),            // processors panel (1 row + 2 border)
+            Constraint::Length(nodes_height), // nodes panel
+            Constraint::Length(10),           // bulletins/noisy panel (8 content + 2 border)
+            Constraint::Fill(1),              // unhealthy queues panel
         ])
-        .split(inner);
+        .split(area);
 
-    render_processor_info_line(frame, zones[0], state.snapshot.as_ref());
-    render_nodes_zone(frame, zones[1], state);
-    render_bulletins_and_noisy(frame, zones[2], state);
-    render_unhealthy_queues(frame, zones[3], &state.unhealthy);
+    // Processors panel
+    let processors_block = Panel::new(" Processors ").into_block();
+    let processors_inner = processors_block.inner(zones[0]);
+    frame.render_widget(processors_block, zones[0]);
+    render_processor_info_line(frame, processors_inner, state.snapshot.as_ref());
+
+    // Nodes panel — title shows node count when populated
+    let total = state.nodes.nodes.len();
+    let nodes_title = if total == 0 {
+        " Nodes ".to_string()
+    } else {
+        format!(" Nodes ({total} connected) ")
+    };
+    let nodes_block = Panel::new(nodes_title).into_block();
+    let nodes_inner = nodes_block.inner(zones[1]);
+    frame.render_widget(nodes_block, zones[1]);
+    render_nodes_zone(frame, nodes_inner, state);
+
+    // Bulletins + Noisy horizontal split, each in its own panel
+    let bn_chunks = Layout::default()
+        .direction(Direction::Horizontal)
+        .constraints([Constraint::Percentage(50), Constraint::Percentage(50)])
+        .split(zones[2]);
+    render_bulletins_and_noisy(frame, bn_chunks[0], bn_chunks[1], state);
+
+    // Unhealthy queues panel
+    let queues_block = Panel::new(" Unhealthy queues ").into_block();
+    let queues_inner = queues_block.inner(zones[3]);
+    frame.render_widget(queues_block, zones[3]);
+    render_unhealthy_queues(frame, queues_inner, &state.unhealthy);
 }
 
-/// Compute how many rows the nodes zone needs. One title row + one row
-/// per visible node + one row for the repositories aggregate. Capped so
-/// the zone never starves the lower zones.
+/// Compute how many rows the nodes panel needs. One row per visible node +
+/// one row for the repositories aggregate + 2 rows for the panel border.
+/// Capped so the panel never starves the lower panels.
 fn nodes_zone_height(state: &OverviewState) -> u16 {
     let visible_nodes = state.nodes.nodes.len().min(8) as u16;
-    // 1 title row + N node rows + 1 repositories row. Min 3 (loading
-    // state needs 1 title + 1 loading msg + 1 buffer).
-    let needed = 1 + visible_nodes.max(1) + 1;
-    needed.clamp(3, 12)
+    // N node rows + 1 repositories row + 2 border rows. Min 4 (loading
+    // state needs 1 loading msg + 1 buffer + 2 border).
+    let needed = visible_nodes.max(1) + 1 + 2;
+    needed.clamp(4, 14)
 }
 
 /// Format C — uppercase muted labels with severity-colored values.
@@ -97,15 +120,7 @@ fn render_processor_info_line(frame: &mut Frame, area: Rect, snapshot: Option<&O
 
 fn render_nodes_zone(frame: &mut Frame, area: Rect, state: &OverviewState) {
     let mut lines: Vec<Line> = Vec::new();
-
-    // Title row.
     let total = state.nodes.nodes.len();
-    let title_text = if total == 0 {
-        "Nodes".to_string()
-    } else {
-        format!("Nodes ({total} connected)")
-    };
-    lines.push(Line::from(Span::styled(title_text, theme::bold())));
 
     if state.nodes.nodes.is_empty() {
         lines.push(Line::from(Span::styled(
@@ -221,14 +236,21 @@ fn format_node_row(node: &crate::client::health::NodeHealthRow) -> Line<'static>
     ])
 }
 
-fn render_bulletins_and_noisy(frame: &mut Frame, area: Rect, state: &OverviewState) {
-    let cols = Layout::default()
-        .direction(Direction::Horizontal)
-        .constraints([Constraint::Percentage(50), Constraint::Percentage(50)])
-        .split(area);
+fn render_bulletins_and_noisy(
+    frame: &mut Frame,
+    bulletins_area: Rect,
+    noisy_area: Rect,
+    state: &OverviewState,
+) {
+    let bulletins_block = Panel::new(" Bulletins / min ").into_block();
+    let bulletins_inner = bulletins_block.inner(bulletins_area);
+    frame.render_widget(bulletins_block, bulletins_area);
+    render_bulletin_sparkline(frame, bulletins_inner, &state.sparkline);
 
-    render_bulletin_sparkline(frame, cols[0], &state.sparkline);
-    render_noisy_components(frame, cols[1], &state.noisy);
+    let noisy_block = Panel::new(" Noisy components ").into_block();
+    let noisy_inner = noisy_block.inner(noisy_area);
+    frame.render_widget(noisy_block, noisy_area);
+    render_noisy_components(frame, noisy_inner, &state.noisy);
 }
 
 fn render_bulletin_sparkline(frame: &mut Frame, area: Rect, buckets: &[BulletinBucket]) {
@@ -237,16 +259,18 @@ fn render_bulletin_sparkline(frame: &mut Frame, area: Rect, buckets: &[BulletinB
         .map(|b| b.max_severity)
         .max()
         .unwrap_or(Severity::Unknown);
-    let title = Line::from(vec![
-        Span::raw("Bulletins / min "),
-        Span::styled(format!("(15m, worst {max_sev:?})"), theme::muted()),
-    ]);
     let data: Vec<u64> = buckets.iter().map(|b| b.count as u64).collect();
+    let subtitle = Span::styled(format!("15m, worst {max_sev:?}"), theme::muted());
+    // Split off 1 row for the subtitle line, rest for the sparkline bar.
+    let inner_chunks = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([Constraint::Length(1), Constraint::Fill(1)])
+        .split(area);
+    frame.render_widget(Paragraph::new(Line::from(subtitle)), inner_chunks[0]);
     let spark = Sparkline::default()
-        .block(Block::default().title(title))
         .data(&data)
         .style(severity_style(max_sev));
-    frame.render_widget(spark, area);
+    frame.render_widget(spark, inner_chunks[1]);
 }
 
 fn render_noisy_components(frame: &mut Frame, area: Rect, noisy: &[NoisyComponent]) {
@@ -277,8 +301,7 @@ fn render_noisy_components(frame: &mut Frame, area: Rect, noisy: &[NoisyComponen
             Constraint::Length(8),
         ],
     )
-    .header(Row::new(vec!["cnt", "source", "worst"]).style(theme::bold()))
-    .block(Block::default().title("Noisy components (top 5)"));
+    .header(Row::new(vec!["cnt", "source", "worst"]).style(theme::bold()));
     frame.render_widget(table, area);
 }
 
@@ -313,12 +336,7 @@ fn render_unhealthy_queues(frame: &mut Frame, area: Rect, queues: &[UnhealthyQue
             Constraint::Length(8),
         ],
     )
-    .header(Row::new(vec!["fill", "queue", "src → dst", "ffiles"]).style(theme::bold()))
-    .block(
-        Block::default()
-            .title(" Unhealthy queues ")
-            .borders(Borders::ALL),
-    );
+    .header(Row::new(vec!["fill", "queue", "src → dst", "ffiles"]).style(theme::bold()));
     frame.render_widget(table, area);
 }
 

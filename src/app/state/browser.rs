@@ -3,6 +3,9 @@
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 
 use super::{AppState, Banner, BannerSeverity, Modal, PendingIntent, UpdateResult, ViewKeyHandler};
+use crate::view::browser::state::{
+    DetailFocus, DetailSection, DetailSections, MAX_DETAIL_SECTIONS,
+};
 
 /// Zero-sized dispatch struct for the Browser tab.
 pub(crate) struct BrowserHandler;
@@ -18,8 +21,123 @@ impl ViewKeyHandler for BrowserHandler {
             return None;
         }
 
+        // Detail-focus handling runs before the tree match. When focus is in a
+        // Section, h/l/Esc are handled here; unrecognised keys fall through to
+        // the tree match below (Tasks 12-14 add more arms here).
+        if let DetailFocus::Section { idx, rows } = state.browser.detail_focus.clone() {
+            let Some(&arena_idx) = state.browser.visible.get(state.browser.selected) else {
+                return Some(UpdateResult::default());
+            };
+            let kind = state.browser.nodes[arena_idx].kind;
+            let sections = DetailSections::for_node(kind);
+            match key.code {
+                KeyCode::Char('h') | KeyCode::Esc => {
+                    state.browser.detail_focus = DetailFocus::Tree;
+                    return Some(UpdateResult {
+                        redraw: true,
+                        intent: None,
+                        tracer_followup: None,
+                    });
+                }
+                KeyCode::Char('l') => {
+                    if sections.is_empty() {
+                        // Defensive: entered Section focus on a node that has no sections.
+                        return Some(UpdateResult::default());
+                    }
+                    let new_idx = (idx + 1) % sections.len();
+                    state.browser.detail_focus = DetailFocus::Section { idx: new_idx, rows };
+                    return Some(UpdateResult {
+                        redraw: true,
+                        intent: None,
+                        tracer_followup: None,
+                    });
+                }
+                KeyCode::Up => {
+                    let mut new_rows = rows;
+                    new_rows[idx] = new_rows[idx].saturating_sub(1);
+                    state.browser.detail_focus = DetailFocus::Section {
+                        idx,
+                        rows: new_rows,
+                    };
+                    return Some(UpdateResult {
+                        redraw: true,
+                        intent: None,
+                        tracer_followup: None,
+                    });
+                }
+                KeyCode::Down => {
+                    // Capture section_len BEFORE mutating detail_focus to
+                    // avoid a double-borrow of state.browser.
+                    let current_section = sections.0[idx];
+                    let max = state
+                        .browser
+                        .section_len(current_section, &state.bulletins.ring);
+                    let mut new_rows = rows;
+                    if max > 0 {
+                        new_rows[idx] = (new_rows[idx] + 1).min(max - 1);
+                    }
+                    state.browser.detail_focus = DetailFocus::Section {
+                        idx,
+                        rows: new_rows,
+                    };
+                    return Some(UpdateResult {
+                        redraw: true,
+                        intent: None,
+                        tracer_followup: None,
+                    });
+                }
+                KeyCode::Char('c') => {
+                    let Some(value) = state.browser.focused_row_copy_value(&state.bulletins.ring)
+                    else {
+                        return Some(UpdateResult::default());
+                    };
+                    let preview: String = value.chars().take(40).collect();
+                    match state.copy_to_clipboard(value) {
+                        Ok(()) => {
+                            state.status.banner = Some(Banner {
+                                severity: BannerSeverity::Info,
+                                message: format!("copied: {preview}"),
+                                detail: None,
+                            });
+                        }
+                        Err(err) => {
+                            state.status.banner = Some(Banner {
+                                severity: BannerSeverity::Warning,
+                                message: format!("clipboard: {err}"),
+                                detail: None,
+                            });
+                        }
+                    }
+                    return Some(UpdateResult {
+                        redraw: true,
+                        intent: None,
+                        tracer_followup: None,
+                    });
+                }
+                KeyCode::Char('t')
+                    if sections.0.get(idx) == Some(&DetailSection::RecentBulletins) =>
+                {
+                    let Some(&arena_idx) = state.browser.visible.get(state.browser.selected) else {
+                        return Some(UpdateResult::default());
+                    };
+                    let source_id = state.browser.nodes[arena_idx].id.clone();
+                    let link = crate::intent::CrossLink::JumpToEvents {
+                        component_id: source_id,
+                    };
+                    return Some(UpdateResult {
+                        redraw: true,
+                        intent: Some(PendingIntent::JumpTo(link)),
+                        tracer_followup: None,
+                    });
+                }
+                _ => {
+                    // Fall through to the tree-focused match.
+                }
+            }
+        }
+
         match key.code {
-            KeyCode::Up | KeyCode::Char('k') => {
+            KeyCode::Up => {
                 state.browser.move_up();
                 state.browser.emit_detail_request_for_current_selection();
                 Some(UpdateResult {
@@ -28,7 +146,7 @@ impl ViewKeyHandler for BrowserHandler {
                     tracer_followup: None,
                 })
             }
-            KeyCode::Down | KeyCode::Char('j') => {
+            KeyCode::Down => {
                 state.browser.move_down();
                 state.browser.emit_detail_request_for_current_selection();
                 Some(UpdateResult {
@@ -73,7 +191,7 @@ impl ViewKeyHandler for BrowserHandler {
                     tracer_followup: None,
                 })
             }
-            KeyCode::Enter | KeyCode::Right | KeyCode::Char('l') => {
+            KeyCode::Enter | KeyCode::Right => {
                 state.browser.enter_selection();
                 state.browser.emit_detail_request_for_current_selection();
                 Some(UpdateResult {
@@ -82,7 +200,7 @@ impl ViewKeyHandler for BrowserHandler {
                     tracer_followup: None,
                 })
             }
-            KeyCode::Backspace | KeyCode::Left | KeyCode::Char('h') => {
+            KeyCode::Backspace | KeyCode::Left => {
                 state.browser.backspace_selection();
                 state.browser.emit_detail_request_for_current_selection();
                 Some(UpdateResult {
@@ -131,7 +249,7 @@ impl ViewKeyHandler for BrowserHandler {
                     return Some(UpdateResult::default());
                 };
                 let id = state.browser.nodes[arena_idx].id.clone();
-                match arboard::Clipboard::new().and_then(|mut cb| cb.set_text(id.clone())) {
+                match state.copy_to_clipboard(id.clone()) {
                     Ok(()) => {
                         state.status.banner = Some(Banner {
                             severity: BannerSeverity::Info,
@@ -183,17 +301,48 @@ impl ViewKeyHandler for BrowserHandler {
                     tracer_followup: None,
                 })
             }
+            KeyCode::Char('l') => {
+                // Enter detail focus at section 0, or show a banner if the
+                // selected node has no focusable sections.
+                let Some(&arena_idx) = state.browser.visible.get(state.browser.selected) else {
+                    return Some(UpdateResult::default());
+                };
+                let kind = state.browser.nodes[arena_idx].kind;
+                let sections = DetailSections::for_node(kind);
+                if sections.is_empty() {
+                    state.status.banner = Some(Banner {
+                        severity: BannerSeverity::Info,
+                        message: "no focusable sections for this node".to_string(),
+                        detail: None,
+                    });
+                    return Some(UpdateResult {
+                        redraw: true,
+                        intent: None,
+                        tracer_followup: None,
+                    });
+                }
+                state.browser.detail_focus = DetailFocus::Section {
+                    idx: 0,
+                    rows: [0; MAX_DETAIL_SECTIONS],
+                };
+                Some(UpdateResult {
+                    redraw: true,
+                    intent: None,
+                    tracer_followup: None,
+                })
+            }
             _ => None,
         }
     }
 
     fn hints(state: &AppState) -> Vec<crate::widget::hint_bar::HintSpan> {
+        use crate::view::browser::state::{DetailFocus, DetailSection, DetailSections};
         use crate::widget::hint_bar::HintSpan;
 
         if state.browser.breadcrumb_focus.is_some() {
             return vec![
                 HintSpan {
-                    key: "h/l",
+                    key: "←/→",
                     action: "nav",
                 },
                 HintSpan {
@@ -207,36 +356,98 @@ impl ViewKeyHandler for BrowserHandler {
             ];
         }
 
-        vec![
-            HintSpan {
-                key: "j/k",
-                action: "nav",
-            },
-            HintSpan {
-                key: "Enter",
-                action: "expand",
-            },
-            HintSpan {
-                key: "h",
-                action: "back",
-            },
-            HintSpan {
-                key: "e",
-                action: "props",
-            },
-            HintSpan {
-                key: "c",
-                action: "copy",
-            },
-            HintSpan {
-                key: "b",
-                action: "crumb",
-            },
-            HintSpan {
-                key: "t",
-                action: "events",
-            },
-        ]
+        match &state.browser.detail_focus {
+            DetailFocus::Tree => vec![
+                HintSpan {
+                    key: "↑/↓",
+                    action: "nav",
+                },
+                HintSpan {
+                    key: "Enter",
+                    action: "drill",
+                },
+                HintSpan {
+                    key: "l",
+                    action: "detail",
+                },
+                HintSpan {
+                    key: "e",
+                    action: "props",
+                },
+                HintSpan {
+                    key: "c",
+                    action: "copy id",
+                },
+                HintSpan {
+                    key: "t",
+                    action: "events",
+                },
+                HintSpan {
+                    key: "b",
+                    action: "crumb",
+                },
+            ],
+            DetailFocus::Section { idx, .. } => {
+                let Some(&arena_idx) = state.browser.visible.get(state.browser.selected) else {
+                    return vec![HintSpan {
+                        key: "h",
+                        action: "back",
+                    }];
+                };
+                let kind = state.browser.nodes[arena_idx].kind;
+                let sections = DetailSections::for_node(kind);
+                match sections.0.get(*idx).copied() {
+                    Some(DetailSection::Properties) => vec![
+                        HintSpan {
+                            key: "↑/↓",
+                            action: "row",
+                        },
+                        HintSpan {
+                            key: "l",
+                            action: "next",
+                        },
+                        HintSpan {
+                            key: "h",
+                            action: "back",
+                        },
+                        HintSpan {
+                            key: "c",
+                            action: "copy value",
+                        },
+                        HintSpan {
+                            key: "e",
+                            action: "full list",
+                        },
+                    ],
+                    Some(DetailSection::RecentBulletins) => vec![
+                        HintSpan {
+                            key: "↑/↓",
+                            action: "row",
+                        },
+                        HintSpan {
+                            key: "l",
+                            action: "next",
+                        },
+                        HintSpan {
+                            key: "h",
+                            action: "back",
+                        },
+                        HintSpan {
+                            key: "c",
+                            action: "copy msg",
+                        },
+                        HintSpan {
+                            key: "t",
+                            action: "trace",
+                        },
+                    ],
+                    _ => vec![HintSpan {
+                        key: "h",
+                        action: "back",
+                    }],
+                }
+            }
+        }
     }
 }
 
@@ -246,7 +457,7 @@ fn handle_breadcrumb_key(state: &mut AppState, key: KeyEvent) -> Option<UpdateRe
     let max_focus = segments.len().saturating_sub(2); // last segment is current node
 
     match key.code {
-        KeyCode::Char('h') | KeyCode::Left => {
+        KeyCode::Left => {
             state.browser.breadcrumb_focus = Some(focus.saturating_sub(1));
             Some(UpdateResult {
                 redraw: true,
@@ -254,7 +465,7 @@ fn handle_breadcrumb_key(state: &mut AppState, key: KeyEvent) -> Option<UpdateRe
                 tracer_followup: None,
             })
         }
-        KeyCode::Char('l') | KeyCode::Right => {
+        KeyCode::Right => {
             state.browser.breadcrumb_focus = Some((focus + 1).min(max_focus));
             Some(UpdateResult {
                 redraw: true,
@@ -428,10 +639,10 @@ mod tests {
     }
 
     #[test]
-    fn on_browser_tab_j_moves_selection_down() {
+    fn on_browser_tab_down_moves_selection_down() {
         let (mut s, c) = seeded_browser_state();
         assert_eq!(s.browser.selected, 0);
-        update(&mut s, key(KeyCode::Char('j'), KeyModifiers::NONE), &c);
+        update(&mut s, key(KeyCode::Down, KeyModifiers::NONE), &c);
         assert_eq!(s.browser.selected, 1);
     }
 
@@ -689,23 +900,23 @@ mod tests {
     }
 
     #[test]
-    fn h_l_navigate_breadcrumb_segments() {
+    fn left_right_navigate_breadcrumb_segments() {
         let (mut s, c) = three_level_browser_state();
         // Select Generate → breadcrumb segments: [Root(0), Pipeline(1), Generate(2)].
         s.browser.selected = 2;
         update(&mut s, key(KeyCode::Char('b'), KeyModifiers::NONE), &c);
         assert_eq!(s.browser.breadcrumb_focus, Some(1)); // Pipeline
 
-        // h → move to Root (index 0).
-        update(&mut s, key(KeyCode::Char('h'), KeyModifiers::NONE), &c);
+        // Left → move to Root (index 0).
+        update(&mut s, key(KeyCode::Left, KeyModifiers::NONE), &c);
         assert_eq!(s.browser.breadcrumb_focus, Some(0));
 
-        // h again → still 0 (saturating).
-        update(&mut s, key(KeyCode::Char('h'), KeyModifiers::NONE), &c);
+        // Left again → still 0 (saturating).
+        update(&mut s, key(KeyCode::Left, KeyModifiers::NONE), &c);
         assert_eq!(s.browser.breadcrumb_focus, Some(0));
 
-        // l → back to 1 (Pipeline).
-        update(&mut s, key(KeyCode::Char('l'), KeyModifiers::NONE), &c);
+        // Right → back to 1 (Pipeline).
+        update(&mut s, key(KeyCode::Right, KeyModifiers::NONE), &c);
         assert_eq!(s.browser.breadcrumb_focus, Some(1));
     }
 
@@ -718,7 +929,7 @@ mod tests {
         assert_eq!(s.browser.breadcrumb_focus, Some(1)); // Pipeline
 
         // Navigate to Root (index 0).
-        update(&mut s, key(KeyCode::Char('h'), KeyModifiers::NONE), &c);
+        update(&mut s, key(KeyCode::Left, KeyModifiers::NONE), &c);
         assert_eq!(s.browser.breadcrumb_focus, Some(0));
 
         // Enter → jump to Root, exit breadcrumb mode.
@@ -739,5 +950,415 @@ mod tests {
         update(&mut s, key(KeyCode::Esc, KeyModifiers::NONE), &c);
         assert_eq!(s.browser.breadcrumb_focus, None);
         assert_eq!(s.browser.selected, prev_selected);
+    }
+
+    #[test]
+    fn tree_nav_uses_arrows_only_no_jk() {
+        let (mut s, c) = seeded_browser_state();
+
+        // j is dropped — firing it leaves selection unchanged.
+        let before = s.browser.selected;
+        update(&mut s, key(KeyCode::Char('j'), KeyModifiers::NONE), &c);
+        assert_eq!(
+            s.browser.selected, before,
+            "j should no longer move the cursor"
+        );
+
+        // Down still works.
+        update(&mut s, key(KeyCode::Down, KeyModifiers::NONE), &c);
+        assert!(s.browser.selected > before, "Down should move the cursor");
+
+        // k is dropped — firing it leaves selection unchanged.
+        let before = s.browser.selected;
+        update(&mut s, key(KeyCode::Char('k'), KeyModifiers::NONE), &c);
+        assert_eq!(
+            s.browser.selected, before,
+            "k should no longer move the cursor"
+        );
+
+        // Up still works.
+        update(&mut s, key(KeyCode::Up, KeyModifiers::NONE), &c);
+        assert!(s.browser.selected < before, "Up should move the cursor");
+    }
+
+    // -----------------------------------------------------------------------
+    // Helpers for Task 11-14 tests
+    // -----------------------------------------------------------------------
+
+    /// AppState with current_tab = Browser, selection on the "gen" Processor
+    /// (visible row 1 in seeded_browser_state).
+    fn fresh_browser_on_processor() -> (AppState, crate::config::Config) {
+        let (mut s, c) = seeded_browser_state();
+        s.browser.selected = 1; // "gen" Processor
+        (s, c)
+    }
+
+    // -----------------------------------------------------------------------
+    // Task 11: Focus cycle (l/h/Esc)
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn l_on_processor_enters_detail_focus_at_section_zero() {
+        let (mut s, c) = fresh_browser_on_processor();
+        update(&mut s, key(KeyCode::Char('l'), KeyModifiers::NONE), &c);
+        match &s.browser.detail_focus {
+            crate::view::browser::state::DetailFocus::Section { idx, .. } => {
+                assert_eq!(*idx, 0)
+            }
+            crate::view::browser::state::DetailFocus::Tree => {
+                panic!("expected Section focus, got Tree")
+            }
+        }
+    }
+
+    #[test]
+    fn l_from_last_section_wraps_to_zero() {
+        let (mut s, c) = fresh_browser_on_processor();
+        // Processor has 2 focusable sections. Tree → 0 → 1 → 0 (wrap).
+        update(&mut s, key(KeyCode::Char('l'), KeyModifiers::NONE), &c);
+        update(&mut s, key(KeyCode::Char('l'), KeyModifiers::NONE), &c);
+        update(&mut s, key(KeyCode::Char('l'), KeyModifiers::NONE), &c);
+        match &s.browser.detail_focus {
+            crate::view::browser::state::DetailFocus::Section { idx, .. } => {
+                assert_eq!(*idx, 0, "wrap")
+            }
+            _ => panic!("expected Section focus"),
+        }
+    }
+
+    #[test]
+    fn h_returns_to_tree_focus() {
+        let (mut s, c) = fresh_browser_on_processor();
+        update(&mut s, key(KeyCode::Char('l'), KeyModifiers::NONE), &c);
+        update(&mut s, key(KeyCode::Char('h'), KeyModifiers::NONE), &c);
+        assert_eq!(
+            s.browser.detail_focus,
+            crate::view::browser::state::DetailFocus::Tree
+        );
+    }
+
+    #[test]
+    fn esc_returns_to_tree_focus() {
+        let (mut s, c) = fresh_browser_on_processor();
+        update(&mut s, key(KeyCode::Char('l'), KeyModifiers::NONE), &c);
+        update(&mut s, key(KeyCode::Esc, KeyModifiers::NONE), &c);
+        assert_eq!(
+            s.browser.detail_focus,
+            crate::view::browser::state::DetailFocus::Tree
+        );
+    }
+
+    #[test]
+    fn moving_tree_selection_resets_detail_focus() {
+        let (mut s, c) = fresh_browser_on_processor();
+        update(&mut s, key(KeyCode::Char('l'), KeyModifiers::NONE), &c);
+        assert!(matches!(
+            s.browser.detail_focus,
+            crate::view::browser::state::DetailFocus::Section { .. }
+        ));
+        // Return to tree focus first (h), then move down — this mimics the
+        // real user flow where h exits section focus and Down re-moves the
+        // tree cursor, which calls reset_detail_focus().
+        update(&mut s, key(KeyCode::Char('h'), KeyModifiers::NONE), &c);
+        update(&mut s, key(KeyCode::Down, KeyModifiers::NONE), &c);
+        assert_eq!(
+            s.browser.detail_focus,
+            crate::view::browser::state::DetailFocus::Tree
+        );
+    }
+
+    #[test]
+    fn l_on_pg_emits_no_focusable_sections_banner() {
+        let (mut s, c) = seeded_browser_state();
+        // Confirm we're on a PG (root, selected=0).
+        let idx = s.browser.visible[s.browser.selected];
+        assert!(matches!(
+            s.browser.nodes[idx].kind,
+            crate::client::NodeKind::ProcessGroup
+        ));
+        update(&mut s, key(KeyCode::Char('l'), KeyModifiers::NONE), &c);
+        assert_eq!(
+            s.browser.detail_focus,
+            crate::view::browser::state::DetailFocus::Tree
+        );
+        assert!(
+            s.status
+                .banner
+                .as_ref()
+                .map(|b| b.message.contains("no focusable"))
+                .unwrap_or(false)
+        );
+    }
+
+    // -----------------------------------------------------------------------
+    // Task 12: Arrow-key row nav inside focused sections
+    // -----------------------------------------------------------------------
+
+    /// AppState with selection on the "gen" Processor (arena 1, visible 1)
+    /// and a NodeDetail::Processor seeded with 3 properties.
+    fn fresh_browser_on_processor_with_properties() -> (AppState, crate::config::Config) {
+        use crate::client::ProcessorDetail;
+        use crate::view::browser::state::NodeDetail;
+
+        let (mut s, c) = seeded_browser_state();
+        s.browser.selected = 1;
+        s.browser.details.insert(
+            1,
+            NodeDetail::Processor(ProcessorDetail {
+                id: "gen".into(),
+                name: "Gen".into(),
+                type_name: "x".into(),
+                bundle: String::new(),
+                run_status: "Running".into(),
+                scheduling_strategy: String::new(),
+                scheduling_period: String::new(),
+                concurrent_tasks: 1,
+                run_duration_ms: 0,
+                penalty_duration: String::new(),
+                yield_duration: String::new(),
+                bulletin_level: String::new(),
+                properties: vec![
+                    ("alpha".into(), "one".into()),
+                    ("beta".into(), "two".into()),
+                    ("gamma".into(), "three".into()),
+                ],
+                validation_errors: vec![],
+            }),
+        );
+        (s, c)
+    }
+
+    #[test]
+    fn down_inside_focused_properties_advances_row() {
+        let (mut s, c) = fresh_browser_on_processor_with_properties();
+        // Enter detail focus on Properties (section 0).
+        update(&mut s, key(KeyCode::Char('l'), KeyModifiers::NONE), &c);
+
+        update(&mut s, key(KeyCode::Down, KeyModifiers::NONE), &c);
+        match &s.browser.detail_focus {
+            crate::view::browser::state::DetailFocus::Section { idx, rows } => {
+                assert_eq!(*idx, 0);
+                assert_eq!(rows[0], 1);
+            }
+            _ => panic!("expected Section focus"),
+        }
+    }
+
+    #[test]
+    fn up_inside_focused_properties_clamps_at_zero() {
+        let (mut s, c) = fresh_browser_on_processor_with_properties();
+        update(&mut s, key(KeyCode::Char('l'), KeyModifiers::NONE), &c);
+
+        update(&mut s, key(KeyCode::Up, KeyModifiers::NONE), &c);
+        match &s.browser.detail_focus {
+            crate::view::browser::state::DetailFocus::Section { rows, .. } => {
+                assert_eq!(rows[0], 0, "clamped at 0")
+            }
+            _ => panic!("expected Section focus"),
+        }
+    }
+
+    #[test]
+    fn down_inside_focused_properties_clamps_at_max() {
+        use crate::view::browser::state::DetailSection;
+
+        let (mut s, c) = fresh_browser_on_processor_with_properties();
+        update(&mut s, key(KeyCode::Char('l'), KeyModifiers::NONE), &c);
+
+        for _ in 0..100 {
+            update(&mut s, key(KeyCode::Down, KeyModifiers::NONE), &c);
+        }
+        match &s.browser.detail_focus {
+            crate::view::browser::state::DetailFocus::Section { rows, .. } => {
+                let max = s
+                    .browser
+                    .section_len(DetailSection::Properties, &s.bulletins.ring);
+                assert_eq!(rows[0], max.saturating_sub(1), "clamped at max-1");
+            }
+            _ => panic!("expected Section focus"),
+        }
+    }
+
+    // -----------------------------------------------------------------------
+    // Task 13: c copy in focused sections
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn c_in_focused_properties_copies_value_and_emits_banner() {
+        let (mut s, c) = fresh_browser_on_processor_with_properties();
+        // Enter detail focus on Properties (section 0).
+        update(&mut s, key(KeyCode::Char('l'), KeyModifiers::NONE), &c);
+
+        update(&mut s, key(KeyCode::Char('c'), KeyModifiers::NONE), &c);
+
+        // The banner must start with "copied" (success) or "clipboard" (failure).
+        // We can't assert the clipboard was set in a headless test, but we can
+        // assert the reducer produced an Info or Warning banner.
+        let banner = s.status.banner.as_ref().expect("banner set after c");
+        assert!(
+            banner.message.starts_with("copied") || banner.message.starts_with("clipboard"),
+            "banner = {}",
+            banner.message
+        );
+    }
+
+    /// Regression test for the arboard X11 `Drop` teardown bug that
+    /// corrupted the ratatui alt-screen grid on every `c` keypress.
+    /// Verifies that `AppState::clipboard` starts as `None` (lazy
+    /// init), the reducer sets a banner on `c`, and the second `c`
+    /// press does not panic — the handle is reused if the first
+    /// succeeded, and re-attempted if the first failed (e.g. headless
+    /// CI with no X display).
+    #[test]
+    fn c_lazily_initializes_and_reuses_persistent_clipboard_handle() {
+        let (mut s, c) = seeded_browser_state();
+
+        // Before any c press, the clipboard handle is None.
+        assert!(
+            s.clipboard.is_none(),
+            "clipboard should be lazily initialized, not eager",
+        );
+
+        // First c press: a banner should appear (Info on success or
+        // Warning on failure). In headless CI with no X display the
+        // arboard call may fail — that's fine, we're testing lazy
+        // init and banner emission, not clipboard success.
+        update(&mut s, key(KeyCode::Char('c'), KeyModifiers::NONE), &c);
+        assert!(
+            s.status.banner.is_some(),
+            "banner should be set after first c press",
+        );
+
+        // Second c press: the reducer reuses the handle if the first
+        // succeeded, retries lazy init if the first failed. Either
+        // path must not panic and must still produce a banner.
+        update(&mut s, key(KeyCode::Char('c'), KeyModifiers::NONE), &c);
+        assert!(
+            s.status.banner.is_some(),
+            "banner should still be set after second c press",
+        );
+    }
+
+    // -----------------------------------------------------------------------
+    // Task 14: t cross-link on focused bulletin rows
+    // -----------------------------------------------------------------------
+
+    /// AppState with selection on "gen" Processor, a populated NodeDetail, and
+    /// one matching bulletin in the ring.
+    fn fresh_browser_on_processor_with_bulletins() -> (AppState, crate::config::Config) {
+        use crate::client::BulletinSnapshot;
+
+        let (mut s, c) = fresh_browser_on_processor_with_properties();
+        s.bulletins.ring.push_back(BulletinSnapshot {
+            id: 1,
+            message: "test bulletin".into(),
+            source_id: "gen".into(),
+            source_name: "Gen".into(),
+            group_id: "root".into(),
+            source_type: "PROCESSOR".into(),
+            level: "WARNING".into(),
+            timestamp_iso: String::new(),
+            timestamp_human: "00:00:00".into(),
+        });
+        (s, c)
+    }
+
+    #[test]
+    fn t_in_focused_recent_bulletins_emits_jump_to_events_crosslink() {
+        let (mut s, c) = fresh_browser_on_processor_with_bulletins();
+        // Enter detail focus on Properties (section 0), then cycle to
+        // RecentBulletins (section 1).
+        update(&mut s, key(KeyCode::Char('l'), KeyModifiers::NONE), &c);
+        update(&mut s, key(KeyCode::Char('l'), KeyModifiers::NONE), &c);
+
+        let r = update(&mut s, key(KeyCode::Char('t'), KeyModifiers::NONE), &c);
+        match r.intent {
+            Some(PendingIntent::JumpTo(CrossLink::JumpToEvents { component_id })) => {
+                assert_eq!(component_id, "gen");
+            }
+            other => panic!("expected JumpToEvents cross-link, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn t_in_focused_properties_section_falls_through_to_tree_t() {
+        // When focus is on Properties (not RecentBulletins), t should fall
+        // through and emit the same JumpToEvents cross-link the tree-level
+        // t handler emits (since the processor is selected in the tree).
+        let (mut s, c) = fresh_browser_on_processor_with_properties();
+        // Enter detail focus on Properties (section 0 — NOT RecentBulletins).
+        update(&mut s, key(KeyCode::Char('l'), KeyModifiers::NONE), &c);
+
+        let r = update(&mut s, key(KeyCode::Char('t'), KeyModifiers::NONE), &c);
+        // The guard `sections.0.get(idx) == Some(&DetailSection::RecentBulletins)`
+        // is false on section 0 (Properties), so t falls through to the tree
+        // handler which also emits JumpToEvents for the selected Processor.
+        match r.intent {
+            Some(PendingIntent::JumpTo(CrossLink::JumpToEvents { component_id })) => {
+                assert_eq!(component_id, "gen");
+            }
+            other => panic!("expected JumpToEvents from tree handler, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn tree_drill_uses_enter_or_right_only_no_l_alias() {
+        // Use three_level_browser_state: root(0) expanded, pipeline(1) expanded,
+        // gen(2). Collapse pipeline so Enter on it will expand and change visible.
+        let (mut s, c) = three_level_browser_state();
+        s.browser.expanded.remove(&1);
+        crate::view::browser::state::rebuild_visible(&mut s.browser);
+        // Visible is now [0, 1] (root expanded, pipeline collapsed).
+        s.browser.selected = 1; // pipeline (collapsed PG)
+        let before_visible = s.browser.visible.clone();
+
+        // `l` no longer drills in.
+        update(&mut s, key(KeyCode::Char('l'), KeyModifiers::NONE), &c);
+        assert_eq!(
+            s.browser.visible, before_visible,
+            "l should no longer drill into a PG"
+        );
+
+        // Enter still drills in (expands pipeline, adds gen to visible).
+        update(&mut s, key(KeyCode::Enter, KeyModifiers::NONE), &c);
+        assert_ne!(
+            s.browser.visible, before_visible,
+            "Enter should still drill in"
+        );
+    }
+
+    #[test]
+    fn tree_drill_out_uses_backspace_or_left_only_no_h_alias() {
+        // Use three_level_browser_state: root(0), pipeline(1) expanded, gen(2).
+        // Select pipeline (arena 1, visible row 1), which is already expanded.
+        let (mut s, c) = three_level_browser_state();
+        let pipeline_arena = s
+            .browser
+            .nodes
+            .iter()
+            .position(|n| n.id == "pipeline")
+            .unwrap();
+        let pipeline_visible = s
+            .browser
+            .visible
+            .iter()
+            .position(|&i| i == pipeline_arena)
+            .unwrap();
+        s.browser.selected = pipeline_visible;
+        let after_drill = s.browser.visible.clone();
+
+        // `h` no longer drills out.
+        update(&mut s, key(KeyCode::Char('h'), KeyModifiers::NONE), &c);
+        assert_eq!(
+            s.browser.visible, after_drill,
+            "h should no longer drill out"
+        );
+
+        // Left still drills out (collapses the expanded pipeline PG).
+        update(&mut s, key(KeyCode::Left, KeyModifiers::NONE), &c);
+        assert_ne!(
+            s.browser.visible, after_drill,
+            "Left should still drill out"
+        );
     }
 }

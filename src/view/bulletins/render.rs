@@ -22,12 +22,13 @@ use ratatui::Frame;
 use ratatui::layout::{Alignment, Constraint, Direction, Layout, Rect};
 use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
-use ratatui::widgets::{Block, Borders, Cell, Paragraph, Row, Table};
+use ratatui::widgets::{Cell, Paragraph, Row, Table};
 use time;
 
-use crate::client::Severity;
 use crate::theme;
 use crate::view::bulletins::state::{BulletinsState, ComponentType, GroupedRow};
+use crate::widget::panel::Panel;
+use crate::widget::severity::{format_severity_label, severity_style};
 
 const FILTER_BAR_ROWS: u16 = 2;
 const DETAIL_PANE_ROWS: u16 = 8;
@@ -44,25 +45,35 @@ pub fn render(
         .and_then(|fetched| SystemTime::now().duration_since(fetched).ok())
         .map(|d| format!(" last {} ago ", format_age(d.as_secs())))
         .unwrap_or_else(|| " connecting… ".to_string());
-    let block = Block::default()
-        .borders(Borders::ALL)
-        .title_top(Line::from(" Bulletins "))
-        .title_top(Line::from(Span::styled(age_label, theme::muted())).right_aligned());
-    let inner = block.inner(area);
-    frame.render_widget(block, area);
 
     let rows = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
-            Constraint::Length(FILTER_BAR_ROWS),
-            Constraint::Fill(1),
-            Constraint::Length(DETAIL_PANE_ROWS),
+            Constraint::Length(FILTER_BAR_ROWS + 2), // +2 for panel border
+            Constraint::Fill(1),                     // bulletins list
+            Constraint::Length(DETAIL_PANE_ROWS + 2), // +2 for panel border
         ])
-        .split(inner);
+        .split(area);
 
-    render_filter_bar(frame, rows[0], state);
-    render_list(frame, rows[1], state, browser, cfg);
-    render_detail(frame, rows[2], state, browser);
+    // Filters panel
+    let filters_block = Panel::new(" Filters ").into_block();
+    let filters_inner = filters_block.inner(rows[0]);
+    frame.render_widget(filters_block, rows[0]);
+    render_filter_bar(frame, filters_inner, state);
+
+    // Bulletins list panel (with age label on the right)
+    let list_block = Panel::new(" Bulletins ")
+        .right(Line::from(Span::styled(age_label, theme::muted())))
+        .into_block();
+    let list_inner = list_block.inner(rows[1]);
+    frame.render_widget(list_block, rows[1]);
+    render_list(frame, list_inner, state, browser, cfg);
+
+    // Detail panel
+    let detail_block = Panel::new(" Detail ").into_block();
+    let detail_inner = detail_block.inner(rows[2]);
+    frame.render_widget(detail_block, rows[2]);
+    render_detail(frame, detail_inner, state, browser);
 }
 
 fn format_age(secs: u64) -> String {
@@ -290,9 +301,7 @@ fn render_detail(
     state: &BulletinsState,
     browser: &crate::view::browser::state::BrowserState,
 ) {
-    let block = Block::default().borders(Borders::TOP);
-    let inner = block.inner(area);
-    frame.render_widget(block, area);
+    let inner = area;
 
     let Some(d) = state.group_details() else {
         return;
@@ -379,24 +388,6 @@ fn render_detail(
     )));
 
     frame.render_widget(Paragraph::new(lines), inner);
-}
-
-fn format_severity_label(level: &str) -> String {
-    match Severity::parse(level) {
-        Severity::Error => "ERROR".to_string(),
-        Severity::Warning => "WARN ".to_string(),
-        Severity::Info => "INFO ".to_string(),
-        Severity::Unknown => level.to_ascii_uppercase(),
-    }
-}
-
-fn severity_style(level: &str) -> Style {
-    match Severity::parse(level) {
-        Severity::Error => theme::error(),
-        Severity::Warning => theme::warning(),
-        Severity::Info => theme::info(),
-        Severity::Unknown => theme::muted(),
-    }
 }
 
 fn format_bulletin_time(

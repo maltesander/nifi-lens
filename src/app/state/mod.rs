@@ -87,6 +87,16 @@ pub struct ClusterSummary {
     pub total_nodes: Option<usize>,
 }
 
+/// Wrapper around `arboard::Clipboard` so `AppState` can still derive
+/// `Debug`. The real clipboard handle has no `Debug` impl.
+pub struct ClipboardHandle(pub arboard::Clipboard);
+
+impl std::fmt::Debug for ClipboardHandle {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("ClipboardHandle").finish_non_exhaustive()
+    }
+}
+
 #[derive(Debug)]
 pub struct AppState {
     pub current_tab: ViewId,
@@ -110,6 +120,13 @@ pub struct AppState {
     pub pending_worker_restart: bool,
     /// Cross-link back/forward history.
     pub history: crate::app::history::TabHistory,
+    /// Persistent arboard clipboard handle, lazily initialized on first
+    /// use. Kept alive for the life of the TUI to prevent arboard's
+    /// X11 `Drop` teardown from running on every keypress — that teardown
+    /// writes a debug-mode warning to stderr (`x11.rs:1167`) which
+    /// corrupts the ratatui alt-screen grid, and tears down the X11
+    /// server thread before clipboard managers can grab the content.
+    pub clipboard: Option<ClipboardHandle>,
 }
 
 impl AppState {
@@ -136,7 +153,34 @@ impl AppState {
             should_quit: false,
             pending_worker_restart: false,
             history: crate::app::history::TabHistory::default(),
+            clipboard: None,
         }
+    }
+
+    /// Copy `text` to the system clipboard, using a persistent
+    /// `arboard` handle held in `self.clipboard`. Lazily initializes
+    /// the handle on first use. Returns `Ok(())` on success or
+    /// `Err(String)` describing the clipboard failure (which the
+    /// caller should surface as a Warning banner).
+    ///
+    /// Holding a single long-lived handle keeps arboard's X11
+    /// `strong_count` at `MIN_OWNERS` forever, so the teardown branch
+    /// in its `Drop` impl (which writes to stderr and corrupts the
+    /// ratatui alt-screen grid) never runs until the TUI exits.
+    pub fn copy_to_clipboard(&mut self, text: String) -> Result<(), String> {
+        if self.clipboard.is_none() {
+            match arboard::Clipboard::new() {
+                Ok(cb) => {
+                    self.clipboard = Some(ClipboardHandle(cb));
+                }
+                Err(err) => return Err(err.to_string()),
+            }
+        }
+        let handle = self
+            .clipboard
+            .as_mut()
+            .ok_or_else(|| "clipboard handle unavailable".to_string())?;
+        handle.0.set_text(text).map_err(|e| e.to_string())
     }
 }
 
@@ -276,7 +320,7 @@ pub fn collect_hints(state: &AppState) -> Vec<crate::widget::hint_bar::HintSpan>
             }],
             Modal::ContextSwitcher(_) => vec![
                 HintSpan {
-                    key: "j/k",
+                    key: "↑/↓",
                     action: "nav",
                 },
                 HintSpan {
@@ -304,7 +348,7 @@ pub fn collect_hints(state: &AppState) -> Vec<crate::widget::hint_bar::HintSpan>
             ],
             Modal::Properties(_) => vec![
                 HintSpan {
-                    key: "j/k",
+                    key: "↑/↓",
                     action: "scroll",
                 },
                 HintSpan {
@@ -565,7 +609,7 @@ fn handle_key(state: &mut AppState, key: KeyEvent, config: &Config) -> UpdateRes
                             tracer_followup: None,
                         };
                     }
-                    KeyCode::Down | KeyCode::Char('j') => {
+                    KeyCode::Down => {
                         cs.move_cursor_down();
                         return UpdateResult {
                             redraw: true,
@@ -573,7 +617,7 @@ fn handle_key(state: &mut AppState, key: KeyEvent, config: &Config) -> UpdateRes
                             tracer_followup: None,
                         };
                     }
-                    KeyCode::Up | KeyCode::Char('k') => {
+                    KeyCode::Up => {
                         cs.move_cursor_up();
                         return UpdateResult {
                             redraw: true,
@@ -684,7 +728,7 @@ fn handle_key(state: &mut AppState, key: KeyEvent, config: &Config) -> UpdateRes
                             tracer_followup: None,
                         };
                     }
-                    KeyCode::Down | KeyCode::Char('j') => {
+                    KeyCode::Down => {
                         // The renderer reconciles `scroll` against the
                         // actual flattened row count; we use a large
                         // placeholder max here and let the renderer clamp.
@@ -695,7 +739,7 @@ fn handle_key(state: &mut AppState, key: KeyEvent, config: &Config) -> UpdateRes
                             tracer_followup: None,
                         };
                     }
-                    KeyCode::Up | KeyCode::Char('k') => {
+                    KeyCode::Up => {
                         ps.scroll_up();
                         return UpdateResult {
                             redraw: true,
@@ -1154,12 +1198,16 @@ fn handle_intent_outcome(
 }
 
 /// Copies `text` to the system clipboard, setting a banner on success or failure.
+///
+/// Routes through [`AppState::copy_to_clipboard`] so every clipboard
+/// write in the app shares the same persistent `arboard` handle.
 fn clipboard_copy(state: &mut AppState, text: &str) {
-    match arboard::Clipboard::new().and_then(|mut cb| cb.set_text(text.to_string())) {
+    let preview = text.to_string();
+    match state.copy_to_clipboard(text.to_string()) {
         Ok(()) => {
             state.status.banner = Some(Banner {
                 severity: BannerSeverity::Info,
-                message: format!("copied: {text}"),
+                message: format!("copied: {preview}"),
                 detail: None,
             });
         }
@@ -1683,6 +1731,95 @@ mod tests {
         // Cluster summary should still be populated even on fallback.
         assert_eq!(s.cluster_summary.total_nodes, Some(2));
         assert_eq!(s.cluster_summary.connected_nodes, Some(2));
+    }
+
+    #[test]
+    fn context_switcher_row_nav_uses_arrows_only_no_jk() {
+        // Open the context switcher (2 entries via tiny_config).
+        let mut s = fresh_state();
+        let c = tiny_config();
+        update(&mut s, key(KeyCode::Char('K'), KeyModifiers::SHIFT), &c);
+        let before = match s.modal.as_ref().unwrap() {
+            Modal::ContextSwitcher(cs) => cs.cursor,
+            _ => panic!("expected ContextSwitcher"),
+        };
+
+        // j is a no-op inside the modal.
+        update(&mut s, key(KeyCode::Char('j'), KeyModifiers::NONE), &c);
+        let after_j = match s.modal.as_ref().unwrap() {
+            Modal::ContextSwitcher(cs) => cs.cursor,
+            _ => panic!("expected ContextSwitcher"),
+        };
+        assert_eq!(after_j, before, "j dropped");
+
+        // Down still moves the cursor.
+        update(&mut s, key(KeyCode::Down, KeyModifiers::NONE), &c);
+        let after_down = match s.modal.as_ref().unwrap() {
+            Modal::ContextSwitcher(cs) => cs.cursor,
+            _ => panic!("expected ContextSwitcher"),
+        };
+        assert!(after_down > before, "Down still works");
+
+        let before = after_down;
+        // k is a no-op.
+        update(&mut s, key(KeyCode::Char('k'), KeyModifiers::NONE), &c);
+        let after_k = match s.modal.as_ref().unwrap() {
+            Modal::ContextSwitcher(cs) => cs.cursor,
+            _ => panic!("expected ContextSwitcher"),
+        };
+        assert_eq!(after_k, before, "k dropped");
+
+        // Up still moves the cursor back.
+        update(&mut s, key(KeyCode::Up, KeyModifiers::NONE), &c);
+        let after_up = match s.modal.as_ref().unwrap() {
+            Modal::ContextSwitcher(cs) => cs.cursor,
+            _ => panic!("expected ContextSwitcher"),
+        };
+        assert!(after_up < before, "Up still works");
+    }
+
+    #[test]
+    fn properties_modal_scroll_uses_arrows_only_no_jk() {
+        use crate::app::state::Modal;
+        use crate::view::browser::state::PropertiesModalState;
+
+        let mut s = fresh_state();
+        let c = tiny_config();
+        // Seed the Properties modal with scroll at 0.
+        s.modal = Some(Modal::Properties(PropertiesModalState::new(1)));
+
+        // j is a no-op inside the modal.
+        update(&mut s, key(KeyCode::Char('j'), KeyModifiers::NONE), &c);
+        let scroll_after_j = match s.modal.as_ref().unwrap() {
+            Modal::Properties(ps) => ps.scroll,
+            _ => panic!("expected Properties modal"),
+        };
+        assert_eq!(scroll_after_j, 0, "j dropped");
+
+        // Down still scrolls.
+        update(&mut s, key(KeyCode::Down, KeyModifiers::NONE), &c);
+        let scroll_after_down = match s.modal.as_ref().unwrap() {
+            Modal::Properties(ps) => ps.scroll,
+            _ => panic!("expected Properties modal"),
+        };
+        assert!(scroll_after_down > 0, "Down still works");
+
+        let before = scroll_after_down;
+        // k is a no-op.
+        update(&mut s, key(KeyCode::Char('k'), KeyModifiers::NONE), &c);
+        let scroll_after_k = match s.modal.as_ref().unwrap() {
+            Modal::Properties(ps) => ps.scroll,
+            _ => panic!("expected Properties modal"),
+        };
+        assert_eq!(scroll_after_k, before, "k dropped");
+
+        // Up still scrolls back.
+        update(&mut s, key(KeyCode::Up, KeyModifiers::NONE), &c);
+        let scroll_after_up = match s.modal.as_ref().unwrap() {
+            Modal::Properties(ps) => ps.scroll,
+            _ => panic!("expected Properties modal"),
+        };
+        assert!(scroll_after_up < before, "Up still works");
     }
 
     #[test]

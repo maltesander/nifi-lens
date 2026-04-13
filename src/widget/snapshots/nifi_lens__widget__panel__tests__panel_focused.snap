@@ -1,0 +1,9 @@
+---
+source: src/widget/panel.rs
+expression: "draw(\" Properties \", true, None)"
+---
+"┏ Properties ━━━━━━━━━━━━━━━━━━┓"
+"┃                              ┃"
+"┃                              ┃"
+"┃                              ┃"
+"┗━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┛"

@@ -43,7 +43,7 @@ impl ViewKeyHandler for TracerHandler {
             ],
             TracerMode::LatestEvents(_) => vec![
                 HintSpan {
-                    key: "j/k",
+                    key: "↑/↓",
                     action: "nav",
                 },
                 HintSpan {
@@ -61,7 +61,7 @@ impl ViewKeyHandler for TracerHandler {
             }],
             TracerMode::Lineage(_) => vec![
                 HintSpan {
-                    key: "j/k",
+                    key: "↑/↓",
                     action: "nav",
                 },
                 HintSpan {
@@ -144,7 +144,7 @@ fn handle_latest_events(state: &mut AppState, key: KeyEvent) -> Option<UpdateRes
     }
 
     match key.code {
-        KeyCode::Down | KeyCode::Char('j') => {
+        KeyCode::Down => {
             ts::latest_events_move_down(&mut state.tracer);
             Some(UpdateResult {
                 redraw: true,
@@ -152,7 +152,7 @@ fn handle_latest_events(state: &mut AppState, key: KeyEvent) -> Option<UpdateRes
                 tracer_followup: None,
             })
         }
-        KeyCode::Up | KeyCode::Char('k') => {
+        KeyCode::Up => {
             ts::latest_events_move_up(&mut state.tracer);
             Some(UpdateResult {
                 redraw: true,
@@ -231,7 +231,7 @@ fn handle_lineage(state: &mut AppState, key: KeyEvent) -> Option<UpdateResult> {
     }
 
     match key.code {
-        KeyCode::Down | KeyCode::Char('j') => {
+        KeyCode::Down => {
             ts::lineage_move_down(&mut state.tracer);
             Some(UpdateResult {
                 redraw: true,
@@ -239,7 +239,7 @@ fn handle_lineage(state: &mut AppState, key: KeyEvent) -> Option<UpdateResult> {
                 tracer_followup: None,
             })
         }
-        KeyCode::Up | KeyCode::Char('k') => {
+        KeyCode::Up => {
             ts::lineage_move_up(&mut state.tracer);
             Some(UpdateResult {
                 redraw: true,
@@ -549,5 +549,143 @@ mod tests {
             "unexpected banner: {}",
             banner.message
         );
+    }
+
+    #[test]
+    fn tracer_lineage_row_nav_uses_arrows_only_no_jk() {
+        use crate::client::LineageSnapshot;
+        use crate::client::tracer::ProvenanceEventSummary;
+
+        let mut s = fresh_state();
+        let c = tiny_config();
+        s.current_tab = ViewId::Tracer;
+        let make_summary = |id: i64| ProvenanceEventSummary {
+            event_id: id,
+            event_time_iso: "2026-01-01T00:00:00Z".to_string(),
+            event_type: "CREATE".to_string(),
+            component_id: "comp-1".to_string(),
+            component_name: "Gen".to_string(),
+            component_type: "GenerateFlowFile".to_string(),
+            group_id: "root".to_string(),
+            flow_file_uuid: "ff-1".to_string(),
+            relationship: None,
+            details: None,
+        };
+        s.tracer.mode = TracerMode::Lineage(Box::new(LineageView {
+            uuid: "ff-1".to_string(),
+            snapshot: LineageSnapshot {
+                events: vec![make_summary(1), make_summary(2)],
+                percent_completed: 100,
+                finished: true,
+            },
+            selected_event: 0,
+            event_detail: EventDetail::NotLoaded,
+            diff_mode: ts::AttributeDiffMode::default(),
+            fetched_at: SystemTime::now(),
+        }));
+
+        // j is a no-op (returns None, global handler no-ops).
+        update(&mut s, key(KeyCode::Char('j'), KeyModifiers::NONE), &c);
+        let sel = if let TracerMode::Lineage(ref v) = s.tracer.mode {
+            v.selected_event
+        } else {
+            panic!("expected Lineage mode")
+        };
+        assert_eq!(sel, 0, "j dropped");
+
+        // Down moves selection forward.
+        update(&mut s, key(KeyCode::Down, KeyModifiers::NONE), &c);
+        let sel = if let TracerMode::Lineage(ref v) = s.tracer.mode {
+            v.selected_event
+        } else {
+            panic!("expected Lineage mode")
+        };
+        assert!(sel > 0, "Down still works");
+
+        let before = sel;
+        // k is a no-op.
+        update(&mut s, key(KeyCode::Char('k'), KeyModifiers::NONE), &c);
+        let sel = if let TracerMode::Lineage(ref v) = s.tracer.mode {
+            v.selected_event
+        } else {
+            panic!("expected Lineage mode")
+        };
+        assert_eq!(sel, before, "k dropped");
+
+        // Up moves selection back.
+        update(&mut s, key(KeyCode::Up, KeyModifiers::NONE), &c);
+        let sel = if let TracerMode::Lineage(ref v) = s.tracer.mode {
+            v.selected_event
+        } else {
+            panic!("expected Lineage mode")
+        };
+        assert!(sel < before, "Up still works");
+    }
+
+    #[test]
+    fn tracer_latest_events_row_nav_uses_arrows_only_no_jk() {
+        use crate::client::LatestEventsSnapshot;
+        use crate::client::tracer::ProvenanceEventSummary;
+        use crate::view::tracer::state::LatestEventsView;
+
+        let mut s = fresh_state();
+        let c = tiny_config();
+        s.current_tab = ViewId::Tracer;
+        let make_summary = |id: i64| ProvenanceEventSummary {
+            event_id: id,
+            event_time_iso: "2026-01-01T00:00:00Z".to_string(),
+            event_type: "CREATE".to_string(),
+            component_id: "comp-1".to_string(),
+            component_name: "Gen".to_string(),
+            component_type: "GenerateFlowFile".to_string(),
+            group_id: "root".to_string(),
+            flow_file_uuid: "ff-1".to_string(),
+            relationship: None,
+            details: None,
+        };
+        let snap = LatestEventsSnapshot {
+            component_id: "comp-1".to_string(),
+            component_label: "Gen".to_string(),
+            events: vec![make_summary(1), make_summary(2)],
+            fetched_at: SystemTime::now(),
+        };
+        s.tracer.mode = TracerMode::LatestEvents(LatestEventsView::from_snapshot(snap));
+
+        // j is a no-op.
+        update(&mut s, key(KeyCode::Char('j'), KeyModifiers::NONE), &c);
+        let sel = if let TracerMode::LatestEvents(ref v) = s.tracer.mode {
+            v.selected
+        } else {
+            panic!("expected LatestEvents mode")
+        };
+        assert_eq!(sel, 0, "j dropped");
+
+        // Down moves selection forward.
+        update(&mut s, key(KeyCode::Down, KeyModifiers::NONE), &c);
+        let sel = if let TracerMode::LatestEvents(ref v) = s.tracer.mode {
+            v.selected
+        } else {
+            panic!("expected LatestEvents mode")
+        };
+        assert!(sel > 0, "Down still works");
+
+        let before = sel;
+        // k is a no-op.
+        update(&mut s, key(KeyCode::Char('k'), KeyModifiers::NONE), &c);
+        let sel = if let TracerMode::LatestEvents(ref v) = s.tracer.mode {
+            v.selected
+        } else {
+            panic!("expected LatestEvents mode")
+        };
+        assert_eq!(sel, before, "k dropped");
+
+        // Up moves selection back.
+        update(&mut s, key(KeyCode::Up, KeyModifiers::NONE), &c);
+        let sel = if let TracerMode::LatestEvents(ref v) = s.tracer.mode {
+            v.selected
+        } else {
+            panic!("expected LatestEvents mode")
+        };
+        assert!(sel < before, "Up still works");
     }
 }

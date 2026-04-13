@@ -44,6 +44,13 @@ pub fn highlight() -> Style {
     Style::default().add_modifier(Modifier::REVERSED)
 }
 
+/// Dim color used for unfocused section borders and separator rules.
+/// Matches the existing `muted()` hue so pre-Phase 7 borders read
+/// identically; future tuning can split them apart.
+pub fn border_dim() -> Style {
+    muted()
+}
+
 /// Maps a percentage (0-100+) to a severity style. Use at render call
 /// sites that currently inline `match pct { p if p >= 90.0 => ..., ... }`
 /// blocks — Health heap, queue fill, etc.

@@ -25,10 +25,11 @@ use ratatui::Frame;
 use ratatui::layout::{Alignment, Constraint, Direction, Layout, Rect};
 use ratatui::style::Modifier;
 use ratatui::text::{Line, Span};
-use ratatui::widgets::{Block, Borders, Paragraph};
+use ratatui::widgets::Paragraph;
 
 use crate::theme;
 use crate::view::events::state::{EventsQueryStatus, EventsState, FilterField};
+use crate::widget::panel::Panel;
 
 const FILTER_BAR_ROWS: u16 = 2;
 const DETAIL_PANE_ROWS: u16 = 8;
@@ -47,25 +48,35 @@ pub fn render(
             .unwrap_or_else(|| "  ".to_string()),
         _ => "  ".to_string(),
     };
-    let block = Block::default()
-        .borders(Borders::ALL)
-        .title_top(Line::from(" Events "))
-        .title_top(Line::from(Span::styled(age_label, theme::muted())).right_aligned());
-    let inner = block.inner(area);
-    frame.render_widget(block, area);
 
     let rows = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
-            Constraint::Length(FILTER_BAR_ROWS),
-            Constraint::Fill(1),
-            Constraint::Length(DETAIL_PANE_ROWS),
+            Constraint::Length(FILTER_BAR_ROWS + 2), // +2 for panel border
+            Constraint::Fill(1),                     // events list
+            Constraint::Length(DETAIL_PANE_ROWS + 2), // +2 for panel border
         ])
-        .split(inner);
+        .split(area);
 
-    render_filter_bar(frame, rows[0], state);
-    render_body(frame, rows[1], state);
-    render_detail_pane(frame, rows[2], state);
+    // Filters panel
+    let filters_block = Panel::new(" Filters ").into_block();
+    let filters_inner = filters_block.inner(rows[0]);
+    frame.render_widget(filters_block, rows[0]);
+    render_filter_bar(frame, filters_inner, state);
+
+    // Events list panel (with age label on the right)
+    let list_block = Panel::new(" Events ")
+        .right(Line::from(Span::styled(age_label, theme::muted())))
+        .into_block();
+    let list_inner = list_block.inner(rows[1]);
+    frame.render_widget(list_block, rows[1]);
+    render_body(frame, list_inner, state);
+
+    // Detail panel
+    let detail_block = Panel::new(" Detail ").into_block();
+    let detail_inner = detail_block.inner(rows[2]);
+    frame.render_widget(detail_block, rows[2]);
+    render_detail_pane(frame, detail_inner, state);
 }
 
 fn format_age(secs: u64) -> String {
@@ -373,15 +384,13 @@ fn render_empty_state(frame: &mut Frame, area: Rect) {
 }
 
 fn render_detail_pane(frame: &mut Frame, area: Rect, state: &EventsState) {
-    let block = Block::default().borders(Borders::TOP);
-    let inner = block.inner(area);
-    frame.render_widget(block, area);
+    let inner = area;
 
     let Some(e) = state.selected_event() else {
         let hint = if state.events.is_empty() {
             "".to_string()
         } else {
-            "press j/k to select a row for detail".to_string()
+            "press ↑/↓ to select a row for detail".to_string()
         };
         let p = Paragraph::new(Span::styled(hint, theme::muted())).alignment(Alignment::Center);
         frame.render_widget(p, inner);
