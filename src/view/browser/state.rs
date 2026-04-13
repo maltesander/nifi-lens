@@ -46,6 +46,64 @@ pub struct ChildPgSummary {
     pub disabled: u32,
 }
 
+/// Named detail sub-sections that can hold keyboard focus.
+///
+/// This is a closed set — adding a new variant requires updating
+/// `DetailSections::for_node` and the render leaves that draw it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DetailSection {
+    Properties,
+    RecentBulletins,
+}
+
+/// Per-node-kind list of focusable sections, in cycle order.
+///
+/// Returning a `&'static` slice keeps the per-call cost zero and
+/// makes the "no focusable sections" case an `.is_empty()` check.
+pub struct DetailSections(pub &'static [DetailSection]);
+
+impl DetailSections {
+    pub fn for_node(kind: crate::client::NodeKind) -> Self {
+        use crate::client::NodeKind as NK;
+        match kind {
+            NK::Processor => {
+                DetailSections(&[DetailSection::Properties, DetailSection::RecentBulletins])
+            }
+            NK::ControllerService => DetailSections(&[DetailSection::Properties]),
+            _ => DetailSections(&[]),
+        }
+    }
+
+    pub fn len(&self) -> usize {
+        self.0.len()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.0.is_empty()
+    }
+}
+
+/// Max number of focusable sections any node kind has — drives the
+/// size of the per-section row-cursor array inside `DetailFocus`.
+pub const MAX_DETAIL_SECTIONS: usize = 4;
+
+/// Browser tab focus — the cursor is either in the tree (default)
+/// or inside one of the detail pane's focusable sub-sections.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub enum DetailFocus {
+    /// Focus is in the PG tree. Default state.
+    #[default]
+    Tree,
+    /// Focus is inside the detail pane.
+    Section {
+        /// Index into `DetailSections::for_node(current_kind).0`.
+        idx: usize,
+        /// Row cursor per section index. Slots beyond the current
+        /// node's `DetailSections::len()` are unused.
+        rows: [usize; MAX_DETAIL_SECTIONS],
+    },
+}
+
 #[derive(Debug, Default)]
 pub struct BrowserState {
     pub nodes: Vec<TreeNode>,
@@ -70,6 +128,10 @@ pub struct BrowserState {
     /// `None` = tree pane has focus. `Some(i)` = breadcrumb segment `i`
     /// is highlighted. Set by the `b` key, cleared by `Esc` or `Enter`.
     pub breadcrumb_focus: Option<usize>,
+    /// Phase 7: which focusable sub-section (if any) holds input focus.
+    /// Always reset to `Tree` by `reset_detail_focus`, called from every
+    /// selection-mutating method on `BrowserState`.
+    pub detail_focus: DetailFocus,
 }
 
 /// One segment in the breadcrumb path.
@@ -84,28 +146,40 @@ impl BrowserState {
         Self::default()
     }
 
+    /// Called from every selection-changing entry point. Resets detail
+    /// focus because the node under the cursor has (potentially) changed.
+    fn reset_detail_focus(&mut self) {
+        self.detail_focus = DetailFocus::Tree;
+    }
+
     pub fn move_down(&mut self) {
         ListNavigation::move_down(self);
+        self.reset_detail_focus();
     }
 
     pub fn move_up(&mut self) {
         ListNavigation::move_up(self);
+        self.reset_detail_focus();
     }
 
     pub fn page_down(&mut self, by: usize) {
         ListNavigation::page_down(self, by);
+        self.reset_detail_focus();
     }
 
     pub fn page_up(&mut self, by: usize) {
         ListNavigation::page_up(self, by);
+        self.reset_detail_focus();
     }
 
     pub fn jump_home(&mut self) {
         ListNavigation::jump_home(self);
+        self.reset_detail_focus();
     }
 
     pub fn jump_end(&mut self) {
         ListNavigation::jump_end(self);
+        self.reset_detail_focus();
     }
 
     /// `Enter` / `→` behavior. On a collapsed PG, expands and moves
@@ -131,6 +205,7 @@ impl BrowserState {
         {
             self.selected = pos;
         }
+        self.reset_detail_focus();
     }
 
     /// `Backspace` / `←` behavior. On an expanded PG with its row
@@ -159,6 +234,7 @@ impl BrowserState {
         {
             self.selected = pos;
         }
+        self.reset_detail_focus();
     }
 
     /// Set `pending_detail` to the currently-selected arena index and
@@ -455,6 +531,7 @@ pub fn apply_tree_snapshot(state: &mut BrowserState, snap: RecursiveSnapshot) {
     state.details = new_details;
     state.pending_detail = None;
     state.breadcrumb_focus = None;
+    state.detail_focus = DetailFocus::Tree;
     state.last_tree_fetched_at = Some(snap.fetched_at);
 
     rebuild_visible(state);
