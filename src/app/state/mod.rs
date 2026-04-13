@@ -77,12 +77,23 @@ impl ViewId {
     }
 }
 
+/// Cluster-wide summary shown in the top-bar identity strip.
+///
+/// Populated by the Overview worker in Phase 3. In Phase 1 the fields
+/// stay `None` and the top-bar renders `nodes ?/?` as a muted placeholder.
+#[derive(Debug, Default, Clone)]
+pub struct ClusterSummary {
+    pub connected_nodes: Option<usize>,
+    pub total_nodes: Option<usize>,
+}
+
 #[derive(Debug)]
 pub struct AppState {
     pub current_tab: ViewId,
     pub context_name: String,
     pub detected_version: Version,
     pub last_refresh: Instant,
+    pub cluster_summary: ClusterSummary,
     pub modal: Option<Modal>,
     pub overview: OverviewState,
     pub bulletins: BulletinsState,
@@ -108,6 +119,7 @@ impl AppState {
             context_name,
             detected_version,
             last_refresh: Instant::now(),
+            cluster_summary: ClusterSummary::default(),
             modal: None,
             overview: OverviewState::new(),
             bulletins: BulletinsState::with_capacity(config.bulletins.ring_size),
@@ -1470,5 +1482,12 @@ mod tests {
         update(&mut s, key(KeyCode::Left, KeyModifiers::ALT), &c);
         // Tab unchanged — no history.
         assert_eq!(s.current_tab, ViewId::Browser);
+    }
+
+    #[test]
+    fn new_state_has_empty_cluster_summary() {
+        let state = fresh_state();
+        assert_eq!(state.cluster_summary.connected_nodes, None);
+        assert_eq!(state.cluster_summary.total_nodes, None);
     }
 }
