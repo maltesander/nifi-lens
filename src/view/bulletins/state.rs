@@ -158,6 +158,37 @@ pub struct GroupedRow {
     pub count: usize,
 }
 
+/// Raw counts by severity for the current ring. Used to render the
+/// count-carrying chips (`[E 87]`). Ignores component-type, text, and
+/// mute filters by design — the chip tells the user how many rows of
+/// that severity *exist*, not how many are currently visible.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct SeverityCounts {
+    pub error: usize,
+    pub warning: usize,
+    pub info: usize,
+}
+
+/// Rendered data for the currently selected group. Returned by
+/// [`BulletinsState::group_details`]; rendered in the bottom detail
+/// pane.
+#[derive(Debug, Clone)]
+pub struct GroupDetails {
+    pub count: usize,
+    pub first_seen_iso: String,
+    pub last_seen_iso: String,
+    pub source_name: String,
+    pub source_id: String,
+    pub source_type: String,
+    pub group_id: String,
+    /// Most-recent stripped message (`strip_component_prefix(raw_message)`).
+    pub stripped_message: String,
+    /// Most-recent raw message, prefix included. The detail pane
+    /// shows this verbatim so the user can inspect what NiFi emitted.
+    pub raw_message: String,
+    pub severity: crate::client::Severity,
+}
+
 impl BulletinsState {
     pub fn with_capacity(ring_capacity: usize) -> Self {
         Self {
@@ -494,6 +525,39 @@ impl ListNavigation for BulletinsState {
 
     fn set_selected(&mut self, index: Option<usize>) {
         self.selected = index.unwrap_or(0);
+    }
+}
+
+impl BulletinsState {
+    pub fn severity_counts(&self) -> SeverityCounts {
+        let mut out = SeverityCounts::default();
+        for b in &self.ring {
+            match crate::client::Severity::parse(&b.level) {
+                crate::client::Severity::Error => out.error += 1,
+                crate::client::Severity::Warning => out.warning += 1,
+                crate::client::Severity::Info | crate::client::Severity::Unknown => out.info += 1,
+            }
+        }
+        out
+    }
+
+    pub fn group_details(&self) -> Option<GroupDetails> {
+        let group = self.grouped_view().into_iter().nth(self.selected)?;
+        let first = &self.ring[group.first_ring_idx];
+        let latest = &self.ring[group.latest_ring_idx];
+        let stripped = strip_component_prefix(&latest.message).to_string();
+        Some(GroupDetails {
+            count: group.count,
+            first_seen_iso: first.timestamp_iso.clone(),
+            last_seen_iso: latest.timestamp_iso.clone(),
+            source_name: latest.source_name.clone(),
+            source_id: latest.source_id.clone(),
+            source_type: latest.source_type.clone(),
+            group_id: latest.group_id.clone(),
+            stripped_message: stripped,
+            raw_message: latest.message.clone(),
+            severity: crate::client::Severity::parse(&latest.level),
+        })
     }
 }
 
@@ -1470,5 +1534,63 @@ mod tests {
         // Empty ring → no selection.
         s.mute_selected_source();
         assert!(s.mutes.is_empty());
+    }
+
+    #[test]
+    fn severity_counts_returns_raw_ring_totals_ignoring_other_filters() {
+        let mut s = seed(
+            100,
+            vec![
+                b_full(1, "ERROR", "PROCESSOR", "A", "a"),
+                b_full(2, "ERROR", "PROCESSOR", "A", "a"),
+                b_full(3, "WARN", "PROCESSOR", "B", "b"),
+                b_full(4, "INFO", "PROCESSOR", "C", "c"),
+            ],
+        );
+        // Apply a text filter — should NOT affect severity counts.
+        s.filters.text = "zzz".into();
+        let counts = s.severity_counts();
+        assert_eq!(counts.error, 2);
+        assert_eq!(counts.warning, 1);
+        assert_eq!(counts.info, 1);
+    }
+
+    #[test]
+    fn group_details_returns_first_and_last_seen_for_dedup_group() {
+        let mut s = BulletinsState::with_capacity(100);
+        let rows = vec![
+            BulletinSnapshot {
+                id: 1,
+                level: "ERROR".into(),
+                message: "P[id=a] same stem".into(),
+                source_id: "src-1".into(),
+                source_name: "P".into(),
+                source_type: "PROCESSOR".into(),
+                group_id: "g".into(),
+                timestamp_iso: "2026-04-11T10:00:00Z".into(),
+                timestamp_human: String::new(),
+            },
+            BulletinSnapshot {
+                id: 2,
+                level: "ERROR".into(),
+                message: "P[id=a] same stem".into(),
+                source_id: "src-1".into(),
+                source_name: "P".into(),
+                source_type: "PROCESSOR".into(),
+                group_id: "g".into(),
+                timestamp_iso: "2026-04-11T10:05:00Z".into(),
+                timestamp_human: String::new(),
+            },
+        ];
+        apply_payload(&mut s, payload(rows));
+        s.selected = 0;
+        let d = s.group_details().expect("group exists");
+        assert_eq!(d.count, 2);
+        assert_eq!(d.first_seen_iso, "2026-04-11T10:00:00Z");
+        assert_eq!(d.last_seen_iso, "2026-04-11T10:05:00Z");
+        assert_eq!(d.source_id, "src-1");
+        assert_eq!(d.group_id, "g");
+        assert_eq!(d.stripped_message, "same stem");
+        assert_eq!(d.raw_message, "P[id=a] same stem");
     }
 }
