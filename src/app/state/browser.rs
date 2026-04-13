@@ -3,6 +3,7 @@
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 
 use super::{AppState, Banner, BannerSeverity, Modal, PendingIntent, UpdateResult, ViewKeyHandler};
+use crate::view::browser::state::{DetailFocus, DetailSections, MAX_DETAIL_SECTIONS};
 
 /// Zero-sized dispatch struct for the Browser tab.
 pub(crate) struct BrowserHandler;
@@ -16,6 +17,43 @@ impl ViewKeyHandler for BrowserHandler {
 
         if !matches!(key.modifiers, KeyModifiers::NONE | KeyModifiers::SHIFT) {
             return None;
+        }
+
+        // Detail-focus handling runs before the tree match. When focus is in a
+        // Section, h/l/Esc are handled here; unrecognised keys fall through to
+        // the tree match below (Tasks 12-14 add more arms here).
+        if let DetailFocus::Section { idx, rows } = state.browser.detail_focus.clone() {
+            let Some(&arena_idx) = state.browser.visible.get(state.browser.selected) else {
+                return Some(UpdateResult::default());
+            };
+            let kind = state.browser.nodes[arena_idx].kind;
+            let sections = DetailSections::for_node(kind);
+            match key.code {
+                KeyCode::Char('h') | KeyCode::Esc => {
+                    state.browser.detail_focus = DetailFocus::Tree;
+                    return Some(UpdateResult {
+                        redraw: true,
+                        intent: None,
+                        tracer_followup: None,
+                    });
+                }
+                KeyCode::Char('l') => {
+                    if sections.is_empty() {
+                        // Defensive: entered Section focus on a node that has no sections.
+                        return Some(UpdateResult::default());
+                    }
+                    let new_idx = (idx + 1) % sections.len();
+                    state.browser.detail_focus = DetailFocus::Section { idx: new_idx, rows };
+                    return Some(UpdateResult {
+                        redraw: true,
+                        intent: None,
+                        tracer_followup: None,
+                    });
+                }
+                _ => {
+                    // Fall through — Tasks 12-14 add Up/Down/c/t handling here.
+                }
+            }
         }
 
         match key.code {
@@ -177,6 +215,36 @@ impl ViewKeyHandler for BrowserHandler {
                     // Focus the last ancestor (parent of selected node).
                     state.browser.breadcrumb_focus = Some(segments.len() - 2);
                 }
+                Some(UpdateResult {
+                    redraw: true,
+                    intent: None,
+                    tracer_followup: None,
+                })
+            }
+            KeyCode::Char('l') => {
+                // Enter detail focus at section 0, or show a banner if the
+                // selected node has no focusable sections.
+                let Some(&arena_idx) = state.browser.visible.get(state.browser.selected) else {
+                    return Some(UpdateResult::default());
+                };
+                let kind = state.browser.nodes[arena_idx].kind;
+                let sections = DetailSections::for_node(kind);
+                if sections.is_empty() {
+                    state.status.banner = Some(Banner {
+                        severity: BannerSeverity::Info,
+                        message: "no focusable sections for this node".to_string(),
+                        detail: None,
+                    });
+                    return Some(UpdateResult {
+                        redraw: true,
+                        intent: None,
+                        tracer_followup: None,
+                    });
+                }
+                state.browser.detail_focus = DetailFocus::Section {
+                    idx: 0,
+                    rows: [0; MAX_DETAIL_SECTIONS],
+                };
                 Some(UpdateResult {
                     redraw: true,
                     intent: None,
@@ -768,6 +836,111 @@ mod tests {
         // Up still works.
         update(&mut s, key(KeyCode::Up, KeyModifiers::NONE), &c);
         assert!(s.browser.selected < before, "Up should move the cursor");
+    }
+
+    // -----------------------------------------------------------------------
+    // Helpers for Task 11-14 tests
+    // -----------------------------------------------------------------------
+
+    /// AppState with current_tab = Browser, selection on the "gen" Processor
+    /// (visible row 1 in seeded_browser_state).
+    fn fresh_browser_on_processor() -> (AppState, crate::config::Config) {
+        let (mut s, c) = seeded_browser_state();
+        s.browser.selected = 1; // "gen" Processor
+        (s, c)
+    }
+
+    // -----------------------------------------------------------------------
+    // Task 11: Focus cycle (l/h/Esc)
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn l_on_processor_enters_detail_focus_at_section_zero() {
+        let (mut s, c) = fresh_browser_on_processor();
+        update(&mut s, key(KeyCode::Char('l'), KeyModifiers::NONE), &c);
+        match &s.browser.detail_focus {
+            crate::view::browser::state::DetailFocus::Section { idx, .. } => {
+                assert_eq!(*idx, 0)
+            }
+            crate::view::browser::state::DetailFocus::Tree => {
+                panic!("expected Section focus, got Tree")
+            }
+        }
+    }
+
+    #[test]
+    fn l_from_last_section_wraps_to_zero() {
+        let (mut s, c) = fresh_browser_on_processor();
+        // Processor has 2 focusable sections. Tree → 0 → 1 → 0 (wrap).
+        update(&mut s, key(KeyCode::Char('l'), KeyModifiers::NONE), &c);
+        update(&mut s, key(KeyCode::Char('l'), KeyModifiers::NONE), &c);
+        update(&mut s, key(KeyCode::Char('l'), KeyModifiers::NONE), &c);
+        match &s.browser.detail_focus {
+            crate::view::browser::state::DetailFocus::Section { idx, .. } => {
+                assert_eq!(*idx, 0, "wrap")
+            }
+            _ => panic!("expected Section focus"),
+        }
+    }
+
+    #[test]
+    fn h_returns_to_tree_focus() {
+        let (mut s, c) = fresh_browser_on_processor();
+        update(&mut s, key(KeyCode::Char('l'), KeyModifiers::NONE), &c);
+        update(&mut s, key(KeyCode::Char('h'), KeyModifiers::NONE), &c);
+        assert_eq!(
+            s.browser.detail_focus,
+            crate::view::browser::state::DetailFocus::Tree
+        );
+    }
+
+    #[test]
+    fn esc_returns_to_tree_focus() {
+        let (mut s, c) = fresh_browser_on_processor();
+        update(&mut s, key(KeyCode::Char('l'), KeyModifiers::NONE), &c);
+        update(&mut s, key(KeyCode::Esc, KeyModifiers::NONE), &c);
+        assert_eq!(
+            s.browser.detail_focus,
+            crate::view::browser::state::DetailFocus::Tree
+        );
+    }
+
+    #[test]
+    fn moving_tree_selection_resets_detail_focus() {
+        let (mut s, c) = fresh_browser_on_processor();
+        update(&mut s, key(KeyCode::Char('l'), KeyModifiers::NONE), &c);
+        assert!(matches!(
+            s.browser.detail_focus,
+            crate::view::browser::state::DetailFocus::Section { .. }
+        ));
+        update(&mut s, key(KeyCode::Down, KeyModifiers::NONE), &c);
+        assert_eq!(
+            s.browser.detail_focus,
+            crate::view::browser::state::DetailFocus::Tree
+        );
+    }
+
+    #[test]
+    fn l_on_pg_emits_no_focusable_sections_banner() {
+        let (mut s, c) = seeded_browser_state();
+        // Confirm we're on a PG (root, selected=0).
+        let idx = s.browser.visible[s.browser.selected];
+        assert!(matches!(
+            s.browser.nodes[idx].kind,
+            crate::client::NodeKind::ProcessGroup
+        ));
+        update(&mut s, key(KeyCode::Char('l'), KeyModifiers::NONE), &c);
+        assert_eq!(
+            s.browser.detail_focus,
+            crate::view::browser::state::DetailFocus::Tree
+        );
+        assert!(
+            s.status
+                .banner
+                .as_ref()
+                .map(|b| b.message.contains("no focusable"))
+                .unwrap_or(false)
+        );
     }
 
     #[test]
