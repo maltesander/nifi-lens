@@ -1,13 +1,21 @@
 //! Process Group detail renderer.
+//!
+//! Phase 7 wraps the existing labeled-sections content in a bordered
+//! outer `Panel`. PG detail has no focusable sub-sections, so the
+//! `_detail_focus` parameter is threaded for signature consistency
+//! with processor / controller_service renderers and currently
+//! ignored.
 
 use ratatui::Frame;
-use ratatui::layout::Rect;
+use ratatui::layout::{Constraint, Direction, Layout, Rect};
+use ratatui::style::Modifier;
 use ratatui::text::{Line, Span};
 use ratatui::widgets::Paragraph;
 
 use crate::client::ProcessGroupDetail;
 use crate::theme;
-use crate::view::browser::state::BrowserState;
+use crate::view::browser::state::{BrowserState, DetailFocus};
+use crate::widget::panel::Panel;
 use crate::widget::severity::{format_severity_label, severity_style};
 
 pub fn render(
@@ -16,19 +24,47 @@ pub fn render(
     d: &ProcessGroupDetail,
     state: &BrowserState,
     bulletins: &std::collections::VecDeque<crate::client::BulletinSnapshot>,
+    _detail_focus: &DetailFocus,
+) {
+    // Outer panel: " <name> · process group "
+    let outer = Panel::new(build_header_title(d)).into_block();
+    let inner = outer.inner(area);
+    frame.render_widget(outer, area);
+
+    // Split: content (fill) + hints strip (1 line).
+    let rows = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([Constraint::Fill(1), Constraint::Length(1)])
+        .split(inner);
+
+    render_content(frame, rows[0], d, state, bulletins);
+    render_hints_strip(frame, rows[1]);
+}
+
+/// Build the outer panel title: ` <name> · process group `.
+fn build_header_title(d: &ProcessGroupDetail) -> Line<'_> {
+    Line::from(vec![
+        Span::raw(" "),
+        Span::styled(
+            d.name.as_str(),
+            theme::accent().add_modifier(Modifier::BOLD),
+        ),
+        Span::raw(" "),
+        Span::styled("·", theme::muted()),
+        Span::raw(" "),
+        Span::styled("process group", theme::muted()),
+        Span::raw(" "),
+    ])
+}
+
+fn render_content(
+    frame: &mut Frame,
+    area: Rect,
+    d: &ProcessGroupDetail,
+    state: &BrowserState,
+    bulletins: &std::collections::VecDeque<crate::client::BulletinSnapshot>,
 ) {
     let mut lines: Vec<Line> = Vec::new();
-
-    // Header: "<name>  process group"
-    lines.push(Line::from(vec![
-        Span::styled(
-            d.name.clone(),
-            theme::accent().add_modifier(ratatui::style::Modifier::BOLD),
-        ),
-        Span::raw("  "),
-        Span::styled("process group".to_string(), theme::muted()),
-    ]));
-    lines.push(Line::from(""));
 
     // Processors line: counts by state.
     lines.push(Line::from(vec![
@@ -124,14 +160,12 @@ pub fn render(
         ]));
     }
 
-    // Action hints.
-    lines.push(Line::from(""));
-    lines.push(Line::from(Span::styled(
-        "e properties · c copy id · Enter drill in".to_string(),
-        theme::muted(),
-    )));
-
     frame.render_widget(Paragraph::new(lines), area);
+}
+
+fn render_hints_strip(frame: &mut Frame, area: Rect) {
+    let text = "↑/↓ nav · Enter drill in · e properties · c copy id";
+    frame.render_widget(Paragraph::new(text).style(theme::muted()), area);
 }
 
 #[cfg(test)]
@@ -173,9 +207,9 @@ mod snapshots {
         let state = BrowserState::new();
         let bulletins: std::collections::VecDeque<crate::client::BulletinSnapshot> =
             std::collections::VecDeque::new();
-        let mut terminal = Terminal::new(TestBackend::new(100, 20)).unwrap();
+        let mut terminal = Terminal::new(TestBackend::new(100, 24)).unwrap();
         terminal
-            .draw(|f| render(f, f.area(), &d, &state, &bulletins))
+            .draw(|f| render(f, f.area(), &d, &state, &bulletins, &DetailFocus::Tree))
             .unwrap();
         assert_snapshot!("pg_detail_with_cs_list", format!("{}", terminal.backend()));
     }

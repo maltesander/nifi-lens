@@ -257,7 +257,9 @@ fn render_detail(
     let header_line = Line::from(Span::styled(header, theme::accent()));
 
     match state.details.get(&arena_idx) {
-        Some(NodeDetail::ProcessGroup(d)) => pg::render(frame, detail_area, d, state, bulletins),
+        Some(NodeDetail::ProcessGroup(d)) => {
+            pg::render(frame, detail_area, d, state, bulletins, &state.detail_focus);
+        }
         Some(NodeDetail::Processor(d)) => {
             processor::render(frame, detail_area, d, state, bulletins, &state.detail_focus);
         }
