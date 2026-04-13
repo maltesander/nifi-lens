@@ -37,6 +37,49 @@ pub fn strip_component_prefix(msg: &str) -> &str {
     }
 }
 
+/// Replace each `[...]` region in `s` with `[…]` (U+2026). Used to
+/// normalize dynamic content like `FlowFile[filename=...]` and
+/// `StandardFlowFileRecord[uuid=...]` so that bulletins from the same
+/// processor with the same message *shape* collapse into a single
+/// dedup bucket regardless of per-flowfile attribute values.
+///
+/// Non-nesting: only the first `]` after each `[` closes the region.
+/// If any `[` in the input has no matching `]` in the remainder, the
+/// full original string is returned unchanged — a conservative choice
+/// matching the "return verbatim on malformed input" style of
+/// `strip_component_prefix`.
+pub fn normalize_dynamic_brackets(s: &str) -> String {
+    let ellipsis = "[\u{2026}]";
+    // Fast path: nothing to do if there's no `[` at all.
+    if !s.contains('[') {
+        return s.to_string();
+    }
+    let mut out = String::with_capacity(s.len());
+    let mut i = 0;
+    let bytes = s.as_bytes();
+    while i < bytes.len() {
+        if bytes[i] == b'[' {
+            match s[i + 1..].find(']') {
+                Some(rel) => {
+                    out.push_str(ellipsis);
+                    i = i + 1 + rel + 1;
+                }
+                None => {
+                    // Unclosed bracket — bail out, return the original
+                    // input verbatim.
+                    return s.to_string();
+                }
+            }
+            continue;
+        }
+        // Append up to the next `[` or end-of-string in one slice.
+        let next = s[i..].find('[').map(|rel| i + rel).unwrap_or(bytes.len());
+        out.push_str(&s[i..next]);
+        i = next;
+    }
+    out
+}
+
 /// Return up to `limit` most-recent bulletins from `ring` whose
 /// `source_id` matches `source_id`, in newest-first order.
 ///
@@ -286,7 +329,8 @@ impl BulletinsState {
             let key = match self.group_mode {
                 GroupMode::SourceAndMessage => {
                     let stem = strip_component_prefix(&b.message);
-                    format!("{}\x1f{stem}", b.source_id)
+                    let normalized = normalize_dynamic_brackets(stem);
+                    format!("{}\x1f{normalized}", b.source_id)
                 }
                 GroupMode::Source => b.source_id.clone(),
                 GroupMode::Off => unreachable!("handled above"),
@@ -1341,6 +1385,112 @@ mod tests {
     fn strip_component_prefix_is_idempotent_on_already_clean_message() {
         let msg = "already clean";
         assert_eq!(strip_component_prefix(msg), "already clean");
+    }
+
+    #[test]
+    fn normalize_dynamic_brackets_replaces_single_bracket_region() {
+        assert_eq!(
+            normalize_dynamic_brackets("Failed to process FlowFile[filename=abc.txt]"),
+            "Failed to process FlowFile[\u{2026}]"
+        );
+    }
+
+    #[test]
+    fn normalize_dynamic_brackets_replaces_multiple_bracket_regions() {
+        let input = "a FlowFile[id=x] and StandardFlowFileRecord[uuid=y]";
+        assert_eq!(
+            normalize_dynamic_brackets(input),
+            "a FlowFile[\u{2026}] and StandardFlowFileRecord[\u{2026}]"
+        );
+    }
+
+    #[test]
+    fn normalize_dynamic_brackets_handles_nested_braces_inside_bracket() {
+        let input = "StandardFlowFileRecord[uuid=abc, attributes={k=v, k2=v2}]";
+        assert_eq!(
+            normalize_dynamic_brackets(input),
+            "StandardFlowFileRecord[\u{2026}]"
+        );
+    }
+
+    #[test]
+    fn normalize_dynamic_brackets_returns_unchanged_when_no_brackets() {
+        assert_eq!(
+            normalize_dynamic_brackets("will route to failure"),
+            "will route to failure"
+        );
+    }
+
+    #[test]
+    fn normalize_dynamic_brackets_returns_unchanged_on_unclosed_bracket() {
+        assert_eq!(
+            normalize_dynamic_brackets("something [unclosed but no close"),
+            "something [unclosed but no close"
+        );
+    }
+
+    #[test]
+    fn normalize_dynamic_brackets_handles_empty_string() {
+        assert_eq!(normalize_dynamic_brackets(""), "");
+    }
+
+    #[test]
+    fn normalize_dynamic_brackets_handles_bracket_at_end() {
+        assert_eq!(
+            normalize_dynamic_brackets("prefix [suffix]"),
+            "prefix [\u{2026}]"
+        );
+    }
+
+    #[test]
+    fn normalize_dynamic_brackets_preserves_text_between_brackets() {
+        let input = "before FlowFile[a=1]; middle StandardFlowFileRecord[b=2]; after";
+        assert_eq!(
+            normalize_dynamic_brackets(input),
+            "before FlowFile[\u{2026}]; middle StandardFlowFileRecord[\u{2026}]; after"
+        );
+    }
+
+    #[test]
+    fn grouped_view_collapses_across_flowfile_attrs() {
+        // Reproduces the user-reported bug: two bulletins from the same
+        // source with the same message shape but different embedded
+        // flowfile attributes should collapse into a single grouped row.
+        use crate::client::BulletinSnapshot;
+        let mut s = BulletinsState::with_capacity(100);
+        s.ring.push_back(BulletinSnapshot {
+            id: 1,
+            level: "ERROR".into(),
+            message: "UpdateRecord[id=pid] Failed to process FlowFile[filename=a.txt]; \
+                      will route to failure"
+                .into(),
+            source_id: "pid".into(),
+            source_name: "UpdateRecord".into(),
+            source_type: "PROCESSOR".into(),
+            group_id: "g1".into(),
+            timestamp_iso: "2026-04-14T10:00:00Z".into(),
+            timestamp_human: String::new(),
+        });
+        s.ring.push_back(BulletinSnapshot {
+            id: 2,
+            level: "ERROR".into(),
+            message: "UpdateRecord[id=pid] Failed to process FlowFile[filename=b.txt]; \
+                      will route to failure"
+                .into(),
+            source_id: "pid".into(),
+            source_name: "UpdateRecord".into(),
+            source_type: "PROCESSOR".into(),
+            group_id: "g1".into(),
+            timestamp_iso: "2026-04-14T10:00:01Z".into(),
+            timestamp_human: String::new(),
+        });
+        let rows = s.grouped_view();
+        assert_eq!(
+            rows.len(),
+            1,
+            "two same-shape bulletins must collapse into one row"
+        );
+        assert_eq!(rows[0].count, 2, "count must reflect both occurrences");
     }
 
     #[test]

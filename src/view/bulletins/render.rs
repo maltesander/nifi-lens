@@ -246,6 +246,7 @@ fn render_list(
                 Cell::from("")
             };
             let stripped = crate::view::bulletins::state::strip_component_prefix(&b.message);
+            let normalized = crate::view::bulletins::state::normalize_dynamic_brackets(stripped);
             let pg_cell = match browser.pg_path(&b.group_id) {
                 Some(path) => Cell::from(truncate_left(&path, 24)),
                 None => {
@@ -272,7 +273,7 @@ fn render_list(
                 count_cell,
                 Cell::from(truncate_right(&b.source_name, 20)),
                 pg_cell,
-                Cell::from(stripped.to_string()),
+                Cell::from(normalized),
             ])
             .style(style)
         })
