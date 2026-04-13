@@ -189,7 +189,7 @@ fn handle_filter_nav(state: &mut AppState, key: KeyEvent) -> Option<UpdateResult
                 tracer_followup: None,
             })
         }
-        KeyCode::Down | KeyCode::Char('j') | KeyCode::Up | KeyCode::Char('k') => {
+        KeyCode::Down | KeyCode::Up => {
             state.events.enter_row_nav();
             redraw()
         }
@@ -203,11 +203,11 @@ fn handle_row_nav(state: &mut AppState, key: KeyEvent) -> Option<UpdateResult> {
             state.events.leave_row_nav();
             redraw()
         }
-        KeyCode::Down | KeyCode::Char('j') => {
+        KeyCode::Down => {
             state.events.move_selection_down();
             redraw()
         }
-        KeyCode::Up | KeyCode::Char('k') => {
+        KeyCode::Up => {
             state.events.move_selection_up();
             redraw()
         }
@@ -352,7 +352,7 @@ mod tests {
             })),
             &c,
         );
-        update(&mut s, key(KeyCode::Char('j'), KeyModifiers::NONE), &c);
+        update(&mut s, key(KeyCode::Down, KeyModifiers::NONE), &c);
         assert_eq!(s.events.selected_row, Some(0));
     }
 
@@ -444,6 +444,73 @@ mod tests {
             }
             other => panic!("expected TraceByUuid, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn events_row_nav_uses_arrows_only_no_jk() {
+        use crate::client::ProvenanceEventSummary;
+        use crate::event::{AppEvent, EventsPayload, ViewPayload};
+        use std::time::SystemTime;
+        let mut s = fresh_state();
+        let c = tiny_config();
+        s.current_tab = ViewId::Events;
+        let make_event = |id: i64| ProvenanceEventSummary {
+            event_id: id,
+            event_time_iso: "2026-04-13T10:00:00Z".into(),
+            event_type: "DROP".into(),
+            component_id: "p".into(),
+            component_name: "P".into(),
+            component_type: "PROCESSOR".into(),
+            group_id: "g".into(),
+            flow_file_uuid: "u".into(),
+            relationship: None,
+            details: None,
+        };
+        update(
+            &mut s,
+            AppEvent::Data(ViewPayload::Events(EventsPayload::QueryStarted {
+                query_id: "q".into(),
+            })),
+            &c,
+        );
+        update(
+            &mut s,
+            AppEvent::Data(ViewPayload::Events(EventsPayload::QueryDone {
+                query_id: "q".into(),
+                events: vec![make_event(1), make_event(2)],
+                fetched_at: SystemTime::now(),
+                truncated: false,
+            })),
+            &c,
+        );
+
+        // j does NOT enter row nav (it falls through as unrecognized in Mode A,
+        // returns None from filter_nav, and the global handler is a no-op).
+        update(&mut s, key(KeyCode::Char('j'), KeyModifiers::NONE), &c);
+        assert_eq!(s.events.selected_row, None, "j does not enter row nav");
+
+        // Down enters row nav (Mode A → enter_row_nav).
+        update(&mut s, key(KeyCode::Down, KeyModifiers::NONE), &c);
+        assert_eq!(s.events.selected_row, Some(0), "Down enters row nav");
+
+        // From Mode B: Down moves selection forward.
+        update(&mut s, key(KeyCode::Down, KeyModifiers::NONE), &c);
+        assert_eq!(s.events.selected_row, Some(1), "Down moves selection down");
+
+        // k exits row nav (unrecognized key in Mode B calls leave_row_nav()).
+        update(&mut s, key(KeyCode::Char('k'), KeyModifiers::NONE), &c);
+        assert_eq!(
+            s.events.selected_row, None,
+            "k exits row nav (not a nav key)"
+        );
+
+        // Re-enter Mode B and confirm Up moves selection up.
+        s.events.enter_row_nav();
+        // Move to row 1 first.
+        update(&mut s, key(KeyCode::Down, KeyModifiers::NONE), &c);
+        assert_eq!(s.events.selected_row, Some(1));
+        update(&mut s, key(KeyCode::Up, KeyModifiers::NONE), &c);
+        assert_eq!(s.events.selected_row, Some(0), "Up moves selection up");
     }
 
     #[tokio::test]
