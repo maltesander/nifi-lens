@@ -30,7 +30,7 @@ use crate::theme;
 use crate::view::bulletins::state::{BulletinsState, ComponentType, GroupedRow};
 
 const FILTER_BAR_ROWS: u16 = 2;
-const DETAIL_PANE_ROWS: u16 = 6;
+const DETAIL_PANE_ROWS: u16 = 8;
 
 pub fn render(
     frame: &mut Frame,
@@ -290,50 +290,95 @@ fn render_detail(
     state: &BulletinsState,
     browser: &crate::view::browser::state::BrowserState,
 ) {
-    let _ = browser; // unused until Task 11
     let block = Block::default().borders(Borders::TOP);
     let inner = block.inner(area);
     frame.render_widget(block, area);
 
-    let Some(idx) = state.selected_ring_index() else {
+    let Some(d) = state.group_details() else {
         return;
     };
-    let b = &state.ring[idx];
-    let sev = format_severity_label(&b.level);
-    let sev_style = severity_style(&b.level);
-    let ts = if b.timestamp_iso.is_empty() {
-        &b.timestamp_human
-    } else {
-        &b.timestamp_iso
+
+    let pg_path = browser
+        .pg_path(&d.group_id)
+        .unwrap_or_else(|| format!("\u{2026}{}", tail8(&d.group_id)));
+
+    // Row 0: header — source · pg path · count · first · last.
+    let header = Line::from(vec![
+        Span::styled(
+            d.source_name.clone(),
+            Style::default().add_modifier(Modifier::BOLD),
+        ),
+        Span::raw(" · "),
+        Span::styled(pg_path, theme::accent()),
+        Span::raw("   "),
+        Span::styled(
+            format!(
+                "{} occurrence{}",
+                d.count,
+                if d.count == 1 { "" } else { "s" }
+            ),
+            theme::muted(),
+        ),
+        Span::raw(" · "),
+        Span::styled(
+            format!("first {}", short_time(&d.first_seen_iso)),
+            theme::muted(),
+        ),
+        Span::raw(" · "),
+        Span::styled(
+            format!("last {}", short_time(&d.last_seen_iso)),
+            theme::muted(),
+        ),
+    ]);
+
+    // Row 1: severity label + raw message (wrapped up to 3 lines).
+    let sev_label = match d.severity {
+        crate::client::Severity::Error => "ERROR ",
+        crate::client::Severity::Warning => "WARN  ",
+        crate::client::Severity::Info => "INFO  ",
+        crate::client::Severity::Unknown => "      ",
     };
-    let line0 = Line::from(vec![
-        Span::styled(sev, sev_style.add_modifier(Modifier::BOLD)),
-        Span::raw("    "),
-        Span::styled(ts.to_string(), theme::accent()),
-    ]);
-    let line1 = Line::from(vec![
-        Span::styled("Source: ", theme::muted()),
-        Span::raw(b.source_name.clone()),
-        Span::raw("  "),
-        Span::styled("ID: ", theme::muted()),
-        Span::raw(b.source_id.clone()),
-    ]);
-    let line2 = Line::from(vec![
-        Span::styled("Group:  ", theme::muted()),
-        Span::raw(b.group_id.clone()),
-    ]);
-    let max_msg_lines = inner.height.saturating_sub(5) as usize;
-    let message_lines = wrap_lines(
-        &b.message,
-        inner.width.saturating_sub(1) as usize,
-        max_msg_lines,
-    );
-    let mut lines = vec![line0, line1, line2, Line::from("")];
-    for ml in message_lines {
-        lines.push(Line::from(ml));
+    let sev_style = match d.severity {
+        crate::client::Severity::Error => theme::error(),
+        crate::client::Severity::Warning => theme::warning(),
+        crate::client::Severity::Info => theme::info(),
+        crate::client::Severity::Unknown => theme::muted(),
+    };
+    let max_msg_width = inner.width.saturating_sub(8) as usize; // "ERROR " + 2 padding
+    let wrapped = wrap_lines(&d.raw_message, max_msg_width.max(1), 3);
+    let mut lines: Vec<Line<'static>> = vec![header, Line::from("")];
+    for (i, ml) in wrapped.into_iter().enumerate() {
+        if i == 0 {
+            lines.push(Line::from(vec![
+                Span::styled(
+                    sev_label.to_string(),
+                    sev_style.add_modifier(Modifier::BOLD),
+                ),
+                Span::raw("  "),
+                Span::raw(ml),
+            ]));
+        } else {
+            lines.push(Line::from(vec![Span::raw("        "), Span::raw(ml)]));
+        }
     }
-    let para = Paragraph::new(lines);
-    frame.render_widget(para, inner);
+
+    // Row N: ids line — source id, pg id.
+    lines.push(Line::from(""));
+    lines.push(Line::from(vec![
+        Span::styled("id  ".to_string(), theme::muted()),
+        Span::raw(d.source_id.clone()),
+        Span::raw("   "),
+        Span::styled("pg  ".to_string(), theme::muted()),
+        Span::raw(d.group_id.clone()),
+    ]));
+
+    // Row N+1: action hints.
+    lines.push(Line::from(Span::styled(
+        "t trace lineage · Enter jump to Browser · m mute source · c clear filters".to_string(),
+        theme::muted(),
+    )));
+
+    frame.render_widget(Paragraph::new(lines), inner);
 }
 
 fn format_severity_label(level: &str) -> String {
@@ -453,6 +498,24 @@ fn wrap_lines(s: &str, width: usize, max_lines: usize) -> Vec<String> {
     }
 
     lines
+}
+
+/// Last 8 chars of a UUID-ish id, used for muted fallback display.
+/// UTF-8 safe — uses `chars()` to avoid panicking on multi-byte input.
+fn tail8(id: &str) -> String {
+    let n = id.chars().count();
+    let skip = n.saturating_sub(8);
+    id.chars().skip(skip).collect()
+}
+
+/// Extract HH:MM:SS from an ISO-8601 / RFC-3339 timestamp string.
+/// Returns `"--:--:--"` on parse failure.
+fn short_time(iso: &str) -> String {
+    let Some(dt) = crate::timestamp::parse_nifi_timestamp(iso) else {
+        return "--:--:--".to_string();
+    };
+    let t = dt.time();
+    format!("{:02}:{:02}:{:02}", t.hour(), t.minute(), t.second())
 }
 
 #[cfg(test)]
