@@ -189,7 +189,13 @@ impl ViewKeyHandler for BulletinsHandler {
             ];
         }
 
-        let mut spans = vec![
+        let group_action: &'static str = match state.bulletins.group_mode {
+            crate::view::bulletins::state::GroupMode::SourceAndMessage => "group: source+msg",
+            crate::view::bulletins::state::GroupMode::Source => "group: source",
+            crate::view::bulletins::state::GroupMode::Off => "group: off",
+        };
+
+        vec![
             HintSpan {
                 key: "j/k",
                 action: "nav",
@@ -210,12 +216,15 @@ impl ViewKeyHandler for BulletinsHandler {
                 key: "Space",
                 action: "pause",
             },
-        ];
-        spans.push(HintSpan {
-            key: "g",
-            action: "group",
-        });
-        spans
+            HintSpan {
+                key: "g",
+                action: group_action,
+            },
+            HintSpan {
+                key: "m",
+                action: "mute",
+            },
+        ]
     }
 }
 
@@ -551,5 +560,48 @@ mod tests {
         s.bulletins.selected = 1;
         update(&mut s, key(KeyCode::Home, KeyModifiers::NONE), &c);
         assert_eq!(s.bulletins.selected, 0);
+    }
+
+    #[test]
+    fn bulletins_hints_show_group_mode_label_for_g_key() {
+        use super::super::ViewKeyHandler;
+        use super::BulletinsHandler;
+        use crate::view::bulletins::state::GroupMode;
+        let mut s = fresh_state();
+        s.current_tab = ViewId::Bulletins;
+        s.bulletins.group_mode = GroupMode::SourceAndMessage;
+        let spans = BulletinsHandler::hints(&s);
+        assert!(
+            spans
+                .iter()
+                .any(|h| h.key == "g" && h.action.contains("source+msg")),
+            "g hint should show current mode `source+msg`; got {spans:?}"
+        );
+        s.bulletins.group_mode = GroupMode::Off;
+        let spans = BulletinsHandler::hints(&s);
+        assert!(
+            spans
+                .iter()
+                .any(|h| h.key == "g" && h.action.contains("off"))
+        );
+    }
+
+    #[test]
+    fn bulletins_hints_include_m_mute() {
+        use super::super::ViewKeyHandler;
+        use super::BulletinsHandler;
+        let s = fresh_state();
+        let spans = BulletinsHandler::hints(&s);
+        assert!(spans.iter().any(|h| h.key == "m" && h.action == "mute"));
+    }
+
+    #[test]
+    fn bulletins_hints_exclude_b_and_bundle_action() {
+        use super::super::ViewKeyHandler;
+        use super::BulletinsHandler;
+        let s = fresh_state();
+        let spans = BulletinsHandler::hints(&s);
+        assert!(!spans.iter().any(|h| h.key == "B"));
+        assert!(!spans.iter().any(|h| h.action.contains("bundle")));
     }
 }
