@@ -161,10 +161,12 @@ ring exceeds its capacity.
   Richer port detail is deferred to Phase 5.
 - **Clipboard failures surface as warning banners.** Not errors;
   clipboard is a nice-to-have.
-- **PG-scoped recent bulletins show 0.** The PG detail pane renders
-  a `"Recent bulletins (0 in this PG)"` header but the actual ring
-  filter is not threaded yet (requires access to `AppState.bulletins`
-  from the render path). Phase 5 polish item.
+- **PG-scoped recent bulletins show 0.** *(resolved in UI Reorg
+  Phase 5)* The PG detail pane renders a
+  `"Recent bulletins (N in this PG)"` header and up to 3 recent
+  matching rows. Phase 5 widened `browser::render::render` to
+  accept `&VecDeque<BulletinSnapshot>` and added the
+  `view::bulletins::state::recent_for_group_id` helper.
 - **PG tree row counts show 0.** `ProcessGroupStatusSnapshotDto`
   does not expose per-PG `running`/`stopped`/`invalid`/`disabled`
   counts; the recursive fetch populates those fields with 0. The PG
@@ -339,6 +341,63 @@ ring exceeds its capacity.
   newest. Use `Home` to jump to oldest. The asymmetry is
   acceptable because `g` delivers more value as a mode cycler than
   as a vim jump.
+
+**Accepted UI Reorg Phase 5 edge cases:**
+
+- **Lost at-a-glance PG counts in the tree.** Dropping
+  `● 5 ○ 2 ⚠ 0 ⌀ 1` trailing summaries means scanning for
+  "which PG has the most invalids" requires drilling in. The
+  tree marker color rolls up to a ternary red/yellow/green
+  signal, not a precise count. User accepted this during
+  brainstorming.
+- **Invalid-only tree badge declined.** A compromise showing
+  `⚠2` inline for PGs with any invalid descendants was offered
+  and declined — clean tree wins.
+- **Connection time-to-full prediction not wired.** The spec
+  calls for a time-to-full badge on Connection detail using the
+  server-predicted `predicted_millis_until_backpressure` field.
+  That field is available on `QueueSnapshot` (Overview) but not
+  yet on `ConnectionDetail` — populating it requires an upstream
+  `nifi-rust-client` change. Polish item.
+- **CS referencing-components list not wired.** The spec calls
+  for a "referencing components" count + short list on
+  Controller Service detail. That requires a second API call to
+  `GET /controller-services/{id}/references`, which is not
+  currently plumbed. Polish item.
+- **PG health rollup ignores bulletin severity.** The rollup
+  only considers descendant processor `run_status`, not recent
+  bulletins. A processor can be RUNNING while emitting ERROR
+  bulletins and the PG marker stays green. Bulletin-aware
+  rollup is a future polish item.
+- **PG health rollup excludes Controller Services.** CS state
+  (`DISABLED`, `INVALID`) does not contribute to the rollup.
+  Intentional — the rollup models "is the flow running" rather
+  than "is every component healthy".
+- **Connection detail has no Recent bulletins section.**
+  Connections rarely emit bulletins directly in practice;
+  adding the plumbing for negligible value is intentional scope
+  tightening. The existing PG-scoped section on the parent PG
+  detail covers the cluster-level view.
+- **Duplicate `format_severity_label` / `severity_style` across
+  render leaves.** `pg.rs`, `processor.rs`, and
+  `bulletins/render.rs` each define their own copies. The
+  helpers are 10 lines each and identical; DRY-ing them into a
+  shared module would widen the Phase 5 scope. A polish task
+  can consolidate when the next render file lands.
+- **PG detail "Recent bulletins" walks the ring twice.** Once
+  for `recent_for_group_id` (up to 3 most recent) and once for
+  the total count in the header. The ring is capped at 5000 by
+  default, so the O(2n) walk is cheap. A single pass returning
+  `(Vec<&Bulletin>, usize)` would be slightly more efficient;
+  deferred as polish.
+- **Processor detail hints line scrolls off the 24-line test
+  terminal.** The `processor_detail_with_many_properties`
+  snapshot test uses `TestBackend::new(100, 24)` and the
+  fixture is dense enough that the `Recent bulletins` header
+  and action hints row fall below the 24-line viewport. The
+  code renders both lines correctly; the snapshot captures
+  only what a 24-row terminal would show. Bumping the test
+  terminal height is a polish item.
 
 ## Dependency on `nifi-rust-client`
 
@@ -635,7 +694,27 @@ usable state.
     vim-jump bindings were removed (`Home` / `End` still work).
     Bulletins `t` keeps its current Tracer cross-link; retargeting
     to the Events tab is deferred to Phase 6.
-14. **Phase 7 — Write-path scaffolding.** Dry-run mode, confirmation modal
+14. **UI Reorg Phase 5 — Browser declutter & detail enrichment.**
+    *(shipped)* Tree rows drop trailing status summaries
+    (`● 5 ○ 2 ⚠ 0 ⌀ 1`, connection fill, CS state) in favor of
+    richly labeled per-kind detail panes. PG tree markers gain a
+    rolled-up health color (`BrowserState::pg_health_rollup`) —
+    any descendant processor `INVALID` → red, `STOPPED` → yellow,
+    else green. PG detail grows labeled sections for processors /
+    threads / queued / controller services / child groups /
+    recent bulletins / action hints. Connection detail gains a
+    prominent fill gauge (via the existing `widget::gauge::fill_bar`
+    helper) with color-by-percent. Controller service detail gains
+    a state chip at the top. Processor detail adds a "Recent
+    bulletins (N for this processor)" section. The Browser render
+    signature is widened to accept `&VecDeque<BulletinSnapshot>`;
+    the Phase 3 "PG-scoped recent bulletins show 0" edge case is
+    resolved. Two new free helpers in
+    `view::bulletins::state` (`recent_for_source_id` /
+    `recent_for_group_id`) filter the ring without cloning.
+    `BrowserState` gains `PgHealth`, `pg_health_rollup`, and
+    `child_process_groups`.
+15. **Phase 7 — Write-path scaffolding.** Dry-run mode, confirmation modal
     primitive, audit log, `--allow-writes` flag. No writes enabled yet —
     this just lays the rails for v2.
 

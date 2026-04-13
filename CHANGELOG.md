@@ -41,6 +41,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   path, occurrence count, first-seen / last-seen timestamps, raw
   message (unstripped), source id, group id, and per-row action
   hints.
+- **UI Reorg Phase 5 — Browser declutter & detail enrichment.**
+  The Browser tree drops all trailing status summaries
+  (`● 5 ○ 2 ⚠ 0 ⌀ 1`, connection fill, CS state) in favor of
+  clean `indent + marker + glyph + name` rows. PG tree markers
+  are now colored by a rolled-up health signal: any descendant
+  processor `INVALID` → red, `STOPPED` → yellow, else green.
+  Per-kind detail panes are rewritten with labeled sections:
+  PG detail shows processors / threads / queued / controller
+  services / child groups / recent bulletins; Connection detail
+  leads with a prominent fill gauge (via the existing
+  `widget::gauge::fill_bar` helper) colored by percent;
+  Controller Service detail gains a state chip at the top;
+  Processor detail gains a "Recent bulletins (N for this
+  processor)" section. The Browser render signature is widened
+  to receive the bulletin ring, resolving the Phase 3 edge case
+  where PG-scoped recent bulletins always showed 0.
 - **F-key remap.** F1=Overview, F2=Bulletins, F3=Browser, F4=Events,
   F5=Tracer (was: F3=Health, F4=Browser, F5=Tracer).
 - Bulletins and Tracer timestamp formatting now route through a shared
@@ -118,6 +134,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **`view::bulletins::state::recent_for_source_id` and
+  `recent_for_group_id`** — pure ring filters returning up to N
+  newest bulletins matching a source or group id. Used by the
+  Browser detail panes.
+- **`BrowserState::PgHealth`**, **`pg_health_rollup`**, and
+  **`ChildPgSummary` / `child_process_groups`** — new state
+  helpers feeding the tree marker colorization and PG detail
+  child-groups listing.
 - **Bulletins `g` (cycle group mode).** Cycles
   `source+msg` → `source` → `off` → wrap. Default is `source+msg`.
 - **Bulletins `m` (mute source).** Toggles the selected row's
