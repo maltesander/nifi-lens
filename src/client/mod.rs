@@ -7,6 +7,7 @@
 
 pub mod browser;
 pub mod build;
+pub mod events;
 pub mod health;
 pub mod tracer;
 
@@ -435,6 +436,7 @@ pub use browser::{
     ConnectionDetail, ControllerServiceDetail, ControllerServiceSummary, NodeKind,
     NodeStatusSummary, ProcessGroupDetail, ProcessorDetail, RawNode, RecursiveSnapshot,
 };
+pub use events::{ProvenancePollResult, ProvenanceQuery, ProvenanceQueryHandle};
 pub use health::{
     GcSnapshot, NodeDiagnostics, NodeHealthRow, RepoUsage, Severity as HealthSeverity,
     SystemDiagAggregate, SystemDiagSnapshot,
