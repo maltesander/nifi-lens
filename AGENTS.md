@@ -478,7 +478,18 @@ usable state.
    timestamp format via new `[ui]` config section
    (`timestamp_format` / `timestamp_tz`), theme audit pass replacing
    inline `Color::*`/`Modifier::*` constructors with `theme::*` helpers.
-10. **Phase 7 — Write-path scaffolding.** Dry-run mode, confirmation modal
+10. **UI Reorg Phase 1 — Chrome refactor.** *(shipped)* One-row top bar
+    (tabs + right-aligned compact identity strip `[ctx] v2.9.0 · nodes N/M`)
+    replacing the old bordered `" nifi-lens "` tab box. Rewritten
+    `status_bar` widget renders a severity-colored banner on the left and
+    a right-aligned refresh age (`⟳ Ns ago`) on the right. New
+    `crate::test_support` helper module (`fresh_state`, `tiny_config`)
+    for widget-level tests outside `app::state`. `AppState.cluster_summary`
+    added as a `Option`-valued placeholder; the Overview worker populates
+    it in UI Reorg Phase 3. Added the `Events` `ViewId` with a
+    "coming in Phase 6" bordered placeholder so the tab bar has its final
+    shape. Health tab still exists until UI Reorg Phase 3 removes it.
+11. **Phase 7 — Write-path scaffolding.** Dry-run mode, confirmation modal
     primitive, audit log, `--allow-writes` flag. No writes enabled yet —
     this just lays the rails for v2.
 
