@@ -26,5 +26,8 @@ docs
 # Isolated worktrees for in-session feature work.
 .worktrees
 
+# Brainstorming companion (local mockups, not for commit).
+.superpowers
+
 # cTags index
 tags
