@@ -13,13 +13,20 @@ const INLINE_PROPERTY_ROWS: usize = 10;
 
 pub fn render(frame: &mut Frame, area: Rect, d: &ControllerServiceDetail, _state: &BrowserState) {
     let mut lines: Vec<Line> = Vec::new();
-    lines.push(Line::from(Span::styled(
-        format!("Controller Service — {}", d.name),
-        theme::accent(),
-    )));
+
+    // Header: "<name>  controller service" with state chip.
+    lines.push(Line::from(vec![
+        Span::styled(
+            d.name.clone(),
+            theme::accent().add_modifier(ratatui::style::Modifier::BOLD),
+        ),
+        Span::raw("  "),
+        Span::styled("controller service".to_string(), theme::muted()),
+        Span::raw("  "),
+        state_chip(&d.state),
+    ]));
     lines.push(Line::from(format!("Type:   {}", d.type_name)));
     lines.push(Line::from(format!("Bundle: {}", d.bundle)));
-    lines.push(Line::from(format!("State:  {}", d.state)));
     lines.push(Line::from(format!(
         "Parent: {}",
         d.parent_group_id.as_deref().unwrap_or("(controller)")
@@ -67,6 +74,18 @@ fn truncate(s: &str, max: usize) -> String {
     } else {
         let head: String = s.chars().take(max.saturating_sub(1)).collect();
         format!("{head}…")
+    }
+}
+
+fn state_chip(state: &str) -> Span<'static> {
+    let label = format!("[{state}]");
+    match state {
+        "ENABLED" => Span::styled(
+            label,
+            theme::success().add_modifier(ratatui::style::Modifier::BOLD),
+        ),
+        "DISABLED" => Span::styled(label, theme::muted()),
+        _ => Span::styled(label, theme::warning()),
     }
 }
 
