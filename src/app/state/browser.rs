@@ -50,8 +50,42 @@ impl ViewKeyHandler for BrowserHandler {
                         tracer_followup: None,
                     });
                 }
+                KeyCode::Up => {
+                    let mut new_rows = rows;
+                    new_rows[idx] = new_rows[idx].saturating_sub(1);
+                    state.browser.detail_focus = DetailFocus::Section {
+                        idx,
+                        rows: new_rows,
+                    };
+                    return Some(UpdateResult {
+                        redraw: true,
+                        intent: None,
+                        tracer_followup: None,
+                    });
+                }
+                KeyCode::Down => {
+                    // Capture section_len BEFORE mutating detail_focus to
+                    // avoid a double-borrow of state.browser.
+                    let current_section = sections.0[idx];
+                    let max = state
+                        .browser
+                        .section_len(current_section, &state.bulletins.ring);
+                    let mut new_rows = rows;
+                    if max > 0 {
+                        new_rows[idx] = (new_rows[idx] + 1).min(max - 1);
+                    }
+                    state.browser.detail_focus = DetailFocus::Section {
+                        idx,
+                        rows: new_rows,
+                    };
+                    return Some(UpdateResult {
+                        redraw: true,
+                        intent: None,
+                        tracer_followup: None,
+                    });
+                }
                 _ => {
-                    // Fall through — Tasks 12-14 add Up/Down/c/t handling here.
+                    // Fall through — Tasks 13-14 add c/t handling here.
                 }
             }
         }
@@ -913,6 +947,10 @@ mod tests {
             s.browser.detail_focus,
             crate::view::browser::state::DetailFocus::Section { .. }
         ));
+        // Return to tree focus first (h), then move down — this mimics the
+        // real user flow where h exits section focus and Down re-moves the
+        // tree cursor, which calls reset_detail_focus().
+        update(&mut s, key(KeyCode::Char('h'), KeyModifiers::NONE), &c);
         update(&mut s, key(KeyCode::Down, KeyModifiers::NONE), &c);
         assert_eq!(
             s.browser.detail_focus,
@@ -941,6 +979,95 @@ mod tests {
                 .map(|b| b.message.contains("no focusable"))
                 .unwrap_or(false)
         );
+    }
+
+    // -----------------------------------------------------------------------
+    // Task 12: Arrow-key row nav inside focused sections
+    // -----------------------------------------------------------------------
+
+    /// AppState with selection on the "gen" Processor (arena 1, visible 1)
+    /// and a NodeDetail::Processor seeded with 3 properties.
+    fn fresh_browser_on_processor_with_properties() -> (AppState, crate::config::Config) {
+        use crate::client::ProcessorDetail;
+        use crate::view::browser::state::NodeDetail;
+
+        let (mut s, c) = seeded_browser_state();
+        s.browser.selected = 1;
+        s.browser.details.insert(
+            1,
+            NodeDetail::Processor(ProcessorDetail {
+                id: "gen".into(),
+                name: "Gen".into(),
+                type_name: "x".into(),
+                bundle: String::new(),
+                run_status: "Running".into(),
+                scheduling_strategy: String::new(),
+                scheduling_period: String::new(),
+                concurrent_tasks: 1,
+                run_duration_ms: 0,
+                penalty_duration: String::new(),
+                yield_duration: String::new(),
+                bulletin_level: String::new(),
+                properties: vec![
+                    ("alpha".into(), "one".into()),
+                    ("beta".into(), "two".into()),
+                    ("gamma".into(), "three".into()),
+                ],
+                validation_errors: vec![],
+            }),
+        );
+        (s, c)
+    }
+
+    #[test]
+    fn down_inside_focused_properties_advances_row() {
+        let (mut s, c) = fresh_browser_on_processor_with_properties();
+        // Enter detail focus on Properties (section 0).
+        update(&mut s, key(KeyCode::Char('l'), KeyModifiers::NONE), &c);
+
+        update(&mut s, key(KeyCode::Down, KeyModifiers::NONE), &c);
+        match &s.browser.detail_focus {
+            crate::view::browser::state::DetailFocus::Section { idx, rows } => {
+                assert_eq!(*idx, 0);
+                assert_eq!(rows[0], 1);
+            }
+            _ => panic!("expected Section focus"),
+        }
+    }
+
+    #[test]
+    fn up_inside_focused_properties_clamps_at_zero() {
+        let (mut s, c) = fresh_browser_on_processor_with_properties();
+        update(&mut s, key(KeyCode::Char('l'), KeyModifiers::NONE), &c);
+
+        update(&mut s, key(KeyCode::Up, KeyModifiers::NONE), &c);
+        match &s.browser.detail_focus {
+            crate::view::browser::state::DetailFocus::Section { rows, .. } => {
+                assert_eq!(rows[0], 0, "clamped at 0")
+            }
+            _ => panic!("expected Section focus"),
+        }
+    }
+
+    #[test]
+    fn down_inside_focused_properties_clamps_at_max() {
+        use crate::view::browser::state::DetailSection;
+
+        let (mut s, c) = fresh_browser_on_processor_with_properties();
+        update(&mut s, key(KeyCode::Char('l'), KeyModifiers::NONE), &c);
+
+        for _ in 0..100 {
+            update(&mut s, key(KeyCode::Down, KeyModifiers::NONE), &c);
+        }
+        match &s.browser.detail_focus {
+            crate::view::browser::state::DetailFocus::Section { rows, .. } => {
+                let max = s
+                    .browser
+                    .section_len(DetailSection::Properties, &s.bulletins.ring);
+                assert_eq!(rows[0], max.saturating_sub(1), "clamped at max-1");
+            }
+            _ => panic!("expected Section focus"),
+        }
     }
 
     #[test]

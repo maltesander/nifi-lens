@@ -352,6 +352,37 @@ impl BrowserState {
         }
     }
 
+    /// Row count for a given detail section on the currently-selected node.
+    ///
+    /// Used to clamp arrow-key row navigation inside detail focus.
+    /// Returns 0 when the section has no data (empty properties, no recent
+    /// bulletins for this node) or when no node is selected / detail not
+    /// yet loaded.
+    pub fn section_len(
+        &self,
+        section: DetailSection,
+        bulletins: &std::collections::VecDeque<crate::client::BulletinSnapshot>,
+    ) -> usize {
+        let Some(&arena_idx) = self.visible.get(self.selected) else {
+            return 0;
+        };
+        let Some(detail) = self.details.get(&arena_idx) else {
+            return 0;
+        };
+        match (section, detail) {
+            (DetailSection::Properties, NodeDetail::Processor(p)) => p.properties.len(),
+            (DetailSection::Properties, NodeDetail::ControllerService(cs)) => cs.properties.len(),
+            (DetailSection::RecentBulletins, NodeDetail::Processor(_)) => {
+                let source_id = &self.nodes[arena_idx].id;
+                bulletins
+                    .iter()
+                    .filter(|b| b.source_id == *source_id)
+                    .count()
+            }
+            _ => 0,
+        }
+    }
+
     /// List the direct child Process Groups of the PG with the
     /// given `group_id`, in arena order. Non-PG children are
     /// excluded. Returns an empty vec if the PG is not present
