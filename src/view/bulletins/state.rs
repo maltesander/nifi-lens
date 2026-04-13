@@ -55,7 +55,7 @@ pub struct BulletinsState {
     pub selected: usize,
     pub auto_scroll: bool,
     pub new_since_pause: u32,
-    pub group_consecutive: bool,
+    pub group_mode: GroupMode,
 }
 
 #[derive(Debug, Clone)]
@@ -99,8 +99,43 @@ impl ComponentType {
     }
 }
 
+/// How rows are folded in the Bulletins list.
+///
+/// Cycle order is `SourceAndMessage` → `Source` → `Off` → wrap.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum GroupMode {
+    /// Dedup by `(source_id, strip_component_prefix(message))`. Default.
+    /// This is the noise-killer: one row per unique error message from
+    /// each source, with a count column.
+    SourceAndMessage,
+    /// Collapse every bulletin from a single source into one row. The
+    /// displayed message is the stripped form of the most recent
+    /// bulletin.
+    Source,
+    /// No folding. One row per bulletin in chronological order.
+    Off,
+}
+
+impl GroupMode {
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::SourceAndMessage => "source+msg",
+            Self::Source => "source",
+            Self::Off => "off",
+        }
+    }
+
+    pub fn cycle(self) -> Self {
+        match self {
+            Self::SourceAndMessage => Self::Source,
+            Self::Source => Self::Off,
+            Self::Off => Self::SourceAndMessage,
+        }
+    }
+}
+
 /// A row in the grouped display. Produced by
-/// [`BulletinsState::grouped_view`] when `group_consecutive` is true,
+/// [`BulletinsState::grouped_view`] when `group_mode` is not `Off`,
 /// or (implicitly, as a vec of `count = 1` singletons) when flat.
 ///
 /// Ring indices are stable for the lifetime of the ring buffer — the
@@ -108,7 +143,7 @@ impl ComponentType {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct GroupedRow {
     /// Ring index of the first bulletin in the run (oldest in the
-    /// group). Used by `toggle_grouping` to find which group contains
+    /// group). Used by `cycle_group_mode` to find which group contains
     /// a given pre-toggle ring index.
     pub first_ring_idx: usize,
     /// Ring index of the most-recent bulletin in the run. Render uses
@@ -132,7 +167,7 @@ impl BulletinsState {
             selected: 0,
             auto_scroll: true,
             new_since_pause: 0,
-            group_consecutive: false,
+            group_mode: GroupMode::SourceAndMessage,
         }
     }
 
@@ -147,14 +182,13 @@ impl BulletinsState {
             .collect()
     }
 
-    /// Fold consecutive bulletins sharing the same `source_id` in the
-    /// filtered list into `GroupedRow`s. In flat mode (`group_consecutive`
-    /// is `false`) every filtered row is its own singleton with `count = 1`.
-    /// In grouped mode, consecutive same-source runs are folded.
+    /// Fold bulletins in the filtered list into `GroupedRow`s according to
+    /// `group_mode`. In `Off` mode every filtered row is its own singleton
+    /// with `count = 1`. `SourceAndMessage` and `Source` both use a
+    /// temporary consecutive-run fold (Task 3 replaces with real dedup).
     pub fn grouped_view(&self) -> Vec<GroupedRow> {
         let filtered = self.filtered_indices();
-        if !self.group_consecutive {
-            // Flat mode: each filtered row is its own "group" with count=1.
+        if self.group_mode == GroupMode::Off {
             return filtered
                 .iter()
                 .map(|&ring_idx| GroupedRow {
@@ -164,7 +198,8 @@ impl BulletinsState {
                 })
                 .collect();
         }
-        // Grouped mode: fold consecutive same-source runs.
+        // Temporary: old consecutive-run fold. Task 3 replaces this with
+        // the real dedup logic.
         let mut out: Vec<GroupedRow> = Vec::with_capacity(filtered.len());
         for &ring_idx in &filtered {
             let source_id = &self.ring[ring_idx].source_id;
@@ -395,13 +430,12 @@ impl BulletinsState {
         };
     }
 
-    /// Flip `group_consecutive` and remap `selected` so the user stays
-    /// on the same logical bulletin across the toggle. Spec reference:
-    /// `Feature 3 — Bulletins Grouping (Shift+B)` "Interactions with
-    /// existing features → Selection preservation on toggle".
-    pub fn toggle_grouping(&mut self) {
+    /// Cycle through the group-by modes. Captures the previously selected
+    /// ring index so `reconcile_selection` can keep the user on the same
+    /// logical bulletin across the toggle.
+    pub fn cycle_group_mode(&mut self) {
         let prev = self.selected_ring_index();
-        self.group_consecutive = !self.group_consecutive;
+        self.group_mode = self.group_mode.cycle();
         self.reconcile_selection(prev);
     }
 }
@@ -899,7 +933,7 @@ mod tests {
                 b_full(3, "INFO", "PROCESSOR", "C", "m"),
             ],
         );
-        s.group_consecutive = true;
+        s.group_mode = GroupMode::Source;
         // Each bulletin has a distinct source_id via `src-{id}` — no grouping.
         let out = s.grouped_view();
         assert_eq!(out.len(), 3);
@@ -951,7 +985,7 @@ mod tests {
                 },
             ]),
         );
-        s.group_consecutive = true;
+        s.group_mode = GroupMode::Source;
         let out = s.grouped_view();
         assert_eq!(out.len(), 1);
         assert_eq!(out[0].count, 3);
@@ -978,7 +1012,7 @@ mod tests {
             &mut s,
             payload(vec![mk(1, "src-a"), mk(2, "src-b"), mk(3, "src-a")]),
         );
-        s.group_consecutive = true;
+        s.group_mode = GroupMode::Source;
         let out = s.grouped_view();
         assert_eq!(out.len(), 3);
         assert!(out.iter().all(|g| g.count == 1));
@@ -1005,7 +1039,7 @@ mod tests {
             &mut s,
             payload(vec![mk(1, "ERROR"), mk(2, "INFO"), mk(3, "ERROR")]),
         );
-        s.group_consecutive = true;
+        s.group_mode = GroupMode::Source;
         // All three share source_id; grouping folds them to one.
         assert_eq!(s.grouped_view().len(), 1);
         // Toggle INFO off — still one group because filtered list is
@@ -1054,17 +1088,19 @@ mod tests {
     }
 
     #[test]
-    fn toggle_grouping_on_preserves_selection_to_enclosing_group() {
+    fn cycle_group_mode_on_preserves_selection_to_enclosing_group() {
         let mut s = seed_grouping_fixture();
-        // Flat mode: 6 visible rows. Select ring_idx 4 (second "src-c").
+        // Off mode: 6 visible rows. Select ring_idx 4 (second "src-c").
+        s.group_mode = GroupMode::Off;
         assert_eq!(s.grouped_view().len(), 6);
         s.selected = 4; // Points at ring_idx 4 in flat mode.
         assert_eq!(s.selected_ring_index(), Some(4));
 
-        s.toggle_grouping();
+        s.cycle_group_mode();
 
-        // Grouped mode: 3 visible groups. Group #2 holds ring_idx 3..=5.
-        assert!(s.group_consecutive);
+        // SourceAndMessage mode (consecutive fold stop-gap): 3 visible groups.
+        // Group #2 holds ring_idx 3..=5.
+        assert_eq!(s.group_mode, GroupMode::SourceAndMessage);
         assert_eq!(s.grouped_view().len(), 3);
         assert_eq!(s.selected, 2);
         // selected_ring_index should now resolve to the LATEST of group #2.
@@ -1072,39 +1108,40 @@ mod tests {
     }
 
     #[test]
-    fn toggle_grouping_off_preserves_selection_to_latest_bulletin() {
+    fn cycle_group_mode_off_preserves_selection_to_latest_bulletin() {
         let mut s = seed_grouping_fixture();
-        s.group_consecutive = true;
+        s.group_mode = GroupMode::Source;
         // Grouped mode: 3 visible groups. Select group #2 (src-c run).
         s.selected = 2;
         assert_eq!(s.selected_ring_index(), Some(5));
 
-        s.toggle_grouping();
+        s.cycle_group_mode();
 
-        // Flat mode: 6 visible rows. Selection should land on the latest
+        // Off mode: 6 visible rows. Selection should land on the latest
         // bulletin of the previously-selected group — ring_idx 5, flat
         // position 5.
-        assert!(!s.group_consecutive);
+        assert_eq!(s.group_mode, GroupMode::Off);
         assert_eq!(s.selected, 5);
         assert_eq!(s.selected_ring_index(), Some(5));
     }
 
     #[test]
-    fn toggle_grouping_from_first_row_stays_on_first_row() {
+    fn cycle_group_mode_from_first_row_stays_on_first_row() {
         let mut s = seed_grouping_fixture();
+        s.group_mode = GroupMode::Off;
         s.selected = 0; // src-a flat ring_idx 0
-        s.toggle_grouping();
-        assert!(s.group_consecutive);
+        s.cycle_group_mode();
+        assert_eq!(s.group_mode, GroupMode::SourceAndMessage);
         // Group #0 contains ring_idx 0 and 1; position 0.
         assert_eq!(s.selected, 0);
     }
 
     #[test]
-    fn toggle_grouping_with_no_visible_rows_is_safe() {
+    fn cycle_group_mode_with_no_visible_rows_is_safe() {
         let mut s = BulletinsState::with_capacity(100);
         // Empty ring — nothing to preserve.
-        s.toggle_grouping();
-        assert!(s.group_consecutive);
+        s.cycle_group_mode();
+        assert_eq!(s.group_mode, GroupMode::Source);
         assert_eq!(s.selected, 0);
     }
 
@@ -1155,5 +1192,23 @@ mod tests {
     fn strip_component_prefix_is_idempotent_on_already_clean_message() {
         let msg = "already clean";
         assert_eq!(strip_component_prefix(msg), "already clean");
+    }
+
+    #[test]
+    fn group_mode_default_is_source_and_message() {
+        let s = BulletinsState::with_capacity(100);
+        assert_eq!(s.group_mode, GroupMode::SourceAndMessage);
+    }
+
+    #[test]
+    fn cycle_group_mode_walks_source_and_message_then_source_then_off() {
+        let mut s = BulletinsState::with_capacity(100);
+        assert_eq!(s.group_mode, GroupMode::SourceAndMessage);
+        s.cycle_group_mode();
+        assert_eq!(s.group_mode, GroupMode::Source);
+        s.cycle_group_mode();
+        assert_eq!(s.group_mode, GroupMode::Off);
+        s.cycle_group_mode();
+        assert_eq!(s.group_mode, GroupMode::SourceAndMessage);
     }
 }
