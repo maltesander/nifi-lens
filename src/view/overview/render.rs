@@ -25,6 +25,7 @@ use super::state::{
     BulletinBucket, NoisyComponent, OverviewSnapshot, OverviewState, Severity, UnhealthyQueue,
 };
 use crate::theme;
+use crate::widget::gauge::{fill_bar, spark_bar};
 
 pub fn render(frame: &mut Frame, area: Rect, state: &OverviewState) {
     let block = Block::default().title(" Overview ").borders(Borders::ALL);
@@ -125,21 +126,36 @@ fn render_nodes_zone(frame: &mut Frame, area: Rect, state: &OverviewState) {
             )));
         }
 
-        // Repositories aggregate row.
+        // Repositories aggregate row with inline fill bars.
         let repos = &state.repositories_summary;
         lines.push(Line::from(vec![
             Span::styled("  repositories  ", theme::muted()),
             Span::raw("content "),
+            Span::styled(
+                fill_bar(4, repos.content_percent),
+                fill_style(repos.content_percent),
+            ),
+            Span::raw(" "),
             Span::styled(
                 format!("{:>3}%", repos.content_percent),
                 fill_style(repos.content_percent),
             ),
             Span::raw("   flowfile "),
             Span::styled(
+                fill_bar(4, repos.flowfile_percent),
+                fill_style(repos.flowfile_percent),
+            ),
+            Span::raw(" "),
+            Span::styled(
                 format!("{:>3}%", repos.flowfile_percent),
                 fill_style(repos.flowfile_percent),
             ),
             Span::raw("   provenance "),
+            Span::styled(
+                fill_bar(4, repos.provenance_percent),
+                fill_style(repos.provenance_percent),
+            ),
+            Span::raw(" "),
             Span::styled(
                 format!("{:>3}%", repos.provenance_percent),
                 fill_style(repos.provenance_percent),
@@ -180,17 +196,27 @@ fn format_node_row(node: &crate::client::health::NodeHealthRow) -> Line<'static>
         (None, _) => ("\u{2014}   ".to_string(), theme::muted()),
     };
 
+    let heap_style = health_severity_style(node.heap_severity);
+    let heap_bar = fill_bar(5, node.heap_percent);
+    // Load bar shows load average as a fraction of available processors
+    // (1.0 = fully loaded). Falls back to an empty bar when either value
+    // is missing.
+    let load_bar = match (node.load_average, node.available_processors) {
+        (Some(l), Some(cpus)) if cpus > 0 => spark_bar(l as f32, cpus as f32, 4),
+        _ => "░░░░".to_string(),
+    };
     Line::from(vec![
         Span::raw("  "),
         Span::styled(node.node_address.clone(), theme::accent()),
         Span::raw("   heap "),
-        Span::styled(
-            format!("{:>3}%", node.heap_percent),
-            health_severity_style(node.heap_severity),
-        ),
+        Span::styled(heap_bar, heap_style),
+        Span::raw(" "),
+        Span::styled(format!("{:>3}%", node.heap_percent), heap_style),
         Span::raw("   gc "),
         Span::styled(gc_str, gc_style),
         Span::raw("   load "),
+        Span::styled(load_bar, load_style),
+        Span::raw(" "),
         Span::styled(load_str, load_style),
     ])
 }

@@ -47,7 +47,10 @@ fn render_banner(frame: &mut Frame, area: Rect, state: &AppState) {
             };
             Line::from(Span::styled(banner.message.clone(), style))
         }
-        None => Line::from(""),
+        None => Line::from(Span::styled(
+            format!("nifi-lens {}", env!("CARGO_PKG_VERSION")),
+            theme::muted(),
+        )),
     };
     frame.render_widget(Paragraph::new(line), area);
 }

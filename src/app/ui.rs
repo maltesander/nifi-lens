@@ -133,19 +133,4 @@ mod tests {
             "first line missing identity strip: {first_line:?}"
         );
     }
-
-    #[test]
-    fn no_bordered_tab_box() {
-        // The old layout wrapped tabs in a bordered box titled " nifi-lens ".
-        // The new layout has no such title anywhere.
-        let state = fresh_state();
-        let backend = TestBackend::new(100, 25);
-        let mut term = Terminal::new(backend).unwrap();
-        term.draw(|f| render(f, &state)).unwrap();
-        let snapshot = format!("{}", term.backend());
-        assert!(
-            !snapshot.contains("nifi-lens "),
-            "rendered output still contains old bordered tab box title: {snapshot}"
-        );
-    }
 }
