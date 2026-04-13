@@ -2,9 +2,7 @@
 
 use ratatui::Frame;
 use ratatui::layout::{Constraint, Direction, Layout, Rect};
-use ratatui::style::{Color, Style};
-use ratatui::text::Line;
-use ratatui::widgets::{Block, Borders, Tabs};
+use ratatui::widgets::{Block, Borders};
 
 use crate::app::state::{AppState, Modal, ViewId};
 use crate::view::{browser, bulletins, health, overview, tracer};
@@ -15,14 +13,14 @@ pub fn render(frame: &mut Frame, state: &AppState) {
     let chunks = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
-            Constraint::Length(3), // tab bar
+            Constraint::Length(1), // top bar (tabs + identity)
             Constraint::Fill(1),   // content
-            Constraint::Length(1), // status bar
-            Constraint::Length(1), // hint bar
+            Constraint::Length(1), // footer row 1: banner + refresh age
+            Constraint::Length(1), // footer row 2: hint bar
         ])
         .split(root);
 
-    render_tab_bar(frame, chunks[0], state);
+    crate::widget::top_bar::render(frame, chunks[0], state);
     render_content(frame, chunks[1], state);
     status_bar::render(frame, chunks[2], state);
 
@@ -57,35 +55,19 @@ pub fn render(frame: &mut Frame, state: &AppState) {
     }
 }
 
-fn render_tab_bar(frame: &mut Frame, area: Rect, state: &AppState) {
-    let titles = vec![
-        Line::from("Overview"),
-        Line::from("Bulletins"),
-        Line::from("Health"),
-        Line::from("Browser"),
-        Line::from("Tracer"),
-    ];
-    let idx = match state.current_tab {
-        ViewId::Overview => 0,
-        ViewId::Bulletins => 1,
-        ViewId::Health => 2,
-        ViewId::Browser => 3,
-        ViewId::Events => 4,
-        ViewId::Tracer => 5,
-    };
-    let tabs = Tabs::new(titles)
-        .block(Block::default().borders(Borders::ALL).title(" nifi-lens "))
-        .select(idx)
-        .highlight_style(Style::default().fg(Color::Cyan));
-    frame.render_widget(tabs, area);
-}
-
 fn render_content(frame: &mut Frame, area: Rect, state: &AppState) {
     match state.current_tab {
         ViewId::Overview => overview::render(frame, area, &state.overview),
         ViewId::Bulletins => bulletins::render(frame, area, &state.bulletins, &state.timestamp_cfg),
         ViewId::Browser => browser::render(frame, area, &state.browser, &state.flow_index),
-        ViewId::Events => {}
+        ViewId::Events => {
+            use ratatui::widgets::Paragraph;
+            let block = Block::default().title(" Events ").borders(Borders::ALL);
+            let p = Paragraph::new("(coming in Phase 6)")
+                .block(block)
+                .style(crate::theme::muted());
+            frame.render_widget(p, area);
+        }
         ViewId::Tracer => tracer::render(frame, area, &state.tracer, &state.timestamp_cfg),
         ViewId::Health => health::render(frame, area, &state.health),
     }
@@ -120,4 +102,46 @@ fn center(area: Rect, pct_x: u16, height: u16) -> Rect {
             Constraint::Percentage((100 - pct_x) / 2),
         ])
         .split(vertical[1])[1]
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::test_support::fresh_state;
+    use ratatui::Terminal;
+    use ratatui::backend::TestBackend;
+
+    #[test]
+    fn top_bar_renders_on_row_zero() {
+        let mut state = fresh_state();
+        state.context_name = "dev-nifi-2-9-0".into();
+        let backend = TestBackend::new(100, 25);
+        let mut term = Terminal::new(backend).unwrap();
+        term.draw(|f| render(f, &state)).unwrap();
+        let snapshot = format!("{}", term.backend());
+        let first_line = snapshot.lines().next().unwrap();
+        assert!(
+            first_line.contains("Overview"),
+            "first line missing tab bar: {first_line:?}"
+        );
+        assert!(
+            first_line.contains("[dev-nifi-2-9-0]"),
+            "first line missing identity strip: {first_line:?}"
+        );
+    }
+
+    #[test]
+    fn no_bordered_tab_box() {
+        // The old layout wrapped tabs in a bordered box titled " nifi-lens ".
+        // The new layout has no such title anywhere.
+        let state = fresh_state();
+        let backend = TestBackend::new(100, 25);
+        let mut term = Terminal::new(backend).unwrap();
+        term.draw(|f| render(f, &state)).unwrap();
+        let snapshot = format!("{}", term.backend());
+        assert!(
+            !snapshot.contains("nifi-lens "),
+            "rendered output still contains old bordered tab box title: {snapshot}"
+        );
+    }
 }
