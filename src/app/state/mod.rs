@@ -835,6 +835,17 @@ fn handle_key(state: &mut AppState, key: KeyEvent, config: &Config) -> UpdateRes
 
     // Global key handling.
     match (key.code, key.modifiers) {
+        (KeyCode::Esc, KeyModifiers::NONE) => {
+            if state.status.banner.is_some() {
+                state.status.banner = None;
+                return UpdateResult {
+                    redraw: true,
+                    intent: None,
+                    tracer_followup: None,
+                };
+            }
+            UpdateResult::default()
+        }
         (KeyCode::Char('q'), KeyModifiers::NONE)
         | (KeyCode::Char('q'), KeyModifiers::CONTROL)
         | (KeyCode::Char('Q'), KeyModifiers::CONTROL) => {
@@ -1413,6 +1424,31 @@ mod tests {
         update(&mut s, key(KeyCode::Char('?'), KeyModifiers::NONE), &c);
         update(&mut s, key(KeyCode::Esc, KeyModifiers::NONE), &c);
         assert!(s.modal.is_none());
+    }
+
+    #[test]
+    fn esc_dismisses_the_status_banner_at_top_level() {
+        let mut s = fresh_state();
+        let c = tiny_config();
+        // Seed a banner — any severity works.
+        s.status.banner = Some(Banner {
+            severity: BannerSeverity::Warning,
+            message: "nodewise diagnostics unavailable".into(),
+            detail: None,
+        });
+        // Ensure no modal is open so Esc reaches the global dispatch.
+        assert!(s.modal.is_none());
+        update(&mut s, key(KeyCode::Esc, KeyModifiers::NONE), &c);
+        assert!(s.status.banner.is_none(), "Esc must clear the banner");
+    }
+
+    #[test]
+    fn esc_with_no_banner_is_idempotent() {
+        let mut s = fresh_state();
+        let c = tiny_config();
+        assert!(s.status.banner.is_none());
+        update(&mut s, key(KeyCode::Esc, KeyModifiers::NONE), &c);
+        assert!(s.status.banner.is_none());
     }
 
     #[test]
