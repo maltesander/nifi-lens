@@ -30,7 +30,7 @@ Pre-release. The tool is being built in phases; see the roadmap in
   PG status, 30 s system diagnostics). `Enter` jumps to Browser.
 - **Flow browser** *(shipped)* — two-pane PG tree + per-node detail
   (Processor / Connection / ProcessGroup / Controller Service);
-  `Ctrl+F` fuzzy find across all known components; `e` for a full
+  `f` fuzzy find across all known components; `e` for a full
   properties modal; `c` to copy a node id to the clipboard.
 - **Multi-cluster, multi-version** — kubeconfig-style contexts; one binary
   works against every supported NiFi 2.x version via
@@ -99,7 +99,7 @@ the Browser tab.
 
 **Browser** *(shipped)* — "Where does X live and what is it doing?"
 Two-pane PG tree with drill-in, per-node detail pane, and global
-`Ctrl+F` fuzzy find across all known components via
+`f` fuzzy find across all known components via
 [`nucleo`](https://crates.io/crates/nucleo). Press `e` for a full
 properties modal on Processor / Controller Service nodes; `c` to copy
 the selected node's id to the clipboard.
@@ -160,9 +160,9 @@ tool.
 |---|---|
 | `Tab` / `Shift+Tab` | Cycle tabs |
 | `F1`–`F5` | Jump to tab directly |
-| `Ctrl+K` | Switch cluster context |
-| `Ctrl+F` | Global component fuzzy find (available once the Browser tab has loaded at least once to seed the index) |
-| `Alt+Left` / `Alt+Right` | Cross-link back / forward |
+| `K` | Switch cluster context |
+| `f` | Global component fuzzy find (available once the Browser tab has loaded at least once to seed the index) |
+| `[` / `]` | Cross-link back / forward |
 | `?` | Context-aware help modal |
 | `q` / `Ctrl+Q` | Quit |
 | `b` (Browser) | Enter breadcrumb navigation |
