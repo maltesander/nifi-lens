@@ -47,10 +47,7 @@ fn render_banner(frame: &mut Frame, area: Rect, state: &AppState) {
             };
             Line::from(Span::styled(banner.message.clone(), style))
         }
-        None => Line::from(Span::styled(
-            format!("nifi-lens {}", env!("CARGO_PKG_VERSION")),
-            theme::muted(),
-        )),
+        None => Line::from(Span::raw("")),
     };
     frame.render_widget(Paragraph::new(line), area);
 }
@@ -113,6 +110,12 @@ mod tests {
         let out = format!("{}", term.backend());
         assert!(out.contains("\u{27f3}"), "refresh glyph should be present");
         assert!(out.contains("ago"), "refresh age suffix should be present");
+        // The version used to live in the banner slot; it now lives in
+        // the hint bar, so it must NOT appear in status_bar output.
+        assert!(
+            !out.contains("nifi-lens v"),
+            "version must not appear in status_bar; it moved to hint_bar"
+        );
     }
 
     #[test]

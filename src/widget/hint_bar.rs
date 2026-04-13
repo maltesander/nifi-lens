@@ -1,7 +1,7 @@
 //! Sticky footer hint bar showing context-sensitive keybindings.
 
 use ratatui::Frame;
-use ratatui::layout::Rect;
+use ratatui::layout::{Alignment, Constraint, Direction, Layout, Rect};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::Paragraph;
 use unicode_width::UnicodeWidthStr;
@@ -27,21 +27,49 @@ const SEPARATOR: &str = " \u{00B7} ";
 /// `area.width`, the bar is truncated from the right with `…` (U+2026).
 /// Empty hints produce no output.
 pub fn render(frame: &mut Frame, area: Rect, hints: &[HintSpan]) {
-    if hints.is_empty() {
+    if area.width == 0 {
         return;
     }
 
+    let version_text = format!("nifi-lens v{}", env!("CARGO_PKG_VERSION"));
+    // Reserve version_text.width() + 1 column of padding on the right.
+    // Clamp to the area width so the split is always valid on very
+    // narrow terminals.
+    let version_cols = version_text
+        .width()
+        .saturating_add(1)
+        .min(area.width as usize) as u16;
+
+    let chunks = Layout::default()
+        .direction(Direction::Horizontal)
+        .constraints([Constraint::Fill(1), Constraint::Length(version_cols)])
+        .split(area);
+
+    render_hints(frame, chunks[0], hints);
+    render_version(frame, chunks[1], &version_text);
+}
+
+fn render_hints(frame: &mut Frame, area: Rect, hints: &[HintSpan]) {
+    if hints.is_empty() || area.width == 0 {
+        return;
+    }
     let spans = build_spans(hints);
     let total_width: usize = spans.iter().map(|s| s.content.width()).sum();
     let max_width = area.width as usize;
-
     let line = if total_width <= max_width {
         Line::from(spans)
     } else {
         truncate_spans(&spans, max_width)
     };
-
     frame.render_widget(Paragraph::new(line), area);
+}
+
+fn render_version(frame: &mut Frame, area: Rect, version_text: &str) {
+    if area.width == 0 {
+        return;
+    }
+    let line = Line::from(Span::styled(version_text.to_string(), theme::muted()));
+    frame.render_widget(Paragraph::new(line).alignment(Alignment::Right), area);
 }
 
 /// Build the full (untruncated) span list for the given hints.
@@ -175,5 +203,89 @@ mod tests {
             "expected at most 20 columns, got {}: {text:?}",
             text.width()
         );
+    }
+
+    #[test]
+    fn renders_version_on_right_edge() {
+        use ratatui::Terminal;
+        use ratatui::backend::TestBackend;
+
+        let hints = vec![
+            HintSpan {
+                key: "↑/↓",
+                action: "nav",
+            },
+            HintSpan {
+                key: "Enter",
+                action: "open",
+            },
+        ];
+        let backend = TestBackend::new(120, 1);
+        let mut term = Terminal::new(backend).unwrap();
+        term.draw(|f| render(f, f.area(), &hints)).unwrap();
+        let out = format!("{}", term.backend());
+        let expected = format!("nifi-lens v{}", env!("CARGO_PKG_VERSION"));
+        assert!(
+            out.contains(&expected),
+            "expected {expected:?} somewhere in row, got {out:?}"
+        );
+        assert!(out.contains("↑/↓"));
+        assert!(out.contains("nav"));
+        assert!(out.contains("Enter"));
+        assert!(out.contains("open"));
+    }
+
+    #[test]
+    fn version_span_survives_on_narrow_terminal_and_hints_truncate() {
+        use ratatui::Terminal;
+        use ratatui::backend::TestBackend;
+
+        let hints = vec![
+            HintSpan {
+                key: "↑/↓",
+                action: "navigation",
+            },
+            HintSpan {
+                key: "Enter",
+                action: "open selected item",
+            },
+            HintSpan {
+                key: "t",
+                action: "trace lineage",
+            },
+            HintSpan {
+                key: "g",
+                action: "jump to browser",
+            },
+        ];
+        // 40 columns — the version eats ~16-17 columns plus padding, the
+        // remaining ~23 columns must truncate the hint list.
+        let backend = TestBackend::new(40, 1);
+        let mut term = Terminal::new(backend).unwrap();
+        term.draw(|f| render(f, f.area(), &hints)).unwrap();
+        let out = format!("{}", term.backend());
+        let expected = format!("nifi-lens v{}", env!("CARGO_PKG_VERSION"));
+        assert!(
+            out.contains(&expected),
+            "version must survive narrow terminals"
+        );
+        assert!(
+            out.contains('\u{2026}'),
+            "hints must truncate with ellipsis"
+        );
+    }
+
+    #[test]
+    fn render_does_not_panic_on_very_narrow_terminal() {
+        use ratatui::Terminal;
+        use ratatui::backend::TestBackend;
+
+        let hints = vec![HintSpan {
+            key: "↑/↓",
+            action: "nav",
+        }];
+        let backend = TestBackend::new(5, 1);
+        let mut term = Terminal::new(backend).unwrap();
+        term.draw(|f| render(f, f.area(), &hints)).unwrap();
     }
 }
