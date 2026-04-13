@@ -19,7 +19,7 @@ impl ViewKeyHandler for BrowserHandler {
         }
 
         match key.code {
-            KeyCode::Up | KeyCode::Char('k') => {
+            KeyCode::Up => {
                 state.browser.move_up();
                 state.browser.emit_detail_request_for_current_selection();
                 Some(UpdateResult {
@@ -28,7 +28,7 @@ impl ViewKeyHandler for BrowserHandler {
                     tracer_followup: None,
                 })
             }
-            KeyCode::Down | KeyCode::Char('j') => {
+            KeyCode::Down => {
                 state.browser.move_down();
                 state.browser.emit_detail_request_for_current_selection();
                 Some(UpdateResult {
@@ -73,7 +73,7 @@ impl ViewKeyHandler for BrowserHandler {
                     tracer_followup: None,
                 })
             }
-            KeyCode::Enter | KeyCode::Right | KeyCode::Char('l') => {
+            KeyCode::Enter | KeyCode::Right => {
                 state.browser.enter_selection();
                 state.browser.emit_detail_request_for_current_selection();
                 Some(UpdateResult {
@@ -82,7 +82,7 @@ impl ViewKeyHandler for BrowserHandler {
                     tracer_followup: None,
                 })
             }
-            KeyCode::Backspace | KeyCode::Left | KeyCode::Char('h') => {
+            KeyCode::Backspace | KeyCode::Left => {
                 state.browser.backspace_selection();
                 state.browser.emit_detail_request_for_current_selection();
                 Some(UpdateResult {
@@ -246,7 +246,7 @@ fn handle_breadcrumb_key(state: &mut AppState, key: KeyEvent) -> Option<UpdateRe
     let max_focus = segments.len().saturating_sub(2); // last segment is current node
 
     match key.code {
-        KeyCode::Char('h') | KeyCode::Left => {
+        KeyCode::Left => {
             state.browser.breadcrumb_focus = Some(focus.saturating_sub(1));
             Some(UpdateResult {
                 redraw: true,
@@ -254,7 +254,7 @@ fn handle_breadcrumb_key(state: &mut AppState, key: KeyEvent) -> Option<UpdateRe
                 tracer_followup: None,
             })
         }
-        KeyCode::Char('l') | KeyCode::Right => {
+        KeyCode::Right => {
             state.browser.breadcrumb_focus = Some((focus + 1).min(max_focus));
             Some(UpdateResult {
                 redraw: true,
@@ -428,10 +428,10 @@ mod tests {
     }
 
     #[test]
-    fn on_browser_tab_j_moves_selection_down() {
+    fn on_browser_tab_down_moves_selection_down() {
         let (mut s, c) = seeded_browser_state();
         assert_eq!(s.browser.selected, 0);
-        update(&mut s, key(KeyCode::Char('j'), KeyModifiers::NONE), &c);
+        update(&mut s, key(KeyCode::Down, KeyModifiers::NONE), &c);
         assert_eq!(s.browser.selected, 1);
     }
 
@@ -689,23 +689,23 @@ mod tests {
     }
 
     #[test]
-    fn h_l_navigate_breadcrumb_segments() {
+    fn left_right_navigate_breadcrumb_segments() {
         let (mut s, c) = three_level_browser_state();
         // Select Generate → breadcrumb segments: [Root(0), Pipeline(1), Generate(2)].
         s.browser.selected = 2;
         update(&mut s, key(KeyCode::Char('b'), KeyModifiers::NONE), &c);
         assert_eq!(s.browser.breadcrumb_focus, Some(1)); // Pipeline
 
-        // h → move to Root (index 0).
-        update(&mut s, key(KeyCode::Char('h'), KeyModifiers::NONE), &c);
+        // Left → move to Root (index 0).
+        update(&mut s, key(KeyCode::Left, KeyModifiers::NONE), &c);
         assert_eq!(s.browser.breadcrumb_focus, Some(0));
 
-        // h again → still 0 (saturating).
-        update(&mut s, key(KeyCode::Char('h'), KeyModifiers::NONE), &c);
+        // Left again → still 0 (saturating).
+        update(&mut s, key(KeyCode::Left, KeyModifiers::NONE), &c);
         assert_eq!(s.browser.breadcrumb_focus, Some(0));
 
-        // l → back to 1 (Pipeline).
-        update(&mut s, key(KeyCode::Char('l'), KeyModifiers::NONE), &c);
+        // Right → back to 1 (Pipeline).
+        update(&mut s, key(KeyCode::Right, KeyModifiers::NONE), &c);
         assert_eq!(s.browser.breadcrumb_focus, Some(1));
     }
 
@@ -718,7 +718,7 @@ mod tests {
         assert_eq!(s.browser.breadcrumb_focus, Some(1)); // Pipeline
 
         // Navigate to Root (index 0).
-        update(&mut s, key(KeyCode::Char('h'), KeyModifiers::NONE), &c);
+        update(&mut s, key(KeyCode::Left, KeyModifiers::NONE), &c);
         assert_eq!(s.browser.breadcrumb_focus, Some(0));
 
         // Enter → jump to Root, exit breadcrumb mode.
@@ -739,5 +739,91 @@ mod tests {
         update(&mut s, key(KeyCode::Esc, KeyModifiers::NONE), &c);
         assert_eq!(s.browser.breadcrumb_focus, None);
         assert_eq!(s.browser.selected, prev_selected);
+    }
+
+    #[test]
+    fn tree_nav_uses_arrows_only_no_jk() {
+        let (mut s, c) = seeded_browser_state();
+
+        // j is dropped — firing it leaves selection unchanged.
+        let before = s.browser.selected;
+        update(&mut s, key(KeyCode::Char('j'), KeyModifiers::NONE), &c);
+        assert_eq!(
+            s.browser.selected, before,
+            "j should no longer move the cursor"
+        );
+
+        // Down still works.
+        update(&mut s, key(KeyCode::Down, KeyModifiers::NONE), &c);
+        assert!(s.browser.selected > before, "Down should move the cursor");
+
+        // k is dropped — firing it leaves selection unchanged.
+        let before = s.browser.selected;
+        update(&mut s, key(KeyCode::Char('k'), KeyModifiers::NONE), &c);
+        assert_eq!(
+            s.browser.selected, before,
+            "k should no longer move the cursor"
+        );
+    }
+
+    #[test]
+    fn tree_drill_uses_enter_or_right_only_no_l_alias() {
+        // Use three_level_browser_state: root(0) expanded, pipeline(1) expanded,
+        // gen(2). Collapse pipeline so Enter on it will expand and change visible.
+        let (mut s, c) = three_level_browser_state();
+        s.browser.expanded.remove(&1);
+        crate::view::browser::state::rebuild_visible(&mut s.browser);
+        // Visible is now [0, 1] (root expanded, pipeline collapsed).
+        s.browser.selected = 1; // pipeline (collapsed PG)
+        let before_visible = s.browser.visible.clone();
+
+        // `l` no longer drills in.
+        update(&mut s, key(KeyCode::Char('l'), KeyModifiers::NONE), &c);
+        assert_eq!(
+            s.browser.visible, before_visible,
+            "l should no longer drill into a PG"
+        );
+
+        // Enter still drills in (expands pipeline, adds gen to visible).
+        update(&mut s, key(KeyCode::Enter, KeyModifiers::NONE), &c);
+        assert_ne!(
+            s.browser.visible, before_visible,
+            "Enter should still drill in"
+        );
+    }
+
+    #[test]
+    fn tree_drill_out_uses_backspace_or_left_only_no_h_alias() {
+        // Use three_level_browser_state: root(0), pipeline(1) expanded, gen(2).
+        // Select pipeline (arena 1, visible row 1), which is already expanded.
+        let (mut s, c) = three_level_browser_state();
+        let pipeline_arena = s
+            .browser
+            .nodes
+            .iter()
+            .position(|n| n.id == "pipeline")
+            .unwrap();
+        let pipeline_visible = s
+            .browser
+            .visible
+            .iter()
+            .position(|&i| i == pipeline_arena)
+            .unwrap();
+        s.browser.selected = pipeline_visible;
+        let after_drill = s.browser.visible.clone();
+
+        // `h` no longer drills out.
+        update(&mut s, key(KeyCode::Char('h'), KeyModifiers::NONE), &c);
+        assert_eq!(
+            s.browser.visible, after_drill,
+            "h should no longer drill out"
+        );
+
+        // Left still drills out (collapses the expanded pipeline PG).
+        update(&mut s, key(KeyCode::Left, KeyModifiers::NONE), &c);
+        assert_ne!(
+            s.browser.visible, after_drill,
+            "Left should still drill out"
+        );
     }
 }
