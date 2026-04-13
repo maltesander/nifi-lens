@@ -1,0 +1,28 @@
+---
+source: src/view/events/render.rs
+expression: render_to_string(&state)
+---
+"┌ Events ────────────────────────────────────────────────────────────────────────────────────────  ┐"
+"│t time last 15m   T type (any)   s source (any)   u file uuid (any)   a attr (any)                │"
+"│status ○ idle   results 0 / cap 500   — t/T/s/u/a edit · Enter run · n new · r reset · L raise cap│"
+"│                                                                                                  │"
+"│                              Events — cluster-wide provenance search                             │"
+"│                                                                                                  │"
+"│                            Set filters above, then press Enter to run.                           │"
+"│                                                                                                  │"
+"│                                         Typical queries:                                         │"
+"│                        t=last 15m  T=DROP,EXPIRE    → what dropped recently?                     │"
+"│                   t=last 1h   s=UpdateRecord   → what has this processor touched?                │"
+"│                   u=8f2c…                      → jump straight to Tracer instead                 │"
+"│                                                                                                  │"
+"│                                                                                                  │"
+"│                                                                                                  │"
+"│──────────────────────────────────────────────────────────────────────────────────────────────────│"
+"│                                                                                                  │"
+"│                                                                                                  │"
+"│                                                                                                  │"
+"│                                                                                                  │"
+"│                                                                                                  │"
+"│                                                                                                  │"
+"│                                                                                                  │"
+"└──────────────────────────────────────────────────────────────────────────────────────────────────┘"
