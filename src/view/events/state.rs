@@ -151,6 +151,58 @@ impl Default for EventsState {
     }
 }
 
+impl EventsState {
+    /// Enter filter-edit mode for the given field. Captures the
+    /// current field value into `pre_edit_value` so `cancel_filter_edit`
+    /// can restore it. If another field was being edited, its current
+    /// buffer is committed first (same as pressing Enter on it).
+    pub fn enter_filter_edit(&mut self, field: FilterField) {
+        if self.filter_edit.is_some() {
+            self.commit_filter_edit();
+        }
+        let current = self.filters.get(field).to_string();
+        self.pre_edit_value = Some(current.clone());
+        self.filter_edit = Some((field, current));
+    }
+
+    /// Append a character to the active filter-edit buffer.
+    /// No-op if no field is being edited.
+    pub fn push_filter_char(&mut self, ch: char) {
+        if let Some((field, buf)) = self.filter_edit.as_mut() {
+            buf.push(ch);
+            let new_buf = buf.clone();
+            let field_copy = *field;
+            *self.filters.get_mut(field_copy) = new_buf;
+        }
+    }
+
+    /// Pop the last character from the active filter-edit buffer.
+    /// No-op if no field is being edited or the buffer is empty.
+    pub fn pop_filter_char(&mut self) {
+        if let Some((field, buf)) = self.filter_edit.as_mut() {
+            buf.pop();
+            let new_buf = buf.clone();
+            let field_copy = *field;
+            *self.filters.get_mut(field_copy) = new_buf;
+        }
+    }
+
+    /// Commit the active filter-edit: leaves `filters.<field>` with
+    /// the live buffer value and clears edit state.
+    pub fn commit_filter_edit(&mut self) {
+        self.filter_edit = None;
+        self.pre_edit_value = None;
+    }
+
+    /// Cancel the active filter-edit: restores the pre-edit value.
+    pub fn cancel_filter_edit(&mut self) {
+        if let Some((field, _)) = self.filter_edit.take() {
+            let restored = self.pre_edit_value.take().unwrap_or_default();
+            *self.filters.get_mut(field) = restored;
+        }
+    }
+}
+
 /// Reducer: fold an [`EventsPayload`](crate::event::EventsPayload) into state.
 pub fn apply_payload(state: &mut EventsState, payload: crate::event::EventsPayload) {
     use crate::event::EventsPayload;
@@ -415,5 +467,72 @@ mod tests {
         let mut f = EventsFilters::default();
         *f.get_mut(FilterField::Source) = "proc-1".into();
         assert_eq!(f.get(FilterField::Source), "proc-1");
+    }
+
+    #[test]
+    fn enter_filter_edit_captures_pre_edit_value() {
+        let mut s = EventsState::new();
+        s.filters.source = "old".into();
+        s.enter_filter_edit(FilterField::Source);
+        assert_eq!(s.filter_edit, Some((FilterField::Source, "old".into())));
+        assert_eq!(s.pre_edit_value.as_deref(), Some("old"));
+    }
+
+    #[test]
+    fn push_filter_char_appends_to_buffer_and_live_updates_field() {
+        let mut s = EventsState::new();
+        s.enter_filter_edit(FilterField::Source);
+        s.push_filter_char('a');
+        s.push_filter_char('b');
+        s.push_filter_char('c');
+        assert_eq!(s.filter_edit.as_ref().unwrap().1, "abc");
+        assert_eq!(s.filters.source, "abc");
+    }
+
+    #[test]
+    fn pop_filter_char_removes_last_and_live_updates_field() {
+        let mut s = EventsState::new();
+        s.enter_filter_edit(FilterField::Source);
+        s.push_filter_char('a');
+        s.push_filter_char('b');
+        s.pop_filter_char();
+        assert_eq!(s.filter_edit.as_ref().unwrap().1, "a");
+        assert_eq!(s.filters.source, "a");
+    }
+
+    #[test]
+    fn commit_filter_edit_clears_edit_state_and_keeps_value() {
+        let mut s = EventsState::new();
+        s.enter_filter_edit(FilterField::Source);
+        s.push_filter_char('x');
+        s.commit_filter_edit();
+        assert!(s.filter_edit.is_none());
+        assert!(s.pre_edit_value.is_none());
+        assert_eq!(s.filters.source, "x");
+    }
+
+    #[test]
+    fn cancel_filter_edit_restores_pre_edit_value() {
+        let mut s = EventsState::new();
+        s.filters.source = "old".into();
+        s.enter_filter_edit(FilterField::Source);
+        s.push_filter_char('X');
+        assert_eq!(s.filters.source, "oldX");
+        s.cancel_filter_edit();
+        assert!(s.filter_edit.is_none());
+        assert_eq!(s.filters.source, "old");
+    }
+
+    #[test]
+    fn enter_filter_edit_replaces_existing_edit() {
+        let mut s = EventsState::new();
+        s.enter_filter_edit(FilterField::Source);
+        s.push_filter_char('a');
+        // Switching to a different field without commit commits the
+        // current one and starts the new one fresh.
+        s.enter_filter_edit(FilterField::Uuid);
+        assert_eq!(s.filter_edit.as_ref().unwrap().0, FilterField::Uuid);
+        // Source retains its edit.
+        assert_eq!(s.filters.source, "a");
     }
 }
