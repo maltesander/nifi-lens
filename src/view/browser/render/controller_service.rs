@@ -1,91 +1,229 @@
 //! Controller Service detail renderer.
+//!
+//! Phase 7 layout:
+//!
+//! ```text
+//! ┌ <name> · controller service · <state> ─┐
+//! │┌ Identity ─────────────────────┐       │
+//! ││ type / bundle / parent        │       │
+//! │└───────────────────────────────┘       │
+//! │┌ Properties  N ────────────────┐       │  ← focusable
+//! ││ KEY              VALUE        │       │
+//! ││ ...scrollable Table...        │       │
+//! │└───────────────────────────────┘       │
+//! │ (optional) N validation errors         │
+//! │ ↑/↓ nav · l enter detail · ...         │
+//! └────────────────────────────────────────┘
+//! ```
 
 use ratatui::Frame;
-use ratatui::layout::Rect;
+use ratatui::layout::{Constraint, Direction, Layout, Rect};
+use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
-use ratatui::widgets::Paragraph;
+use ratatui::widgets::{Cell, Paragraph, Row, Table, TableState};
 
-use crate::client::ControllerServiceDetail;
+use crate::client::{ControllerServiceDetail, NodeKind};
 use crate::theme;
-use crate::view::browser::state::BrowserState;
+use crate::view::browser::state::{BrowserState, DetailFocus, DetailSection, DetailSections};
+use crate::widget::panel::Panel;
 
-const INLINE_PROPERTY_ROWS: usize = 10;
+pub fn render(
+    frame: &mut Frame,
+    area: Rect,
+    d: &ControllerServiceDetail,
+    _state: &BrowserState,
+    detail_focus: &DetailFocus,
+) {
+    // 1. Outer panel: " <name> · controller service · <state> "
+    let outer = Panel::new(build_header_title(d)).into_block();
+    let inner = outer.inner(area);
+    frame.render_widget(outer, area);
 
-pub fn render(frame: &mut Frame, area: Rect, d: &ControllerServiceDetail, _state: &BrowserState) {
-    let mut lines: Vec<Line> = Vec::new();
+    // 2. Inner vertical layout.
+    //    identity: 5 rows (2 borders + 3 content lines)
+    //    properties (and optional validation line): fill
+    //    hints: 1 line
+    let rows = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([
+            Constraint::Length(5),
+            Constraint::Fill(1),
+            Constraint::Length(1),
+        ])
+        .split(inner);
 
-    // Header: "<name>  controller service" with state chip.
-    lines.push(Line::from(vec![
-        Span::styled(
-            d.name.clone(),
-            theme::accent().add_modifier(ratatui::style::Modifier::BOLD),
-        ),
-        Span::raw("  "),
-        Span::styled("controller service".to_string(), theme::muted()),
-        Span::raw("  "),
-        state_chip(&d.state),
-    ]));
-    lines.push(Line::from(format!("Type:   {}", d.type_name)));
-    lines.push(Line::from(format!("Bundle: {}", d.bundle)));
-    lines.push(Line::from(format!(
-        "Parent: {}",
-        d.parent_group_id.as_deref().unwrap_or("(controller)")
-    )));
-    lines.push(Line::from(""));
+    render_identity_panel(frame, rows[0], d);
+    render_properties_and_validation(frame, rows[1], d, detail_focus);
+    render_hints_strip(frame, rows[2], detail_focus);
+}
 
-    let m = d.properties.len();
-    let n = INLINE_PROPERTY_ROWS.min(m);
-    lines.push(Line::from(Span::styled(
-        format!("Properties (showing {n} of {m})"),
-        theme::accent(),
-    )));
-    for (k, v) in d.properties.iter().take(n) {
-        let key = format!("  {:28}", truncate(k, 28));
-        let val = truncate(v, 60);
-        lines.push(Line::from(format!("{key} {val}")));
+/// Build the outer panel title: ` <name> · controller service · <state> `.
+fn build_header_title(d: &ControllerServiceDetail) -> Line<'_> {
+    Line::from(vec![
+        Span::raw(" "),
+        Span::styled(d.name.as_str(), theme::accent()),
+        Span::raw(" "),
+        Span::styled("·", theme::muted()),
+        Span::raw(" "),
+        Span::styled("controller service", theme::muted()),
+        Span::raw(" "),
+        Span::styled("·", theme::muted()),
+        Span::raw(" "),
+        Span::styled(d.state.as_str(), state_style(&d.state)),
+        Span::raw(" "),
+    ])
+}
+
+fn state_style(state: &str) -> Style {
+    match state {
+        "ENABLED" => theme::success().add_modifier(Modifier::BOLD),
+        "DISABLED" => theme::muted(),
+        _ => theme::warning(),
     }
-    if m > INLINE_PROPERTY_ROWS {
-        lines.push(Line::from(Span::styled(
-            format!("  …{} more, press e to expand", m - INLINE_PROPERTY_ROWS),
-            theme::muted(),
-        )));
-    }
+}
 
-    let ve = d.validation_errors.len();
-    if ve == 0 {
-        lines.push(Line::from("Validation errors: none"));
+fn render_identity_panel(frame: &mut Frame, area: Rect, d: &ControllerServiceDetail) {
+    let block = Panel::new(" Identity ").into_block();
+    let inner = block.inner(area);
+    frame.render_widget(block, area);
+
+    let parent = d.parent_group_id.as_deref().unwrap_or("(controller)");
+    let lines = vec![
+        Line::from(vec![
+            Span::styled("type   ", theme::muted()),
+            Span::raw(truncate(
+                &d.type_name,
+                inner.width.saturating_sub(7) as usize,
+            )),
+        ]),
+        Line::from(vec![
+            Span::styled("bundle ", theme::muted()),
+            Span::raw(truncate(&d.bundle, inner.width.saturating_sub(7) as usize)),
+        ]),
+        Line::from(vec![
+            Span::styled("parent ", theme::muted()),
+            Span::raw(truncate(parent, inner.width.saturating_sub(7) as usize)),
+        ]),
+    ];
+    frame.render_widget(Paragraph::new(lines), inner);
+}
+
+/// Renders the Properties sub-panel and, when the CS has validation
+/// errors, a single-line summary below it.
+fn render_properties_and_validation(
+    frame: &mut Frame,
+    area: Rect,
+    d: &ControllerServiceDetail,
+    detail_focus: &DetailFocus,
+) {
+    let has_validation = !d.validation_errors.is_empty();
+    let constraints: Vec<Constraint> = if has_validation {
+        vec![Constraint::Fill(1), Constraint::Length(1)]
     } else {
-        lines.push(Line::from(Span::styled(
-            format!("Validation errors: {ve}"),
-            theme::error(),
-        )));
-        let max_err_width = (area.width as usize).saturating_sub(4);
-        for err in d.validation_errors.iter().take(3) {
-            lines.push(Line::from(format!("  {}", truncate(err, max_err_width))));
-        }
-    }
+        vec![Constraint::Fill(1)]
+    };
+    let chunks = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints(constraints)
+        .split(area);
 
-    frame.render_widget(Paragraph::new(lines), area);
+    render_properties_panel(frame, chunks[0], d, detail_focus);
+    if has_validation {
+        render_validation_line(frame, chunks[1], d);
+    }
+}
+
+fn render_validation_line(frame: &mut Frame, area: Rect, d: &ControllerServiceDetail) {
+    let count = d.validation_errors.len();
+    let line = if count == 0 {
+        Line::from(Span::styled("validation errors: none", theme::muted()))
+    } else {
+        let first = d
+            .validation_errors
+            .first()
+            .map(String::as_str)
+            .unwrap_or("");
+        let width = area.width.saturating_sub(24) as usize;
+        Line::from(vec![
+            Span::styled(format!("validation errors: {count} "), theme::error()),
+            Span::styled(truncate(first, width), theme::error()),
+        ])
+    };
+    frame.render_widget(Paragraph::new(line), area);
+}
+
+fn render_properties_panel(
+    frame: &mut Frame,
+    area: Rect,
+    d: &ControllerServiceDetail,
+    detail_focus: &DetailFocus,
+) {
+    let sections = DetailSections::for_node(NodeKind::ControllerService);
+    let props_idx = sections
+        .0
+        .iter()
+        .position(|s| *s == DetailSection::Properties)
+        .unwrap_or(0);
+    let is_focused = matches!(
+        detail_focus,
+        DetailFocus::Section { idx, .. } if *idx == props_idx
+    );
+
+    let total = d.properties.len();
+    let panel = Panel::new(" Properties ")
+        .right(Line::from(format!(" {total} ")))
+        .focused(is_focused)
+        .into_block();
+    let inner = panel.inner(area);
+    frame.render_widget(panel, area);
+
+    let header = Row::new(vec![Cell::from("KEY"), Cell::from("VALUE")])
+        .style(theme::muted().add_modifier(Modifier::BOLD));
+
+    let rows_data: Vec<Row> = d
+        .properties
+        .iter()
+        .map(|(k, v)| Row::new(vec![Cell::from(k.clone()), Cell::from(v.clone())]))
+        .collect();
+    let widths = [Constraint::Length(30), Constraint::Fill(1)];
+    let table = Table::new(rows_data, widths)
+        .header(header)
+        .row_highlight_style(theme::cursor_row());
+
+    let mut state = TableState::default();
+    if let DetailFocus::Section { rows, .. } = detail_focus
+        && is_focused
+    {
+        state.select(Some(rows[props_idx]));
+    }
+    frame.render_stateful_widget(table, inner, &mut state);
+}
+
+fn render_hints_strip(frame: &mut Frame, area: Rect, detail_focus: &DetailFocus) {
+    let text = match detail_focus {
+        DetailFocus::Tree => "↑/↓ nav · l enter detail · Enter drill in · e properties · c copy id",
+        DetailFocus::Section { idx, .. } => {
+            let sections = DetailSections::for_node(NodeKind::ControllerService);
+            match sections.0.get(*idx) {
+                Some(DetailSection::Properties) => {
+                    "↑/↓ row · l next section · h back · c copy value · e full list"
+                }
+                _ => "",
+            }
+        }
+    };
+    frame.render_widget(Paragraph::new(text).style(theme::muted()), area);
 }
 
 fn truncate(s: &str, max: usize) -> String {
+    if max == 0 {
+        return String::new();
+    }
     if s.chars().count() <= max {
         s.to_string()
     } else {
         let head: String = s.chars().take(max.saturating_sub(1)).collect();
         format!("{head}…")
-    }
-}
-
-fn state_chip(state: &str) -> Span<'static> {
-    let label = format!("[{state}]");
-    match state {
-        "ENABLED" => Span::styled(
-            label,
-            theme::success().add_modifier(ratatui::style::Modifier::BOLD),
-        ),
-        "DISABLED" => Span::styled(label, theme::muted()),
-        _ => Span::styled(label, theme::warning()),
     }
 }
 
@@ -96,8 +234,7 @@ mod snapshots {
     use ratatui::Terminal;
     use ratatui::backend::TestBackend;
 
-    #[test]
-    fn cs_detail_renders() {
+    fn seeded_cs_detail() -> (ControllerServiceDetail, BrowserState) {
         let d = ControllerServiceDetail {
             id: "cs1".into(),
             name: "http-pool".into(),
@@ -113,13 +250,38 @@ mod snapshots {
                     "/opt/nifi/truststore.jks".into(),
                 ),
                 ("SSL Protocol".into(), "TLSv1.2".into()),
+                ("Key Password".into(), "********".into()),
             ],
-            validation_errors: vec![],
+            validation_errors: vec!["Keystore password is required".into()],
             bulletin_level: "WARN".into(),
         };
         let state = BrowserState::new();
-        let mut terminal = Terminal::new(TestBackend::new(100, 18)).unwrap();
-        terminal.draw(|f| render(f, f.area(), &d, &state)).unwrap();
-        assert_snapshot!("cs_detail_renders", format!("{}", terminal.backend()));
+        (d, state)
+    }
+
+    fn render_snapshot(detail_focus: &DetailFocus) -> String {
+        let (d, state) = seeded_cs_detail();
+        let mut term = Terminal::new(TestBackend::new(120, 30)).unwrap();
+        term.draw(|f| {
+            render(f, f.area(), &d, &state, detail_focus);
+        })
+        .unwrap();
+        format!("{}", term.backend())
+    }
+
+    #[test]
+    fn controller_service_detail_tree_focused() {
+        let out = render_snapshot(&DetailFocus::Tree);
+        assert_snapshot!("controller_service_detail_tree_focused", out);
+    }
+
+    #[test]
+    fn controller_service_detail_properties_focused() {
+        let focus = DetailFocus::Section {
+            idx: 0,
+            rows: [1, 0, 0, 0],
+        };
+        let out = render_snapshot(&focus);
+        assert_snapshot!("controller_service_detail_properties_focused", out);
     }
 }

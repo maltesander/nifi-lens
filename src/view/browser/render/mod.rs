@@ -263,7 +263,7 @@ fn render_detail(
         }
         Some(NodeDetail::Connection(d)) => connection::render(frame, detail_area, d, state),
         Some(NodeDetail::ControllerService(d)) => {
-            controller_service::render(frame, detail_area, d, state);
+            controller_service::render(frame, detail_area, d, state, &state.detail_focus);
         }
         None => {
             let lines = vec![
