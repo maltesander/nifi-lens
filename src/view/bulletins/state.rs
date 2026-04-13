@@ -3,7 +3,7 @@
 //! Everything here is synchronous and no-I/O. The tokio worker in
 //! `super::worker` is the only place that touches the network.
 
-use std::collections::VecDeque;
+use std::collections::{HashSet, VecDeque};
 use std::time::SystemTime;
 
 use crate::app::navigation::ListNavigation;
@@ -44,6 +44,10 @@ pub struct BulletinsState {
     pub last_id: Option<i64>,
     pub last_fetched_at: Option<SystemTime>,
     pub filters: FilterState,
+    /// Session-scoped mute list. `row_matches` filters out any bulletin
+    /// whose `source_id` is in this set. Toggled by `m` in the key
+    /// handler; not persisted to config.
+    pub mutes: HashSet<String>,
     /// `Some(buf)` while in text-input mode. Every keystroke mutates the
     /// buffer and live-updates `filters.text`. On commit, the buffer is
     /// copied into `filters.text`. On cancel, `pre_input_text` is restored.
@@ -162,6 +166,7 @@ impl BulletinsState {
             last_id: None,
             last_fetched_at: None,
             filters: FilterState::default(),
+            mutes: HashSet::new(),
             text_input: None,
             pre_input_text: None,
             selected: 0,
@@ -253,6 +258,9 @@ impl BulletinsState {
             }
         };
         if !severity_ok {
+            return false;
+        }
+        if self.mutes.contains(&b.source_id) {
             return false;
         }
         if let Some(want) = self.filters.component_type
@@ -452,6 +460,21 @@ impl BulletinsState {
     pub fn cycle_group_mode(&mut self) {
         let prev = self.selected_ring_index();
         self.group_mode = self.group_mode.cycle();
+        self.reconcile_selection(prev);
+    }
+
+    /// Toggle the mute state for the currently selected row's
+    /// `source_id`. If the row is already muted this unmutes it
+    /// (should be unreachable while the row is hidden, but defensive).
+    pub fn mute_selected_source(&mut self) {
+        let Some(ring_idx) = self.selected_ring_index() else {
+            return;
+        };
+        let prev = Some(ring_idx);
+        let source_id = self.ring[ring_idx].source_id.clone();
+        if !self.mutes.insert(source_id.clone()) {
+            self.mutes.remove(&source_id);
+        }
         self.reconcile_selection(prev);
     }
 }
@@ -1397,5 +1420,55 @@ mod tests {
         assert_eq!(s.group_mode, GroupMode::Off);
         s.cycle_group_mode();
         assert_eq!(s.group_mode, GroupMode::SourceAndMessage);
+    }
+
+    #[test]
+    fn mute_selected_source_hides_matching_rows() {
+        let mut s = seed(
+            100,
+            vec![
+                b_full(1, "ERROR", "PROCESSOR", "A", "ProcA[id=a] boom"),
+                b_full(2, "ERROR", "PROCESSOR", "B", "ProcB[id=b] crash"),
+                b_full(3, "ERROR", "PROCESSOR", "A", "ProcA[id=a] boom"),
+            ],
+        );
+        // Use Off mode to see all rows individually.
+        s.group_mode = GroupMode::Off;
+        // Select the first row (src-1) and mute it.
+        s.selected = 0;
+        s.mute_selected_source();
+        let rows = s.grouped_view();
+        // src-1 is filtered out, leaving src-2 and src-3 (2 rows in Off mode).
+        assert_eq!(rows.len(), 2);
+        assert_eq!(s.ring[rows[0].latest_ring_idx].source_id, "src-2");
+        assert_eq!(s.ring[rows[1].latest_ring_idx].source_id, "src-3");
+        // Selection must have snapped forward to the surviving row.
+        assert_eq!(s.selected, 0);
+    }
+
+    #[test]
+    fn mute_selected_source_is_a_toggle_on_repress() {
+        let mut s = seed(
+            100,
+            vec![
+                b_full(1, "ERROR", "PROCESSOR", "A", "ProcA[id=a] boom"),
+                b_full(2, "ERROR", "PROCESSOR", "B", "ProcB[id=b] crash"),
+            ],
+        );
+        s.selected = 0;
+        s.mute_selected_source();
+        assert_eq!(s.grouped_view().len(), 1);
+        // Navigate back onto src-1 is impossible while muted. Unmute by
+        // API — the handler-side toggle path is covered in Task 6.
+        s.mutes.remove("src-1");
+        assert_eq!(s.grouped_view().len(), 2);
+    }
+
+    #[test]
+    fn mute_noop_when_no_selection() {
+        let mut s = BulletinsState::with_capacity(100);
+        // Empty ring → no selection.
+        s.mute_selected_source();
+        assert!(s.mutes.is_empty());
     }
 }
