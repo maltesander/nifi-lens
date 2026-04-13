@@ -1,0 +1,28 @@
+---
+source: src/view/events/render.rs
+expression: render_to_string(&state)
+---
+"┌ Events ──────────────────────────────────────────────────────────────────────── last __ ago ┐"
+"│t time last 15m   T type (any)   s source (any)   u file uuid (any)   a attr (any)                │"
+"│status ● done   took 100ms   results 1 / cap 500   — t/T/s/u/a edit · Enter run · n new · r reset │"
+"│time       type         component                uuid           rel                               │"
+"│08:12:15   DROP         ControlRate              8f2ce90a…a9    failure                           │"
+"│                                                                                                  │"
+"│                                                                                                  │"
+"│                                                                                                  │"
+"│                                                                                                  │"
+"│                                                                                                  │"
+"│                                                                                                  │"
+"│                                                                                                  │"
+"│                                                                                                  │"
+"│                                                                                                  │"
+"│                                                                                                  │"
+"│──────────────────────────────────────────────────────────────────────────────────────────────────│"
+"│DROP · ControlRate · 08:12:15 · flowfile 8f2ce90a-019d-1000-ffff-ffffe8c7c7a9                     │"
+"│                                                                                                  │"
+"│relationship   failure                                                                            │"
+"│component  ControlRate   group  noisy-pipeline                                                    │"
+"│                                                                                                  │"
+"│t trace lineage · g open in browser · Esc back · c copy uuid                                      │"
+"│                                                                                                  │"
+"└──────────────────────────────────────────────────────────────────────────────────────────────────┘"

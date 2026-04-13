@@ -216,6 +216,34 @@ pub enum NifiLensError {
     },
 
     /// See `ClientBuildFailed` for the boxed-source rationale.
+    #[snafu(display("failed to submit provenance query in context {context:?}: {source}"))]
+    ProvenanceQuerySubmitFailed {
+        context: String,
+        source: Box<dyn std::error::Error + Send + Sync>,
+    },
+
+    /// See `ClientBuildFailed` for the boxed-source rationale.
+    #[snafu(display(
+        "failed to poll provenance query {query_id:?} in context {context:?}: {source}"
+    ))]
+    ProvenanceQueryPollFailed {
+        context: String,
+        query_id: String,
+        source: Box<dyn std::error::Error + Send + Sync>,
+    },
+
+    /// See `ClientBuildFailed` for the boxed-source rationale. Delete
+    /// failures are logged at warn level and never surfaced to the user.
+    #[snafu(display(
+        "failed to delete provenance query {query_id:?} in context {context:?}: {source}"
+    ))]
+    ProvenanceQueryDeleteFailed {
+        context: String,
+        query_id: String,
+        source: Box<dyn std::error::Error + Send + Sync>,
+    },
+
+    /// See `ClientBuildFailed` for the boxed-source rationale.
     #[snafu(display(
         "failed to fetch provenance event {event_id} in context {context:?}: {source}"
     ))]

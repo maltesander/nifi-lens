@@ -101,6 +101,9 @@ pub async fn run(
                         PendingIntent::SwitchContext(name) => Some(Intent::SwitchContext(name)),
                         PendingIntent::JumpTo(link) => Some(Intent::JumpTo(link)),
                         PendingIntent::Dispatch(intent) => Some(intent),
+                        PendingIntent::RunProvenanceQuery { query } => {
+                            Some(Intent::RunProvenanceQuery { query })
+                        }
                         PendingIntent::Quit => Some(Intent::Quit),
                         _ => {
                             tracing::warn!("unhandled PendingIntent variant");

@@ -5,7 +5,7 @@ use ratatui::layout::{Constraint, Direction, Layout, Rect};
 use ratatui::widgets::{Block, Borders};
 
 use crate::app::state::{AppState, Modal, ViewId};
-use crate::view::{browser, bulletins, overview, tracer};
+use crate::view::{browser, bulletins, events, overview, tracer};
 use crate::widget::{context_switcher, help_modal, status_bar};
 
 pub fn render(frame: &mut Frame, state: &AppState) {
@@ -72,7 +72,7 @@ fn render_content(frame: &mut Frame, area: Rect, state: &AppState) {
             &state.flow_index,
             &state.bulletins.ring,
         ),
-        ViewId::Events => crate::view::render_placeholder(frame, area, " Events ", "Phase 6"),
+        ViewId::Events => events::render::render(frame, area, &state.events, &state.timestamp_cfg),
         ViewId::Tracer => tracer::render(frame, area, &state.tracer, &state.timestamp_cfg),
     }
 }

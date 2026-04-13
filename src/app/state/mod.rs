@@ -5,6 +5,7 @@
 
 mod browser;
 mod bulletins;
+mod events;
 mod overview;
 mod tracer;
 
@@ -21,6 +22,7 @@ use crate::view::browser::state::{
     BrowserState, FlowIndex, apply_tree_snapshot, build_flow_index, rebuild_visible,
 };
 use crate::view::bulletins::state::BulletinsState;
+use crate::view::events::state::EventsState;
 use crate::view::overview::{OverviewState, apply_payload as apply_overview_payload};
 use crate::view::tracer::state::TracerState;
 
@@ -96,6 +98,7 @@ pub struct AppState {
     pub overview: OverviewState,
     pub bulletins: BulletinsState,
     pub browser: BrowserState,
+    pub events: EventsState,
     pub tracer: TracerState,
     pub flow_index: Option<FlowIndex>,
     pub status: StatusLine,
@@ -121,6 +124,7 @@ impl AppState {
             overview: OverviewState::new(),
             bulletins: BulletinsState::with_capacity(config.bulletins.ring_size),
             browser: BrowserState::new(),
+            events: EventsState::new(),
             tracer: TracerState::new(),
             flow_index: None,
             status: StatusLine::default(),
@@ -242,6 +246,9 @@ pub enum PendingIntent {
     JumpTo(CrossLink),
     Dispatch(crate::intent::Intent),
     SaveEventContent(PendingSave),
+    RunProvenanceQuery {
+        query: crate::client::ProvenanceQuery,
+    },
     Quit,
 }
 
@@ -327,7 +334,7 @@ pub fn collect_hints(state: &AppState) -> Vec<crate::widget::hint_bar::HintSpan>
         ViewId::Overview => overview::OverviewHandler::hints(state),
         ViewId::Bulletins => bulletins::BulletinsHandler::hints(state),
         ViewId::Browser => browser::BrowserHandler::hints(state),
-        ViewId::Events => vec![],
+        ViewId::Events => events::EventsHandler::hints(state),
         ViewId::Tracer => tracer::TracerHandler::hints(state),
     };
 
@@ -483,6 +490,15 @@ pub fn update(state: &mut AppState, event: AppEvent, config: &Config) -> UpdateR
                 redraw: true,
                 intent: None,
                 tracer_followup: followup,
+            }
+        }
+        AppEvent::Data(ViewPayload::Events(payload)) => {
+            crate::view::events::state::apply_payload(&mut state.events, payload);
+            state.last_refresh = Instant::now();
+            UpdateResult {
+                redraw: true,
+                intent: None,
+                tracer_followup: None,
             }
         }
         AppEvent::IntentOutcome(outcome) => handle_intent_outcome(state, outcome),
@@ -747,7 +763,7 @@ fn handle_key(state: &mut AppState, key: KeyEvent, config: &Config) -> UpdateRes
             ViewId::Overview => overview::OverviewHandler::handle_key(state, key),
             ViewId::Bulletins => bulletins::BulletinsHandler::handle_key(state, key),
             ViewId::Browser => browser::BrowserHandler::handle_key(state, key),
-            ViewId::Events => None,
+            ViewId::Events => events::EventsHandler::handle_key(state, key),
             ViewId::Tracer => tracer::TracerHandler::handle_key(state, key),
         };
         if let Some(r) = consumed {
@@ -1068,6 +1084,7 @@ fn handle_intent_outcome(
             }
         }
         Ok(IntentOutcome::TracerLineageStarted { uuid, abort }) => {
+            state.current_tab = ViewId::Tracer;
             use crate::view::tracer::state::start_lineage;
             start_lineage(&mut state.tracer, uuid, Some(abort));
             UpdateResult {
@@ -1085,6 +1102,25 @@ fn handle_intent_outcome(
             UpdateResult {
                 redraw: true,
                 intent: None,
+                tracer_followup: None,
+            }
+        }
+        Ok(IntentOutcome::EventsLandingOn { component_id }) => {
+            // Switch to Events, seed filters, and auto-run.
+            state.current_tab = ViewId::Events;
+            state.events.filters.source = component_id;
+            state.events.filters.time = "last 15m".to_string();
+            state.events.status = crate::view::events::state::EventsQueryStatus::Running {
+                query_id: None,
+                submitted_at: std::time::SystemTime::now(),
+                percent: 0,
+            };
+            state.events.events.clear();
+            state.events.selected_row = None;
+            let query = state.events.build_query();
+            UpdateResult {
+                redraw: true,
+                intent: Some(PendingIntent::RunProvenanceQuery { query }),
                 tracer_followup: None,
             }
         }
@@ -1638,5 +1674,26 @@ mod tests {
         // Cluster summary should still be populated even on fallback.
         assert_eq!(s.cluster_summary.total_nodes, Some(2));
         assert_eq!(s.cluster_summary.connected_nodes, Some(2));
+    }
+
+    #[test]
+    fn events_landing_on_seeds_filters_and_switches_tab() {
+        let mut s = fresh_state();
+        let c = tiny_config();
+        let outcome = crate::event::IntentOutcome::EventsLandingOn {
+            component_id: "proc-42".into(),
+        };
+        let r = update(&mut s, AppEvent::IntentOutcome(Ok(outcome)), &c);
+        assert_eq!(s.current_tab, ViewId::Events);
+        assert_eq!(s.events.filters.source, "proc-42");
+        assert_eq!(s.events.filters.time, "last 15m");
+        assert!(matches!(
+            s.events.status,
+            crate::view::events::state::EventsQueryStatus::Running { .. }
+        ));
+        assert!(matches!(
+            r.intent,
+            Some(PendingIntent::RunProvenanceQuery { .. })
+        ));
     }
 }

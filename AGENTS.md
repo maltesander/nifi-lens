@@ -399,6 +399,61 @@ ring exceeds its capacity.
   only what a 24-row terminal would show. Bumping the test
   terminal height is a polish item.
 
+**Accepted UI Reorg Phase 6 edge cases:**
+
+- **No tab completion for `T` type field.** The spec calls for Tab
+  to complete known event types (DROP, EXPIRE, ROUTE, etc.). v1
+  supports free-text inline edit only. A polish task can wire
+  completion against the static event-type list.
+- **No parent/child uuid display in detail pane.** The
+  `ProvenanceEventSummary` DTO does not carry parent/child flowfile
+  uuids. Populating those rows requires a second
+  `GET /provenance-events/{id}` per row or upstream library work.
+  Deferred; the detail pane shows relationship, component, group id,
+  and flowfile uuid only.
+- **Bulletins/Browser `t` clobbers `source` + `time` filters.**
+  Cross-linking from these tabs overwrites the user's current
+  `source` and `time` filter values. The `types`, `uuid`, and
+  `attr` fields are preserved. This is the user-friendlier behavior
+  when iterating — if it proves confusing, a polish item can
+  clear all other filters on cross-link.
+- **`truncated` false positive at exactly the cap.** The reducer
+  marks `truncated = true` when `total_count > max_results` (strict
+  greater-than). A query that returns exactly 500 events is NOT
+  marked truncated — this is the conservative read: at exactly the
+  cap the server either clipped at our request or coincidentally
+  matched. In practice the server returns fewer than cap unless it
+  is genuinely truncating.
+- **`CrossLink::TraceComponent` variant retained.** The old Tracer
+  latest-events cross-link variant stays in `src/intent/mod.rs` with
+  its handle_pure / dispatch arms intact. Phase 6 just removes the
+  emission sites in Bulletins and Browser `t` handlers. Pruning the
+  variant is deferred until no emission site remains.
+- **Filter state survives tab switches.** When the user leaves the
+  Events tab and returns, the filter bar's edit buffer is committed
+  and the filters re-display on return. Query state (`Running`,
+  `Done`) also persists. Consistent with Bulletins tab's filter
+  preservation.
+- **Worker poll timeout is a hard 60 s.** Queries that do not
+  complete within 60 s emit `QueryFailed`. Longer windows would
+  need the timeout raised via config — deferred.
+- **`t` key collision resolved per-mode.** On the filter bar
+  (Mode A), `t` opens the time-field editor. On a selected results
+  row (Mode B), `t` emits the `TraceByUuid` cross-link. Mode A and
+  Mode B are distinguished by whether `selected_row.is_some()`.
+- **Events row `g` uses `OpenInBrowser`, not a Events-specific
+  variant.** The spec says "g jump to Browser (ControlRate)". Since
+  both `component_id` and `group_id` are available on
+  `ProvenanceEventSummary`, the existing `CrossLink::OpenInBrowser`
+  variant is a clean reuse.
+- **Events row `t` switches tab via `TracerLineageStarted` reducer.**
+  The `CrossLink::TraceByUuid` dispatcher arm spawns `spawn_lineage`
+  and returns `IntentOutcome::TracerLineageStarted { uuid, abort }`.
+  Its reducer arm sets `state.current_tab = ViewId::Tracer` and
+  populates `state.tracer` via `start_lineage` — same path used by
+  the existing Tracer entry-form submission, where the tab switch
+  is a no-op because the user is already on Tracer.
+
 ## Dependency on `nifi-rust-client`
 
 `nifi-lens` depends on `nifi-rust-client = "0.8.0"` with the `dynamic`
@@ -714,7 +769,31 @@ usable state.
     `recent_for_group_id`) filter the ring without cloning.
     `BrowserState` gains `PgHealth`, `pg_health_rollup`, and
     `child_process_groups`.
-15. **Phase 7 — Write-path scaffolding.** Dry-run mode, confirmation modal
+15. **UI Reorg Phase 6 — Events tab.** *(shipped)* New cluster-wide
+    provenance-search tab with a 2-row filter bar (`t time` / `T type`
+    / `s source` / `u file uuid` / `a attr`), a results list colored
+    by event type (DROP/EXPIRE red+bold, ROUTE accent, RECEIVE/SEND
+    /FETCH/DOWNLOAD green, FORK/JOIN/CLONE muted), and a detail pane
+    for the selected row. A new `src/client/events.rs` wraps NiFi's
+    `POST /provenance` + `GET /provenance/{id}` + `DELETE
+    /provenance/{id}` endpoints; the worker
+    (`src/view/events/worker.rs`) submits, polls at 750 ms until the
+    server reports `finished = true`, and best-effort-deletes the
+    server-side query. The reducer walks
+    `EventsQueryStatus { Idle / Running / Done / Failed }` with
+    query-id matching to drop late payloads from cancelled queries.
+    Mode A (filter-bar nav) vs Mode B (row nav) keep the letter-key
+    bindings unambiguous — `t` on the filter bar opens the time-field
+    editor; `t` on a selected row emits the `CrossLink::TraceByUuid`
+    cross-link. Cross-links: Bulletins `t` and Browser `t` now land
+    on Events pre-filled with `source = component` and
+    `time = last 15m`, auto-running the query. Events row `t` →
+    Tracer lineage via `CrossLink::TraceByUuid`. Events row `g` →
+    Browser via the existing `OpenInBrowser` cross-link. Scope cuts:
+    tab-completion on `T type`, attribute regex, realtime follow,
+    saved queries, per-node scope, bulk export, parent/child uuid
+    display — all tracked as edge cases.
+16. **Phase 7 — Write-path scaffolding.** Dry-run mode, confirmation modal
     primitive, audit log, `--allow-writes` flag. No writes enabled yet —
     this just lays the rails for v2.
 

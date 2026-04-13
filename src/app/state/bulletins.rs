@@ -154,7 +154,7 @@ impl ViewKeyHandler for BulletinsHandler {
             KeyCode::Char('t') => {
                 if let Some(idx) = state.bulletins.selected_ring_index() {
                     let b = &state.bulletins.ring[idx];
-                    let link = CrossLink::TraceComponent {
+                    let link = CrossLink::JumpToEvents {
                         component_id: b.source_id.clone(),
                     };
                     return Some(UpdateResult {
@@ -206,7 +206,7 @@ impl ViewKeyHandler for BulletinsHandler {
             },
             HintSpan {
                 key: "t",
-                action: "trace",
+                action: "events",
             },
             HintSpan {
                 key: "/",
