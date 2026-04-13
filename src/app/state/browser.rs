@@ -466,10 +466,10 @@ mod tests {
     }
 
     #[test]
-    fn ctrl_f_with_no_index_shows_warning_banner_and_does_not_open_modal() {
+    fn f_with_no_index_shows_warning_banner_and_does_not_open_modal() {
         let mut s = fresh_state();
         let c = tiny_config();
-        update(&mut s, key(KeyCode::Char('f'), KeyModifiers::CONTROL), &c);
+        update(&mut s, key(KeyCode::Char('f'), KeyModifiers::NONE), &c);
         assert!(s.modal.is_none());
         assert!(
             s.status
@@ -481,7 +481,7 @@ mod tests {
     }
 
     #[test]
-    fn ctrl_f_with_index_opens_fuzzy_find_modal() {
+    fn f_with_index_opens_fuzzy_find_modal() {
         let mut s = fresh_state();
         let c = tiny_config();
         s.flow_index = Some(FlowIndex {
@@ -493,7 +493,7 @@ mod tests {
                 haystack: "p   processor   root".into(),
             }],
         });
-        update(&mut s, key(KeyCode::Char('f'), KeyModifiers::CONTROL), &c);
+        update(&mut s, key(KeyCode::Char('f'), KeyModifiers::NONE), &c);
         assert!(matches!(s.modal, Some(Modal::FuzzyFind(_))));
     }
 
@@ -510,7 +510,7 @@ mod tests {
                 haystack: "putkafka   processor   root".into(),
             }],
         });
-        update(&mut s, key(KeyCode::Char('f'), KeyModifiers::CONTROL), &c);
+        update(&mut s, key(KeyCode::Char('f'), KeyModifiers::NONE), &c);
         update(&mut s, key(KeyCode::Char('p'), KeyModifiers::NONE), &c);
         let r = update(&mut s, key(KeyCode::Enter, KeyModifiers::NONE), &c);
         match r.intent {
@@ -535,7 +535,7 @@ mod tests {
                 haystack: "x   processor   root".into(),
             }],
         });
-        update(&mut s, key(KeyCode::Char('f'), KeyModifiers::CONTROL), &c);
+        update(&mut s, key(KeyCode::Char('f'), KeyModifiers::NONE), &c);
         let r = update(&mut s, key(KeyCode::Esc, KeyModifiers::NONE), &c);
         assert!(s.modal.is_none());
         assert!(r.intent.is_none());

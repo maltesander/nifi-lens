@@ -614,7 +614,7 @@ fn handle_key(state: &mut AppState, key: KeyEvent, config: &Config) -> UpdateRes
             }
             Modal::FuzzyFind(fs) => {
                 match (key.code, key.modifiers) {
-                    (KeyCode::Esc, _) | (KeyCode::Char('f'), KeyModifiers::CONTROL) => {
+                    (KeyCode::Esc, _) | (KeyCode::Char('f'), KeyModifiers::NONE) => {
                         state.modal = None;
                         return UpdateResult {
                             redraw: true,
@@ -815,7 +815,7 @@ fn handle_key(state: &mut AppState, key: KeyEvent, config: &Config) -> UpdateRes
                 tracer_followup: None,
             }
         }
-        (KeyCode::Left, KeyModifiers::ALT) => {
+        (KeyCode::Char('['), KeyModifiers::NONE) => {
             let anchor = capture_anchor(state);
             let current = crate::app::history::HistoryEntry {
                 tab: state.current_tab,
@@ -831,7 +831,7 @@ fn handle_key(state: &mut AppState, key: KeyEvent, config: &Config) -> UpdateRes
                 tracer_followup: None,
             }
         }
-        (KeyCode::Right, KeyModifiers::ALT) => {
+        (KeyCode::Char(']'), KeyModifiers::NONE) => {
             let anchor = capture_anchor(state);
             let current = crate::app::history::HistoryEntry {
                 tab: state.current_tab,
@@ -911,7 +911,7 @@ fn handle_key(state: &mut AppState, key: KeyEvent, config: &Config) -> UpdateRes
                 tracer_followup: None,
             }
         }
-        (KeyCode::Char('k'), KeyModifiers::CONTROL) => {
+        (KeyCode::Char('K'), KeyModifiers::SHIFT) => {
             let cs = ContextSwitcherState::from_config(
                 config,
                 &state.context_name,
@@ -924,7 +924,7 @@ fn handle_key(state: &mut AppState, key: KeyEvent, config: &Config) -> UpdateRes
                 tracer_followup: None,
             }
         }
-        (KeyCode::Char('f'), KeyModifiers::CONTROL) => {
+        (KeyCode::Char('f'), KeyModifiers::NONE) => {
             if state.flow_index.is_none() {
                 state.status.banner = Some(Banner {
                     severity: BannerSeverity::Warning,
@@ -1357,10 +1357,10 @@ mod tests {
     }
 
     #[test]
-    fn ctrl_k_opens_context_switcher() {
+    fn capital_k_opens_context_switcher() {
         let mut s = fresh_state();
         let c = tiny_config();
-        update(&mut s, key(KeyCode::Char('k'), KeyModifiers::CONTROL), &c);
+        update(&mut s, key(KeyCode::Char('K'), KeyModifiers::SHIFT), &c);
         let modal = s.modal.as_ref().unwrap();
         match modal {
             Modal::ContextSwitcher(cs) => {
@@ -1375,7 +1375,7 @@ mod tests {
     fn context_switcher_enter_emits_intent() {
         let mut s = fresh_state();
         let c = tiny_config();
-        update(&mut s, key(KeyCode::Char('k'), KeyModifiers::CONTROL), &c);
+        update(&mut s, key(KeyCode::Char('K'), KeyModifiers::SHIFT), &c);
         update(&mut s, key(KeyCode::Down, KeyModifiers::NONE), &c);
         let r = update(&mut s, key(KeyCode::Enter, KeyModifiers::NONE), &c);
         match r.intent {
@@ -1388,7 +1388,7 @@ mod tests {
     fn context_switched_outcome_updates_version_and_closes_modal() {
         let mut s = fresh_state();
         let c = tiny_config();
-        update(&mut s, key(KeyCode::Char('k'), KeyModifiers::CONTROL), &c);
+        update(&mut s, key(KeyCode::Char('K'), KeyModifiers::SHIFT), &c);
         let outcome = Ok(IntentOutcome::ContextSwitched {
             new_context_name: "other-ctx".into(),
             new_version: Version::new(2, 7, 2),
@@ -1442,7 +1442,7 @@ mod tests {
     }
 
     #[test]
-    fn alt_left_navigates_back() {
+    fn left_bracket_navigates_back() {
         let mut s = fresh_state();
         let c = tiny_config();
         s.current_tab = ViewId::Bulletins;
@@ -1452,12 +1452,12 @@ mod tests {
         });
         s.current_tab = ViewId::Browser;
 
-        update(&mut s, key(KeyCode::Left, KeyModifiers::ALT), &c);
+        update(&mut s, key(KeyCode::Char('['), KeyModifiers::NONE), &c);
         assert_eq!(s.current_tab, ViewId::Bulletins);
     }
 
     #[test]
-    fn alt_right_navigates_forward() {
+    fn right_bracket_navigates_forward() {
         let mut s = fresh_state();
         let c = tiny_config();
         // Simulate: was on Bulletins, pushed history, moved to Browser,
@@ -1477,16 +1477,16 @@ mod tests {
         s.current_tab = ViewId::Bulletins;
         assert!(s.history.can_go_forward());
 
-        update(&mut s, key(KeyCode::Right, KeyModifiers::ALT), &c);
+        update(&mut s, key(KeyCode::Char(']'), KeyModifiers::NONE), &c);
         assert_eq!(s.current_tab, ViewId::Browser);
     }
 
     #[test]
-    fn alt_left_noop_when_history_empty() {
+    fn left_bracket_noop_when_history_empty() {
         let mut s = fresh_state();
         let c = tiny_config();
         s.current_tab = ViewId::Browser;
-        update(&mut s, key(KeyCode::Left, KeyModifiers::ALT), &c);
+        update(&mut s, key(KeyCode::Char('['), KeyModifiers::NONE), &c);
         // Tab unchanged — no history.
         assert_eq!(s.current_tab, ViewId::Browser);
     }

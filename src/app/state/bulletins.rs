@@ -11,11 +11,15 @@ pub(crate) struct BulletinsHandler;
 impl ViewKeyHandler for BulletinsHandler {
     fn handle_key(state: &mut AppState, key: KeyEvent) -> Option<UpdateResult> {
         // Text-input mode captures character-level keys and edit keys (Esc,
-        // Enter, Backspace). Keys with CONTROL modifiers (Ctrl+C, Ctrl+K, etc.)
-        // skip this block so they reach the global handlers. Tab and other
-        // unmodified keys are still suppressed to keep focus on text input.
+        // Enter, Backspace). Keys with CONTROL modifiers (Ctrl+C, etc.) and
+        // app-wide SHIFT chords (Shift+K for context switcher) skip this block
+        // so they reach the global handlers. Tab and other unmodified keys are
+        // still suppressed to keep focus on text input.
+        let is_app_shift_chord =
+            key.modifiers == KeyModifiers::SHIFT && key.code == KeyCode::Char('K');
         if state.bulletins.text_input.is_some()
             && matches!(key.modifiers, KeyModifiers::NONE | KeyModifiers::SHIFT)
+            && !is_app_shift_chord
         {
             return handle_text_input(state, key);
         }
@@ -421,22 +425,22 @@ mod tests {
     }
 
     #[test]
-    fn text_input_mode_does_not_swallow_ctrl_k_context_switcher() {
+    fn text_input_mode_does_not_swallow_capital_k_context_switcher() {
         let mut s = fresh_state();
         let c = tiny_config();
         s.current_tab = ViewId::Bulletins;
         update(&mut s, key(KeyCode::Char('/'), KeyModifiers::NONE), &c);
         update(&mut s, key(KeyCode::Char('f'), KeyModifiers::NONE), &c);
-        // Ctrl+K should open the context switcher modal.
-        update(&mut s, key(KeyCode::Char('k'), KeyModifiers::CONTROL), &c);
+        // Shift+K should open the context switcher modal.
+        update(&mut s, key(KeyCode::Char('K'), KeyModifiers::SHIFT), &c);
         assert!(
             matches!(s.modal, Some(Modal::ContextSwitcher(_))),
-            "Ctrl+K should open the context switcher"
+            "Shift+K should open the context switcher"
         );
         assert_eq!(
             s.bulletins.text_input.as_deref(),
             Some("f"),
-            "Ctrl+K must not append 'k' to the filter buffer"
+            "Shift+K must not append 'K' to the filter buffer"
         );
     }
 }
