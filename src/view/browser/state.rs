@@ -32,6 +32,20 @@ pub enum PgHealth {
     Red,
 }
 
+/// Summary of a direct-child Process Group for the PG detail
+/// pane's "Child groups" section. Pulls pre-computed counts from
+/// the arena's `NodeStatusSummary::ProcessGroup` variant — no
+/// extra API calls required.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ChildPgSummary {
+    pub id: String,
+    pub name: String,
+    pub running: u32,
+    pub stopped: u32,
+    pub invalid: u32,
+    pub disabled: u32,
+}
+
 #[derive(Debug, Default)]
 pub struct BrowserState {
     pub nodes: Vec<TreeNode>,
@@ -258,6 +272,47 @@ impl BrowserState {
         } else {
             PgHealth::Green
         }
+    }
+
+    /// List the direct child Process Groups of the PG with the
+    /// given `group_id`, in arena order. Non-PG children are
+    /// excluded. Returns an empty vec if the PG is not present
+    /// in the current snapshot.
+    pub fn child_process_groups(&self, group_id: &str) -> Vec<ChildPgSummary> {
+        let Some(parent_idx) = self
+            .nodes
+            .iter()
+            .position(|n| matches!(n.kind, NodeKind::ProcessGroup) && n.id == group_id)
+        else {
+            return Vec::new();
+        };
+        self.nodes[parent_idx]
+            .children
+            .iter()
+            .filter_map(|&child_idx| {
+                let child = self.nodes.get(child_idx)?;
+                if !matches!(child.kind, NodeKind::ProcessGroup) {
+                    return None;
+                }
+                let (running, stopped, invalid, disabled) = match &child.status_summary {
+                    NodeStatusSummary::ProcessGroup {
+                        running,
+                        stopped,
+                        invalid,
+                        disabled,
+                    } => (*running, *stopped, *invalid, *disabled),
+                    _ => (0, 0, 0, 0),
+                };
+                Some(ChildPgSummary {
+                    id: child.id.clone(),
+                    name: child.name.clone(),
+                    running,
+                    stopped,
+                    invalid,
+                    disabled,
+                })
+            })
+            .collect()
     }
 }
 
@@ -1355,5 +1410,117 @@ mod tests {
         let mut s = BrowserState::new();
         apply_tree_snapshot(&mut s, snap);
         assert_eq!(s.pg_health_rollup(0), PgHealth::Green);
+    }
+
+    #[test]
+    fn child_process_groups_returns_direct_children_with_counts() {
+        // Root → noisy (pg), healthy (pg), connection (not a pg).
+        let snap = RecursiveSnapshot {
+            nodes: vec![
+                RawNode {
+                    parent_idx: None,
+                    kind: NodeKind::ProcessGroup,
+                    id: "root".into(),
+                    group_id: "root".into(),
+                    name: "Root".into(),
+                    status_summary: NodeStatusSummary::ProcessGroup {
+                        running: 0,
+                        stopped: 0,
+                        invalid: 0,
+                        disabled: 0,
+                    },
+                },
+                RawNode {
+                    parent_idx: Some(0),
+                    kind: NodeKind::ProcessGroup,
+                    id: "noisy".into(),
+                    group_id: "root".into(),
+                    name: "noisy".into(),
+                    status_summary: NodeStatusSummary::ProcessGroup {
+                        running: 3,
+                        stopped: 2,
+                        invalid: 1,
+                        disabled: 0,
+                    },
+                },
+                RawNode {
+                    parent_idx: Some(0),
+                    kind: NodeKind::ProcessGroup,
+                    id: "healthy".into(),
+                    group_id: "root".into(),
+                    name: "healthy".into(),
+                    status_summary: NodeStatusSummary::ProcessGroup {
+                        running: 5,
+                        stopped: 0,
+                        invalid: 0,
+                        disabled: 0,
+                    },
+                },
+                RawNode {
+                    parent_idx: Some(0),
+                    kind: NodeKind::Connection,
+                    id: "c1".into(),
+                    group_id: "root".into(),
+                    name: "conn".into(),
+                    status_summary: NodeStatusSummary::Connection {
+                        fill_percent: 10,
+                        flow_files_queued: 100,
+                        queued_display: "100 / 1 KB".into(),
+                    },
+                },
+            ],
+            fetched_at: UNIX_EPOCH,
+        };
+        let mut s = BrowserState::new();
+        apply_tree_snapshot(&mut s, snap);
+        let kids = s.child_process_groups("root");
+        assert_eq!(kids.len(), 2);
+        assert_eq!(kids[0].name, "noisy");
+        assert_eq!(kids[0].running, 3);
+        assert_eq!(kids[0].stopped, 2);
+        assert_eq!(kids[0].invalid, 1);
+        assert_eq!(kids[1].name, "healthy");
+        assert_eq!(kids[1].running, 5);
+    }
+
+    #[test]
+    fn child_process_groups_returns_empty_for_unknown_pg() {
+        let s = BrowserState::new();
+        assert!(s.child_process_groups("nope").is_empty());
+    }
+
+    #[test]
+    fn child_process_groups_excludes_non_pg_children() {
+        let snap = RecursiveSnapshot {
+            nodes: vec![
+                RawNode {
+                    parent_idx: None,
+                    kind: NodeKind::ProcessGroup,
+                    id: "pg1".into(),
+                    group_id: "pg1".into(),
+                    name: "pg1".into(),
+                    status_summary: NodeStatusSummary::ProcessGroup {
+                        running: 0,
+                        stopped: 0,
+                        invalid: 0,
+                        disabled: 0,
+                    },
+                },
+                RawNode {
+                    parent_idx: Some(0),
+                    kind: NodeKind::Processor,
+                    id: "p1".into(),
+                    group_id: "pg1".into(),
+                    name: "P1".into(),
+                    status_summary: NodeStatusSummary::Processor {
+                        run_status: "RUNNING".into(),
+                    },
+                },
+            ],
+            fetched_at: UNIX_EPOCH,
+        };
+        let mut s = BrowserState::new();
+        apply_tree_snapshot(&mut s, snap);
+        assert!(s.child_process_groups("pg1").is_empty());
     }
 }
