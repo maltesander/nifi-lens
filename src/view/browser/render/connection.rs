@@ -10,45 +10,99 @@ use crate::theme;
 use crate::view::browser::state::BrowserState;
 
 pub fn render(frame: &mut Frame, area: Rect, d: &ConnectionDetail, _state: &BrowserState) {
+    use crate::widget::gauge::fill_bar;
     let mut lines: Vec<Line> = Vec::new();
-    lines.push(Line::from(Span::styled(
-        format!("Connection — {}", d.name),
-        theme::accent(),
-    )));
-    lines.push(Line::from(format!(
-        "From: {} ({})   To: {} ({})",
-        d.source_name, d.source_type, d.destination_name, d.destination_type
-    )));
-    lines.push(Line::from(format!(
-        "Relationships: {}",
-        if d.selected_relationships.is_empty() {
+
+    // Header: "<name>  connection"
+    lines.push(Line::from(vec![
+        Span::styled(
+            d.name.clone(),
+            theme::accent().add_modifier(ratatui::style::Modifier::BOLD),
+        ),
+        Span::raw("  "),
+        Span::styled("connection".to_string(), theme::muted()),
+    ]));
+    lines.push(Line::from(""));
+
+    // Fill gauge: prominent visual block.
+    let gauge_width: u16 = area.width.saturating_sub(12).clamp(8, 40);
+    let bar = fill_bar(gauge_width, d.fill_percent);
+    let gauge_style = fill_style(d.fill_percent);
+    lines.push(Line::from(vec![
+        Span::styled("Fill        ".to_string(), theme::muted()),
+        Span::styled(bar, gauge_style),
+        Span::raw(format!(
+            "  {}% ({} ff / {})",
+            d.fill_percent, d.flow_files_queued, d.queued_display
+        )),
+    ]));
+
+    // Source / Destination block.
+    lines.push(Line::from(""));
+    lines.push(Line::from(vec![
+        Span::styled("From        ".to_string(), theme::muted()),
+        Span::raw(format!("{} ({})", d.source_name, d.source_type)),
+    ]));
+    lines.push(Line::from(vec![
+        Span::styled("To          ".to_string(), theme::muted()),
+        Span::raw(format!("{} ({})", d.destination_name, d.destination_type)),
+    ]));
+    lines.push(Line::from(vec![
+        Span::styled("Relations   ".to_string(), theme::muted()),
+        Span::raw(if d.selected_relationships.is_empty() {
             "(none)".to_string()
         } else {
             d.selected_relationships.join(", ")
-        }
-    )));
+        }),
+    ]));
+
+    // Back-pressure block.
     lines.push(Line::from(""));
-    lines.push(Line::from(format!(
-        "Fill: {}%  ({} ff / {})",
-        d.fill_percent, d.flow_files_queued, d.queued_display
+    lines.push(Line::from(Span::styled(
+        "Back-pressure".to_string(),
+        theme::accent(),
     )));
-    lines.push(Line::from(format!(
-        "Back-pressure thresholds: count={}, size={}",
-        d.back_pressure_object_threshold, d.back_pressure_data_size_threshold
-    )));
-    lines.push(Line::from(format!(
-        "Expiration: {}",
-        if d.flow_file_expiration.is_empty() {
+    lines.push(Line::from(vec![
+        Span::styled("  count     ".to_string(), theme::muted()),
+        Span::raw(format!("{}", d.back_pressure_object_threshold)),
+    ]));
+    lines.push(Line::from(vec![
+        Span::styled("  size      ".to_string(), theme::muted()),
+        Span::raw(d.back_pressure_data_size_threshold.clone()),
+    ]));
+    lines.push(Line::from(vec![
+        Span::styled("  expire    ".to_string(), theme::muted()),
+        Span::raw(if d.flow_file_expiration.is_empty() {
             "none".to_string()
         } else {
             d.flow_file_expiration.clone()
-        }
+        }),
+    ]));
+    lines.push(Line::from(vec![
+        Span::styled("  load-bal  ".to_string(), theme::muted()),
+        Span::raw(d.load_balance_strategy.clone()),
+    ]));
+
+    // Action hints.
+    lines.push(Line::from(""));
+    lines.push(Line::from(Span::styled(
+        "c copy id".to_string(),
+        theme::muted(),
     )));
-    lines.push(Line::from(format!(
-        "Load balance: {}",
-        d.load_balance_strategy
-    )));
+
     frame.render_widget(Paragraph::new(lines), area);
+}
+
+/// Fill-percent → gauge color. Mirrors the Overview repositories
+/// severity mapping.
+fn fill_style(percent: u32) -> ratatui::style::Style {
+    if percent >= 80 {
+        theme::error()
+    } else if percent >= 50 {
+        theme::warning()
+    } else {
+        theme::success()
+    }
 }
 
 #[cfg(test)]
