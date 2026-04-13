@@ -215,23 +215,9 @@ fn render_body(frame: &mut Frame, area: Rect, state: &EventsState) {
         frame.render_widget(centered, spot);
         return;
     }
-    if let EventsQueryStatus::Failed { error } = &state.status {
-        let centered = Paragraph::new(Span::styled(
-            format!("query failed: {error}"),
-            theme::error(),
-        ))
-        .alignment(Alignment::Center);
-        let mid = area.height.saturating_sub(1) / 2;
-        let spot = Rect {
-            x: area.x,
-            y: area.y + mid,
-            width: area.width,
-            height: 1,
-        };
-        frame.render_widget(centered, spot);
-        return;
-    }
-    // Otherwise (Done with events), render the real results list.
+    // Otherwise (Done with events, or Failed), render the real results list.
+    // On Failed the results list falls through to its empty-state message;
+    // the global footer banner is the single source of truth for the error.
     render_results_list(frame, area, state);
 }
 
