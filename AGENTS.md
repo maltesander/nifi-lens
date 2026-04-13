@@ -246,6 +246,35 @@ ring exceeds its capacity.
   is consistent with vim-modal convention and is the same trade-off
   that the old `Shift+B` already had.
 
+**Accepted UI Reorg Phase 3 edge cases:**
+
+- **Processor thread leaderboard dropped.** The old Health "Processors"
+  category showed a top-N processor-by-active-threads leaderboard.
+  Layout 3's Overview has no equivalent panel — the processor info
+  line shows aggregate counts only. Per-processor thread
+  investigation is still possible via the Browser detail pane.
+  Re-introducing a leaderboard would require a future detail-pane
+  drill-in.
+- **Per-node repository breakdown dropped.** The old Health
+  "Repositories" detail pane showed per-node fill bars when a row
+  was selected. Overview shows only the cluster-aggregate row
+  (averaged via the server's `SystemDiagAggregate`). Per-node
+  breakdown would land via a future `Enter`-on-row drill-in detail
+  pane.
+- **`connected_nodes` always equals `total_nodes`.** The current
+  `NodeDiagnostics` shape on `nifi-rust-client` 0.9 does not carry a
+  per-node connected/disconnected status field, so the cluster
+  summary reports `connected = total = diag.nodes.len()`
+  unconditionally. The top-bar identity strip therefore always
+  renders the node count in muted style. A real connected-vs-total
+  distinction needs an upstream library change.
+- **Aggregate-fallback warning persists.** When the nodewise sysdiag
+  call fails and the worker falls back to aggregate-only, the
+  reducer surfaces a WARN banner each cycle. The banner has no
+  auto-clear (it persists until dismissed), so under sustained
+  failure the user sees the same warning until they press Esc.
+  Auto-suppress on repeat is a polish item.
+
 ## Dependency on `nifi-rust-client`
 
 `nifi-lens` depends on `nifi-rust-client = "0.8.0"` with the `dynamic`
@@ -510,7 +539,20 @@ usable state.
     (emacs text-input conventions). Established rule: bare lowercase
     for view-local, bare capital for app-wide, no Ctrl chords except
     `Ctrl+C` or text-input helpers.
-12. **Phase 7 — Write-path scaffolding.** Dry-run mode, confirmation modal
+12. **UI Reorg Phase 3 — Overview merge.** *(shipped)* Health tab
+    deleted entirely; its node, repository, queue-pressure, and
+    sysdiag data merged into Overview as the new Layout 3 dashboard
+    (processor info line, nodes hero zone, bulletins+noisy split,
+    unhealthy queues full-width). Overview worker rewritten for
+    dual cadence (10s PG status, 30s system diagnostics with
+    nodewise → aggregate fallback). `AppState.cluster_summary` now
+    populated from the SystemDiag payload — top-bar identity strip
+    shows real `nodes N/M` instead of the Phase 1 `?/?` placeholder.
+    `ViewPayload::Health`, `HealthPayload`, `ViewId::Health`, the
+    `view/health/` directory, `app/state/health.rs`, and the F3 →
+    Health binding all removed. F-keys remap to F1..F5 =
+    Overview/Bulletins/Browser/Events/Tracer.
+13. **Phase 7 — Write-path scaffolding.** Dry-run mode, confirmation modal
     primitive, audit log, `--allow-writes` flag. No writes enabled yet —
     this just lays the rails for v2.
 

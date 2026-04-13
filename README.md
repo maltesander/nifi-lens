@@ -89,8 +89,9 @@ current view and mode.
 operational question.
 
 **Overview** — "Is this cluster OK right now?" Cluster identity, component
-counts, bulletin-rate sparkline, top-10 unhealthy queues, noisiest components.
-Refreshes every 10 seconds.
+counts, bulletin-rate sparkline, queue backpressure metrics, repository fill
+status, per-node health strips, and noisiest components. Dual-cadence refresh
+(PG status every 10 s, system diagnostics every 30 s).
 
 **Bulletins** *(shipped)* — cluster-wide bulletin tail with severity,
 component-type, and free-text filters; auto-scroll pause with a new-
@@ -111,16 +112,6 @@ content on demand (text, JSON prettyprint, or hex dump for binary). Press `s`
 to save the raw content bytes to a file. Cross-links from the Bulletins tab
 (`t`) and Browser tab (`t`) land on a latest-provenance-events mini list for
 the selected component.
-
-**Health** *(shipped)* — "How healthy is my cluster right now?" Two-pane
-ops dashboard with four categories: queue backpressure leaderboard with
-server-predicted time-to-full, repository fill bars with per-node breakdown,
-per-node heap/GC/load strips, and processor thread leaderboard. Navigate
-categories with `1`–`4` and scroll detail rows with `j`/`k`. Select a
-repository row to see per-node fill bars in the detail pane. Press `Enter`
-on a queue or processor row to jump directly to that component in the
-Browser tab. Refreshes automatically (PG status every 10 s, system
-diagnostics every 30 s); press `r` to force an immediate refresh.
 
 ### Browser tab
 
@@ -159,7 +150,11 @@ tool.
 | Key | Action |
 |---|---|
 | `Tab` / `Shift+Tab` | Cycle tabs |
-| `F1`–`F5` | Jump to tab directly |
+| `F1` | Jump to Overview |
+| `F2` | Jump to Bulletins |
+| `F3` | Jump to Browser |
+| `F4` | Jump to Events |
+| `F5` | Jump to Tracer |
 | `K` | Switch cluster context |
 | `f` | Global component fuzzy find (available once the Browser tab has loaded at least once to seed the index) |
 | `[` / `]` | Cross-link back / forward |
