@@ -461,6 +461,15 @@ fn restore_anchor(state: &mut AppState, entry: &crate::app::history::HistoryEntr
 // ---------------------------------------------------------------------------
 
 pub fn update(state: &mut AppState, event: AppEvent, config: &Config) -> UpdateResult {
+    let prev_tab = state.current_tab;
+    let result = update_inner(state, event, config);
+    if prev_tab == ViewId::Events && state.current_tab != ViewId::Events {
+        state.events.clear_failed_status();
+    }
+    result
+}
+
+fn update_inner(state: &mut AppState, event: AppEvent, config: &Config) -> UpdateResult {
     match event {
         AppEvent::Input(Event::Key(key)) => handle_key(state, key, config),
         AppEvent::Input(Event::Resize(_, _)) => UpdateResult {
@@ -1841,5 +1850,41 @@ mod tests {
             r.intent,
             Some(PendingIntent::RunProvenanceQuery { .. })
         ));
+    }
+
+    #[test]
+    fn tab_switch_away_from_events_clears_failed_status() {
+        use crate::event::{EventsPayload, ViewPayload};
+        use crate::view::events::state::EventsQueryStatus;
+
+        let mut s = fresh_state();
+        let c = tiny_config();
+        s.current_tab = ViewId::Events;
+
+        // Drive the events state into Running so QueryFailed applies.
+        update(
+            &mut s,
+            AppEvent::Data(ViewPayload::Events(EventsPayload::QueryStarted {
+                query_id: "q-1".into(),
+            })),
+            &c,
+        );
+        update(
+            &mut s,
+            AppEvent::Data(ViewPayload::Events(EventsPayload::QueryFailed {
+                query_id: Some("q-1".into()),
+                error: "boom".into(),
+            })),
+            &c,
+        );
+        assert!(matches!(s.events.status, EventsQueryStatus::Failed { .. }));
+
+        // Press F1 to switch to Overview.
+        update(&mut s, key(KeyCode::F(1), KeyModifiers::NONE), &c);
+        assert_eq!(s.current_tab, ViewId::Overview);
+        assert!(
+            matches!(s.events.status, EventsQueryStatus::Idle),
+            "leaving Events must reset Failed to Idle"
+        );
     }
 }

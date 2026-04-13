@@ -143,6 +143,16 @@ impl EventsState {
             pre_edit_value: None,
         }
     }
+
+    /// If the current query status is `Failed { .. }`, reset it to
+    /// `Idle`. Called by the app-level reducer when the user navigates
+    /// away from the Events tab so returning to the tab shows a clean
+    /// slate instead of a stale error.
+    pub fn clear_failed_status(&mut self) {
+        if matches!(self.status, EventsQueryStatus::Failed { .. }) {
+            self.status = EventsQueryStatus::Idle;
+        }
+    }
 }
 
 impl Default for EventsState {
