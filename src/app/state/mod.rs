@@ -465,6 +465,33 @@ pub fn update(state: &mut AppState, event: AppEvent, config: &Config) -> UpdateR
             tracer_followup: None,
         },
         AppEvent::Data(ViewPayload::Overview(payload)) => {
+            // Side-effects on AppState that need fields outside OverviewState
+            // happen here, before delegating to the per-view reducer. Mirrors
+            // the existing HealthPayload dispatch pattern.
+            //
+            // Populate the cluster_summary placeholder added in Phase 1.
+            // This drives the top-bar identity strip's `nodes N/M`.
+            //
+            // `NodeDiagnostics` has no `status` field that distinguishes
+            // connected from disconnected nodes, so both totals are set to
+            // `diag.nodes.len()` until upstream adds that field.
+            match &payload {
+                crate::event::OverviewPayload::SystemDiag(diag)
+                | crate::event::OverviewPayload::SystemDiagFallback { diag, .. } => {
+                    state.cluster_summary.total_nodes = Some(diag.nodes.len());
+                    state.cluster_summary.connected_nodes = Some(diag.nodes.len());
+                }
+                crate::event::OverviewPayload::PgStatus(_) => {}
+            }
+
+            if let crate::event::OverviewPayload::SystemDiagFallback { warning, .. } = &payload {
+                state.status.banner = Some(crate::app::state::Banner {
+                    severity: crate::app::state::BannerSeverity::Warning,
+                    message: warning.clone(),
+                    detail: None,
+                });
+            }
+
             apply_overview_payload(&mut state.overview, payload);
             state.last_refresh = Instant::now();
             UpdateResult {
@@ -1560,5 +1587,126 @@ mod tests {
             matches!(s.modal, Some(Modal::ContextSwitcher(_))),
             "K without SHIFT modifier should still open the context switcher"
         );
+    }
+
+    fn build_test_sysdiag_with_two_nodes() -> crate::client::health::SystemDiagSnapshot {
+        use crate::client::health::{
+            GcSnapshot, NodeDiagnostics, RepoUsage, SystemDiagAggregate, SystemDiagSnapshot,
+        };
+        use std::time::Instant;
+
+        let node = |address: &str| NodeDiagnostics {
+            address: address.into(),
+            heap_used_bytes: 512 * 1024 * 1024,
+            heap_max_bytes: 1024 * 1024 * 1024,
+            gc: vec![GcSnapshot {
+                name: "G1 Young".into(),
+                collection_count: 10,
+                collection_millis: 50,
+            }],
+            load_average: Some(1.5),
+            available_processors: Some(4),
+            total_threads: 50,
+            uptime: "1h".into(),
+            content_repos: vec![RepoUsage {
+                identifier: "content".into(),
+                used_bytes: 60,
+                total_bytes: 100,
+                free_bytes: 40,
+                utilization_percent: 60,
+            }],
+            flowfile_repo: Some(RepoUsage {
+                identifier: "flowfile".into(),
+                used_bytes: 30,
+                total_bytes: 100,
+                free_bytes: 70,
+                utilization_percent: 30,
+            }),
+            provenance_repos: vec![RepoUsage {
+                identifier: "provenance".into(),
+                used_bytes: 20,
+                total_bytes: 100,
+                free_bytes: 80,
+                utilization_percent: 20,
+            }],
+        };
+
+        SystemDiagSnapshot {
+            aggregate: SystemDiagAggregate {
+                content_repos: vec![RepoUsage {
+                    identifier: "content".into(),
+                    used_bytes: 60,
+                    total_bytes: 100,
+                    free_bytes: 40,
+                    utilization_percent: 60,
+                }],
+                flowfile_repo: Some(RepoUsage {
+                    identifier: "flowfile".into(),
+                    used_bytes: 30,
+                    total_bytes: 100,
+                    free_bytes: 70,
+                    utilization_percent: 30,
+                }),
+                provenance_repos: vec![RepoUsage {
+                    identifier: "provenance".into(),
+                    used_bytes: 20,
+                    total_bytes: 100,
+                    free_bytes: 80,
+                    utilization_percent: 20,
+                }],
+            },
+            nodes: vec![node("node1:8080"), node("node2:8080")],
+            fetched_at: Instant::now(),
+        }
+    }
+
+    #[test]
+    fn overview_sysdiag_payload_populates_cluster_summary() {
+        use crate::event::{OverviewPayload, ViewPayload};
+
+        let mut s = fresh_state();
+        let c = tiny_config();
+
+        // Pre-condition: cluster_summary is empty placeholder.
+        assert_eq!(s.cluster_summary.connected_nodes, None);
+        assert_eq!(s.cluster_summary.total_nodes, None);
+
+        let diag = build_test_sysdiag_with_two_nodes();
+
+        update(
+            &mut s,
+            AppEvent::Data(ViewPayload::Overview(OverviewPayload::SystemDiag(diag))),
+            &c,
+        );
+
+        assert_eq!(s.cluster_summary.total_nodes, Some(2));
+        // NodeDiagnostics has no status field, so connected_nodes equals total.
+        assert_eq!(s.cluster_summary.connected_nodes, Some(2));
+    }
+
+    #[test]
+    fn overview_sysdiag_fallback_payload_sets_warning_banner() {
+        use crate::event::{OverviewPayload, ViewPayload};
+
+        let mut s = fresh_state();
+        let c = tiny_config();
+        let diag = build_test_sysdiag_with_two_nodes();
+
+        update(
+            &mut s,
+            AppEvent::Data(ViewPayload::Overview(OverviewPayload::SystemDiagFallback {
+                diag,
+                warning: "nodewise diagnostics unavailable".into(),
+            })),
+            &c,
+        );
+
+        assert!(s.status.banner.is_some());
+        let banner = s.status.banner.unwrap();
+        assert_eq!(banner.severity, BannerSeverity::Warning);
+        assert_eq!(banner.message, "nodewise diagnostics unavailable");
+        // Cluster summary should still be populated even on fallback.
+        assert_eq!(s.cluster_summary.total_nodes, Some(2));
+        assert_eq!(s.cluster_summary.connected_nodes, Some(2));
     }
 }
