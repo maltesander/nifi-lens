@@ -80,13 +80,20 @@ fn render_filter_bar(frame: &mut Frame, area: Rect, state: &BulletinsState) {
         .constraints([Constraint::Length(1), Constraint::Length(1)])
         .split(area);
 
-    // Row 0: chips + type + text display + badge.
-    let mut row0 = vec![
-        chip_span("E", state.filters.show_error, theme::error()),
+    let counts = state.severity_counts();
+
+    // Row 0: chips-with-counts + type + text + mutes badge + +N new.
+    let mut row0: Vec<Span<'static>> = vec![
+        chip_with_count("E", counts.error, state.filters.show_error, theme::error()),
         Span::raw(" "),
-        chip_span("W", state.filters.show_warning, theme::warning()),
+        chip_with_count(
+            "W",
+            counts.warning,
+            state.filters.show_warning,
+            theme::warning(),
+        ),
         Span::raw(" "),
-        chip_span("I", state.filters.show_info, theme::info()),
+        chip_with_count("I", counts.info, state.filters.show_info, theme::info()),
         Span::raw("   type: "),
         Span::styled(
             component_type_label(state.filters.component_type),
@@ -94,46 +101,58 @@ fn render_filter_bar(frame: &mut Frame, area: Rect, state: &BulletinsState) {
         ),
         Span::raw("   "),
     ];
-    let text_display = if state.filters.text.is_empty() {
+    // Text-input display folded into the chip row.
+    let text_display = if let Some(buf) = state.text_input.as_deref() {
+        Span::styled(format!("text: {buf}_"), theme::accent())
+    } else if state.filters.text.is_empty() {
         Span::styled("text: (none)".to_string(), theme::muted())
     } else {
         Span::styled(format!("text: {}", state.filters.text), theme::accent())
     };
     row0.push(text_display);
-    let badge = if state.new_since_pause > 0 {
-        Span::styled(
-            format!("  +{} new", state.new_since_pause),
+    // Mute-count badge.
+    if !state.mutes.is_empty() {
+        row0.push(Span::raw("   "));
+        row0.push(Span::styled(
+            format!("muted: {}", state.mutes.len()),
+            theme::muted(),
+        ));
+    }
+    // Pause +N new badge.
+    if state.new_since_pause > 0 {
+        row0.push(Span::raw("   "));
+        row0.push(Span::styled(
+            format!("+{} new", state.new_since_pause),
             Style::default().add_modifier(Modifier::BOLD),
-        )
-    } else {
-        Span::raw("")
-    };
-    row0.push(Span::raw("   "));
-    row0.push(badge);
+        ));
+    }
     frame.render_widget(Paragraph::new(Line::from(row0)), chunks[0]);
 
-    // Row 1: hints OR live editor line.
-    let row1 = if let Some(buf) = state.text_input.as_deref() {
-        Line::from(vec![
-            Span::raw("/"),
-            Span::styled(buf.to_string(), theme::accent()),
-            Span::styled("_", theme::muted()),
-            Span::styled("  Enter commit · Esc cancel".to_string(), theme::muted()),
-        ])
-    } else {
+    // Row 1: static per-view hint line. Non-text-input mode only; while
+    // text-input is active the chip row already shows the live cursor.
+    let row1 = if state.text_input.is_some() {
         Line::from(Span::styled(
-            "— e/w/i toggle severity · T type · / text · c clear · p pause · ? help —".to_string(),
+            "Enter commit · Esc cancel".to_string(),
+            theme::muted(),
+        ))
+    } else {
+        let group_label = state.group_mode.label();
+        Line::from(Span::styled(
+            format!(
+                "— e/w/i severity · T type · / text · g group: {group_label} · m mute · c clear · p pause —"
+            ),
             theme::muted(),
         ))
     };
     frame.render_widget(Paragraph::new(row1), chunks[1]);
 }
 
-fn chip_span(label: &'static str, on: bool, on_style: Style) -> Span<'static> {
+fn chip_with_count(label: &'static str, count: usize, on: bool, on_style: Style) -> Span<'static> {
+    let text = format!("[{label} {count}]");
     if on {
-        Span::styled(format!("[{label}]"), on_style.add_modifier(Modifier::BOLD))
+        Span::styled(text, on_style.add_modifier(Modifier::BOLD))
     } else {
-        Span::styled(format!("[{label}]"), theme::muted())
+        Span::styled(text, theme::muted())
     }
 }
 
