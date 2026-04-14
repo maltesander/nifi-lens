@@ -120,6 +120,10 @@ pub struct NodeHealthRow {
     pub available_processors: Option<u32>,
     pub uptime: String,
     pub total_threads: u32,
+    pub gc: Vec<GcSnapshot>,
+    pub content_repos: Vec<RepoUsage>,
+    pub flowfile_repo: Option<RepoUsage>,
+    pub provenance_repos: Vec<RepoUsage>,
 }
 
 /// Stateful container for the node-health table.
@@ -173,6 +177,10 @@ pub fn update_nodes(state: &mut NodesState, diag: &SystemDiagSnapshot) {
                 available_processors: n.available_processors,
                 uptime: n.uptime.clone(),
                 total_threads: n.total_threads,
+                gc: n.gc.clone(),
+                content_repos: n.content_repos.clone(),
+                flowfile_repo: n.flowfile_repo.clone(),
+                provenance_repos: n.provenance_repos.clone(),
             }
         })
         .collect();
@@ -490,6 +498,72 @@ mod tests {
             node2.gc_delta.is_none(),
             "brand-new node must get None delta"
         );
+    }
+
+    #[test]
+    fn update_nodes_copies_gc_collectors_to_row() {
+        use std::time::Instant;
+        let diag = SystemDiagSnapshot {
+            aggregate: SystemDiagAggregate {
+                content_repos: vec![],
+                flowfile_repo: None,
+                provenance_repos: vec![],
+            },
+            nodes: vec![NodeDiagnostics {
+                address: "node1:8080".into(),
+                heap_used_bytes: 512 * 1024 * 1024,
+                heap_max_bytes: 1024 * 1024 * 1024,
+                gc: vec![
+                    GcSnapshot {
+                        name: "G1 Young".into(),
+                        collection_count: 10,
+                        collection_millis: 50,
+                    },
+                    GcSnapshot {
+                        name: "G1 Old".into(),
+                        collection_count: 2,
+                        collection_millis: 120,
+                    },
+                ],
+                load_average: None,
+                available_processors: None,
+                total_threads: 40,
+                uptime: "1h".into(),
+                content_repos: vec![RepoUsage {
+                    identifier: "c".into(),
+                    used_bytes: 60,
+                    total_bytes: 100,
+                    free_bytes: 40,
+                    utilization_percent: 60,
+                }],
+                flowfile_repo: Some(RepoUsage {
+                    identifier: "f".into(),
+                    used_bytes: 30,
+                    total_bytes: 100,
+                    free_bytes: 70,
+                    utilization_percent: 30,
+                }),
+                provenance_repos: vec![RepoUsage {
+                    identifier: "p".into(),
+                    used_bytes: 20,
+                    total_bytes: 100,
+                    free_bytes: 80,
+                    utilization_percent: 20,
+                }],
+            }],
+            fetched_at: Instant::now(),
+        };
+        let mut state = NodesState::default();
+        update_nodes(&mut state, &diag);
+
+        let row = &state.nodes[0];
+        assert_eq!(row.gc.len(), 2);
+        assert_eq!(row.gc[0].name, "G1 Young");
+        assert_eq!(row.gc[1].collection_millis, 120);
+        assert_eq!(row.content_repos.len(), 1);
+        assert_eq!(row.content_repos[0].utilization_percent, 60);
+        assert_eq!(row.flowfile_repo.as_ref().unwrap().utilization_percent, 30);
+        assert_eq!(row.provenance_repos[0].utilization_percent, 20);
     }
 
     #[test]
