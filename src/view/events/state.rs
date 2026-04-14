@@ -270,17 +270,22 @@ impl EventsState {
 
     /// Build a [`ProvenanceQuery`](crate::client::ProvenanceQuery) from the
     /// current filter state. Projects `filters.time` into a NiFi-native
-    /// `MM/dd/yyyy HH:mm:ss` start date (best-effort — empty /
-    /// unparseable input falls back to no start filter). The time is
-    /// computed in the local timezone so the server interprets it in
-    /// whatever zone both sides share (typical for dev fixtures);
-    /// falls back to UTC if the local offset is indeterminate.
+    /// `MM/dd/yyyy HH:mm:ss UTC` start date (best-effort — empty /
+    /// unparseable input falls back to no start filter).
+    ///
+    /// NiFi 2.x rejects start/end dates without a named timezone suffix
+    /// with `400 "Message body is malformed"`, and it parses the suffix
+    /// via `java.util.TimeZone.getTimeZone`, which accepts `UTC`,
+    /// `GMT`, or any IANA zone name. We always emit UTC because the
+    /// window math is computed in UTC internally — converting to local
+    /// would require re-embedding a timezone the server also has to
+    /// recognize.
     pub fn build_query(&self) -> crate::client::ProvenanceQuery {
         use time::OffsetDateTime;
         use time::macros::format_description;
 
-        let nifi_fmt = format_description!("[month]/[day]/[year] [hour]:[minute]:[second]");
-        let now = OffsetDateTime::now_local().unwrap_or_else(|_| OffsetDateTime::now_utc());
+        let nifi_fmt = format_description!("[month]/[day]/[year] [hour]:[minute]:[second] UTC");
+        let now = OffsetDateTime::now_utc();
         let start = parse_time_window(&self.filters.time)
             .and_then(|d| now.checked_sub(d))
             .and_then(|dt| dt.format(&nifi_fmt).ok());
@@ -831,6 +836,27 @@ mod tests {
         assert!(
             q.start_time_iso.is_some(),
             "last 15m default should parse into a start date"
+        );
+    }
+
+    #[test]
+    fn build_query_start_date_has_named_timezone_suffix() {
+        // NiFi 2.x rejects start/end dates without a named timezone
+        // suffix with `400 "Message body is malformed"`. Pin the
+        // `MM/dd/yyyy HH:mm:ss UTC` shape so a future refactor does
+        // not regress this.
+        let s = EventsState::new();
+        let q = s.build_query();
+        let start = q.start_time_iso.expect("default produces a start date");
+        assert!(
+            start.ends_with(" UTC"),
+            "start date must end with ' UTC' — NiFi rejects bare dates, got {start:?}"
+        );
+        // Shape check: 19 chars of `MM/dd/yyyy HH:mm:ss` + ` UTC` = 23.
+        assert_eq!(
+            start.len(),
+            23,
+            "start date must be exactly `MM/dd/yyyy HH:mm:ss UTC`, got {start:?}"
         );
     }
 

@@ -368,6 +368,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   truth for errors. Leaving the Events tab resets a stale `Failed`
   status back to `Idle` so returning shows a clean slate. A new
   global `Esc` at the top level dismisses the status banner.
+- **Events: provenance query `400 Message body is malformed`
+  resolved.** `build_query` now emits `startDate` in the
+  `MM/dd/yyyy HH:mm:ss UTC` format NiFi 2.x actually accepts. The
+  previous format had no timezone suffix, so every query submission
+  failed with a 400 before a single row could come back.
 - **Footer: `nifi-lens vX.Y.Z` is now visible on every frame.** The
   persistent nodewise-diagnostics warning used to hide the crate
   version, which lived in the status-bar left slot. The version
