@@ -673,6 +673,33 @@ fn push_visible_subtree(state: &mut BrowserState, idx: usize) {
     }
 }
 
+/// Type-specific state chip rendered in the fuzzy find State column.
+///
+/// Pre-computed at `build_flow_index` time from each arena node's
+/// `NodeStatusSummary` so the fuzzy renderer never touches the
+/// original DTO shape.
+#[derive(Debug, Clone)]
+pub enum StateBadge {
+    /// Processor run-state icon (`●` running, `◌` stopped, `⚠` invalid,
+    /// `⌀` disabled, `◐` validating). `style` carries the theme color.
+    Processor {
+        glyph: char,
+        style: ratatui::style::Style,
+    },
+    /// Controller service state word (`ENABLED`, `DISABLED`, ...) with
+    /// theme style.
+    Cs {
+        label: String,
+        style: ratatui::style::Style,
+    },
+    /// Process group rollup; renders `⚠N` when `invalid>0`, else blank.
+    Pg { invalid: u32 },
+    /// Connection queue fill; renders `N%` in muted style.
+    Conn { fill_percent: u32 },
+    /// Input or output port; renders blank (ports have no run state).
+    Port,
+}
+
 /// Fuzzy-find haystack shared between Browser and the f-key modal.
 /// Rebuilt on every tree snapshot.
 #[derive(Debug, Clone)]
@@ -1671,5 +1698,20 @@ mod tests {
         let mut s = BrowserState::new();
         apply_tree_snapshot(&mut s, snap);
         assert!(s.child_process_groups("pg1").is_empty());
+    }
+
+    #[test]
+    fn state_badge_processor_carries_icon_and_style() {
+        use super::StateBadge;
+        use crate::widget::run_icon::processor_run_icon;
+        let (glyph, style) = processor_run_icon("RUNNING");
+        let badge = StateBadge::Processor { glyph, style };
+        match badge {
+            StateBadge::Processor { glyph: g, style: s } => {
+                assert_eq!(g, '\u{25CF}');
+                assert_eq!(s, crate::theme::success());
+            }
+            _ => panic!("expected Processor variant"),
+        }
     }
 }
