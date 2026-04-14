@@ -433,17 +433,21 @@ impl ViewKeyHandler for TracerHandler {
                             }
                             FocusAction::Right => {
                                 ts::lineage_cycle_detail_tab_right(&mut state.tracer);
+                                let intent =
+                                    dispatch_content_fetch_for_active_tab(&mut state.tracer);
                                 Some(UpdateResult {
                                     redraw: true,
-                                    intent: None,
+                                    intent,
                                     tracer_followup: None,
                                 })
                             }
                             FocusAction::Left => {
                                 ts::lineage_cycle_detail_tab_left(&mut state.tracer);
+                                let intent =
+                                    dispatch_content_fetch_for_active_tab(&mut state.tracer);
                                 Some(UpdateResult {
                                     redraw: true,
-                                    intent: None,
+                                    intent,
                                     tracer_followup: None,
                                 })
                             }
@@ -523,6 +527,65 @@ impl ViewKeyHandler for TracerHandler {
     fn default_cross_link(_state: &AppState) -> Option<crate::input::GoTarget> {
         None
     }
+}
+
+/// When the user cycles into the Input or Output tab, trigger a
+/// content fetch if the tab isn't already loaded / loading for that
+/// side. Mutates the content pane to the appropriate `Loading` state
+/// and returns the `FetchEventContent` intent for the dispatcher.
+///
+/// Returns `None` when:
+/// - Not in Lineage mode.
+/// - Event detail isn't `Loaded` yet (the detail fetch is still in
+///   flight — a later cycle press will kick off the content fetch).
+/// - Active tab is `Attributes` (no fetch needed).
+/// - Content pane is already showing or loading the requested side.
+fn dispatch_content_fetch_for_active_tab(
+    state: &mut crate::view::tracer::state::TracerState,
+) -> Option<PendingIntent> {
+    use crate::client::ContentSide as ClientSide;
+    use crate::intent::{ContentSide as IntentSide, Intent};
+    use crate::view::tracer::state::{
+        ContentPane, DetailTab, EventDetail, TracerMode, lineage_mark_content_loading,
+    };
+
+    // Extract what we need without holding a mutable borrow, so we can
+    // call `lineage_mark_content_loading` afterwards.
+    let (event_id, want_client_side, want_intent_side) = {
+        let TracerMode::Lineage(ref view) = state.mode else {
+            return None;
+        };
+        let EventDetail::Loaded {
+            ref event,
+            ref content,
+        } = view.event_detail
+        else {
+            return None;
+        };
+
+        let (client_side, intent_side) = match view.active_detail_tab {
+            DetailTab::Attributes => return None,
+            DetailTab::Input => (ClientSide::Input, IntentSide::Input),
+            DetailTab::Output => (ClientSide::Output, IntentSide::Output),
+        };
+
+        // Skip if already showing or loading the requested side.
+        match content {
+            ContentPane::Shown { side, .. } if *side == client_side => return None,
+            ContentPane::LoadingInput if client_side == ClientSide::Input => return None,
+            ContentPane::LoadingOutput if client_side == ClientSide::Output => return None,
+            _ => {}
+        }
+
+        (event.summary.event_id, client_side, intent_side)
+    };
+
+    lineage_mark_content_loading(state, want_client_side);
+
+    Some(PendingIntent::Dispatch(Intent::FetchEventContent {
+        event_id,
+        side: want_intent_side,
+    }))
 }
 
 /// Extracts the raw bytes from the Tracer's content pane and builds a
@@ -978,5 +1041,94 @@ mod tests {
         };
         assert_eq!(v.active_detail_tab, ts::DetailTab::Input);
         assert!(matches!(v.focus, ts::LineageFocus::Content { .. }));
+    }
+
+    #[test]
+    fn cycling_to_input_tab_dispatches_fetch_event_content() {
+        // Regression: cycling into the Input tab must trigger a
+        // FetchEventContent intent and mark the content pane as
+        // LoadingInput. Before the fix, the cycle just updated
+        // `active_detail_tab` and left the content pane Collapsed, so
+        // users saw an empty tab forever.
+        use crate::app::state::PendingIntent;
+        use crate::input::FocusAction;
+        use crate::intent::{ContentSide as IntentSide, Intent};
+        let mut s = fresh_state();
+        s.current_tab = ViewId::Tracer;
+        seed_tracer_with_loaded_detail(&mut s);
+        // Reset to Attributes so Right cycles into Input.
+        if let TracerMode::Lineage(ref mut v) = s.tracer.mode {
+            v.active_detail_tab = ts::DetailTab::Attributes;
+            v.focus = ts::LineageFocus::Attributes { row: 0 };
+            if let EventDetail::Loaded {
+                ref mut content, ..
+            } = v.event_detail
+            {
+                *content = ContentPane::Collapsed;
+            }
+        }
+
+        let r = super::TracerHandler::handle_focus(&mut s, FocusAction::Right)
+            .expect("Right on Attributes tab must be consumed");
+        assert!(r.redraw);
+        assert!(
+            matches!(
+                r.intent,
+                Some(PendingIntent::Dispatch(Intent::FetchEventContent {
+                    side: IntentSide::Input,
+                    ..
+                }))
+            ),
+            "expected FetchEventContent(Input), got {:?}",
+            r.intent
+        );
+        // Content pane should now be in LoadingInput state.
+        let TracerMode::Lineage(ref v) = s.tracer.mode else {
+            panic!("expected Lineage");
+        };
+        let EventDetail::Loaded { ref content, .. } = v.event_detail else {
+            panic!("expected Loaded detail");
+        };
+        assert!(matches!(content, ContentPane::LoadingInput));
+    }
+
+    #[test]
+    fn cycling_to_input_tab_is_noop_when_already_loaded() {
+        // When content for the target side is already Shown, cycling
+        // must not re-dispatch the fetch. Users don't want a network
+        // round-trip every time they flip between tabs.
+        use crate::client::ContentRender;
+        use crate::client::ContentSide as ClientSide;
+        use crate::input::FocusAction;
+        use std::sync::Arc;
+
+        let mut s = fresh_state();
+        s.current_tab = ViewId::Tracer;
+        seed_tracer_with_loaded_detail(&mut s);
+        if let TracerMode::Lineage(ref mut v) = s.tracer.mode {
+            v.active_detail_tab = ts::DetailTab::Attributes;
+            v.focus = ts::LineageFocus::Attributes { row: 0 };
+            if let EventDetail::Loaded {
+                ref mut content, ..
+            } = v.event_detail
+            {
+                *content = ContentPane::Shown {
+                    side: ClientSide::Input,
+                    render: ContentRender::Text {
+                        pretty: "hi".into(),
+                    },
+                    total_bytes: 2,
+                    raw: Arc::from(b"hi".as_ref()),
+                };
+            }
+        }
+
+        // Cycle to Input (which is already loaded).
+        let r =
+            super::TracerHandler::handle_focus(&mut s, FocusAction::Right).expect("Right consumed");
+        assert!(
+            r.intent.is_none(),
+            "no fetch should dispatch when side is already Shown"
+        );
     }
 }
