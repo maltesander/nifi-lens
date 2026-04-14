@@ -454,10 +454,13 @@ pub(crate) fn nodes_to_events(
     events
         .into_iter()
         .map(|n| ProvenanceEventSummary {
-            event_id: 0,
+            // For EVENT-type nodes, ProvenanceNodeDto.id is the numeric
+            // provenance event id serialized as a string; parse it so
+            // the detail fetch can target the right event.
+            event_id: n.id.as_deref().and_then(|s| s.parse().ok()).unwrap_or(0),
             event_time_iso: n.timestamp.unwrap_or_default(),
             event_type: n.event_type.unwrap_or_default(),
-            component_id: n.id.unwrap_or_default(),
+            component_id: String::new(),
             component_name: String::new(),
             component_type: n.component_type.unwrap_or_default(),
             group_id: String::new(),
@@ -520,5 +523,55 @@ mod tests {
             ContentRender::Hex { first_4k } => assert_eq!(first_4k, "ff 00 61 fe"),
             other => panic!("got {other:?}"),
         }
+    }
+
+    #[test]
+    fn nodes_to_events_parses_event_id_from_node_id() {
+        use nifi_rust_client::dynamic::types::ProvenanceNodeDto;
+
+        let mut earlier = ProvenanceNodeDto::default();
+        earlier.r#type = Some("EVENT".to_string());
+        earlier.id = Some("42".to_string());
+        earlier.event_type = Some("RECEIVE".to_string());
+        earlier.millis = Some(1_000);
+        earlier.flow_file_uuid = Some("uuid-a".to_string());
+
+        let mut later = ProvenanceNodeDto::default();
+        later.r#type = Some("EVENT".to_string());
+        later.id = Some("99".to_string());
+        later.event_type = Some("DROP".to_string());
+        later.millis = Some(2_000);
+        later.flow_file_uuid = Some("uuid-b".to_string());
+
+        let mut flowfile = ProvenanceNodeDto::default();
+        flowfile.r#type = Some("FLOWFILE".to_string());
+        flowfile.id = Some("should-be-filtered".to_string());
+
+        let events = nodes_to_events(vec![later, earlier, flowfile]);
+
+        assert_eq!(events.len(), 2, "FLOWFILE nodes must be filtered out");
+        assert_eq!(
+            events[0].event_id, 42,
+            "sorted ascending by millis; event id parsed from node id"
+        );
+        assert_eq!(events[0].event_type, "RECEIVE");
+        assert_eq!(events[0].flow_file_uuid, "uuid-a");
+        assert_eq!(events[1].event_id, 99);
+        assert_eq!(events[1].event_type, "DROP");
+    }
+
+    #[test]
+    fn nodes_to_events_unparseable_id_falls_back_to_zero() {
+        use nifi_rust_client::dynamic::types::ProvenanceNodeDto;
+
+        let mut node = ProvenanceNodeDto::default();
+        node.r#type = Some("EVENT".to_string());
+        node.id = Some("not-a-number".to_string());
+        node.event_type = Some("RECEIVE".to_string());
+        node.millis = Some(0);
+
+        let events = nodes_to_events(vec![node]);
+        assert_eq!(events.len(), 1);
+        assert_eq!(events[0].event_id, 0);
     }
 }
