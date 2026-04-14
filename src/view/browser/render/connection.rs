@@ -74,7 +74,7 @@ fn render_endpoints_panel(frame: &mut Frame, area: Rect, d: &ConnectionDetail) {
 
     let lines = vec![
         Line::from(vec![
-            Span::styled("Fill      ".to_string(), theme::muted()),
+            Span::styled("Fill     ", theme::muted()),
             Span::styled(bar, gauge_style),
             Span::raw(format!(
                 "  {}% ({} ff / {})",
@@ -82,15 +82,15 @@ fn render_endpoints_panel(frame: &mut Frame, area: Rect, d: &ConnectionDetail) {
             )),
         ]),
         Line::from(vec![
-            Span::styled("From      ".to_string(), theme::muted()),
+            Span::styled("From     ", theme::muted()),
             Span::raw(format!("{} ({})", d.source_name, d.source_type)),
         ]),
         Line::from(vec![
-            Span::styled("To        ".to_string(), theme::muted()),
+            Span::styled("To       ", theme::muted()),
             Span::raw(format!("{} ({})", d.destination_name, d.destination_type)),
         ]),
         Line::from(vec![
-            Span::styled("Relations ".to_string(), theme::muted()),
+            Span::styled("Relations", theme::muted()),
             Span::raw(if d.selected_relationships.is_empty() {
                 "(none)".to_string()
             } else {
@@ -108,15 +108,15 @@ fn render_back_pressure_panel(frame: &mut Frame, area: Rect, d: &ConnectionDetai
 
     let lines = vec![
         Line::from(vec![
-            Span::styled("count    ".to_string(), theme::muted()),
-            Span::raw(format!("{}", d.back_pressure_object_threshold)),
+            Span::styled("count    ", theme::muted()),
+            Span::raw(d.back_pressure_object_threshold.to_string()),
         ]),
         Line::from(vec![
-            Span::styled("size     ".to_string(), theme::muted()),
+            Span::styled("size     ", theme::muted()),
             Span::raw(d.back_pressure_data_size_threshold.clone()),
         ]),
         Line::from(vec![
-            Span::styled("expire   ".to_string(), theme::muted()),
+            Span::styled("expire   ", theme::muted()),
             Span::raw(if d.flow_file_expiration.is_empty() {
                 "none".to_string()
             } else {
@@ -124,7 +124,7 @@ fn render_back_pressure_panel(frame: &mut Frame, area: Rect, d: &ConnectionDetai
             }),
         ]),
         Line::from(vec![
-            Span::styled("load-bal ".to_string(), theme::muted()),
+            Span::styled("load-bal ", theme::muted()),
             Span::raw(d.load_balance_strategy.clone()),
         ]),
     ];
