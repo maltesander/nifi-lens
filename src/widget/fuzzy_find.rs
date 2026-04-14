@@ -26,6 +26,18 @@ pub struct MatchedEntry {
     pub highlights: Vec<u32>,
 }
 
+fn kind_priority(kind: crate::client::NodeKind) -> u8 {
+    use crate::client::NodeKind;
+    match kind {
+        NodeKind::Processor => 0,
+        NodeKind::ProcessGroup => 1,
+        NodeKind::ControllerService => 2,
+        NodeKind::Connection => 3,
+        NodeKind::InputPort => 4,
+        NodeKind::OutputPort => 5,
+    }
+}
+
 impl Default for FuzzyFindState {
     fn default() -> Self {
         Self::new()
@@ -61,7 +73,13 @@ impl FuzzyFindState {
                 });
             }
         }
-        results.sort_by(|a, b| b.score.cmp(&a.score));
+        results.sort_by(|a, b| {
+            b.score.cmp(&a.score).then_with(|| {
+                let ka = index.entries[a.index_entry].kind;
+                let kb = index.entries[b.index_entry].kind;
+                kind_priority(ka).cmp(&kind_priority(kb))
+            })
+        });
         results.truncate(50);
         self.matches = results;
         if self.selected >= self.matches.len() {
@@ -179,5 +197,43 @@ mod tests {
             s.move_down();
         }
         assert!(s.selected < s.matches.len());
+    }
+
+    #[test]
+    fn kind_priority_tiebreak_puts_processor_above_pg() {
+        use crate::view::browser::state::StateBadge;
+        // Two entries engineered to tie on fuzzy score: identical names so
+        // nucleo returns the same score. Kinds differ — Processor should
+        // land first.
+        let index = FlowIndex {
+            entries: vec![
+                FlowIndexEntry {
+                    id: "pg1".into(),
+                    group_id: "root".into(),
+                    kind: NodeKind::ProcessGroup,
+                    name: "auth".into(),
+                    group_path: "(root)".into(),
+                    state: StateBadge::Pg { invalid: 0 },
+                    haystack: "auth   pg   (root)".into(),
+                },
+                FlowIndexEntry {
+                    id: "p1".into(),
+                    group_id: "root".into(),
+                    kind: NodeKind::Processor,
+                    name: "auth".into(),
+                    group_path: "root".into(),
+                    state: StateBadge::Processor {
+                        glyph: '\u{25CF}',
+                        style: crate::theme::success(),
+                    },
+                    haystack: "auth   processor   root".into(),
+                },
+            ],
+        };
+        let mut s = FuzzyFindState::new();
+        s.query = "auth".into();
+        s.rebuild_matches(&index);
+        let first = s.selected_entry(&index).unwrap();
+        assert_eq!(first.id, "p1", "processor should tie-break above PG");
     }
 }
