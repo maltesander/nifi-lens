@@ -181,7 +181,7 @@ fn render_nodes_zone(frame: &mut Frame, area: Rect, state: &OverviewState) {
     rows.push(Row::new(vec![
         Cell::from(Span::styled("  repositories", theme::muted())),
         Cell::from(Line::from(vec![
-            Span::raw("content "),
+            Span::raw("cnt  "),
             Span::styled(
                 fill_bar(4, repos.content_percent),
                 fill_style(repos.content_percent),
@@ -193,7 +193,7 @@ fn render_nodes_zone(frame: &mut Frame, area: Rect, state: &OverviewState) {
             ),
         ])),
         Cell::from(Line::from(vec![
-            Span::raw("flowfile "),
+            Span::raw("ff   "),
             Span::styled(
                 fill_bar(4, repos.flowfile_percent),
                 fill_style(repos.flowfile_percent),
@@ -205,7 +205,7 @@ fn render_nodes_zone(frame: &mut Frame, area: Rect, state: &OverviewState) {
             ),
         ])),
         Cell::from(Line::from(vec![
-            Span::raw("provenance "),
+            Span::raw("prov "),
             Span::styled(
                 fill_bar(4, repos.provenance_percent),
                 fill_style(repos.provenance_percent),
@@ -222,9 +222,9 @@ fn render_nodes_zone(frame: &mut Frame, area: Rect, state: &OverviewState) {
         rows,
         [
             Constraint::Fill(1),
-            Constraint::Length(18),
-            Constraint::Length(16),
-            Constraint::Length(18),
+            Constraint::Length(15),
+            Constraint::Length(15),
+            Constraint::Length(14),
         ],
     );
     frame.render_widget(table, area);
