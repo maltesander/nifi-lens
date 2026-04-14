@@ -401,12 +401,23 @@ fn render_unhealthy_queues(
             Cell::from(""),
         ])]
     } else {
+        let visible_rows = area.height.saturating_sub(1) as usize;
+        let scroll_offset = if visible_rows == 0 {
+            0
+        } else if selected >= visible_rows {
+            selected + 1 - visible_rows
+        } else {
+            0
+        };
+        let selected_in_window = selected.saturating_sub(scroll_offset);
         queues
             .iter()
+            .skip(scroll_offset)
+            .take(visible_rows)
             .enumerate()
             .map(|(idx, q)| {
                 let style = fill_style(q.fill_percent);
-                let row_style = if focused && idx == selected {
+                let row_style = if focused && idx == selected_in_window {
                     theme::cursor_row()
                 } else {
                     Style::default()
@@ -1122,6 +1133,81 @@ mod tests {
         assert!(
             output.contains("echo"),
             "selected row 'echo' must be visible after scroll"
+        );
+        assert!(
+            !output.contains("alfa"),
+            "'alfa' must be scrolled out of view"
+        );
+    }
+
+    #[test]
+    fn queues_panel_scrolls_to_selected() {
+        use crate::client::{
+            AboutSnapshot, BulletinBoardSnapshot, ControllerStatusSnapshot, QueueSnapshot,
+            RootPgStatusSnapshot,
+        };
+        use crate::event::{OverviewPayload, OverviewPgStatusPayload};
+        use crate::view::overview::state::apply_payload;
+        use std::time::{Duration, UNIX_EPOCH};
+
+        let mut state = OverviewState::new();
+        state.focus = crate::view::overview::state::OverviewFocus::Queues;
+
+        // Ten queues with distinct names. With 0 nodes the queues inner area
+        // is 10 rows tall, giving visible_rows=9 (one row is the header).
+        // selected=9 forces scroll_offset=1. "alfa" scrolls away; "juliet" appears.
+        let names = [
+            "alfa", "bravo", "charlie", "delta", "echo", "foxtrot", "golf", "hotel", "india",
+            "juliet",
+        ];
+        let connections: Vec<QueueSnapshot> = names
+            .iter()
+            .enumerate()
+            .map(|(i, &name)| QueueSnapshot {
+                id: format!("c{i}"),
+                group_id: "root".into(),
+                name: name.into(),
+                source_name: "Src".into(),
+                destination_name: "Dst".into(),
+                fill_percent: 99,
+                flow_files_queued: 100,
+                bytes_queued: 0,
+                queued_display: "100".into(),
+            })
+            .collect();
+
+        apply_payload(
+            &mut state,
+            OverviewPayload::PgStatus(OverviewPgStatusPayload {
+                about: AboutSnapshot {
+                    version: "2.8.0".into(),
+                    title: "NiFi".into(),
+                },
+                controller: ControllerStatusSnapshot {
+                    running: 1,
+                    stopped: 0,
+                    invalid: 0,
+                    disabled: 0,
+                    active_threads: 0,
+                    flow_files_queued: 0,
+                    bytes_queued: 0,
+                },
+                root_pg: RootPgStatusSnapshot {
+                    flow_files_queued: 0,
+                    bytes_queued: 0,
+                    connections,
+                },
+                bulletin_board: BulletinBoardSnapshot::default(),
+                fetched_at: UNIX_EPOCH + Duration::from_secs(T0),
+            }),
+        );
+        state.queues_selected = 9;
+
+        let output = render_to_string(&state);
+
+        assert!(
+            output.contains("juliet"),
+            "selected row 'juliet' must be visible after scroll"
         );
         assert!(
             !output.contains("alfa"),
