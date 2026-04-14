@@ -246,6 +246,34 @@ impl BrowserState {
         self.reset_detail_focus();
     }
 
+    /// Locate the PG with `group_id` in the arena, expand all ancestors,
+    /// rebuild visible, and move selection to that PG's row. Also resets
+    /// detail focus to `Tree`. Returns `true` on success, `false` if the
+    /// id is unknown.
+    ///
+    /// Used by `Enter` on a focused Child-groups row in the PG detail pane.
+    pub fn drill_into_group(&mut self, group_id: &str) -> bool {
+        let Some(target_idx) = self
+            .nodes
+            .iter()
+            .position(|n| matches!(n.kind, NodeKind::ProcessGroup) && n.id == group_id)
+        else {
+            return false;
+        };
+        // Walk up and expand every ancestor.
+        let mut cursor = self.nodes[target_idx].parent;
+        while let Some(p) = cursor {
+            self.expanded.insert(p);
+            cursor = self.nodes[p].parent;
+        }
+        rebuild_visible(self);
+        if let Some(pos) = self.visible.iter().position(|&i| i == target_idx) {
+            self.selected = pos;
+        }
+        self.reset_detail_focus();
+        true
+    }
+
     /// Set `pending_detail` to the currently-selected arena index and
     /// push a `DetailRequest` on `detail_tx` when a sender exists.
     pub fn emit_detail_request_for_current_selection(&mut self) {
@@ -2112,5 +2140,80 @@ mod tests {
         }
         // Row 1 newest-first → p2.
         assert_eq!(s.focused_row_source_id(&ring).as_deref(), Some("p2"),);
+    }
+
+    #[test]
+    fn drill_into_group_expands_ancestors_and_selects_child() {
+        use crate::client::{NodeKind, NodeStatusSummary};
+
+        // Arena: root (idx 0) → ingest (idx 1) → enrich (idx 2).
+        let mut s = BrowserState::new();
+        s.nodes.push(TreeNode {
+            parent: None,
+            children: vec![1],
+            kind: NodeKind::ProcessGroup,
+            id: "root".into(),
+            group_id: String::new(),
+            name: "root".into(),
+            status_summary: NodeStatusSummary::ProcessGroup {
+                running: 0,
+                stopped: 0,
+                invalid: 0,
+                disabled: 0,
+            },
+        });
+        s.nodes.push(TreeNode {
+            parent: Some(0),
+            children: vec![2],
+            kind: NodeKind::ProcessGroup,
+            id: "ingest".into(),
+            group_id: "root".into(),
+            name: "ingest".into(),
+            status_summary: NodeStatusSummary::ProcessGroup {
+                running: 0,
+                stopped: 0,
+                invalid: 0,
+                disabled: 0,
+            },
+        });
+        s.nodes.push(TreeNode {
+            parent: Some(1),
+            children: vec![],
+            kind: NodeKind::ProcessGroup,
+            id: "enrich".into(),
+            group_id: "ingest".into(),
+            name: "enrich".into(),
+            status_summary: NodeStatusSummary::ProcessGroup {
+                running: 0,
+                stopped: 0,
+                invalid: 0,
+                disabled: 0,
+            },
+        });
+        // Start with only the root visible, selection on root, no expansion.
+        s.visible = vec![0];
+        s.selected = 0;
+        s.detail_focus = DetailFocus::Section {
+            idx: 1,
+            rows: [0; MAX_DETAIL_SECTIONS],
+        };
+
+        let ok = s.drill_into_group("enrich");
+        assert!(ok);
+
+        // root and ingest must be expanded now; `visible` must contain
+        // [root, ingest, enrich]; selected must point to enrich.
+        assert!(s.expanded.contains(&0));
+        assert!(s.expanded.contains(&1));
+        assert_eq!(s.visible, vec![0, 1, 2]);
+        assert_eq!(s.visible[s.selected], 2);
+        // And detail focus must have reset.
+        assert_eq!(s.detail_focus, DetailFocus::Tree);
+    }
+
+    #[test]
+    fn drill_into_group_missing_id_returns_false() {
+        let mut s = BrowserState::new();
+        assert!(!s.drill_into_group("nope"));
     }
 }
