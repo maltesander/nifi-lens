@@ -275,6 +275,9 @@ fn highlight_spans_for_name<'a>(name: &'a str, highlights: &[u32]) -> Vec<Span<'
             cursor = end_char;
         } else {
             let start_byte = chars[cursor].0;
+            // unwrap_or(chars.len()) covers the drain case: when p_iter is
+            // exhausted, end_char becomes chars.len(), end_byte = name.len(),
+            // and cursor exits the while loop after this final plain span.
             let next_highlight_char = p_iter.peek().map(|p| *p as usize).unwrap_or(chars.len());
             let end_char = next_highlight_char.min(chars.len());
             let end_byte = if end_char < chars.len() {
@@ -563,5 +566,68 @@ mod tests {
             out.contains("no matches"),
             "expected 'no matches' placeholder in:\n{out}"
         );
+    }
+
+    #[test]
+    fn highlight_spans_for_name_empty_highlights_returns_single_raw_span() {
+        let name = "PutKafka";
+        let highlights: Vec<u32> = vec![];
+        let spans = highlight_spans_for_name(name, &highlights);
+        assert_eq!(spans.len(), 1);
+        assert_eq!(spans[0].content.as_ref(), "PutKafka");
+        assert!(
+            !spans[0]
+                .style
+                .add_modifier
+                .contains(ratatui::style::Modifier::BOLD)
+        );
+    }
+
+    #[test]
+    fn highlight_spans_for_name_adjacent_positions_collapse_into_one_span() {
+        // Positions 1, 2, 3 in "PutKafka" should merge into a single
+        // styled "utK" span flanked by "P" and "afka".
+        let name = "PutKafka";
+        let highlights: Vec<u32> = vec![1, 2, 3];
+        let spans = highlight_spans_for_name(name, &highlights);
+        let flattened: Vec<(String, bool)> = spans
+            .iter()
+            .map(|s| {
+                let bold = s
+                    .style
+                    .add_modifier
+                    .contains(ratatui::style::Modifier::BOLD);
+                (s.content.to_string(), bold)
+            })
+            .collect();
+        assert_eq!(
+            flattened,
+            vec![
+                ("P".into(), false),
+                ("utK".into(), true),
+                ("afka".into(), false),
+            ]
+        );
+    }
+
+    #[test]
+    fn highlight_spans_for_name_handles_multibyte_characters() {
+        // "café" has 4 characters but 5 bytes (é = 2 bytes). Highlight
+        // positions 2 and 3 cover 'f' and 'é' — the returned spans must
+        // slice on valid UTF-8 boundaries and must not panic.
+        let name = "café";
+        let highlights: Vec<u32> = vec![2, 3];
+        let spans = highlight_spans_for_name(name, &highlights);
+        let flattened: Vec<(String, bool)> = spans
+            .iter()
+            .map(|s| {
+                let bold = s
+                    .style
+                    .add_modifier
+                    .contains(ratatui::style::Modifier::BOLD);
+                (s.content.to_string(), bold)
+            })
+            .collect();
+        assert_eq!(flattened, vec![("ca".into(), false), ("fé".into(), true),]);
     }
 }
