@@ -331,9 +331,8 @@ mod snapshots {
     use ratatui::Terminal;
     use ratatui::backend::TestBackend;
 
-    #[test]
-    fn pg_detail_with_cs_list() {
-        let d = ProcessGroupDetail {
+    fn seeded_pg_detail() -> ProcessGroupDetail {
+        ProcessGroupDetail {
             id: "ingest".into(),
             name: "ingest".into(),
             parent_group_id: Some("root".into()),
@@ -346,27 +345,99 @@ mod snapshots {
             bytes_queued: 2048,
             queued_display: "4 / 2 KB".into(),
             controller_services: vec![
-                crate::client::ControllerServiceSummary {
+                ControllerServiceSummary {
                     id: "cs1".into(),
                     name: "http-pool".into(),
                     type_short: "StandardRestrictedSSLContextService".into(),
                     state: "ENABLED".into(),
                 },
-                crate::client::ControllerServiceSummary {
+                ControllerServiceSummary {
                     id: "cs2".into(),
                     name: "kafka-brokers".into(),
                     type_short: "Kafka3ConnectionService".into(),
                     state: "DISABLED".into(),
                 },
             ],
-        };
+        }
+    }
+
+    #[test]
+    fn pg_detail_with_cs_list() {
+        let d = seeded_pg_detail();
         let state = BrowserState::new();
-        let bulletins: std::collections::VecDeque<crate::client::BulletinSnapshot> =
-            std::collections::VecDeque::new();
+        let bulletins: VecDeque<BulletinSnapshot> = VecDeque::new();
         let mut terminal = Terminal::new(TestBackend::new(100, 24)).unwrap();
         terminal
             .draw(|f| render(f, f.area(), &d, &state, &bulletins, &DetailFocus::Tree))
             .unwrap();
         assert_snapshot!("pg_detail_with_cs_list", format!("{}", terminal.backend()));
+    }
+
+    #[test]
+    fn pg_detail_controller_services_focused() {
+        let d = seeded_pg_detail();
+        let state = BrowserState::new();
+        let bulletins: VecDeque<BulletinSnapshot> = VecDeque::new();
+        let focus = DetailFocus::Section {
+            idx: 0, // ControllerServices
+            rows: [1, 0, 0, 0],
+        };
+        let mut terminal = Terminal::new(TestBackend::new(100, 28)).unwrap();
+        terminal
+            .draw(|f| render(f, f.area(), &d, &state, &bulletins, &focus))
+            .unwrap();
+        assert_snapshot!(
+            "pg_detail_controller_services_focused",
+            format!("{}", terminal.backend())
+        );
+    }
+
+    #[test]
+    fn pg_detail_child_groups_focused() {
+        let d = seeded_pg_detail();
+        let state = BrowserState::new();
+        let bulletins: VecDeque<BulletinSnapshot> = VecDeque::new();
+        let focus = DetailFocus::Section {
+            idx: 1, // ChildGroups
+            rows: [0, 0, 0, 0],
+        };
+        let mut terminal = Terminal::new(TestBackend::new(100, 28)).unwrap();
+        terminal
+            .draw(|f| render(f, f.area(), &d, &state, &bulletins, &focus))
+            .unwrap();
+        assert_snapshot!(
+            "pg_detail_child_groups_focused",
+            format!("{}", terminal.backend())
+        );
+    }
+
+    #[test]
+    fn pg_detail_recent_bulletins_focused() {
+        let d = seeded_pg_detail();
+        let state = BrowserState::new();
+        let mut bulletins: VecDeque<BulletinSnapshot> = VecDeque::new();
+        bulletins.push_back(BulletinSnapshot {
+            id: 1,
+            level: "WARN".into(),
+            message: "hi".into(),
+            source_id: "p1".into(),
+            source_name: "p1".into(),
+            source_type: "PROCESSOR".into(),
+            group_id: "ingest".into(),
+            timestamp_iso: "2026-04-14T10:14:10.000Z".into(),
+            timestamp_human: "04/14/2026 10:14:10 UTC".into(),
+        });
+        let focus = DetailFocus::Section {
+            idx: 2, // RecentBulletins
+            rows: [0, 0, 0, 0],
+        };
+        let mut terminal = Terminal::new(TestBackend::new(100, 28)).unwrap();
+        terminal
+            .draw(|f| render(f, f.area(), &d, &state, &bulletins, &focus))
+            .unwrap();
+        assert_snapshot!(
+            "pg_detail_recent_bulletins_focused",
+            format!("{}", terminal.backend())
+        );
     }
 }
