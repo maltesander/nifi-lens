@@ -1,10 +1,10 @@
 //! Fuzzy-find modal backed by nucleo.
 //!
-//! The widget is state + reducer-side helpers only; the modal overlay
-//! render lands in Task 18. The corpus (`FlowIndex`) is shared with the
-//! Browser tab and populated by `apply_tree_snapshot`. This widget
-//! never touches the corpus directly — it receives a borrow at match
-//! time and writes results into its own `matches` field.
+//! The widget owns state, reducer helpers, and the modal overlay render.
+//! The corpus (`FlowIndex`) is shared with the Browser tab and populated
+//! by `apply_tree_snapshot`. This widget never touches the corpus directly
+//! — it receives a borrow at match time and writes results into its own
+//! `matches` field.
 
 use nucleo::{Config, Matcher, Utf32Str};
 use ratatui::Frame;
@@ -14,6 +14,7 @@ use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Borders, Clear, Paragraph};
 
 use crate::client::NodeKind;
+use crate::theme;
 use crate::view::browser::state::{FlowIndex, FlowIndexEntry};
 
 #[derive(Debug)]
@@ -153,7 +154,7 @@ pub fn render(
     lines.push(Line::from(format!("> {}_", fuzz.query)));
     lines.push(Line::from(Span::styled(
         "─".repeat(inner.width as usize),
-        crate::theme::muted(),
+        theme::muted(),
     )));
     if let Some(idx) = flow_index {
         let max_rows = (inner.height as usize).saturating_sub(3);
@@ -163,7 +164,7 @@ pub fn render(
             };
             let marker = if i == fuzz.selected { "▸ " } else { "  " };
             let style = if i == fuzz.selected {
-                crate::theme::cursor_row()
+                theme::cursor_row()
             } else {
                 Style::default()
             };
@@ -173,7 +174,7 @@ pub fn render(
             ]));
         }
     } else {
-        lines.push(Line::from(Span::styled("no index", crate::theme::muted())));
+        lines.push(Line::from(Span::styled("no index", theme::muted())));
     }
     frame.render_widget(Paragraph::new(lines), inner);
 }

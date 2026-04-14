@@ -3,8 +3,8 @@
 //! Per-kind detail renderers live in sibling files (`pg.rs`,
 //! `processor.rs`, `connection.rs`, `controller_service.rs`). This
 //! module owns the outer layout, the tree pane, the dispatch to the
-//! per-kind renderer, the loading / empty states, and the fuzzy-find /
-//! properties modal overlays.
+//! per-kind renderer, the loading / empty states, and the properties
+//! modal overlay.
 
 pub mod connection;
 pub mod controller_service;
