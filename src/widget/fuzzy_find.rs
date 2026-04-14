@@ -102,27 +102,43 @@ mod tests {
     use crate::client::NodeKind;
 
     fn sample_index() -> FlowIndex {
+        use crate::view::browser::state::StateBadge;
         FlowIndex {
             entries: vec![
                 FlowIndexEntry {
                     id: "p1".into(),
                     group_id: "root".into(),
                     kind: NodeKind::Processor,
-                    display: "PutKafka   Processor   root/publish".into(),
+                    name: "PutKafka".into(),
+                    group_path: "root/publish".into(),
+                    state: StateBadge::Processor {
+                        glyph: '\u{25CF}',
+                        style: crate::theme::success(),
+                    },
                     haystack: "putkafka   processor   root/publish".into(),
                 },
                 FlowIndexEntry {
                     id: "p2".into(),
                     group_id: "root".into(),
                     kind: NodeKind::Processor,
-                    display: "GenerateFlowFile   Processor   root".into(),
+                    name: "GenerateFlowFile".into(),
+                    group_path: "root".into(),
+                    state: StateBadge::Processor {
+                        glyph: '\u{25CF}',
+                        style: crate::theme::success(),
+                    },
                     haystack: "generateflowfile   processor   root".into(),
                 },
                 FlowIndexEntry {
                     id: "cs1".into(),
                     group_id: "root".into(),
                     kind: NodeKind::ControllerService,
-                    display: "kafka-brokers   CS   (controller)".into(),
+                    name: "kafka-brokers".into(),
+                    group_path: "(controller)".into(),
+                    state: StateBadge::Cs {
+                        label: "ENABLED".into(),
+                        style: crate::theme::success(),
+                    },
                     haystack: "kafka-brokers   cs   (controller)".into(),
                 },
             ],

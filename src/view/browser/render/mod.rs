@@ -319,7 +319,7 @@ pub fn render_fuzzy_find_modal(
             };
             lines.push(Line::from(vec![
                 Span::raw(marker),
-                Span::styled(entry.display.clone(), style),
+                Span::styled(format!("{}   {}", entry.name, entry.group_path), style),
             ]));
         }
     } else {

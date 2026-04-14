@@ -700,7 +700,12 @@ mod tests {
                 id: "p".into(),
                 group_id: "root".into(),
                 kind: NodeKind::Processor,
-                display: "P   Processor   root".into(),
+                name: "P".into(),
+                group_path: "root".into(),
+                state: crate::view::browser::state::StateBadge::Processor {
+                    glyph: '\u{25CF}',
+                    style: crate::theme::success(),
+                },
                 haystack: "p   processor   root".into(),
             }],
         });
@@ -717,7 +722,12 @@ mod tests {
                 id: "target".into(),
                 group_id: "g".into(),
                 kind: NodeKind::Processor,
-                display: "PutKafka   Processor   root".into(),
+                name: "PutKafka".into(),
+                group_path: "root".into(),
+                state: crate::view::browser::state::StateBadge::Processor {
+                    glyph: '\u{25CF}',
+                    style: crate::theme::success(),
+                },
                 haystack: "putkafka   processor   root".into(),
             }],
         });
@@ -742,7 +752,12 @@ mod tests {
                 id: "x".into(),
                 group_id: "g".into(),
                 kind: NodeKind::Processor,
-                display: "X   Processor   root".into(),
+                name: "X".into(),
+                group_path: "root".into(),
+                state: crate::view::browser::state::StateBadge::Processor {
+                    glyph: '\u{25CF}',
+                    style: crate::theme::success(),
+                },
                 haystack: "x   processor   root".into(),
             }],
         });

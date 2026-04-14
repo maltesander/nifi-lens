@@ -712,9 +712,16 @@ pub struct FlowIndexEntry {
     pub id: String,
     pub group_id: String,
     pub kind: NodeKind,
-    /// Display form shown in modal rows: `"{name}   {kind}   {group_path}"`.
-    pub display: String,
-    /// Lowercased display form, the haystack nucleo searches against.
+    /// Display name shown in the Name column.
+    pub name: String,
+    /// Group path for the Path column — e.g. `"root/ingest/enrich"`,
+    /// or `"(root)"` for the root PG.
+    pub group_path: String,
+    /// Type-specific state chip for the State column.
+    pub state: StateBadge,
+    /// Lowercased `"{name}   {kind_label}   {group_path}"` — the
+    /// haystack nucleo searches against. Highlight positions from the
+    /// matcher index into this string.
     pub haystack: String,
 }
 
@@ -788,13 +795,39 @@ pub fn build_flow_index(state: &BrowserState) -> FlowIndex {
                 Some(p) => path_to_root(&state.nodes, p),
                 None => "(root)".to_string(),
             };
-            let display = format!("{}   {}   {}", n.name, kind_label, group_path);
-            let haystack = display.to_lowercase();
+            let haystack = format!("{}   {}   {}", n.name, kind_label, group_path).to_lowercase();
+            let state_badge = match &n.status_summary {
+                NodeStatusSummary::Processor { run_status } => {
+                    let (glyph, style) = crate::widget::run_icon::processor_run_icon(run_status);
+                    StateBadge::Processor { glyph, style }
+                }
+                NodeStatusSummary::ControllerService { state } => {
+                    let style = match state.to_ascii_uppercase().as_str() {
+                        "ENABLED" => crate::theme::success(),
+                        "DISABLED" => crate::theme::disabled(),
+                        "ENABLING" | "DISABLING" => crate::theme::info(),
+                        _ => crate::theme::muted(),
+                    };
+                    StateBadge::Cs {
+                        label: state.clone(),
+                        style,
+                    }
+                }
+                NodeStatusSummary::ProcessGroup { invalid, .. } => {
+                    StateBadge::Pg { invalid: *invalid }
+                }
+                NodeStatusSummary::Connection { fill_percent, .. } => StateBadge::Conn {
+                    fill_percent: *fill_percent,
+                },
+                NodeStatusSummary::Port => StateBadge::Port,
+            };
             FlowIndexEntry {
                 id: n.id.clone(),
                 group_id: n.group_id.clone(),
                 kind: n.kind,
-                display,
+                name: n.name.clone(),
+                group_path,
+                state: state_badge,
                 haystack,
             }
         })
@@ -1209,12 +1242,84 @@ mod tests {
         let mut s = BrowserState::new();
         apply_tree_snapshot(&mut s, demo_snap());
         let idx = build_flow_index(&s);
-        // "upd" sits under root/ingest
         let upd = idx.entries.iter().find(|e| e.id == "upd").unwrap();
-        assert!(upd.display.contains("Processor"));
-        assert!(upd.display.contains("root/ingest"));
-        // Haystack is lowercased.
-        assert_eq!(upd.haystack, upd.display.to_lowercase());
+        assert_eq!(upd.group_path, "root/ingest");
+    }
+
+    #[test]
+    fn build_flow_index_populates_structured_fields() {
+        let mut s = BrowserState::new();
+        apply_tree_snapshot(&mut s, demo_snap());
+        let idx = build_flow_index(&s);
+        // "upd" sits under root/ingest per demo_snap
+        let upd = idx.entries.iter().find(|e| e.id == "upd").unwrap();
+        assert_eq!(upd.name, "upd");
+        assert_eq!(upd.group_path, "root/ingest");
+        match &upd.state {
+            StateBadge::Processor { glyph, .. } => assert_eq!(*glyph, '\u{25CF}'),
+            _ => panic!("expected Processor state badge"),
+        }
+    }
+
+    #[test]
+    fn build_flow_index_populates_cs_state_badge() {
+        let mut s = BrowserState::new();
+        s.nodes.push(TreeNode {
+            parent: None,
+            children: vec![1],
+            kind: NodeKind::ProcessGroup,
+            id: "root".into(),
+            group_id: String::new(),
+            name: "Root".into(),
+            status_summary: NodeStatusSummary::ProcessGroup {
+                running: 0,
+                stopped: 0,
+                invalid: 0,
+                disabled: 0,
+            },
+        });
+        s.nodes.push(TreeNode {
+            parent: Some(0),
+            children: vec![],
+            kind: NodeKind::ControllerService,
+            id: "cs1".into(),
+            group_id: "root".into(),
+            name: "kafka-brokers".into(),
+            status_summary: NodeStatusSummary::ControllerService {
+                state: "ENABLED".into(),
+            },
+        });
+        let idx = build_flow_index(&s);
+        let cs = idx.entries.iter().find(|e| e.id == "cs1").unwrap();
+        match &cs.state {
+            StateBadge::Cs { label, .. } => assert_eq!(label, "ENABLED"),
+            _ => panic!("expected Cs state badge"),
+        }
+    }
+
+    #[test]
+    fn build_flow_index_populates_invalid_count_for_pg() {
+        let mut s = BrowserState::new();
+        s.nodes.push(TreeNode {
+            parent: None,
+            children: vec![],
+            kind: NodeKind::ProcessGroup,
+            id: "root".into(),
+            group_id: String::new(),
+            name: "Root".into(),
+            status_summary: NodeStatusSummary::ProcessGroup {
+                running: 1,
+                stopped: 0,
+                invalid: 2,
+                disabled: 0,
+            },
+        });
+        let idx = build_flow_index(&s);
+        let pg = idx.entries.iter().find(|e| e.id == "root").unwrap();
+        match &pg.state {
+            StateBadge::Pg { invalid } => assert_eq!(*invalid, 2),
+            _ => panic!("expected Pg state badge"),
+        }
     }
 
     #[test]
