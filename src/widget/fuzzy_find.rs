@@ -8,6 +8,7 @@
 
 use nucleo::{Config, Matcher, Utf32Str};
 
+use crate::client::NodeKind;
 use crate::view::browser::state::{FlowIndex, FlowIndexEntry};
 
 #[derive(Debug)]
@@ -26,8 +27,8 @@ pub struct MatchedEntry {
     pub highlights: Vec<u32>,
 }
 
-fn kind_priority(kind: crate::client::NodeKind) -> u8 {
-    use crate::client::NodeKind;
+/// Lower return value means higher display priority.
+fn kind_priority(kind: NodeKind) -> u8 {
     match kind {
         NodeKind::Processor => 0,
         NodeKind::ProcessGroup => 1,
@@ -214,7 +215,7 @@ mod tests {
                     name: "auth".into(),
                     group_path: "(root)".into(),
                     state: StateBadge::Pg { invalid: 0 },
-                    haystack: "auth   pg   (root)".into(),
+                    haystack: "auth".into(),
                 },
                 FlowIndexEntry {
                     id: "p1".into(),
@@ -226,7 +227,7 @@ mod tests {
                         glyph: '\u{25CF}',
                         style: crate::theme::success(),
                     },
-                    haystack: "auth   processor   root".into(),
+                    haystack: "auth".into(),
                 },
             ],
         };
