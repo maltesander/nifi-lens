@@ -386,6 +386,16 @@ impl BrowserState {
                     .filter(|b| b.source_id == *source_id)
                     .count()
             }
+            (DetailSection::ControllerServices, NodeDetail::ProcessGroup(d)) => {
+                d.controller_services.len()
+            }
+            (DetailSection::ChildGroups, NodeDetail::ProcessGroup(d)) => {
+                self.child_process_groups(&d.id).len()
+            }
+            (DetailSection::RecentBulletins, NodeDetail::ProcessGroup(d)) => {
+                let group_id = &d.id;
+                bulletins.iter().filter(|b| b.group_id == *group_id).count()
+            }
             _ => 0,
         }
     }
@@ -1840,5 +1850,81 @@ mod tests {
             ][..],
         );
         assert_eq!(sections.len(), 3);
+    }
+
+    #[test]
+    fn section_len_process_group_sections() {
+        use crate::client::{
+            BulletinSnapshot, ControllerServiceSummary, NodeKind, NodeStatusSummary,
+            ProcessGroupDetail,
+        };
+        use std::collections::VecDeque;
+
+        let mut s = BrowserState::new();
+        // Minimal arena: one PG node at idx 0, visible.
+        s.nodes.push(TreeNode {
+            parent: None,
+            children: vec![],
+            kind: NodeKind::ProcessGroup,
+            id: "pg-1".into(),
+            group_id: String::new(),
+            name: "pg-1".into(),
+            status_summary: NodeStatusSummary::ProcessGroup {
+                running: 0,
+                stopped: 0,
+                invalid: 0,
+                disabled: 0,
+            },
+        });
+        s.visible = vec![0];
+        s.selected = 0;
+        s.details.insert(
+            0,
+            NodeDetail::ProcessGroup(ProcessGroupDetail {
+                id: "pg-1".into(),
+                name: "pg-1".into(),
+                parent_group_id: None,
+                running: 0,
+                stopped: 0,
+                invalid: 0,
+                disabled: 0,
+                active_threads: 0,
+                flow_files_queued: 0,
+                bytes_queued: 0,
+                queued_display: "0 / 0 B".into(),
+                controller_services: vec![
+                    ControllerServiceSummary {
+                        id: "cs1".into(),
+                        name: "cs1".into(),
+                        type_short: "T".into(),
+                        state: "ENABLED".into(),
+                    },
+                    ControllerServiceSummary {
+                        id: "cs2".into(),
+                        name: "cs2".into(),
+                        type_short: "T".into(),
+                        state: "ENABLED".into(),
+                    },
+                ],
+            }),
+        );
+
+        // No child PGs in the arena, one bulletin in the ring for this group.
+        let mut ring: VecDeque<BulletinSnapshot> = VecDeque::new();
+        ring.push_back(BulletinSnapshot {
+            id: 1,
+            level: "WARN".into(),
+            message: "hi".into(),
+            source_id: "p1".into(),
+            source_name: "p1".into(),
+            source_type: "PROCESSOR".into(),
+            group_id: "pg-1".into(),
+            timestamp_iso: "2026-04-14T10:00:00.000Z".into(),
+            timestamp_human: "04/14/2026 10:00:00 UTC".into(),
+        });
+
+        assert_eq!(s.section_len(DetailSection::ControllerServices, &ring), 2);
+        assert_eq!(s.section_len(DetailSection::ChildGroups, &ring), 0);
+        assert_eq!(s.section_len(DetailSection::RecentBulletins, &ring), 1);
     }
 }
