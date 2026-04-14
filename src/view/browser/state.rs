@@ -54,6 +54,8 @@ pub struct ChildPgSummary {
 pub enum DetailSection {
     Properties,
     RecentBulletins,
+    ControllerServices,
+    ChildGroups,
 }
 
 /// Per-node-kind list of focusable sections, in cycle order.
@@ -71,6 +73,11 @@ impl DetailSections {
                 DetailSections(&[DetailSection::Properties, DetailSection::RecentBulletins])
             }
             NK::ControllerService => DetailSections(&[DetailSection::Properties]),
+            NK::ProcessGroup => DetailSections(&[
+                DetailSection::ControllerServices,
+                DetailSection::ChildGroups,
+                DetailSection::RecentBulletins,
+            ]),
             _ => DetailSections(&[]),
         }
     }
@@ -1818,5 +1825,20 @@ mod tests {
             }
             _ => panic!("expected Processor variant"),
         }
+    }
+
+    #[test]
+    fn for_node_process_group_returns_three_sections() {
+        use crate::client::NodeKind;
+        let sections = DetailSections::for_node(NodeKind::ProcessGroup);
+        assert_eq!(
+            sections.0,
+            &[
+                DetailSection::ControllerServices,
+                DetailSection::ChildGroups,
+                DetailSection::RecentBulletins,
+            ][..],
+        );
+        assert_eq!(sections.len(), 3);
     }
 }
