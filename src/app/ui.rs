@@ -46,6 +46,9 @@ pub fn render(frame: &mut Frame, state: &AppState) {
             Modal::SaveEventContent(save) => {
                 crate::widget::save_modal::render(frame, frame.area(), save);
             }
+            Modal::NodeDetail(row) => {
+                crate::view::overview::render::render_node_detail_modal(frame, frame.area(), row);
+            }
         }
     }
 }

@@ -23,6 +23,7 @@ use crate::view::browser::state::{
 };
 use crate::view::bulletins::state::BulletinsState;
 use crate::view::events::state::EventsState;
+use crate::view::overview::state::OverviewFocus;
 use crate::view::overview::{OverviewState, apply_payload as apply_overview_payload};
 use crate::view::tracer::state::TracerState;
 
@@ -272,6 +273,8 @@ pub enum Modal {
     FuzzyFind(crate::widget::fuzzy_find::FuzzyFindState),
     Properties(crate::view::browser::state::PropertiesModalState),
     SaveEventContent(crate::widget::save_modal::SaveEventContentState),
+    /// Per-node detail popup opened from the Overview Nodes panel.
+    NodeDetail(Box<crate::client::health::NodeHealthRow>),
 }
 
 #[derive(Debug)]
@@ -604,6 +607,11 @@ fn modal_hints(modal: &Modal) -> Vec<crate::widget::hint_bar::HintSpan> {
                 enabled: true,
             },
         ],
+        Modal::NodeDetail(_) => vec![HintSpan {
+            key: "Esc",
+            action: "close",
+            enabled: true,
+        }],
     }
 }
 
@@ -1354,6 +1362,17 @@ fn handle_key(state: &mut AppState, key: KeyEvent, config: &Config) -> UpdateRes
                     _ => return UpdateResult::default(),
                 }
             }
+            Modal::NodeDetail(_) => {
+                if matches!(key.code, KeyCode::Esc) {
+                    state.modal = None;
+                    return UpdateResult {
+                        redraw: true,
+                        intent: None,
+                        tracer_followup: None,
+                    };
+                }
+                return UpdateResult::default();
+            }
         }
     }
 
@@ -1429,6 +1448,36 @@ fn build_go_crosslink(state: &AppState, target: crate::input::GoTarget) -> Optio
         (ViewId::Tracer, GoTarget::Events) => {
             let component_id = state.tracer.selected_component_id()?;
             Some(CrossLink::JumpToEvents { component_id })
+        }
+        (ViewId::Overview, GoTarget::Browser) => match state.overview.focus {
+            OverviewFocus::Noisy => {
+                let n = state.overview.noisy.get(state.overview.noisy_selected)?;
+                Some(CrossLink::OpenInBrowser {
+                    component_id: n.source_id.clone(),
+                    group_id: n.group_id.clone(),
+                })
+            }
+            OverviewFocus::Queues => {
+                let q = state
+                    .overview
+                    .unhealthy
+                    .get(state.overview.queues_selected)?;
+                Some(CrossLink::OpenInBrowser {
+                    component_id: q.id.clone(),
+                    group_id: q.group_id.clone(),
+                })
+            }
+            _ => None,
+        },
+        (ViewId::Overview, GoTarget::Events) => {
+            if state.overview.focus == OverviewFocus::Noisy {
+                let n = state.overview.noisy.get(state.overview.noisy_selected)?;
+                Some(CrossLink::JumpToEvents {
+                    component_id: n.source_id.clone(),
+                })
+            } else {
+                None
+            }
         }
         _ => None,
     }
@@ -2570,5 +2619,84 @@ mod tests {
             &c,
         );
         assert!(s.status.banner.is_none(), "Esc must dismiss the banner");
+    }
+
+    #[test]
+    fn overview_noisy_g_b_builds_open_in_browser() {
+        use crate::view::overview::state::{NoisyComponent, OverviewFocus, Severity as OvSev};
+        let mut s = fresh_state();
+        s.current_tab = ViewId::Overview;
+        s.overview.focus = OverviewFocus::Noisy;
+        s.overview.noisy = vec![NoisyComponent {
+            source_id: "proc-1".into(),
+            group_id: "grp-1".into(),
+            source_name: "MyProc".into(),
+            count: 3,
+            max_severity: OvSev::Error,
+        }];
+        s.overview.noisy_selected = 0;
+        let link = build_go_crosslink(&s, crate::input::GoTarget::Browser);
+        assert!(
+            matches!(&link, Some(CrossLink::OpenInBrowser { component_id, group_id })
+                if component_id == "proc-1" && group_id == "grp-1"),
+            "got {link:?}"
+        );
+    }
+
+    #[test]
+    fn overview_noisy_g_e_builds_jump_to_events() {
+        use crate::view::overview::state::{NoisyComponent, OverviewFocus, Severity as OvSev};
+        let mut s = fresh_state();
+        s.current_tab = ViewId::Overview;
+        s.overview.focus = OverviewFocus::Noisy;
+        s.overview.noisy = vec![NoisyComponent {
+            source_id: "proc-2".into(),
+            group_id: "grp-2".into(),
+            source_name: "OtherProc".into(),
+            count: 1,
+            max_severity: OvSev::Warning,
+        }];
+        s.overview.noisy_selected = 0;
+        let link = build_go_crosslink(&s, crate::input::GoTarget::Events);
+        assert!(
+            matches!(&link, Some(CrossLink::JumpToEvents { component_id })
+                if component_id == "proc-2"),
+            "got {link:?}"
+        );
+    }
+
+    #[test]
+    fn overview_queues_g_b_builds_open_in_browser() {
+        use crate::view::overview::state::{OverviewFocus, UnhealthyQueue};
+        let mut s = fresh_state();
+        s.current_tab = ViewId::Overview;
+        s.overview.focus = OverviewFocus::Queues;
+        s.overview.unhealthy = vec![UnhealthyQueue {
+            id: "conn-1".into(),
+            group_id: "grp-3".into(),
+            name: "q1".into(),
+            source_name: "A".into(),
+            destination_name: "B".into(),
+            fill_percent: 80,
+            flow_files_queued: 800,
+            bytes_queued: 0,
+            queued_display: "800".into(),
+        }];
+        s.overview.queues_selected = 0;
+        let link = build_go_crosslink(&s, crate::input::GoTarget::Browser);
+        assert!(
+            matches!(&link, Some(CrossLink::OpenInBrowser { component_id, group_id })
+                if component_id == "conn-1" && group_id == "grp-3"),
+            "got {link:?}"
+        );
+    }
+
+    #[test]
+    fn overview_no_focus_g_b_returns_none() {
+        use crate::view::overview::state::OverviewFocus;
+        let mut s = fresh_state();
+        s.current_tab = ViewId::Overview;
+        s.overview.focus = OverviewFocus::None;
+        assert!(build_go_crosslink(&s, crate::input::GoTarget::Browser).is_none());
     }
 }

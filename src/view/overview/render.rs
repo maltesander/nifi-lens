@@ -19,7 +19,7 @@ use ratatui::Frame;
 use ratatui::layout::{Constraint, Direction, Layout, Rect};
 use ratatui::style::Style;
 use ratatui::text::{Line, Span};
-use ratatui::widgets::{Cell, Paragraph, Row, Sparkline, Table};
+use ratatui::widgets::{Cell, Clear, Paragraph, Row, Sparkline, Table};
 
 use super::state::{
     BulletinBucket, NoisyComponent, OverviewSnapshot, OverviewState, Severity, UnhealthyQueue,
@@ -365,6 +365,39 @@ fn severity_style(s: Severity) -> Style {
         Severity::Warning => theme::warning(),
         Severity::Info => theme::info(),
         Severity::Unknown => theme::muted(),
+    }
+}
+
+/// Centred popup displaying per-node detail. Replace this stub with the
+/// full implementation in Task 7.
+pub fn render_node_detail_modal(
+    frame: &mut Frame,
+    area: Rect,
+    row: &crate::client::health::NodeHealthRow,
+) {
+    let popup = center_rect(80, 5, area);
+    frame.render_widget(Clear, popup);
+    let block = Panel::new(format!(" {} ", row.node_address)).into_block();
+    let inner = block.inner(popup);
+    frame.render_widget(block, popup);
+    frame.render_widget(
+        Paragraph::new(ratatui::text::Line::from(ratatui::text::Span::styled(
+            "loading…",
+            theme::muted(),
+        ))),
+        inner,
+    );
+}
+
+fn center_rect(pct_x: u16, height: u16, area: Rect) -> Rect {
+    let w = area.width * pct_x / 100;
+    let x = area.x + (area.width.saturating_sub(w)) / 2;
+    let y = area.y + (area.height.saturating_sub(height)) / 2;
+    Rect {
+        x,
+        y,
+        width: w,
+        height,
     }
 }
 
