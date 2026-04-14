@@ -1,49 +1,74 @@
 use ratatui::Frame;
-use ratatui::layout::{Alignment, Constraint, Direction, Layout, Rect};
-use ratatui::text::{Line, Span};
-use ratatui::widgets::{Block, Borders, Clear, Paragraph};
+use ratatui::layout::{Constraint, Direction, Layout, Rect};
+use ratatui::style::Style;
+use ratatui::text::Span;
+use ratatui::widgets::Clear;
 
 use crate::app::state::ContextSwitcherState;
 use crate::theme;
 
 pub fn render(frame: &mut Frame, area: Rect, state: &ContextSwitcherState) {
-    let height = (state.entries.len() as u16 + 4).clamp(6, 20);
+    use ratatui::layout::Constraint;
+    use ratatui::widgets::{Cell, Row, Table, TableState};
+
+    let height = (state.entries.len() as u16 + 5).clamp(7, 20);
     let modal = center(area, 70, height);
     frame.render_widget(Clear, modal);
-    let block = Block::default()
-        .title(" Switch Context (K) ")
-        .borders(Borders::ALL);
 
-    let lines: Vec<Line> = state
+    let block = crate::widget::panel::Panel::new(" Switch Context (K) ").into_block();
+    let inner = block.inner(modal);
+    frame.render_widget(block, modal);
+
+    let header = Row::new(vec![
+        Cell::from(Span::styled("Name", theme::muted())),
+        Cell::from(Span::styled("URL", theme::muted())),
+        Cell::from(Span::styled("Version", theme::muted())),
+        Cell::from(Span::styled("Active", theme::muted())),
+    ]);
+
+    let rows: Vec<Row> = state
         .entries
         .iter()
-        .enumerate()
-        .map(|(i, e)| {
-            let cursor = if i == state.cursor { "▸ " } else { "  " };
-            let active_marker = if e.is_active { " (*)" } else { "" };
-            let version = if e.connecting {
+        .map(|e| {
+            let name_style = if e.is_active {
+                theme::accent()
+            } else {
+                Style::default()
+            };
+            let version_text = if e.connecting {
                 "Connecting…".to_string()
             } else if let Some(v) = &e.version {
-                format!("(NiFi {v})")
+                v.to_string()
             } else {
                 String::new()
             };
-            let content = format!("{cursor}{} {} {}{active_marker}", e.name, e.url, version);
-            let mut span = Span::raw(content);
-            if e.is_active {
-                span = span.style(theme::accent());
-            }
-            if i == state.cursor {
-                span = span.style(theme::cursor_row());
-            }
-            Line::from(span)
+            let active_cell = if e.is_active {
+                Cell::from(Span::styled("(*)", theme::accent()))
+            } else {
+                Cell::from("")
+            };
+            Row::new(vec![
+                Cell::from(Span::styled(e.name.clone(), name_style)),
+                Cell::from(e.url.clone()),
+                Cell::from(version_text),
+                active_cell,
+            ])
         })
         .collect();
 
-    let p = Paragraph::new(lines)
-        .alignment(Alignment::Left)
-        .block(block);
-    frame.render_widget(p, modal);
+    let widths = [
+        Constraint::Length(20),
+        Constraint::Percentage(100),
+        Constraint::Length(12),
+        Constraint::Length(6),
+    ];
+    let table = Table::new(rows, widths)
+        .header(header)
+        .row_highlight_style(theme::cursor_row());
+
+    let mut ts = TableState::default();
+    ts.select(Some(state.cursor));
+    frame.render_stateful_widget(table, inner, &mut ts);
 }
 
 fn center(area: Rect, pct_x: u16, height: u16) -> Rect {
@@ -121,31 +146,72 @@ mod tests {
     }
 
     #[test]
-    fn marker_is_independent_of_cursor_position() {
-        // Active is entry 1 (dev-nifi-2-9-0), cursor is on entry 0.
+    fn context_table_renders_column_headers() {
         let state = sample_state("dev-nifi-2-9-0", 0);
         let out = render_with(&state);
-        // Cursor chevron is on the first row, marker is on the active row.
-        let lines: Vec<&str> = out.lines().collect();
-        let cursor_line = lines
-            .iter()
-            .find(|l| l.contains("▸"))
-            .expect("cursor chevron missing");
+        assert!(out.contains("Name"), "expected Name header in:\n{out}");
+        assert!(out.contains("URL"), "expected URL header in:\n{out}");
         assert!(
-            cursor_line.contains("dev-nifi-2-6-0"),
-            "cursor should be on first entry"
+            out.contains("Version"),
+            "expected Version header in:\n{out}"
+        );
+        assert!(out.contains("Active"), "expected Active header in:\n{out}");
+    }
+
+    #[test]
+    fn marker_is_independent_of_cursor_position() {
+        use ratatui::Terminal;
+        use ratatui::backend::TestBackend;
+        use ratatui::style::Modifier;
+
+        // Active is entry 1 (dev-nifi-2-9-0), cursor is on entry 0.
+        let state = sample_state("dev-nifi-2-9-0", 0);
+
+        let backend = TestBackend::new(120, 12);
+        let mut term = Terminal::new(backend).unwrap();
+        term.draw(|f| render(f, f.area(), &state)).unwrap();
+        let buffer = term.backend().buffer();
+
+        let area = buffer.area;
+        let width = area.width as usize;
+        let content = buffer.content();
+        let mut row_texts: Vec<(u16, String, bool)> = Vec::new();
+        for y in area.top()..area.bottom() {
+            let row_start = (y as usize) * width;
+            let row_slice = &content[row_start..row_start + width];
+            let mut text = String::new();
+            let mut reversed = false;
+            for cell in row_slice {
+                text.push_str(cell.symbol());
+                if cell.style().add_modifier.contains(Modifier::REVERSED) {
+                    reversed = true;
+                }
+            }
+            row_texts.push((y, text, reversed));
+        }
+
+        let cursor_row = row_texts
+            .iter()
+            .find(|(_, _, rev)| *rev)
+            .expect("cursor row not highlighted");
+        assert!(
+            cursor_row.1.contains("dev-nifi-2-6-0"),
+            "cursor should be on first entry, got row: {}",
+            cursor_row.1
         );
         assert!(
-            !cursor_line.contains("(*)"),
-            "cursor row is not the active row, should not carry marker"
+            !cursor_row.1.contains("(*)"),
+            "cursor row is not the active row, should not carry (*) marker"
         );
-        let active_line = lines
+
+        let active_row = row_texts
             .iter()
-            .find(|l| l.contains("(*)"))
+            .find(|(_, text, _)| text.contains("(*)"))
             .expect("active marker missing");
         assert!(
-            active_line.contains("dev-nifi-2-9-0"),
-            "active marker should be on dev-nifi-2-9-0"
+            active_row.1.contains("dev-nifi-2-9-0"),
+            "active marker should be on dev-nifi-2-9-0, got row: {}",
+            active_row.1
         );
     }
 }
