@@ -269,7 +269,13 @@ fn render_results_list(frame: &mut Frame, area: Rect, state: &EventsState) {
                 Cell::from(e.event_type.clone()).style(event_type_style(&e.event_type)),
                 Cell::from(e.component_name.clone()),
                 Cell::from(short_uuid(&e.flow_file_uuid)),
-                Cell::from(e.relationship.clone().unwrap_or_default()),
+                Cell::from(
+                    e.relationship
+                        .as_deref()
+                        .or(e.details.as_deref())
+                        .unwrap_or_default()
+                        .to_string(),
+                ),
             ])
             .style(row_style)
         })
@@ -279,14 +285,14 @@ fn render_results_list(frame: &mut Frame, area: Rect, state: &EventsState) {
         rows,
         [
             Constraint::Length(10), // time (HH:MM:SS)
-            Constraint::Length(12), // type
+            Constraint::Length(22), // type (longest: ATTRIBUTES_MODIFIED = 20 chars)
             Constraint::Length(24), // component
             Constraint::Length(14), // file uuid
-            Constraint::Fill(1),    // relationship / attrs
+            Constraint::Fill(1),    // relationship (ROUTE) or event details
         ],
     )
     .header(
-        Row::new(vec!["time", "type", "component", "uuid", "rel"])
+        Row::new(vec!["time", "type", "component", "uuid", "details"])
             .style(Style::default().add_modifier(Modifier::BOLD)),
     );
     frame.render_widget(table, area);
