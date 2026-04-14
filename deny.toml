@@ -10,12 +10,6 @@ targets = [
 
 [advisories]
 yanked = "deny"
-ignore = [
-    # paste is unmaintained (not a security vulnerability) and is a transitive
-    # dependency of ratatui. No safe upstream migration is available yet;
-    # ratatui will pick up an alternative when one is ready.
-    "RUSTSEC-2024-0436",
-]
 
 [bans]
 multiple-versions = "allow"
