@@ -283,6 +283,12 @@ pub struct LineageView {
     pub selected_event: usize,
     /// Detail pane for the selected event (loaded on demand).
     pub event_detail: EventDetail,
+    /// Accumulated cache of per-event details, keyed by event_id.
+    ///
+    /// Populated as the user navigates the timeline (auto-load on scroll).
+    /// Used to render attribute-change and content indicators in each
+    /// timeline row without requiring a separate fetch per visible row.
+    pub loaded_details: std::collections::HashMap<i64, ProvenanceEventDetail>,
     /// Whether to show all attributes or only changed ones.
     pub diff_mode: AttributeDiffMode,
     /// When the lineage snapshot was last fetched.
@@ -821,6 +827,7 @@ pub fn apply_payload(state: &mut TracerState, payload: TracerPayload) -> Option<
                     snapshot,
                     selected_event: 0,
                     event_detail: EventDetail::default(),
+                    loaded_details: std::collections::HashMap::new(),
                     diff_mode: AttributeDiffMode::default(),
                     fetched_at,
                     focus: LineageFocus::default(),
@@ -874,6 +881,10 @@ pub fn apply_payload(state: &mut TracerState, payload: TracerPayload) -> Option<
         }
         TracerPayload::EventDetail { event_id, detail } => {
             if let TracerMode::Lineage(ref mut view) = state.mode {
+                // Always cache — used to enrich all timeline rows with
+                // attribute-change and content indicators as the user scrolls.
+                view.loaded_details.insert(event_id, detail.clone());
+
                 let selected_id = view
                     .snapshot
                     .events
@@ -1561,6 +1572,7 @@ mod tests {
             },
             selected_event: 0,
             event_detail: EventDetail::default(),
+            loaded_details: std::collections::HashMap::new(),
             diff_mode: AttributeDiffMode::default(),
             fetched_at: SystemTime::now(),
             focus: LineageFocus::default(),

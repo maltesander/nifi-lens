@@ -212,17 +212,19 @@ impl ViewKeyHandler for TracerHandler {
                     LineageFocus::Timeline => match action {
                         FocusAction::Up => {
                             ts::lineage_move_up(&mut state.tracer);
+                            let intent = lineage_load_detail_intent(&mut state.tracer);
                             Some(UpdateResult {
                                 redraw: true,
-                                intent: None,
+                                intent,
                                 tracer_followup: None,
                             })
                         }
                         FocusAction::Down => {
                             ts::lineage_move_down(&mut state.tracer);
+                            let intent = lineage_load_detail_intent(&mut state.tracer);
                             Some(UpdateResult {
                                 redraw: true,
-                                intent: None,
+                                intent,
                                 tracer_followup: None,
                             })
                         }
@@ -230,9 +232,10 @@ impl ViewKeyHandler for TracerHandler {
                             for _ in 0..10 {
                                 ts::lineage_move_up(&mut state.tracer);
                             }
+                            let intent = lineage_load_detail_intent(&mut state.tracer);
                             Some(UpdateResult {
                                 redraw: true,
-                                intent: None,
+                                intent,
                                 tracer_followup: None,
                             })
                         }
@@ -240,9 +243,10 @@ impl ViewKeyHandler for TracerHandler {
                             for _ in 0..10 {
                                 ts::lineage_move_down(&mut state.tracer);
                             }
+                            let intent = lineage_load_detail_intent(&mut state.tracer);
                             Some(UpdateResult {
                                 redraw: true,
-                                intent: None,
+                                intent,
                                 tracer_followup: None,
                             })
                         }
@@ -255,9 +259,10 @@ impl ViewKeyHandler for TracerHandler {
                                 v.focus = LineageFocus::Timeline;
                                 v.active_detail_tab = DetailTab::default();
                             }
+                            let intent = lineage_load_detail_intent(&mut state.tracer);
                             Some(UpdateResult {
                                 redraw: true,
-                                intent: None,
+                                intent,
                                 tracer_followup: None,
                             })
                         }
@@ -271,9 +276,10 @@ impl ViewKeyHandler for TracerHandler {
                                     v.active_detail_tab = DetailTab::default();
                                 }
                             }
+                            let intent = lineage_load_detail_intent(&mut state.tracer);
                             Some(UpdateResult {
                                 redraw: true,
-                                intent: None,
+                                intent,
                                 tracer_followup: None,
                             })
                         }
@@ -609,6 +615,22 @@ pub(super) fn extract_raw_for_save(
     }
 }
 
+/// Marks the current lineage event detail as loading and returns a
+/// `PendingIntent` to fetch it. Returns `None` when not in Lineage mode or
+/// no event is selected.
+fn lineage_load_detail_intent(
+    state: &mut crate::view::tracer::state::TracerState,
+) -> Option<PendingIntent> {
+    use crate::intent::Intent;
+    use crate::view::tracer::state::{lineage_mark_detail_loading, lineage_selected_event_id};
+
+    let event_id = lineage_selected_event_id(state)?;
+    lineage_mark_detail_loading(state);
+    Some(PendingIntent::Dispatch(Intent::LoadEventDetail {
+        event_id,
+    }))
+}
+
 #[cfg(test)]
 mod tests {
     use super::super::tests::{fresh_state, key, tiny_config};
@@ -654,6 +676,7 @@ mod tests {
             },
             selected_event: 0,
             event_detail: EventDetail::NotLoaded,
+            loaded_details: std::collections::HashMap::new(),
             diff_mode: ts::AttributeDiffMode::default(),
             fetched_at: SystemTime::now(),
             focus: ts::LineageFocus::default(),
@@ -804,6 +827,7 @@ mod tests {
                 event: Box::new(detail),
                 content: ContentPane::default(),
             },
+            loaded_details: std::collections::HashMap::new(),
             diff_mode: ts::AttributeDiffMode::default(),
             fetched_at: SystemTime::now(),
             focus: ts::LineageFocus::Attributes { row: 0 },
@@ -847,6 +871,7 @@ mod tests {
                 event: Box::new(detail),
                 content: ContentPane::default(),
             },
+            loaded_details: std::collections::HashMap::new(),
             diff_mode: ts::AttributeDiffMode::default(),
             fetched_at: SystemTime::now(),
             focus: ts::LineageFocus::Attributes { row: 0 },

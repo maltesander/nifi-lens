@@ -231,31 +231,28 @@ fn render_lineage_timeline(
 
             let marker = if is_selected { ">" } else { " " };
             let time = format_tracer_time(&e.event_time_iso, now, cfg, true);
-            let event_type = format!("{:<16}", truncate(&e.event_type, 16));
-            let comp_name = format!("{:<22}", truncate(&e.component_name, 22));
-            let group = truncate(&e.group_id, 24).to_string();
+            // "ATTRIBUTES_MODIFIED" is 19 chars; pad to 19 + 1 space = 20.
+            let event_type = format!("{:<19}", truncate(&e.event_type, 19));
+            // component_type is populated from lineage nodes (component_name
+            // is empty for lineage queries). Pad to 19 + 1 space = 20.
+            let comp_type = format!("{:<19}", truncate(&e.component_type, 19));
 
             let is_fail = e.relationship.as_deref().is_some_and(|r| r == "failure");
 
-            if is_fail {
-                Row::new(vec![
-                    Cell::from(Span::styled(marker, base_style)),
-                    Cell::from(Span::styled(time, base_style)),
-                    Cell::from(Span::styled(event_type, base_style)),
-                    Cell::from(Span::styled(comp_name, base_style)),
-                    Cell::from(Span::styled(group, base_style)),
-                    Cell::from(Span::styled("  \u{2190} fail", theme::error())),
-                ])
-            } else {
-                Row::new(vec![
-                    Cell::from(Span::styled(marker, base_style)),
-                    Cell::from(Span::styled(time, base_style)),
-                    Cell::from(Span::styled(event_type, base_style)),
-                    Cell::from(Span::styled(comp_name, base_style)),
-                    Cell::from(Span::styled(group, base_style)),
-                    Cell::from(Span::raw("")),
-                ])
-            }
+            // Build enrichment spans from the detail cache.
+            let enrichment = lineage_enrichment_spans(
+                view.loaded_details.get(&e.event_id),
+                is_fail,
+                is_selected,
+            );
+
+            Row::new(vec![
+                Cell::from(Span::styled(marker, base_style)),
+                Cell::from(Span::styled(time, base_style)),
+                Cell::from(Span::styled(event_type, base_style)),
+                Cell::from(Span::styled(comp_type, base_style)),
+                Cell::from(enrichment),
+            ])
         })
         .collect();
 
@@ -264,10 +261,9 @@ fn render_lineage_timeline(
         [
             Constraint::Length(1),  // gutter
             Constraint::Length(20), // Mon DD HH:MM:SS.mmm (19) + 1 space
-            Constraint::Length(17), // event type (16 + 1 space)
-            Constraint::Length(23), // component name (22 + 1 space)
-            Constraint::Length(25), // group path (24 + 1 space)
-            Constraint::Fill(1),    // fail tag or empty
+            Constraint::Length(20), // event type (19 + 1 space)
+            Constraint::Length(20), // component type (19 + 1 space)
+            Constraint::Fill(1),    // enrichment: attr changes, content, fail tag
         ],
     );
     frame.render_widget(table, area);
@@ -279,7 +275,7 @@ fn render_lineage_detail(frame: &mut Frame, area: Rect, view: &LineageView) {
     match &view.event_detail {
         EventDetail::NotLoaded => {
             let para = Paragraph::new(Span::styled(
-                "Press Enter to load this event's detail",
+                "Navigate to an event to load its detail",
                 theme::muted(),
             ))
             .alignment(Alignment::Center);
@@ -786,6 +782,105 @@ fn format_tracer_time(
 }
 
 /// Truncates `s` to at most `max_chars` Unicode scalar values.
+/// Builds the enrichment `Line` for a lineage timeline row.
+///
+/// Shows:
+/// - `← fail` (red) when the event was routed to the failure relationship.
+/// - Attribute change summary (`+N added`, `~N changed`, `-N removed`) when a
+///   detail has been loaded for this event.
+/// - `in` / `out` when input or output content is available.
+///
+/// Returns an empty `Line` when no detail has been loaded yet and there is no
+/// failure indicator.
+fn lineage_enrichment_spans<'a>(
+    detail: Option<&'a crate::client::tracer::ProvenanceEventDetail>,
+    is_fail: bool,
+    is_selected: bool,
+) -> Line<'a> {
+    let mut spans: Vec<Span<'a>> = Vec::new();
+
+    if is_fail {
+        spans.push(Span::styled("\u{2190} fail", theme::error()));
+    }
+
+    if let Some(d) = detail {
+        let attrs = &d.attributes;
+        let added = attrs
+            .iter()
+            .filter(|a| a.previous.is_none() && a.current.is_some())
+            .count();
+        let changed = attrs
+            .iter()
+            .filter(|a| a.previous.is_some() && a.current.is_some() && a.previous != a.current)
+            .count();
+        let removed = attrs
+            .iter()
+            .filter(|a| a.previous.is_some() && a.current.is_none())
+            .count();
+
+        let has_attr_info = added > 0 || changed > 0 || removed > 0;
+        if has_attr_info {
+            if !spans.is_empty() {
+                spans.push(Span::raw("  "));
+            }
+            // On selected (reversed) rows use a plain style so the colour
+            // contrast stays legible; use semantic colours on normal rows.
+            if is_selected {
+                let parts: Vec<String> = [
+                    (added > 0).then(|| format!("+{added}")),
+                    (changed > 0).then(|| format!("~{changed}")),
+                    (removed > 0).then(|| format!("-{removed}")),
+                ]
+                .into_iter()
+                .flatten()
+                .collect();
+                spans.push(Span::raw(parts.join(" ")));
+                spans.push(Span::raw(" attrs"));
+            } else {
+                if added > 0 {
+                    spans.push(Span::styled(format!("+{added}"), theme::success()));
+                }
+                if changed > 0 {
+                    if added > 0 {
+                        spans.push(Span::raw(" "));
+                    }
+                    spans.push(Span::styled(format!("~{changed}"), theme::warning()));
+                }
+                if removed > 0 {
+                    if added > 0 || changed > 0 {
+                        spans.push(Span::raw(" "));
+                    }
+                    spans.push(Span::styled(format!("-{removed}"), theme::error()));
+                }
+                spans.push(Span::styled(" attrs", theme::muted()));
+            }
+        }
+
+        let has_content = d.input_available || d.output_available;
+        if has_content {
+            if !spans.is_empty() {
+                spans.push(Span::raw("  "));
+            }
+            let content_style = if is_selected {
+                Style::default()
+            } else {
+                theme::muted()
+            };
+            if d.input_available {
+                spans.push(Span::styled("in", content_style));
+            }
+            if d.input_available && d.output_available {
+                spans.push(Span::raw(" "));
+            }
+            if d.output_available {
+                spans.push(Span::styled("out", content_style));
+            }
+        }
+    }
+
+    Line::from(spans)
+}
+
 fn truncate(s: &str, max_chars: usize) -> &str {
     match s.char_indices().nth(max_chars) {
         Some((byte_idx, _)) => &s[..byte_idx],
@@ -942,6 +1037,7 @@ mod tests {
             },
             selected_event: 1,
             event_detail: EventDetail::NotLoaded,
+            loaded_details: std::collections::HashMap::new(),
             diff_mode: AttributeDiffMode::All,
             fetched_at: SystemTime::now(),
             focus: LineageFocus::default(),
