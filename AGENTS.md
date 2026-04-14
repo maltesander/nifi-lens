@@ -270,12 +270,12 @@ ring exceeds its capacity.
   unconditionally. The top-bar identity strip therefore always
   renders the node count in muted style. A real connected-vs-total
   distinction needs an upstream library change.
-- **Aggregate-fallback warning persists.** When the nodewise sysdiag
-  call fails and the worker falls back to aggregate-only, the
-  reducer surfaces a WARN banner each cycle. The banner has no
-  auto-clear (it persists until dismissed), so under sustained
-  failure the user sees the same warning until they press Esc.
-  Auto-suppress on repeat is a polish item.
+- **Aggregate-fallback warning persists.** *(resolved 2026-04-14)*
+  `OverviewState.sysdiag_mode` now tracks the last successful sysdiag
+  mode; the reducer only surfaces the WARN banner when the mode
+  transitions from nodewise (or unknown) into aggregate, so
+  steady-state aggregate polls are silent. A subsequent recovery +
+  re-fallback re-arms the banner. Top-level Esc dismisses the banner.
 - **Queue time-to-full predictions dropped from the UI.** The old Health
   "Queues" category showed server-predicted `~30s` / `~2m` / `stable`
   hints in a `time-to-full` column, and a red `∞ (stalled)` badge for
@@ -306,11 +306,14 @@ ring exceeds its capacity.
   message — they will not collapse with correctly-prefixed
   variants. Acceptable because NiFi's own emission is consistent
   in practice.
-- **Dedup key is stem-only, not attribute-aware.** Two bulletins
-  from the same processor with the same stem but different bound
-  attribute values in the stem (e.g. `… uuid=A` vs `… uuid=B`)
-  are distinct rows because the attribute values are part of the
-  stem. Collapse-across-attrs is a future polish item.
+- **Dedup key is stem-only, not attribute-aware.** *(resolved
+  2026-04-14)* A new `normalize_dynamic_brackets` helper walks
+  the stem and replaces every `[...]` region with `[…]` before
+  hashing. Two bulletins from the same processor with
+  `FlowFile[filename=A]` and `FlowFile[filename=B]` now collapse
+  into a single grouped row; the list displays the normalized
+  form while the detail pane keeps the latest raw message for
+  inspection.
 - **PG path fallback to UUID tail.** When the Browser tree has not
   yet been populated (user lands on Bulletins first), the PG path
   column shows `…d59706` (last 8 chars of the group UUID) in

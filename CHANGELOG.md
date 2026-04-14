@@ -354,6 +354,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   info hint instead of silently doing nothing.
 - Help modal: removed stale "Phase 3/4 stub" annotations from
   keybinding descriptions.
+- **Bulletins: grouped rows now collapse across dynamic flowfile
+  attributes.** The dedup key used by `g group: source+msg` was
+  stem-only — `FlowFile[filename=A]` and `FlowFile[filename=B]` from
+  the same processor never collapsed. A new
+  `normalize_dynamic_brackets` helper replaces each `[...]` region in
+  the stem with `[…]` so same-shaped messages fold into one row with
+  a real occurrence count. The detail pane still shows the latest raw
+  message verbatim.
+- **Events: query-failure no longer displays twice and clears on tab
+  switch.** The mid-pane `"query failed: …"` paragraph in the results
+  list is gone; the global footer banner is the single source of
+  truth for errors. Leaving the Events tab resets a stale `Failed`
+  status back to `Idle` so returning shows a clean slate. A new
+  global `Esc` at the top level dismisses the status banner.
+- **Footer: `nifi-lens vX.Y.Z` is now visible on every frame.** The
+  persistent nodewise-diagnostics warning used to hide the crate
+  version, which lived in the status-bar left slot. The version
+  moves to the hint-bar right edge (below the refresh-age
+  indicator), and the sysdiag fallback warning now fires only when
+  the mode transitions from nodewise to aggregate rather than on
+  every 30 s poll.
 
 ### Internal
 
