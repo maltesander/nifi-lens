@@ -8,7 +8,6 @@ use crate::app::state::ContextSwitcherState;
 use crate::theme;
 
 pub fn render(frame: &mut Frame, area: Rect, state: &ContextSwitcherState) {
-    use ratatui::layout::Constraint;
     use ratatui::widgets::{Cell, Row, Table, TableState};
 
     let height = (state.entries.len() as u16 + 5).clamp(7, 20);
@@ -60,7 +59,7 @@ pub fn render(frame: &mut Frame, area: Rect, state: &ContextSwitcherState) {
         Constraint::Length(20),
         Constraint::Percentage(100),
         Constraint::Length(12),
-        Constraint::Length(6),
+        Constraint::Length(8),
     ];
     let table = Table::new(rows, widths)
         .header(header)
