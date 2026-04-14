@@ -59,28 +59,85 @@ impl ViewKeyHandler for TracerHandler {
                 key: "Esc",
                 action: "cancel",
             }],
-            TracerMode::Lineage(_) => vec![
-                HintSpan {
-                    key: "↑/↓",
-                    action: "nav",
-                },
-                HintSpan {
-                    key: "Enter",
-                    action: "detail",
-                },
-                HintSpan {
-                    key: "Tab",
-                    action: "content",
-                },
-                HintSpan {
-                    key: "s",
-                    action: "save",
-                },
-                HintSpan {
-                    key: "Esc",
-                    action: "back",
-                },
-            ],
+            TracerMode::Lineage(view) => {
+                use crate::view::tracer::state::LineageFocus;
+                match view.focus {
+                    LineageFocus::Timeline => vec![
+                        HintSpan {
+                            key: "↑/↓",
+                            action: "nav",
+                        },
+                        HintSpan {
+                            key: "Enter",
+                            action: "detail",
+                        },
+                        HintSpan {
+                            key: "l",
+                            action: "attrs",
+                        },
+                        HintSpan {
+                            key: "i/o",
+                            action: "content",
+                        },
+                        HintSpan {
+                            key: "s",
+                            action: "save",
+                        },
+                        HintSpan {
+                            key: "Esc",
+                            action: "back",
+                        },
+                    ],
+                    LineageFocus::Attributes { .. } => vec![
+                        HintSpan {
+                            key: "↑/↓",
+                            action: "row",
+                        },
+                        HintSpan {
+                            key: "c",
+                            action: "copy",
+                        },
+                        HintSpan {
+                            key: "a",
+                            action: "diff",
+                        },
+                        HintSpan {
+                            key: "l",
+                            action: "content",
+                        },
+                        HintSpan {
+                            key: "h/Esc",
+                            action: "timeline",
+                        },
+                    ],
+                    LineageFocus::Content { .. } => vec![
+                        HintSpan {
+                            key: "↑/↓",
+                            action: "scroll",
+                        },
+                        HintSpan {
+                            key: "PgUp/Dn",
+                            action: "page",
+                        },
+                        HintSpan {
+                            key: "Home/End",
+                            action: "top/end",
+                        },
+                        HintSpan {
+                            key: "i/o",
+                            action: "input/output",
+                        },
+                        HintSpan {
+                            key: "s",
+                            action: "save",
+                        },
+                        HintSpan {
+                            key: "h/Esc",
+                            action: "timeline",
+                        },
+                    ],
+                }
+            }
         }
     }
 }
@@ -224,10 +281,140 @@ fn handle_lineage_running(state: &mut AppState, key: KeyEvent) -> Option<UpdateR
 
 fn handle_lineage(state: &mut AppState, key: KeyEvent) -> Option<UpdateResult> {
     use crate::intent::Intent;
-    use crate::view::tracer::state::{self as ts, ContentPane, EventDetail, TracerMode};
+    use crate::view::tracer::state::{
+        self as ts, ContentPane, EventDetail, LineageFocus, TracerMode,
+    };
 
     if !matches!(key.modifiers, KeyModifiers::NONE | KeyModifiers::SHIFT) {
         return None;
+    }
+
+    // Focus-aware branch: when a detail sub-pane owns focus, arrow
+    // keys and close chords are routed there before falling through
+    // to the timeline handler.
+    let focus = match state.tracer.mode {
+        TracerMode::Lineage(ref view) => view.focus,
+        _ => LineageFocus::Timeline,
+    };
+    if matches!(focus, LineageFocus::Attributes { .. }) {
+        match key.code {
+            KeyCode::Down => {
+                ts::lineage_attr_move_down(&mut state.tracer);
+                return Some(UpdateResult {
+                    redraw: true,
+                    intent: None,
+                    tracer_followup: None,
+                });
+            }
+            KeyCode::Up => {
+                ts::lineage_attr_move_up(&mut state.tracer);
+                return Some(UpdateResult {
+                    redraw: true,
+                    intent: None,
+                    tracer_followup: None,
+                });
+            }
+            KeyCode::Right | KeyCode::Char('l') => {
+                // Cycle into the content pane if it has been loaded.
+                if !ts::lineage_focus_content(&mut state.tracer) {
+                    state.status.banner = Some(Banner {
+                        severity: BannerSeverity::Info,
+                        message: "press i or o to load content first".to_string(),
+                        detail: None,
+                    });
+                }
+                return Some(UpdateResult {
+                    redraw: true,
+                    intent: None,
+                    tracer_followup: None,
+                });
+            }
+            KeyCode::Esc | KeyCode::Left | KeyCode::Char('h') => {
+                ts::lineage_focus_timeline(&mut state.tracer);
+                return Some(UpdateResult {
+                    redraw: true,
+                    intent: None,
+                    tracer_followup: None,
+                });
+            }
+            KeyCode::Char('c') => {
+                if let Some(value) = ts::lineage_focused_attribute_value(&state.tracer) {
+                    super::clipboard_copy(state, &value);
+                }
+                return Some(UpdateResult {
+                    redraw: true,
+                    intent: None,
+                    tracer_followup: None,
+                });
+            }
+            // Other keys (a/r/i/o/Enter/s/Tab) fall through to the
+            // timeline handler — they operate on the selected event,
+            // which is still identified by `view.selected_event`.
+            _ => {}
+        }
+    } else if matches!(focus, LineageFocus::Content { .. }) {
+        match key.code {
+            KeyCode::Down => {
+                ts::lineage_content_scroll_down(&mut state.tracer, 1);
+                return Some(UpdateResult {
+                    redraw: true,
+                    intent: None,
+                    tracer_followup: None,
+                });
+            }
+            KeyCode::Up => {
+                ts::lineage_content_scroll_up(&mut state.tracer, 1);
+                return Some(UpdateResult {
+                    redraw: true,
+                    intent: None,
+                    tracer_followup: None,
+                });
+            }
+            KeyCode::PageDown => {
+                ts::lineage_content_scroll_down(&mut state.tracer, 10);
+                return Some(UpdateResult {
+                    redraw: true,
+                    intent: None,
+                    tracer_followup: None,
+                });
+            }
+            KeyCode::PageUp => {
+                ts::lineage_content_scroll_up(&mut state.tracer, 10);
+                return Some(UpdateResult {
+                    redraw: true,
+                    intent: None,
+                    tracer_followup: None,
+                });
+            }
+            KeyCode::Home => {
+                ts::lineage_content_scroll_home(&mut state.tracer);
+                return Some(UpdateResult {
+                    redraw: true,
+                    intent: None,
+                    tracer_followup: None,
+                });
+            }
+            KeyCode::End => {
+                ts::lineage_content_scroll_end(&mut state.tracer);
+                return Some(UpdateResult {
+                    redraw: true,
+                    intent: None,
+                    tracer_followup: None,
+                });
+            }
+            KeyCode::Esc | KeyCode::Left | KeyCode::Char('h') => {
+                ts::lineage_focus_timeline(&mut state.tracer);
+                return Some(UpdateResult {
+                    redraw: true,
+                    intent: None,
+                    tracer_followup: None,
+                });
+            }
+            // a/r/i/o/s fall through so users can still toggle diff
+            // mode, refresh, flip content side, or open the save modal
+            // while focused on the content pane.
+            _ => {}
+        }
     }
 
     match key.code {
@@ -260,6 +447,25 @@ fn handle_lineage(state: &mut AppState, key: KeyEvent) -> Option<UpdateResult> {
             } else {
                 Some(UpdateResult::default())
             }
+        }
+        KeyCode::Right | KeyCode::Char('l') => {
+            // Cycle focus into the detail side. Prefer the attribute
+            // table; if it's empty, try the content pane; otherwise
+            // surface an info banner so the key doesn't read as broken.
+            if !ts::lineage_focus_attributes(&mut state.tracer)
+                && !ts::lineage_focus_content(&mut state.tracer)
+            {
+                state.status.banner = Some(Banner {
+                    severity: BannerSeverity::Info,
+                    message: "nothing to focus — press Enter to load detail first".to_string(),
+                    detail: None,
+                });
+            }
+            Some(UpdateResult {
+                redraw: true,
+                intent: None,
+                tracer_followup: None,
+            })
         }
         KeyCode::Char('i') => dispatch_content_fetch(state, crate::client::ContentSide::Input),
         KeyCode::Char('o') => dispatch_content_fetch(state, crate::client::ContentSide::Output),
@@ -489,6 +695,7 @@ mod tests {
             },
             diff_mode: ts::AttributeDiffMode::default(),
             fetched_at: SystemTime::now(),
+            focus: ts::LineageFocus::default(),
         }));
         (s, c)
     }
@@ -582,6 +789,7 @@ mod tests {
             event_detail: EventDetail::NotLoaded,
             diff_mode: ts::AttributeDiffMode::default(),
             fetched_at: SystemTime::now(),
+            focus: ts::LineageFocus::default(),
         }));
 
         // j is a no-op (returns None, global handler no-ops).

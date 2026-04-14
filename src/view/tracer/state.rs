@@ -145,6 +145,52 @@ pub struct LineageRunningState {
 
 // ── LineageView ──────────────────────────────────────────────────────────────
 
+/// Where keyboard focus lives in Lineage mode.
+///
+/// Mirrors the Browser tab's focus cycle: the timeline is the default
+/// "list" pane, and `l` / `Right` steps through sub-panels on the
+/// detail side — first the attribute table, then the content pane
+/// once it has been loaded.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum LineageFocus {
+    /// Arrow keys navigate the event timeline.
+    #[default]
+    Timeline,
+    /// Arrow keys navigate rows inside the attribute table.
+    Attributes {
+        /// Row index into the currently-visible (filtered) attribute list.
+        row: usize,
+    },
+    /// Arrow keys scroll the content pane. The pane is expanded to
+    /// consume most of the detail area under this focus.
+    Content {
+        /// Top-line scroll offset, in rendered content lines.
+        scroll: u16,
+    },
+}
+
+/// Classifies an attribute row for diff-style coloring.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AttributeClass {
+    /// Attribute is new in this event (no previous value).
+    Added,
+    /// Attribute was removed by this event (no current value).
+    Deleted,
+    /// Attribute is present on both sides (may or may not have changed).
+    Unchanged,
+}
+
+impl AttributeClass {
+    /// Returns the class of the given triple.
+    pub fn of(attr: &AttributeTriple) -> Self {
+        match (attr.previous.as_ref(), attr.current.as_ref()) {
+            (None, Some(_)) => Self::Added,
+            (Some(_), None) => Self::Deleted,
+            _ => Self::Unchanged,
+        }
+    }
+}
+
 /// State after the lineage query has finished.
 #[derive(Debug)]
 pub struct LineageView {
@@ -160,6 +206,8 @@ pub struct LineageView {
     pub diff_mode: AttributeDiffMode,
     /// When the lineage snapshot was last fetched.
     pub fetched_at: SystemTime,
+    /// Which sub-pane currently owns keyboard focus.
+    pub focus: LineageFocus,
 }
 
 impl ListNavigation for LineageView {
@@ -277,34 +325,208 @@ pub enum Followup {
 
 /// Moves the selection down by one row in Lineage mode, wrapping at the end.
 ///
-/// Resets `event_detail` to [`EventDetail::NotLoaded`] on any selection change.
+/// Resets `event_detail` to [`EventDetail::NotLoaded`] and focus to
+/// [`LineageFocus::Timeline`] on any selection change.
 pub fn lineage_move_down(state: &mut TracerState) {
     if let TracerMode::Lineage(ref mut view) = state.mode {
         let prev = view.selected_event;
         ListNavigation::move_down(view.as_mut());
         if view.selected_event != prev {
             view.event_detail = EventDetail::NotLoaded;
+            view.focus = LineageFocus::Timeline;
         }
     }
 }
 
 /// Moves the selection up by one row in Lineage mode, wrapping at the start.
 ///
-/// Resets `event_detail` to [`EventDetail::NotLoaded`] on any selection change.
+/// Resets `event_detail` to [`EventDetail::NotLoaded`] and focus to
+/// [`LineageFocus::Timeline`] on any selection change.
 pub fn lineage_move_up(state: &mut TracerState) {
     if let TracerMode::Lineage(ref mut view) = state.mode {
         let prev = view.selected_event;
         ListNavigation::move_up(view.as_mut());
         if view.selected_event != prev {
             view.event_detail = EventDetail::NotLoaded;
+            view.focus = LineageFocus::Timeline;
         }
     }
 }
 
 /// Sets `event_detail` to [`EventDetail::Loading`] in Lineage mode.
+///
+/// Also resets focus to [`LineageFocus::Timeline`] — the attribute
+/// table doesn't exist yet.
 pub fn lineage_mark_detail_loading(state: &mut TracerState) {
     if let TracerMode::Lineage(ref mut view) = state.mode {
         view.event_detail = EventDetail::Loading;
+        view.focus = LineageFocus::Timeline;
+    }
+}
+
+/// Returns the attributes currently visible in the detail pane, after
+/// applying [`AttributeDiffMode`] filtering. Returns an empty vec when
+/// the event detail hasn't loaded yet.
+pub fn lineage_visible_attributes(view: &LineageView) -> Vec<&AttributeTriple> {
+    match &view.event_detail {
+        EventDetail::Loaded { event, .. } => event
+            .attributes
+            .iter()
+            .filter(|a| view.diff_mode.matches(a))
+            .collect(),
+        _ => Vec::new(),
+    }
+}
+
+/// Attempts to move keyboard focus from the timeline into the attribute
+/// table. Only acts when an event detail is currently [`EventDetail::Loaded`]
+/// and has at least one visible attribute under the current diff mode.
+///
+/// Returns `true` on a successful transition, `false` otherwise (the
+/// caller can use the return value to surface an info banner).
+pub fn lineage_focus_attributes(state: &mut TracerState) -> bool {
+    if let TracerMode::Lineage(ref mut view) = state.mode
+        && matches!(view.event_detail, EventDetail::Loaded { .. })
+        && !lineage_visible_attributes(view).is_empty()
+    {
+        view.focus = LineageFocus::Attributes { row: 0 };
+        return true;
+    }
+    false
+}
+
+/// Returns keyboard focus to the timeline. Idempotent.
+pub fn lineage_focus_timeline(state: &mut TracerState) {
+    if let TracerMode::Lineage(ref mut view) = state.mode {
+        view.focus = LineageFocus::Timeline;
+    }
+}
+
+/// Moves the attribute-table row cursor down, wrapping at the end.
+/// No-op unless focus is [`LineageFocus::Attributes`].
+pub fn lineage_attr_move_down(state: &mut TracerState) {
+    if let TracerMode::Lineage(ref mut view) = state.mode
+        && let LineageFocus::Attributes { row } = view.focus
+    {
+        let visible = lineage_visible_attributes(view).len();
+        if visible == 0 {
+            view.focus = LineageFocus::Timeline;
+            return;
+        }
+        view.focus = LineageFocus::Attributes {
+            row: (row + 1) % visible,
+        };
+    }
+}
+
+/// Moves the attribute-table row cursor up, wrapping at the start.
+/// No-op unless focus is [`LineageFocus::Attributes`].
+pub fn lineage_attr_move_up(state: &mut TracerState) {
+    if let TracerMode::Lineage(ref mut view) = state.mode
+        && let LineageFocus::Attributes { row } = view.focus
+    {
+        let visible = lineage_visible_attributes(view).len();
+        if visible == 0 {
+            view.focus = LineageFocus::Timeline;
+            return;
+        }
+        let new_row = if row == 0 { visible - 1 } else { row - 1 };
+        view.focus = LineageFocus::Attributes { row: new_row };
+    }
+}
+
+/// Returns the focused attribute's current value, for clipboard copy.
+/// When the current value is absent (deleted rows), returns the previous
+/// value so `c` still yields something useful. Returns `None` unless the
+/// focus is on a valid attribute row.
+pub fn lineage_focused_attribute_value(state: &TracerState) -> Option<String> {
+    if let TracerMode::Lineage(ref view) = state.mode
+        && let LineageFocus::Attributes { row } = view.focus
+    {
+        let visible = lineage_visible_attributes(view);
+        if let Some(attr) = visible.get(row) {
+            return attr
+                .current
+                .clone()
+                .or_else(|| attr.previous.clone())
+                .or_else(|| Some(String::new()));
+        }
+    }
+    None
+}
+
+/// Returns the number of rendered lines for the currently shown content
+/// pane in the detail view, or 0 when nothing is displayable.
+pub fn lineage_content_line_count(view: &LineageView) -> usize {
+    if let EventDetail::Loaded {
+        content: ContentPane::Shown { render, .. },
+        ..
+    } = &view.event_detail
+    {
+        match render {
+            ContentRender::Text { pretty } => pretty.lines().count().max(1),
+            ContentRender::Hex { first_4k } => first_4k.lines().count().max(1),
+            ContentRender::Empty => 1,
+        }
+    } else {
+        0
+    }
+}
+
+/// Attempts to move keyboard focus into the content pane. Only acts
+/// when the current content pane is in [`ContentPane::Shown`] state.
+///
+/// Returns `true` on a successful transition.
+pub fn lineage_focus_content(state: &mut TracerState) -> bool {
+    if let TracerMode::Lineage(ref mut view) = state.mode
+        && let EventDetail::Loaded {
+            content: ContentPane::Shown { .. },
+            ..
+        } = &view.event_detail
+    {
+        view.focus = LineageFocus::Content { scroll: 0 };
+        return true;
+    }
+    false
+}
+
+/// Scrolls the focused content pane down by `by` lines, clamped at the
+/// last visible line. No-op unless focus is [`LineageFocus::Content`].
+pub fn lineage_content_scroll_down(state: &mut TracerState, by: u16) {
+    if let TracerMode::Lineage(ref mut view) = state.mode {
+        let max = lineage_content_line_count(view).saturating_sub(1) as u16;
+        if let LineageFocus::Content { ref mut scroll } = view.focus {
+            *scroll = scroll.saturating_add(by).min(max);
+        }
+    }
+}
+
+/// Scrolls the focused content pane up by `by` lines, saturating at 0.
+/// No-op unless focus is [`LineageFocus::Content`].
+pub fn lineage_content_scroll_up(state: &mut TracerState, by: u16) {
+    if let TracerMode::Lineage(ref mut view) = state.mode
+        && let LineageFocus::Content { ref mut scroll } = view.focus
+    {
+        *scroll = scroll.saturating_sub(by);
+    }
+}
+
+/// Sets the content-pane scroll to the first line (`Home`).
+pub fn lineage_content_scroll_home(state: &mut TracerState) {
+    if let TracerMode::Lineage(ref mut view) = state.mode
+        && let LineageFocus::Content { ref mut scroll } = view.focus
+    {
+        *scroll = 0;
+    }
+}
+
+/// Sets the content-pane scroll to the last line (`End`).
+pub fn lineage_content_scroll_end(state: &mut TracerState) {
+    if let TracerMode::Lineage(ref mut view) = state.mode {
+        let max = lineage_content_line_count(view).saturating_sub(1) as u16;
+        if let LineageFocus::Content { ref mut scroll } = view.focus {
+            *scroll = max;
+        }
     }
 }
 
@@ -472,6 +694,7 @@ pub fn apply_payload(state: &mut TracerState, payload: TracerPayload) -> Option<
                     event_detail: EventDetail::default(),
                     diff_mode: AttributeDiffMode::default(),
                     fetched_at,
+                    focus: LineageFocus::default(),
                 }));
                 return Some(Followup::DeleteLineageQuery {
                     query_id,
@@ -544,6 +767,7 @@ pub fn apply_payload(state: &mut TracerState, payload: TracerPayload) -> Option<
                     .map(|e| e.event_id);
                 if selected_id == Some(event_id) {
                     view.event_detail = EventDetail::Failed(error);
+                    view.focus = LineageFocus::Timeline;
                 }
             }
             None
@@ -562,6 +786,11 @@ pub fn apply_payload(state: &mut TracerState, payload: TracerPayload) -> Option<
                     total_bytes: snap.total_bytes,
                     raw: snap.raw,
                 };
+                // Reset scroll if the user was already focused on the
+                // content pane — the new payload replaces the old.
+                if let LineageFocus::Content { ref mut scroll } = view.focus {
+                    *scroll = 0;
+                }
             }
             None
         }
@@ -1204,6 +1433,7 @@ mod tests {
             event_detail: EventDetail::default(),
             diff_mode: AttributeDiffMode::default(),
             fetched_at: SystemTime::now(),
+            focus: LineageFocus::default(),
         }));
     }
 
@@ -1351,6 +1581,348 @@ mod tests {
                 ..
             }
         ));
+    }
+
+    // ── LineageFocus + attribute class tests ───────────────────────────────
+
+    fn fake_detail_with_attrs(event_id: i64, attrs: Vec<AttributeTriple>) -> ProvenanceEventDetail {
+        ProvenanceEventDetail {
+            summary: fake_summary(event_id, "uuid-detail"),
+            attributes: attrs,
+            transit_uri: None,
+            input_available: false,
+            output_available: false,
+        }
+    }
+
+    fn triple(key: &str, prev: Option<&str>, curr: Option<&str>) -> AttributeTriple {
+        AttributeTriple {
+            key: key.to_string(),
+            previous: prev.map(String::from),
+            current: curr.map(String::from),
+        }
+    }
+
+    #[test]
+    fn attribute_class_added_deleted_unchanged() {
+        assert_eq!(
+            AttributeClass::of(&triple("k", None, Some("v"))),
+            AttributeClass::Added
+        );
+        assert_eq!(
+            AttributeClass::of(&triple("k", Some("v"), None)),
+            AttributeClass::Deleted
+        );
+        assert_eq!(
+            AttributeClass::of(&triple("k", Some("v"), Some("v"))),
+            AttributeClass::Unchanged
+        );
+        // Modified is grouped under Unchanged ("both sides present").
+        assert_eq!(
+            AttributeClass::of(&triple("k", Some("old"), Some("new"))),
+            AttributeClass::Unchanged
+        );
+    }
+
+    fn load_detail_with_attrs(state: &mut TracerState, attrs: Vec<AttributeTriple>) {
+        let TracerMode::Lineage(ref mut view) = state.mode else {
+            panic!("expected Lineage mode");
+        };
+        let selected_id = view.snapshot.events[view.selected_event].event_id;
+        view.event_detail = EventDetail::Loaded {
+            event: Box::new(fake_detail_with_attrs(selected_id, attrs)),
+            content: ContentPane::default(),
+        };
+    }
+
+    #[test]
+    fn lineage_focus_attributes_rejects_when_detail_not_loaded() {
+        let mut state = TracerState::new();
+        seed_lineage(&mut state, &[1]);
+        assert!(!lineage_focus_attributes(&mut state));
+        let TracerMode::Lineage(ref view) = state.mode else {
+            panic!("expected Lineage mode");
+        };
+        assert_eq!(view.focus, LineageFocus::Timeline);
+    }
+
+    #[test]
+    fn lineage_focus_attributes_rejects_when_visible_list_empty() {
+        let mut state = TracerState::new();
+        seed_lineage(&mut state, &[1]);
+        // Loaded but no attributes at all.
+        load_detail_with_attrs(&mut state, vec![]);
+        assert!(!lineage_focus_attributes(&mut state));
+
+        // Loaded with only unchanged attrs but filter = Changed → empty visible.
+        load_detail_with_attrs(&mut state, vec![triple("k", Some("v"), Some("v"))]);
+        if let TracerMode::Lineage(ref mut view) = state.mode {
+            view.diff_mode = AttributeDiffMode::Changed;
+        }
+        assert!(!lineage_focus_attributes(&mut state));
+    }
+
+    #[test]
+    fn lineage_focus_attributes_enters_and_returns_to_timeline() {
+        let mut state = TracerState::new();
+        seed_lineage(&mut state, &[1]);
+        load_detail_with_attrs(
+            &mut state,
+            vec![
+                triple("added", None, Some("new")),
+                triple("removed", Some("old"), None),
+                triple("kept", Some("v"), Some("v")),
+            ],
+        );
+
+        assert!(lineage_focus_attributes(&mut state));
+        let TracerMode::Lineage(ref view) = state.mode else {
+            panic!("expected Lineage mode");
+        };
+        assert_eq!(view.focus, LineageFocus::Attributes { row: 0 });
+
+        lineage_focus_timeline(&mut state);
+        let TracerMode::Lineage(ref view) = state.mode else {
+            panic!("expected Lineage mode");
+        };
+        assert_eq!(view.focus, LineageFocus::Timeline);
+    }
+
+    #[test]
+    fn lineage_attr_move_wraps_and_is_noop_without_focus() {
+        let mut state = TracerState::new();
+        seed_lineage(&mut state, &[1]);
+        load_detail_with_attrs(
+            &mut state,
+            vec![
+                triple("a", None, Some("1")),
+                triple("b", None, Some("2")),
+                triple("c", None, Some("3")),
+            ],
+        );
+        // No focus yet — attr nav is a no-op.
+        lineage_attr_move_down(&mut state);
+        let TracerMode::Lineage(ref view) = state.mode else {
+            panic!("expected Lineage mode");
+        };
+        assert_eq!(view.focus, LineageFocus::Timeline);
+
+        assert!(lineage_focus_attributes(&mut state));
+        lineage_attr_move_down(&mut state);
+        let TracerMode::Lineage(ref view) = state.mode else {
+            panic!("expected Lineage mode");
+        };
+        assert_eq!(view.focus, LineageFocus::Attributes { row: 1 });
+
+        lineage_attr_move_down(&mut state);
+        lineage_attr_move_down(&mut state); // wraps 2 → 0
+        let TracerMode::Lineage(ref view) = state.mode else {
+            panic!("expected Lineage mode");
+        };
+        assert_eq!(view.focus, LineageFocus::Attributes { row: 0 });
+
+        // Up from 0 wraps to last (2).
+        lineage_attr_move_up(&mut state);
+        let TracerMode::Lineage(ref view) = state.mode else {
+            panic!("expected Lineage mode");
+        };
+        assert_eq!(view.focus, LineageFocus::Attributes { row: 2 });
+    }
+
+    #[test]
+    fn lineage_focused_attribute_value_reads_current_or_previous() {
+        let mut state = TracerState::new();
+        seed_lineage(&mut state, &[1]);
+        load_detail_with_attrs(
+            &mut state,
+            vec![
+                triple("added", None, Some("new-val")),
+                triple("removed", Some("old-val"), None),
+            ],
+        );
+        assert!(lineage_focus_attributes(&mut state));
+        // Row 0 = added → current
+        assert_eq!(
+            lineage_focused_attribute_value(&state).as_deref(),
+            Some("new-val")
+        );
+        lineage_attr_move_down(&mut state);
+        // Row 1 = removed → previous (because current is None)
+        assert_eq!(
+            lineage_focused_attribute_value(&state).as_deref(),
+            Some("old-val")
+        );
+    }
+
+    #[test]
+    fn lineage_move_selection_resets_focus_and_detail() {
+        let mut state = TracerState::new();
+        seed_lineage(&mut state, &[1, 2]);
+        load_detail_with_attrs(&mut state, vec![triple("k", None, Some("v"))]);
+        assert!(lineage_focus_attributes(&mut state));
+
+        lineage_move_down(&mut state);
+        let TracerMode::Lineage(ref view) = state.mode else {
+            panic!("expected Lineage mode");
+        };
+        assert_eq!(view.focus, LineageFocus::Timeline);
+        assert!(matches!(view.event_detail, EventDetail::NotLoaded));
+    }
+
+    // ── Content focus tests ─────────────────────────────────────────────────
+
+    fn load_content_shown(state: &mut TracerState, body: &str) {
+        use crate::client::tracer::{ContentRender, ContentSide};
+        use std::sync::Arc;
+        let TracerMode::Lineage(ref mut view) = state.mode else {
+            panic!("expected Lineage mode");
+        };
+        if let EventDetail::Loaded {
+            ref mut content, ..
+        } = view.event_detail
+        {
+            *content = ContentPane::Shown {
+                side: ContentSide::Output,
+                render: ContentRender::Text {
+                    pretty: body.to_string(),
+                },
+                total_bytes: body.len(),
+                raw: Arc::from(body.as_bytes()),
+            };
+        } else {
+            panic!("detail must be Loaded before loading content");
+        }
+    }
+
+    #[test]
+    fn lineage_focus_content_rejects_when_not_shown() {
+        let mut state = TracerState::new();
+        seed_lineage(&mut state, &[1]);
+        load_detail_with_attrs(&mut state, vec![]);
+        // Still ContentPane::Collapsed by default.
+        assert!(!lineage_focus_content(&mut state));
+    }
+
+    #[test]
+    fn lineage_focus_content_enters_content_and_resets_scroll() {
+        let mut state = TracerState::new();
+        seed_lineage(&mut state, &[1]);
+        load_detail_with_attrs(&mut state, vec![]);
+        load_content_shown(&mut state, "a\nb\nc\n");
+        assert!(lineage_focus_content(&mut state));
+        let TracerMode::Lineage(ref view) = state.mode else {
+            panic!("expected Lineage mode");
+        };
+        assert_eq!(view.focus, LineageFocus::Content { scroll: 0 });
+    }
+
+    #[test]
+    fn lineage_content_scroll_down_clamps_at_max() {
+        let mut state = TracerState::new();
+        seed_lineage(&mut state, &[1]);
+        load_detail_with_attrs(&mut state, vec![]);
+        load_content_shown(&mut state, "line1\nline2\nline3");
+        assert!(lineage_focus_content(&mut state));
+
+        // 3 lines → max scroll is 2 (zero-indexed).
+        lineage_content_scroll_down(&mut state, 1);
+        lineage_content_scroll_down(&mut state, 1);
+        lineage_content_scroll_down(&mut state, 5); // clamps
+        let TracerMode::Lineage(ref view) = state.mode else {
+            panic!("expected Lineage mode");
+        };
+        assert_eq!(view.focus, LineageFocus::Content { scroll: 2 });
+    }
+
+    #[test]
+    fn lineage_content_scroll_up_saturates_at_zero() {
+        let mut state = TracerState::new();
+        seed_lineage(&mut state, &[1]);
+        load_detail_with_attrs(&mut state, vec![]);
+        load_content_shown(&mut state, "a\nb\nc\nd\ne");
+        assert!(lineage_focus_content(&mut state));
+        lineage_content_scroll_down(&mut state, 3);
+        lineage_content_scroll_up(&mut state, 10); // saturates
+        let TracerMode::Lineage(ref view) = state.mode else {
+            panic!("expected Lineage mode");
+        };
+        assert_eq!(view.focus, LineageFocus::Content { scroll: 0 });
+    }
+
+    #[test]
+    fn lineage_content_scroll_home_end_jump_to_bounds() {
+        let mut state = TracerState::new();
+        seed_lineage(&mut state, &[1]);
+        load_detail_with_attrs(&mut state, vec![]);
+        load_content_shown(&mut state, "a\nb\nc\nd\ne\nf");
+        assert!(lineage_focus_content(&mut state));
+        lineage_content_scroll_end(&mut state);
+        let TracerMode::Lineage(ref view) = state.mode else {
+            panic!("expected Lineage mode");
+        };
+        assert_eq!(view.focus, LineageFocus::Content { scroll: 5 });
+
+        lineage_content_scroll_home(&mut state);
+        let TracerMode::Lineage(ref view) = state.mode else {
+            panic!("expected Lineage mode");
+        };
+        assert_eq!(view.focus, LineageFocus::Content { scroll: 0 });
+    }
+
+    #[test]
+    fn new_content_payload_resets_scroll_when_focused() {
+        use crate::client::tracer::{ContentRender, ContentSide};
+        use std::sync::Arc;
+
+        let mut state = TracerState::new();
+        seed_lineage(&mut state, &[1]);
+        load_detail_with_attrs(&mut state, vec![]);
+        load_content_shown(&mut state, "a\nb\nc\nd\ne");
+        assert!(lineage_focus_content(&mut state));
+        lineage_content_scroll_down(&mut state, 3);
+
+        // New payload arrives (e.g., user pressed `o` to load output).
+        let new_body = "x\ny\nz";
+        apply_payload(
+            &mut state,
+            TracerPayload::Content(crate::client::tracer::ContentSnapshot {
+                event_id: 1,
+                side: ContentSide::Output,
+                render: ContentRender::Text {
+                    pretty: new_body.to_string(),
+                },
+                total_bytes: new_body.len(),
+                raw: Arc::from(new_body.as_bytes()),
+            }),
+        );
+        let TracerMode::Lineage(ref view) = state.mode else {
+            panic!("expected Lineage mode");
+        };
+        assert_eq!(
+            view.focus,
+            LineageFocus::Content { scroll: 0 },
+            "scroll must reset on new payload"
+        );
+    }
+
+    #[test]
+    fn event_detail_failed_resets_focus_to_timeline() {
+        let mut state = TracerState::new();
+        seed_lineage(&mut state, &[1]);
+        // Transition through Loading then failed.
+        lineage_mark_detail_loading(&mut state);
+        apply_payload(
+            &mut state,
+            TracerPayload::EventDetailFailed {
+                event_id: 1,
+                error: "boom".to_string(),
+            },
+        );
+        let TracerMode::Lineage(ref view) = state.mode else {
+            panic!("expected Lineage mode");
+        };
+        assert_eq!(view.focus, LineageFocus::Timeline);
+        assert!(matches!(view.event_detail, EventDetail::Failed(_)));
     }
 
     #[test]

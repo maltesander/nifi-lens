@@ -14,15 +14,15 @@ use std::time::SystemTime;
 
 use ratatui::Frame;
 use ratatui::layout::{Alignment, Constraint, Direction, Layout, Rect};
-use ratatui::style::Style;
+use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
-use ratatui::widgets::{Cell, Gauge, Paragraph, Row, Table};
+use ratatui::widgets::{Cell, Gauge, Paragraph, Row, Table, TableState};
 
 use crate::client::tracer::{AttributeTriple, ContentRender, ContentSide};
 use crate::theme;
 use crate::view::tracer::state::{
-    AttributeDiffMode, ContentPane, EntryState, EventDetail, LatestEventsView, LineageRunningState,
-    LineageView, TracerMode, TracerState,
+    AttributeClass, AttributeDiffMode, ContentPane, EntryState, EventDetail, LatestEventsView,
+    LineageFocus, LineageRunningState, LineageView, TracerMode, TracerState,
 };
 use crate::widget::panel::Panel;
 
@@ -49,7 +49,9 @@ pub fn render(
         }
         TracerMode::Lineage(view) => {
             // Lineage mode has two stacked sub-panes: timeline + detail.
-            // Each gets its own bordered Panel.
+            // Each gets its own bordered Panel. The detail panel flips
+            // its focused border-style when the user `l`s into the
+            // nested attribute table.
             let rows = Layout::default()
                 .direction(Direction::Vertical)
                 .constraints([
@@ -58,12 +60,25 @@ pub fn render(
                 ])
                 .split(area);
 
-            let lineage_block = Panel::new(" Lineage ").into_block();
+            let timeline_focused = matches!(
+                view.focus,
+                crate::view::tracer::state::LineageFocus::Timeline
+            );
+            let attributes_focused = matches!(
+                view.focus,
+                crate::view::tracer::state::LineageFocus::Attributes { .. }
+            );
+
+            let lineage_block = Panel::new(" Lineage ")
+                .focused(timeline_focused)
+                .into_block();
             let lineage_inner = lineage_block.inner(rows[0]);
             frame.render_widget(lineage_block, rows[0]);
             render_lineage_timeline(frame, lineage_inner, view, now, cfg);
 
-            let detail_block = Panel::new(" Detail ").into_block();
+            let detail_block = Panel::new(" Detail ")
+                .focused(attributes_focused)
+                .into_block();
             let detail_inner = detail_block.inner(rows[1]);
             frame.render_widget(detail_block, rows[1]);
             render_lineage_detail(frame, detail_inner, view);
@@ -297,7 +312,7 @@ fn render_lineage_detail(frame: &mut Frame, area: Rect, view: &LineageView) {
             frame.render_widget(para, inner);
         }
         EventDetail::Loaded { event, content } => {
-            render_lineage_detail_loaded(frame, inner, event, content, view.diff_mode);
+            render_lineage_detail_loaded(frame, inner, event, content, view);
         }
     }
 }
@@ -307,20 +322,33 @@ fn render_lineage_detail_loaded(
     area: Rect,
     event: &crate::client::tracer::ProvenanceEventDetail,
     content: &ContentPane,
-    diff_mode: AttributeDiffMode,
+    view: &LineageView,
 ) {
     let s = &event.summary;
     let rel = s.relationship.as_deref().unwrap_or("");
     let details = s.details.as_deref().unwrap_or("");
 
-    // Split into: header (1), attributes (variable), content pane (variable)
+    // When focus is on the content pane, swap the split so content
+    // fills the detail area and attributes shrink to a minimal strip.
+    // Non-content focus uses the default attributes-dominant layout
+    // with a bordered content panel tall enough to read a few lines.
+    let content_focused = matches!(view.focus, LineageFocus::Content { .. });
+    let constraints: [Constraint; 3] = if content_focused {
+        [
+            Constraint::Length(1), // event header
+            Constraint::Length(5), // shrunken attributes (legend + header + 2 rows + border chrome)
+            Constraint::Fill(1),   // expanded content
+        ]
+    } else {
+        [
+            Constraint::Length(1), // event header
+            Constraint::Fill(1),   // attributes table
+            Constraint::Length(8), // content panel (border + header + 5 body lines)
+        ]
+    };
     let rows = Layout::default()
         .direction(Direction::Vertical)
-        .constraints([
-            Constraint::Length(1), // header line
-            Constraint::Fill(1),   // attributes
-            Constraint::Length(3), // content pane (header + 2 lines)
-        ])
+        .constraints(constraints)
         .split(area);
 
     // ── Header ──
@@ -340,38 +368,55 @@ fn render_lineage_detail_loaded(
     frame.render_widget(Paragraph::new(header_line), rows[0]);
 
     // ── Attribute table ──
-    render_attribute_table(frame, rows[1], &event.attributes, diff_mode);
+    render_attribute_table(frame, rows[1], &event.attributes, view);
 
-    // ── Content pane ──
-    render_content_pane(frame, rows[2], content);
+    // ── Content panel ──
+    render_content_panel(frame, rows[2], content, view);
+}
+
+/// Style helper — maps an [`AttributeClass`] onto the user-requested
+/// diff palette: added→green, deleted→red, unchanged/modified→yellow.
+fn attribute_row_style(class: AttributeClass) -> Style {
+    match class {
+        AttributeClass::Added => theme::success(),
+        AttributeClass::Deleted => theme::error(),
+        AttributeClass::Unchanged => theme::warning(),
+    }
 }
 
 fn render_attribute_table(
     frame: &mut Frame,
     area: Rect,
     attributes: &[AttributeTriple],
-    diff_mode: AttributeDiffMode,
+    view: &LineageView,
 ) {
     if area.height == 0 {
         return;
     }
 
-    // First row is a header.
+    // First row is a header + legend.
     let changed_count = attributes.iter().filter(|a| a.is_changed()).count();
-    let mode_indicator = match diff_mode {
+    let mode_indicator = match view.diff_mode {
         AttributeDiffMode::All => "[ \u{25ba} All | Changed ]",
         AttributeDiffMode::Changed => "[ All | \u{25ba} Changed ]",
     };
     let attr_header = Line::from(vec![
         Span::styled("Attributes  ", theme::muted()),
         Span::styled(
-            format!("{mode_indicator} ({changed_count} changed)"),
+            format!("{mode_indicator} ({changed_count} changed)  "),
             theme::muted(),
         ),
+        Span::styled("+added", theme::success()),
+        Span::styled(" \u{00b7} ", theme::muted()),
+        Span::styled("-deleted", theme::error()),
+        Span::styled(" \u{00b7} ", theme::muted()),
+        Span::styled("~unchanged", theme::warning()),
     ]);
 
-    let visible_attrs: Vec<&AttributeTriple> =
-        attributes.iter().filter(|a| diff_mode.matches(a)).collect();
+    let visible_attrs: Vec<&AttributeTriple> = attributes
+        .iter()
+        .filter(|a| view.diff_mode.matches(a))
+        .collect();
 
     // We have area.height rows total. Use row 0 for header, rest for data rows.
     let header_area = Rect {
@@ -392,22 +437,30 @@ fn render_attribute_table(
         height: area.height - 1,
     };
 
+    // Inline separator cell used between every data column. Rendered
+    // dim so the column rule reads as chrome, not content.
+    let sep_cell = || Cell::from(Span::styled("\u{2502}", theme::border_dim()));
+
     let table_rows: Vec<Row> = visible_attrs
         .iter()
         .map(|attr| {
             let prev = attr.previous.as_deref().unwrap_or("(none)");
             let curr = attr.current.as_deref().unwrap_or("(none)");
-            let gutter = if attr.is_changed() { "\u{00b7}" } else { " " };
-            let curr_style = if attr.is_changed() {
-                theme::warning()
-            } else {
-                Style::default()
+            let class = AttributeClass::of(attr);
+            let gutter = match class {
+                AttributeClass::Added => "+",
+                AttributeClass::Deleted => "-",
+                AttributeClass::Unchanged if attr.is_changed() => "~",
+                AttributeClass::Unchanged => " ",
             };
+            let row_style = attribute_row_style(class);
             Row::new(vec![
-                Cell::from(gutter),
-                Cell::from(truncate(&attr.key, 22).to_string()),
-                Cell::from(truncate(prev, 28).to_string()),
-                Cell::from(Span::styled(truncate(curr, 28).to_string(), curr_style)),
+                Cell::from(Span::styled(gutter.to_string(), row_style)),
+                Cell::from(Span::styled(truncate(&attr.key, 22).to_string(), row_style)),
+                sep_cell(),
+                Cell::from(Span::styled(truncate(prev, 28).to_string(), row_style)),
+                sep_cell(),
+                Cell::from(Span::styled(truncate(curr, 28).to_string(), row_style)),
             ])
         })
         .collect();
@@ -415,116 +468,132 @@ fn render_attribute_table(
     let header_row = Row::new(vec![
         Cell::from(""),
         Cell::from(Span::styled("key", theme::muted())),
+        sep_cell(),
         Cell::from(Span::styled("previous", theme::muted())),
+        sep_cell(),
         Cell::from(Span::styled("current", theme::muted())),
-    ]);
+    ])
+    .style(theme::muted().add_modifier(Modifier::BOLD));
+
     let table = Table::new(
         table_rows,
         [
             Constraint::Length(1),  // gutter
-            Constraint::Length(23), // key (22 + 1)
-            Constraint::Length(29), // previous (28 + 1)
+            Constraint::Length(22), // key
+            Constraint::Length(1),  // │
+            Constraint::Length(28), // previous
+            Constraint::Length(1),  // │
             Constraint::Fill(1),    // current
         ],
     )
-    .header(header_row);
-    frame.render_widget(table, table_area);
+    .header(header_row)
+    .row_highlight_style(theme::cursor_row());
+
+    let mut ts = TableState::default();
+    if let LineageFocus::Attributes { row } = view.focus
+        && row < visible_attrs.len()
+    {
+        ts.select(Some(row));
+    }
+    frame.render_stateful_widget(table, table_area, &mut ts);
 }
 
-fn render_content_pane(frame: &mut Frame, area: Rect, content: &ContentPane) {
+/// Renders the content sub-pane inside a focus-aware [`Panel`].
+///
+/// When `view.focus` is [`LineageFocus::Content`], the panel gains a
+/// thick accent border and displays a `scroll/total` indicator on the
+/// right title, and the caller's layout gives it the majority of the
+/// detail area. Otherwise the panel is a short un-focused strip.
+fn render_content_panel(frame: &mut Frame, area: Rect, content: &ContentPane, view: &LineageView) {
     if area.height == 0 {
         return;
     }
 
-    match content {
-        ContentPane::Collapsed => {
-            let header = Line::from(vec![
-                Span::styled("Content  ", theme::muted()),
-                Span::styled(
-                    "[ i input \u{00b7} o output \u{00b7} s save ]",
-                    theme::muted(),
-                ),
-            ]);
-            let hint = Paragraph::new(Span::styled(
-                "(collapsed \u{2014} press i or o to load)",
-                theme::muted(),
-            ));
-            let rows = Layout::default()
-                .direction(Direction::Vertical)
-                .constraints([Constraint::Length(1), Constraint::Fill(1)])
-                .split(area);
-            frame.render_widget(Paragraph::new(header), rows[0]);
-            frame.render_widget(hint, rows[1]);
-        }
-        ContentPane::LoadingInput => {
-            let para = Paragraph::new(Span::styled("loading input\u{2026}", theme::muted()));
-            frame.render_widget(para, area);
-        }
-        ContentPane::LoadingOutput => {
-            let para = Paragraph::new(Span::styled("loading output\u{2026}", theme::muted()));
-            frame.render_widget(para, area);
-        }
+    let focused = matches!(view.focus, LineageFocus::Content { .. });
+    let scroll = match view.focus {
+        LineageFocus::Content { scroll } => scroll,
+        _ => 0,
+    };
+
+    // Compute left-title suffix, right-title (scroll indicator), and
+    // the body text to render inside the panel.
+    let (title_suffix, right_title, body_text, body_style) = match content {
+        ContentPane::Collapsed => (
+            "".to_string(),
+            "".to_string(),
+            "(collapsed \u{2014} press i for input or o for output)".to_string(),
+            theme::muted(),
+        ),
+        ContentPane::LoadingInput => (
+            " \u{00b7} input ".to_string(),
+            "".to_string(),
+            "loading input\u{2026}".to_string(),
+            theme::muted(),
+        ),
+        ContentPane::LoadingOutput => (
+            " \u{00b7} output ".to_string(),
+            "".to_string(),
+            "loading output\u{2026}".to_string(),
+            theme::muted(),
+        ),
         ContentPane::Shown {
             side,
             render,
             total_bytes,
             ..
         } => {
-            render_content_shown(frame, area, side, render, *total_bytes);
+            let side_label = match side {
+                ContentSide::Input => "input",
+                ContentSide::Output => "output",
+            };
+            let body = match render {
+                ContentRender::Text { pretty } => pretty.clone(),
+                ContentRender::Hex { first_4k } => first_4k.clone(),
+                ContentRender::Empty => "(empty)".to_string(),
+            };
+            let total_lines = body.lines().count().max(1);
+            let suffix = format!(" \u{00b7} {side_label} \u{00b7} {total_bytes} B ");
+            let right = if total_lines > 1 {
+                format!(
+                    " {}/{} ",
+                    (scroll as usize).min(total_lines - 1) + 1,
+                    total_lines
+                )
+            } else {
+                "".to_string()
+            };
+            (suffix, right, body, Style::default())
         }
-        ContentPane::Failed(err) => {
-            let para = Paragraph::new(Span::styled(
-                format!("content error: {err}"),
-                theme::error(),
-            ));
-            frame.render_widget(para, area);
-        }
+        ContentPane::Failed(err) => (
+            "".to_string(),
+            "".to_string(),
+            format!("error: {err}"),
+            theme::error(),
+        ),
+    };
+
+    let mut panel = Panel::new(format!(" Content{title_suffix}")).focused(focused);
+    if !right_title.is_empty() {
+        panel = panel.right(Line::from(Span::styled(right_title, theme::muted())));
     }
-}
+    let block = panel.into_block();
+    let inner = block.inner(area);
+    frame.render_widget(block, area);
 
-fn render_content_shown(
-    frame: &mut Frame,
-    area: Rect,
-    side: &ContentSide,
-    render: &ContentRender,
-    total_bytes: usize,
-) {
-    let side_label = match side {
-        ContentSide::Input => "input",
-        ContentSide::Output => "output",
-    };
-    let header = Line::from(vec![
-        Span::styled(format!("Content ({side_label})  "), theme::muted()),
-        Span::styled(format!("{total_bytes} bytes"), theme::muted()),
-    ]);
-
-    let body_text = match render {
-        ContentRender::Text { pretty } => pretty.as_str(),
-        ContentRender::Hex { first_4k } => first_4k.as_str(),
-        ContentRender::Empty => "(empty)",
-    };
-
-    let rows = Layout::default()
-        .direction(Direction::Vertical)
-        .constraints([Constraint::Length(1), Constraint::Fill(1)])
-        .split(area);
-    frame.render_widget(Paragraph::new(header), rows[0]);
-
-    let available = rows[1].height as usize;
-    let lines: Vec<&str> = body_text.lines().collect();
-    let shown = lines.len().min(available.saturating_sub(1).max(1));
-    let mut display_lines: Vec<Line> = lines[..shown]
-        .iter()
-        .map(|l| Line::from(Span::raw(l.to_string())))
+    // Split the body into explicit Lines so `Paragraph::scroll` steps
+    // line-by-line — wrapping a multi-line String in a single Span
+    // would flatten embedded `\n` into spaces.
+    let body_lines: Vec<Line> = body_text
+        .lines()
+        .map(|l| Line::from(Span::styled(l.to_string(), body_style)))
         .collect();
-    if lines.len() > shown {
-        let remaining = lines.len() - shown;
-        display_lines.push(Line::from(Span::styled(
-            format!("\u{2026} ({remaining} more lines)"),
-            theme::muted(),
-        )));
-    }
-    frame.render_widget(Paragraph::new(display_lines), rows[1]);
+    let body = if body_lines.is_empty() {
+        vec![Line::from("")]
+    } else {
+        body_lines
+    };
+    let para = Paragraph::new(body).scroll((scroll, 0));
+    frame.render_widget(para, inner);
 }
 
 // ── LatestEvents ──────────────────────────────────────────────────────────────
@@ -822,7 +891,9 @@ mod tests {
 
     fn seed_lineage_state(state: &mut TracerState) {
         use crate::client::tracer::LineageSnapshot;
-        use crate::view::tracer::state::{AttributeDiffMode, EventDetail, LineageView};
+        use crate::view::tracer::state::{
+            AttributeDiffMode, EventDetail, LineageFocus, LineageView,
+        };
 
         state.mode = TracerMode::Lineage(Box::new(LineageView {
             uuid: "ff000001-0000-0000-0000-000000000001".to_string(),
@@ -839,6 +910,7 @@ mod tests {
             event_detail: EventDetail::NotLoaded,
             diff_mode: AttributeDiffMode::All,
             fetched_at: SystemTime::now(),
+            focus: LineageFocus::default(),
         }));
     }
 
