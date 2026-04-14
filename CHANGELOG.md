@@ -132,6 +132,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **`deny.toml`** now allows `BSL-1.0` (clipboard-win / error-code via
   arboard) and ignores `RUSTSEC-2024-0436` (unmaintained `paste`
   transitive via ratatui — no safe upgrade available).
+- Input layer is now driven by typed action enums (`FocusAction`,
+  `HistoryAction`, `TabAction`, `AppAction`, `GoTarget`, per-view
+  `ViewVerb`) plus a shared `Verb` trait. Every keybinding is the
+  single source of truth for its hint-bar entry and help-modal line.
+- History back/forward moves from `[`/`]` to `Shift+←`/`Shift+→`.
+- Cross-tab jumps are now a two-key leader combo `g <letter>`
+  (`g b` Browser, `g e` Events, `g t` Tracer). Replaces Bulletins `t`,
+  Browser `t`, Events `t`/`g`, Tracer `t`.
+- Bulletins severity filters move from `e`/`w`/`i` to `1`/`2`/`3`.
+  Group-by moves from `g` to `Y`.
+- Browser breadcrumb mode (`b`) removed — use history navigation.
+- Browser properties modal moves from `e` to `p`.
+- Tracer detail pane is now tabbed (Attributes | Input | Output) with
+  `←`/`→` cycling; `i`/`o`/`a` letter shortcuts removed.
+- Tracer attribute-diff toggle moves from `a` to `d`.
+- Hint bar and help modal are now generated from the `Verb` trait;
+  adding a keybinding automatically updates both surfaces.
+- No view binds `j` or `k`. No view binds bare `[` or `]`. Regression
+  tests enforce this.
 
 ### Removed
 
@@ -168,6 +187,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Bulletins `g` vim jump-to-oldest.** `g` is now the group-mode
   cycle. `Home` still works for jump-to-oldest; the vim `g`/`G`
   pair is deliberately asymmetric now.
+- Global `e` chord for expanding the error banner. When the banner is
+  shown it becomes the outermost focus; `Enter` expands it, `Esc`
+  dismisses.
+- Browser interactive breadcrumb focus mode (the static breadcrumb
+  strip at the top of the Browser panel is preserved).
 
 ### Added
 

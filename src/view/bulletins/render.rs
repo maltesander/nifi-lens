@@ -151,7 +151,7 @@ fn render_filter_bar(frame: &mut Frame, area: Rect, state: &BulletinsState) {
         let group_label = state.group_mode.label();
         Line::from(Span::styled(
             format!(
-                "— e/w/i severity · T type · / text · g group: {group_label} · m mute · c clear · p pause —"
+                "— 1/2/3 severity · T type · / text · Y group: {group_label} · m mute · c clear · p pause —"
             ),
             theme::muted(),
         ))
@@ -384,7 +384,7 @@ fn render_detail(
 
     // Row N+1: action hints.
     lines.push(Line::from(Span::styled(
-        "t trace lineage · Enter jump to Browser · m mute source · c clear filters".to_string(),
+        "Enter jump to Browser · ge events · m mute source · c clear filters".to_string(),
         theme::muted(),
     )));
 

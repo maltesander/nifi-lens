@@ -11,6 +11,7 @@ pub mod client;
 pub mod config;
 pub mod error;
 pub mod event;
+pub mod input;
 pub mod intent;
 pub mod logging;
 pub mod theme;

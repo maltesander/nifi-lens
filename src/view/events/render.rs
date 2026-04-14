@@ -414,7 +414,7 @@ fn render_detail_pane(frame: &mut Frame, area: Rect, state: &EventsState) {
         Span::raw(e.group_id.clone()),
     ]);
     let hints_line = Line::from(Span::styled(
-        "t trace lineage \u{00b7} g open in browser \u{00b7} Esc back \u{00b7} c copy uuid"
+        "g t trace lineage \u{00b7} g b open in browser \u{00b7} Esc back \u{00b7} c copy uuid"
             .to_string(),
         theme::muted(),
     ));

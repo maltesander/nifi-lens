@@ -2,229 +2,82 @@
 
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 
-use super::{AppState, PendingIntent, UpdateResult, ViewKeyHandler};
-use crate::intent::CrossLink;
+use super::{AppState, UpdateResult, ViewKeyHandler};
+use crate::input::{BulletinsVerb, FocusAction, GoTarget, Severity, ViewVerb};
 
 /// Zero-sized dispatch struct for the Bulletins tab.
 pub(crate) struct BulletinsHandler;
 
 impl ViewKeyHandler for BulletinsHandler {
-    fn handle_key(state: &mut AppState, key: KeyEvent) -> Option<UpdateResult> {
-        // Text-input mode captures character-level keys and edit keys (Esc,
-        // Enter, Backspace). Keys with CONTROL modifiers (Ctrl+C, etc.) skip this
-        // block so they reach the global handlers. Tab and other unmodified keys
-        // are still suppressed to keep focus on text input. Printable characters
-        // including capitals and brackets are captured by handle_text_input; to
-        // use them as app-wide commands the user must press Esc to exit text
-        // input mode first.
-        if state.bulletins.text_input.is_some()
-            && matches!(key.modifiers, KeyModifiers::NONE | KeyModifiers::SHIFT)
-        {
-            return handle_text_input(state, key);
+    fn handle_verb(state: &mut AppState, verb: ViewVerb) -> Option<UpdateResult> {
+        let bv = match verb {
+            ViewVerb::Bulletins(v) => v,
+            _ => return None,
+        };
+        match bv {
+            BulletinsVerb::ToggleSeverity(Severity::Error) => state.bulletins.toggle_error(),
+            BulletinsVerb::ToggleSeverity(Severity::Warning) => state.bulletins.toggle_warning(),
+            BulletinsVerb::ToggleSeverity(Severity::Info) => state.bulletins.toggle_info(),
+            BulletinsVerb::CycleTypeFilter => state.bulletins.cycle_component_type(),
+            BulletinsVerb::CycleGroupBy => state.bulletins.cycle_group_mode(),
+            BulletinsVerb::TogglePause => state.bulletins.toggle_pause(),
+            BulletinsVerb::MuteSource => state.bulletins.mute_selected_source(),
+            BulletinsVerb::ClearFilters => state.bulletins.clear_filters(),
+            BulletinsVerb::OpenSearch => state.bulletins.enter_text_input_mode(),
+            // Bulletins auto-refreshes; verb kept for parity but no state mutation.
+            BulletinsVerb::Refresh => {}
         }
+        Some(UpdateResult {
+            redraw: true,
+            intent: None,
+            tracer_followup: None,
+        })
+    }
 
-        // View-local keys take priority over global `e`. Accept
-        // NONE or SHIFT modifiers so `G` and `T` (typed as Shift+g / Shift+t)
-        // reach the handler — crossterm delivers them as
-        // `KeyCode::Char('G')` with `KeyModifiers::SHIFT`.
-        if !matches!(key.modifiers, KeyModifiers::NONE | KeyModifiers::SHIFT) {
-            return None;
+    fn handle_focus(state: &mut AppState, action: FocusAction) -> Option<UpdateResult> {
+        match action {
+            FocusAction::Up => state.bulletins.move_selection_up(),
+            FocusAction::Down => state.bulletins.move_selection_down(),
+            FocusAction::First => state.bulletins.jump_to_oldest(),
+            FocusAction::Last => state.bulletins.jump_to_newest(),
+            // Descend: return None so the central dispatcher applies Rule 1a
+            // (Enter-fallback to default_cross_link → Browser).
+            FocusAction::Descend => return None,
+            // Ascend: no-op at root level.
+            FocusAction::Ascend => return None,
+            // Left / Right / PageUp / PageDown not bound for Bulletins.
+            FocusAction::Left
+            | FocusAction::Right
+            | FocusAction::PageUp
+            | FocusAction::PageDown => return None,
         }
+        Some(UpdateResult {
+            redraw: true,
+            intent: None,
+            tracer_followup: None,
+        })
+    }
 
-        match key.code {
-            KeyCode::Char('e') => {
-                state.bulletins.toggle_error();
-                Some(UpdateResult {
-                    redraw: true,
-                    intent: None,
-                    tracer_followup: None,
-                })
-            }
-            KeyCode::Char('w') => {
-                state.bulletins.toggle_warning();
-                Some(UpdateResult {
-                    redraw: true,
-                    intent: None,
-                    tracer_followup: None,
-                })
-            }
-            KeyCode::Char('i') => {
-                state.bulletins.toggle_info();
-                Some(UpdateResult {
-                    redraw: true,
-                    intent: None,
-                    tracer_followup: None,
-                })
-            }
-            KeyCode::Char('T') => {
-                state.bulletins.cycle_component_type();
-                Some(UpdateResult {
-                    redraw: true,
-                    intent: None,
-                    tracer_followup: None,
-                })
-            }
-            KeyCode::Char('c') => {
-                state.bulletins.clear_filters();
-                Some(UpdateResult {
-                    redraw: true,
-                    intent: None,
-                    tracer_followup: None,
-                })
-            }
-            KeyCode::Char('p') => {
-                state.bulletins.toggle_pause();
-                Some(UpdateResult {
-                    redraw: true,
-                    intent: None,
-                    tracer_followup: None,
-                })
-            }
-            KeyCode::Char('/') => {
-                state.bulletins.enter_text_input_mode();
-                Some(UpdateResult {
-                    redraw: true,
-                    intent: None,
-                    tracer_followup: None,
-                })
-            }
-            KeyCode::Char('g') => {
-                state.bulletins.cycle_group_mode();
-                Some(UpdateResult {
-                    redraw: true,
-                    intent: None,
-                    tracer_followup: None,
-                })
-            }
-            KeyCode::Home => {
-                state.bulletins.jump_to_oldest();
-                Some(UpdateResult {
-                    redraw: true,
-                    intent: None,
-                    tracer_followup: None,
-                })
-            }
-            KeyCode::Char('G') | KeyCode::End => {
-                state.bulletins.jump_to_newest();
-                Some(UpdateResult {
-                    redraw: true,
-                    intent: None,
-                    tracer_followup: None,
-                })
-            }
-            KeyCode::Up => {
-                state.bulletins.move_selection_up();
-                Some(UpdateResult {
-                    redraw: true,
-                    intent: None,
-                    tracer_followup: None,
-                })
-            }
-            KeyCode::Down => {
-                state.bulletins.move_selection_down();
-                Some(UpdateResult {
-                    redraw: true,
-                    intent: None,
-                    tracer_followup: None,
-                })
-            }
-            KeyCode::Enter => {
-                if let Some(idx) = state.bulletins.selected_ring_index() {
-                    let b = &state.bulletins.ring[idx];
-                    let link = CrossLink::OpenInBrowser {
-                        component_id: b.source_id.clone(),
-                        group_id: b.group_id.clone(),
-                    };
-                    return Some(UpdateResult {
-                        redraw: true,
-                        intent: Some(PendingIntent::JumpTo(link)),
-                        tracer_followup: None,
-                    });
-                }
-                Some(UpdateResult::default())
-            }
-            KeyCode::Char('m') => {
-                state.bulletins.mute_selected_source();
-                Some(UpdateResult {
-                    redraw: true,
-                    intent: None,
-                    tracer_followup: None,
-                })
-            }
-            KeyCode::Char('t') => {
-                if let Some(idx) = state.bulletins.selected_ring_index() {
-                    let b = &state.bulletins.ring[idx];
-                    let link = CrossLink::JumpToEvents {
-                        component_id: b.source_id.clone(),
-                    };
-                    return Some(UpdateResult {
-                        redraw: true,
-                        intent: Some(PendingIntent::JumpTo(link)),
-                        tracer_followup: None,
-                    });
-                }
-                Some(UpdateResult::default())
-            }
-            _ => None,
+    fn default_cross_link(state: &AppState) -> Option<GoTarget> {
+        if state.bulletins.selected_ring_index().is_some() {
+            Some(GoTarget::Browser)
+        } else {
+            None
         }
     }
 
-    fn hints(state: &AppState) -> Vec<crate::widget::hint_bar::HintSpan> {
-        use crate::widget::hint_bar::HintSpan;
+    fn is_text_input_focused(state: &AppState) -> bool {
+        state.bulletins.text_input.is_some()
+    }
 
-        if state.bulletins.text_input.is_some() {
-            return vec![
-                HintSpan {
-                    key: "type",
-                    action: "filter",
-                },
-                HintSpan {
-                    key: "Enter",
-                    action: "apply",
-                },
-                HintSpan {
-                    key: "Esc",
-                    action: "cancel",
-                },
-            ];
+    fn handle_text_input(state: &mut AppState, key: KeyEvent) -> Option<UpdateResult> {
+        if state.bulletins.text_input.is_some()
+            && matches!(key.modifiers, KeyModifiers::NONE | KeyModifiers::SHIFT)
+        {
+            handle_text_input(state, key)
+        } else {
+            None
         }
-
-        let group_action: &'static str = match state.bulletins.group_mode {
-            crate::view::bulletins::state::GroupMode::SourceAndMessage => "group: source+msg",
-            crate::view::bulletins::state::GroupMode::Source => "group: source",
-            crate::view::bulletins::state::GroupMode::Off => "group: off",
-        };
-
-        vec![
-            HintSpan {
-                key: "↑/↓",
-                action: "nav",
-            },
-            HintSpan {
-                key: "Enter",
-                action: "browser",
-            },
-            HintSpan {
-                key: "t",
-                action: "events",
-            },
-            HintSpan {
-                key: "/",
-                action: "filter",
-            },
-            HintSpan {
-                key: "Space",
-                action: "pause",
-            },
-            HintSpan {
-                key: "g",
-                action: group_action,
-            },
-            HintSpan {
-                key: "m",
-                action: "mute",
-            },
-        ]
     }
 }
 
@@ -275,11 +128,56 @@ fn handle_text_input(state: &mut AppState, key: KeyEvent) -> Option<UpdateResult
 mod tests {
     use super::super::tests::{fresh_state, key, tiny_config};
     use super::super::update;
-    use crate::app::state::{PendingIntent, ViewId};
+    use crate::app::state::{AppState, PendingIntent, ViewId};
     use crate::client::BulletinSnapshot;
     use crate::event::{AppEvent, BulletinsPayload, ViewPayload};
     use crossterm::event::{KeyCode, KeyModifiers};
     use std::time::SystemTime;
+
+    /// Push one ERROR bulletin into `state.bulletins.ring` directly.
+    fn seed_one_bulletin(state: &mut AppState) {
+        let c = tiny_config();
+        let payload = BulletinsPayload {
+            bulletins: vec![BulletinSnapshot {
+                id: 1,
+                level: "ERROR".into(),
+                message: "seed[id=a] boom".into(),
+                source_id: "seed-src".into(),
+                source_name: "Seed".into(),
+                source_type: "PROCESSOR".into(),
+                group_id: "root".into(),
+                timestamp_iso: "2026-04-14T00:00:01Z".into(),
+                timestamp_human: String::new(),
+            }],
+            fetched_at: SystemTime::now(),
+        };
+        update(state, AppEvent::Data(ViewPayload::Bulletins(payload)), &c);
+    }
+
+    /// Push `n` INFO bulletins with distinct IDs into `state.bulletins.ring`.
+    fn seed_multiple_bulletins(state: &mut AppState, n: usize) {
+        let c = tiny_config();
+        let bulletins = (1..=(n as i64))
+            .map(|i| BulletinSnapshot {
+                id: i,
+                level: "INFO".into(),
+                message: format!("msg-{i}"),
+                source_id: format!("src-{i}"),
+                source_name: format!("S{i}"),
+                source_type: "PROCESSOR".into(),
+                group_id: "root".into(),
+                timestamp_iso: format!("2026-04-14T00:00:{:02}Z", i),
+                timestamp_human: String::new(),
+            })
+            .collect();
+        let payload = BulletinsPayload {
+            bulletins,
+            fetched_at: SystemTime::now(),
+        };
+        update(state, AppEvent::Data(ViewPayload::Bulletins(payload)), &c);
+        state.bulletins.auto_scroll = false;
+        state.bulletins.selected = 0;
+    }
 
     #[test]
     fn bulletins_data_event_seeds_ring() {
@@ -305,13 +203,28 @@ mod tests {
     }
 
     #[test]
-    fn on_bulletins_tab_e_toggles_error_chip() {
+    fn on_bulletins_tab_1_toggles_error_chip() {
+        // After the keybind redesign, severity filters are on 1/2/3 (not e/w/i).
+        let mut s = fresh_state();
+        let c = tiny_config();
+        s.current_tab = ViewId::Bulletins;
+        assert!(s.bulletins.filters.show_error);
+        update(&mut s, key(KeyCode::Char('1'), KeyModifiers::NONE), &c);
+        assert!(!s.bulletins.filters.show_error);
+    }
+
+    #[test]
+    fn on_bulletins_tab_e_is_now_noop() {
+        // Regression guard: `e` no longer toggles error filter in Bulletins.
         let mut s = fresh_state();
         let c = tiny_config();
         s.current_tab = ViewId::Bulletins;
         assert!(s.bulletins.filters.show_error);
         update(&mut s, key(KeyCode::Char('e'), KeyModifiers::NONE), &c);
-        assert!(!s.bulletins.filters.show_error);
+        assert!(
+            s.bulletins.filters.show_error,
+            "`e` must not toggle error filter after keybind redesign"
+        );
     }
 
     #[test]
@@ -422,17 +335,18 @@ mod tests {
     }
 
     #[test]
-    fn on_bulletins_tab_g_cycles_group_mode() {
+    fn on_bulletins_tab_shift_y_cycles_group_mode() {
+        // After the keybind redesign, cycle-group-by is on Y (Shift+y), not g.
         use crate::view::bulletins::state::GroupMode;
         let mut s = fresh_state();
         let c = tiny_config();
         s.current_tab = ViewId::Bulletins;
         assert_eq!(s.bulletins.group_mode, GroupMode::SourceAndMessage);
-        update(&mut s, key(KeyCode::Char('g'), KeyModifiers::NONE), &c);
+        update(&mut s, key(KeyCode::Char('Y'), KeyModifiers::SHIFT), &c);
         assert_eq!(s.bulletins.group_mode, GroupMode::Source);
-        update(&mut s, key(KeyCode::Char('g'), KeyModifiers::NONE), &c);
+        update(&mut s, key(KeyCode::Char('Y'), KeyModifiers::SHIFT), &c);
         assert_eq!(s.bulletins.group_mode, GroupMode::Off);
-        update(&mut s, key(KeyCode::Char('g'), KeyModifiers::NONE), &c);
+        update(&mut s, key(KeyCode::Char('Y'), KeyModifiers::SHIFT), &c);
         assert_eq!(s.bulletins.group_mode, GroupMode::SourceAndMessage);
     }
 
@@ -474,51 +388,19 @@ mod tests {
     }
 
     #[test]
-    fn on_bulletins_tab_lowercase_g_no_longer_jumps_home() {
-        // Regression guard: `g` is now cycle-group-mode, not jump-oldest.
+    fn on_bulletins_tab_lowercase_g_is_now_go_leader() {
+        // After the keybind redesign, `g` enters PendingGo (leader for go-chords)
+        // and no longer cycles group-by mode (which moved to Y).
         let mut s = fresh_state();
         let c = tiny_config();
         s.current_tab = ViewId::Bulletins;
-        // Seed >1 bulletin so a jump would be observable.
-        let payload = BulletinsPayload {
-            bulletins: vec![
-                BulletinSnapshot {
-                    id: 1,
-                    level: "ERROR".into(),
-                    message: "P[id=a] one".into(),
-                    source_id: "s1".into(),
-                    source_name: "P".into(),
-                    source_type: "PROCESSOR".into(),
-                    group_id: "g".into(),
-                    timestamp_iso: "2026-04-11T10:14:22Z".into(),
-                    timestamp_human: String::new(),
-                },
-                BulletinSnapshot {
-                    id: 2,
-                    level: "ERROR".into(),
-                    message: "Q[id=b] two".into(),
-                    source_id: "s2".into(),
-                    source_name: "Q".into(),
-                    source_type: "PROCESSOR".into(),
-                    group_id: "g".into(),
-                    timestamp_iso: "2026-04-11T10:14:23Z".into(),
-                    timestamp_human: String::new(),
-                },
-            ],
-            fetched_at: SystemTime::now(),
-        };
-        update(&mut s, AppEvent::Data(ViewPayload::Bulletins(payload)), &c);
-        let before_selected = s.bulletins.selected;
+        let before_mode = s.bulletins.group_mode;
         update(&mut s, key(KeyCode::Char('g'), KeyModifiers::NONE), &c);
-        // `g` cycles mode; selection is preserved via reconcile_selection.
-        // It MUST NOT have been reset to 0 unless that happens to be the
-        // reconciled position. Assert that mode changed — that's the
-        // definitive test that `g` no longer jumps home.
-        assert_ne!(
-            s.bulletins.group_mode,
-            crate::view::bulletins::state::GroupMode::SourceAndMessage
+        // Group mode MUST NOT have changed — `g` is now the go-leader.
+        assert_eq!(
+            s.bulletins.group_mode, before_mode,
+            "`g` must not cycle group mode after keybind redesign"
         );
-        let _ = before_selected;
     }
 
     #[test]
@@ -563,44 +445,36 @@ mod tests {
     }
 
     #[test]
-    fn bulletins_hints_show_group_mode_label_for_g_key() {
-        use super::super::ViewKeyHandler;
-        use super::BulletinsHandler;
-        use crate::view::bulletins::state::GroupMode;
+    fn bulletins_hints_show_group_by_hint_for_shift_y() {
+        // After the keybind redesign, group-by is on Shift+Y; collect_hints
+        // derives the hint from BulletinsVerb::CycleGroupBy::hint() == "group".
+        use crate::app::state::collect_hints;
         let mut s = fresh_state();
         s.current_tab = ViewId::Bulletins;
-        s.bulletins.group_mode = GroupMode::SourceAndMessage;
-        let spans = BulletinsHandler::hints(&s);
+        let spans = collect_hints(&s);
         assert!(
             spans
                 .iter()
-                .any(|h| h.key == "g" && h.action.contains("source+msg")),
-            "g hint should show current mode `source+msg`; got {spans:?}"
-        );
-        s.bulletins.group_mode = GroupMode::Off;
-        let spans = BulletinsHandler::hints(&s);
-        assert!(
-            spans
-                .iter()
-                .any(|h| h.key == "g" && h.action.contains("off"))
+                .any(|h| h.key == "Shift+Y" && h.action == "group"),
+            "Shift+Y hint should show `group`; got {spans:?}"
         );
     }
 
     #[test]
     fn bulletins_hints_include_m_mute() {
-        use super::super::ViewKeyHandler;
-        use super::BulletinsHandler;
-        let s = fresh_state();
-        let spans = BulletinsHandler::hints(&s);
+        use crate::app::state::collect_hints;
+        let mut s = fresh_state();
+        s.current_tab = ViewId::Bulletins;
+        let spans = collect_hints(&s);
         assert!(spans.iter().any(|h| h.key == "m" && h.action == "mute"));
     }
 
     #[test]
     fn bulletins_hints_exclude_b_and_bundle_action() {
-        use super::super::ViewKeyHandler;
-        use super::BulletinsHandler;
-        let s = fresh_state();
-        let spans = BulletinsHandler::hints(&s);
+        use crate::app::state::collect_hints;
+        let mut s = fresh_state();
+        s.current_tab = ViewId::Bulletins;
+        let spans = collect_hints(&s);
         assert!(!spans.iter().any(|h| h.key == "B"));
         assert!(!spans.iter().any(|h| h.action.contains("bundle")));
     }
@@ -658,5 +532,81 @@ mod tests {
         // Up still works.
         update(&mut s, key(KeyCode::Up, KeyModifiers::NONE), &c);
         assert!(s.bulletins.selected < before, "Up still works");
+    }
+
+    // ---- New tests for typed handle_verb / handle_focus / Rule 1a ----
+
+    #[test]
+    fn number_keys_toggle_severity_filters() {
+        use crate::app::state::ViewKeyHandler;
+        use crate::input::{BulletinsVerb, Severity, ViewVerb};
+        let mut s = fresh_state();
+        s.current_tab = ViewId::Bulletins;
+        let before = s.bulletins.filters.show_error;
+
+        let r = super::BulletinsHandler::handle_verb(
+            &mut s,
+            ViewVerb::Bulletins(BulletinsVerb::ToggleSeverity(Severity::Error)),
+        )
+        .expect("verb consumed");
+        assert!(r.redraw);
+        assert_ne!(s.bulletins.filters.show_error, before);
+    }
+
+    #[test]
+    fn shift_y_cycles_group_by() {
+        use crate::app::state::ViewKeyHandler;
+        use crate::input::{BulletinsVerb, ViewVerb};
+        use crate::view::bulletins::state::GroupMode;
+        let mut s = fresh_state();
+        s.current_tab = ViewId::Bulletins;
+        s.bulletins.group_mode = GroupMode::SourceAndMessage;
+        super::BulletinsHandler::handle_verb(
+            &mut s,
+            ViewVerb::Bulletins(BulletinsVerb::CycleGroupBy),
+        );
+        assert_eq!(s.bulletins.group_mode, GroupMode::Source);
+    }
+
+    #[test]
+    fn enter_fallback_produces_browser_crosslink() {
+        // Rule 1a: Bulletins has no local descent target, so Enter
+        // (FocusAction::Descend) returns None from handle_focus; the
+        // central dispatcher then falls back to the default cross-link.
+        use crate::app::state::ViewKeyHandler;
+        use crate::input::FocusAction;
+        let mut s = fresh_state();
+        s.current_tab = ViewId::Bulletins;
+        seed_one_bulletin(&mut s);
+        let consumed = super::BulletinsHandler::handle_focus(&mut s, FocusAction::Descend);
+        assert!(
+            consumed.is_none(),
+            "Bulletins Descend must not consume at root"
+        );
+    }
+
+    #[test]
+    fn default_cross_link_is_browser() {
+        use crate::app::state::ViewKeyHandler;
+        use crate::input::GoTarget;
+        let mut s = fresh_state();
+        s.current_tab = ViewId::Bulletins;
+        seed_one_bulletin(&mut s);
+        assert_eq!(
+            super::BulletinsHandler::default_cross_link(&s),
+            Some(GoTarget::Browser)
+        );
+    }
+
+    #[test]
+    fn arrow_keys_via_focus_move_selection() {
+        use crate::app::state::ViewKeyHandler;
+        use crate::input::FocusAction;
+        let mut s = fresh_state();
+        s.current_tab = ViewId::Bulletins;
+        seed_multiple_bulletins(&mut s, 5);
+        let before = s.bulletins.selected;
+        super::BulletinsHandler::handle_focus(&mut s, FocusAction::Down);
+        assert_eq!(s.bulletins.selected, before + 1);
     }
 }

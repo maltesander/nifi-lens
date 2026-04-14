@@ -1,20 +1,20 @@
 //! Overview tab key handler.
 
-use crossterm::event::KeyEvent;
-
 use super::{AppState, UpdateResult, ViewKeyHandler};
 
 /// Zero-sized dispatch struct for the Overview tab.
 pub(crate) struct OverviewHandler;
 
 impl ViewKeyHandler for OverviewHandler {
-    fn handle_key(_state: &mut AppState, _key: KeyEvent) -> Option<UpdateResult> {
-        // Overview has no tab-local keys; everything falls through to globals.
+    fn handle_verb(_state: &mut AppState, _verb: crate::input::ViewVerb) -> Option<UpdateResult> {
         None
     }
 
-    fn hints(_state: &AppState) -> Vec<crate::widget::hint_bar::HintSpan> {
-        Vec::new() // Overview has no view-specific keys
+    fn handle_focus(
+        _state: &mut AppState,
+        _action: crate::input::FocusAction,
+    ) -> Option<UpdateResult> {
+        None
     }
 }
 
@@ -27,6 +27,22 @@ mod tests {
     };
     use crate::event::{AppEvent, OverviewPayload, OverviewPgStatusPayload, ViewPayload};
     use std::time::SystemTime;
+
+    #[test]
+    fn overview_handle_verb_is_noop() {
+        use crate::app::state::ViewKeyHandler;
+        use crate::input::{BulletinsVerb, FocusAction, ViewVerb};
+        let mut s = fresh_state();
+        s.current_tab = crate::app::state::ViewId::Overview;
+        assert!(
+            super::OverviewHandler::handle_verb(
+                &mut s,
+                ViewVerb::Bulletins(BulletinsVerb::Refresh)
+            )
+            .is_none()
+        );
+        assert!(super::OverviewHandler::handle_focus(&mut s, FocusAction::Descend).is_none());
+    }
 
     #[test]
     fn overview_data_event_updates_state_and_triggers_redraw() {

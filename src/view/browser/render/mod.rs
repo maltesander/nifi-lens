@@ -192,12 +192,10 @@ fn build_breadcrumb_line(state: &BrowserState) -> Line<'static> {
             spans.push(Span::styled(" > ", theme::muted()));
         }
 
-        let style = if Some(i) == state.breadcrumb_focus {
-            theme::cursor_row() // highlighted segment in breadcrumb mode
-        } else if i == last {
-            theme::bold() // current node (non-navigable)
+        let style = if i == last {
+            theme::bold() // current node
         } else {
-            theme::muted() // ancestor (navigable in breadcrumb mode)
+            theme::muted() // ancestor
         };
 
         spans.push(Span::styled(seg.name.clone(), style));

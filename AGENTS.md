@@ -107,12 +107,45 @@ in v0.1 and the dispatcher refuses to execute them without an
   match `nifi-rust-client`.
 - **Application edge**: `color-eyre` for pretty crash reports.
 - **In-TUI errors**: surfaced as a transient status-line banner with an
-  optional detail modal (`e` to expand). Never printed to stdout while the
-  TUI is active — it corrupts the terminal.
+  optional detail modal (`Enter` to expand, `Esc` to dismiss). Never
+  printed to stdout while the TUI is active — it corrupts the terminal.
 - **No panics in data paths.** Panics are only acceptable on config parse
   failures at startup.
 - **No `unwrap` / `expect` in production code.** Map `Option`/`Err` to
   `NifiLensError` variants. Tests may `unwrap`.
+
+### Input layer
+
+All keyboard input flows through `src/input/`. A `KeyMap` state
+machine (`Idle` ↔ `PendingGo`) translates `crossterm::KeyEvent` into
+`InputEvent` values carrying typed action enums:
+
+- `FocusAction` (Up/Down/Left/Right/PgUp/PgDn/First/Last/Descend/Ascend)
+- `HistoryAction` (Back/Forward — `Shift+←`/`Shift+→`)
+- `TabAction` (Next/Prev/Jump(n))
+- `AppAction` (Quit/Help/ContextSwitcher/FuzzyFind)
+- `GoTarget` (Browser/Events/Tracer — reached via the two-key `g <letter>` combo)
+- `ViewVerb` — wraps per-view enums (`BulletinsVerb`, `BrowserVerb`, `EventsVerb`, `TracerVerb`)
+
+Every enum implements the `Verb` trait, which is the **single source of
+truth** for the chord, label, hint text, enabled predicate, and
+truncation priority. The hint bar and help modal are generators that
+iterate `Verb::all()` — adding a keybinding cannot desync the two
+surfaces.
+
+Views expose a small trait surface (`handle_verb`, `handle_focus`,
+`default_cross_link`, `is_text_input_focused`, `handle_text_input`)
+instead of raw `KeyEvent` matches. `FocusAction::Descend` is "drill
+into the selected thing / activate / submit"; `FocusAction::Ascend` is
+"leave the focused pane / cancel pending input". Rule 1a: when a view
+has no local descent target, `Enter` falls back to the view's
+`default_cross_link` — in practice this is only Bulletins, which
+defaults to Browser so historical `Enter`-jumps-to-Browser muscle
+memory is preserved.
+
+`F12` dumps the keymap reverse table (every registered chord and its
+enum source) to the log file. Unadvertised in the help modal; use it
+when debugging "why doesn't key X do anything".
 
 ### Logging
 
@@ -136,7 +169,8 @@ Rows in the list are additionally deduplicated by
 `ComponentName[id=<uuid>]` prefix and normalizes dynamic `[...]` regions
 before hashing, so repeating errors from the same component collapse
 into a single row with an `×N` count column. Grouping mode is cycled by
-the `g` key (`source+msg` / `source` / `off`).
+the `Y` key (`source+msg` / `source` / `off`). `g` is reserved as the
+global go-leader for cross-tab jumps (`g b` / `g e` / `g t`).
 
 ### Visual language
 

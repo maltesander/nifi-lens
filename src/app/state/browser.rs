@@ -1,8 +1,9 @@
 //! Browser tab key handler.
 
-use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+use crossterm::event::KeyEvent;
 
-use super::{AppState, Banner, BannerSeverity, Modal, PendingIntent, UpdateResult, ViewKeyHandler};
+use super::{AppState, Banner, BannerSeverity, Modal, UpdateResult, ViewKeyHandler};
+use crate::input::{FocusAction, ViewVerb};
 use crate::view::browser::state::{
     DetailFocus, DetailSection, DetailSections, MAX_DETAIL_SECTIONS, NodeDetail,
 };
@@ -11,82 +12,25 @@ use crate::view::browser::state::{
 pub(crate) struct BrowserHandler;
 
 impl ViewKeyHandler for BrowserHandler {
-    fn handle_key(state: &mut AppState, key: KeyEvent) -> Option<UpdateResult> {
-        // Breadcrumb mode intercepts all keys.
-        if state.browser.breadcrumb_focus.is_some() {
-            return handle_breadcrumb_key(state, key);
-        }
-
-        if !matches!(key.modifiers, KeyModifiers::NONE | KeyModifiers::SHIFT) {
-            return None;
-        }
-
-        // Detail-focus handling runs before the tree match. When focus is in a
-        // Section, h/l/Esc are handled here; unrecognised keys fall through to
-        // the tree match below (Tasks 12-14 add more arms here).
-        if let DetailFocus::Section { idx, rows } = state.browser.detail_focus.clone() {
-            let Some(&arena_idx) = state.browser.visible.get(state.browser.selected) else {
-                return Some(UpdateResult::default());
-            };
-            let kind = state.browser.nodes[arena_idx].kind;
-            let sections = DetailSections::for_node(kind);
-            match key.code {
-                KeyCode::Char('h') | KeyCode::Esc => {
-                    state.browser.detail_focus = DetailFocus::Tree;
-                    return Some(UpdateResult {
-                        redraw: true,
-                        intent: None,
-                        tracer_followup: None,
-                    });
+    fn handle_verb(state: &mut AppState, verb: ViewVerb) -> Option<UpdateResult> {
+        use crate::input::BrowserVerb;
+        let bv = match verb {
+            ViewVerb::Browser(v) => v,
+            _ => return None,
+        };
+        match bv {
+            BrowserVerb::Refresh => {
+                // Consume the force-tick oneshot. The worker wakes and fetches
+                // immediately. Clearing the sender prevents a second press from
+                // panicking.
+                if let Some(tx) = state.browser.force_tick_tx.take() {
+                    let _ = tx.send(());
                 }
-                KeyCode::Char('l') => {
-                    if sections.is_empty() {
-                        // Defensive: entered Section focus on a node that has no sections.
-                        return Some(UpdateResult::default());
-                    }
-                    let new_idx = (idx + 1) % sections.len();
-                    state.browser.detail_focus = DetailFocus::Section { idx: new_idx, rows };
-                    return Some(UpdateResult {
-                        redraw: true,
-                        intent: None,
-                        tracer_followup: None,
-                    });
-                }
-                KeyCode::Up => {
-                    let mut new_rows = rows;
-                    new_rows[idx] = new_rows[idx].saturating_sub(1);
-                    state.browser.detail_focus = DetailFocus::Section {
-                        idx,
-                        rows: new_rows,
-                    };
-                    return Some(UpdateResult {
-                        redraw: true,
-                        intent: None,
-                        tracer_followup: None,
-                    });
-                }
-                KeyCode::Down => {
-                    // Capture section_len BEFORE mutating detail_focus to
-                    // avoid a double-borrow of state.browser.
-                    let current_section = sections.0[idx];
-                    let max = state
-                        .browser
-                        .section_len(current_section, &state.bulletins.ring);
-                    let mut new_rows = rows;
-                    if max > 0 {
-                        new_rows[idx] = (new_rows[idx] + 1).min(max - 1);
-                    }
-                    state.browser.detail_focus = DetailFocus::Section {
-                        idx,
-                        rows: new_rows,
-                    };
-                    return Some(UpdateResult {
-                        redraw: true,
-                        intent: None,
-                        tracer_followup: None,
-                    });
-                }
-                KeyCode::Char('c') => {
+            }
+            BrowserVerb::Copy => {
+                // Copy depends on where focus is: row value in detail focus,
+                // node id in tree focus.
+                if matches!(state.browser.detail_focus, DetailFocus::Section { .. }) {
                     let Some(value) = state.browser.focused_row_copy_value(&state.bulletins.ring)
                     else {
                         return Some(UpdateResult::default());
@@ -108,144 +52,32 @@ impl ViewKeyHandler for BrowserHandler {
                             });
                         }
                     }
-                    return Some(UpdateResult {
-                        redraw: true,
-                        intent: None,
-                        tracer_followup: None,
-                    });
-                }
-                KeyCode::Char('t')
-                    if sections.0.get(idx) == Some(&DetailSection::RecentBulletins) =>
-                {
-                    let Some(source_id) =
-                        state.browser.focused_row_source_id(&state.bulletins.ring)
-                    else {
+                } else {
+                    // Tree focus: copy the selected node's id.
+                    let Some(&arena_idx) = state.browser.visible.get(state.browser.selected) else {
                         return Some(UpdateResult::default());
                     };
-                    let link = crate::intent::CrossLink::JumpToEvents {
-                        component_id: source_id,
-                    };
-                    return Some(UpdateResult {
-                        redraw: true,
-                        intent: Some(PendingIntent::JumpTo(link)),
-                        tracer_followup: None,
-                    });
-                }
-                KeyCode::Enter if sections.0.get(idx) == Some(&DetailSection::ChildGroups) => {
-                    let pg_id = match state.browser.details.get(&arena_idx) {
-                        Some(NodeDetail::ProcessGroup(d)) => d.id.clone(),
-                        _ => return Some(UpdateResult::default()),
-                    };
-                    let kids = state.browser.child_process_groups(&pg_id);
-                    let row = rows[idx];
-                    let Some(target) = kids.get(row) else {
-                        return Some(UpdateResult::default());
-                    };
-                    let target_id = target.id.clone();
-                    if state.browser.drill_into_group(&target_id) {
-                        state.browser.emit_detail_request_for_current_selection();
+                    let id = state.browser.nodes[arena_idx].id.clone();
+                    match state.copy_to_clipboard(id.clone()) {
+                        Ok(()) => {
+                            state.status.banner = Some(Banner {
+                                severity: BannerSeverity::Info,
+                                message: format!("copied id: {id}"),
+                                detail: None,
+                            });
+                        }
+                        Err(err) => {
+                            state.status.banner = Some(Banner {
+                                severity: BannerSeverity::Warning,
+                                message: format!("clipboard: {err}"),
+                                detail: None,
+                            });
+                        }
                     }
-                    return Some(UpdateResult {
-                        redraw: true,
-                        intent: None,
-                        tracer_followup: None,
-                    });
-                }
-                _ => {
-                    // Fall through to the tree-focused match.
                 }
             }
-        }
-
-        match key.code {
-            KeyCode::Up => {
-                state.browser.move_up();
-                state.browser.emit_detail_request_for_current_selection();
-                Some(UpdateResult {
-                    redraw: true,
-                    intent: None,
-                    tracer_followup: None,
-                })
-            }
-            KeyCode::Down => {
-                state.browser.move_down();
-                state.browser.emit_detail_request_for_current_selection();
-                Some(UpdateResult {
-                    redraw: true,
-                    intent: None,
-                    tracer_followup: None,
-                })
-            }
-            KeyCode::PageDown => {
-                state.browser.page_down(10);
-                state.browser.emit_detail_request_for_current_selection();
-                Some(UpdateResult {
-                    redraw: true,
-                    intent: None,
-                    tracer_followup: None,
-                })
-            }
-            KeyCode::PageUp => {
-                state.browser.page_up(10);
-                state.browser.emit_detail_request_for_current_selection();
-                Some(UpdateResult {
-                    redraw: true,
-                    intent: None,
-                    tracer_followup: None,
-                })
-            }
-            KeyCode::Home => {
-                state.browser.jump_home();
-                state.browser.emit_detail_request_for_current_selection();
-                Some(UpdateResult {
-                    redraw: true,
-                    intent: None,
-                    tracer_followup: None,
-                })
-            }
-            KeyCode::End => {
-                state.browser.jump_end();
-                state.browser.emit_detail_request_for_current_selection();
-                Some(UpdateResult {
-                    redraw: true,
-                    intent: None,
-                    tracer_followup: None,
-                })
-            }
-            KeyCode::Enter | KeyCode::Right => {
-                state.browser.enter_selection();
-                state.browser.emit_detail_request_for_current_selection();
-                Some(UpdateResult {
-                    redraw: true,
-                    intent: None,
-                    tracer_followup: None,
-                })
-            }
-            KeyCode::Backspace | KeyCode::Left => {
-                state.browser.backspace_selection();
-                state.browser.emit_detail_request_for_current_selection();
-                Some(UpdateResult {
-                    redraw: true,
-                    intent: None,
-                    tracer_followup: None,
-                })
-            }
-            KeyCode::Char('r') => {
-                // Consume the force-tick oneshot. The worker is listening
-                // and will fire an immediate tree fetch. Clearing the
-                // sender prevents a second press from panicking.
-                if let Some(tx) = state.browser.force_tick_tx.take() {
-                    let _ = tx.send(());
-                }
-                Some(UpdateResult {
-                    redraw: true,
-                    intent: None,
-                    tracer_followup: None,
-                })
-            }
-            KeyCode::Char('e') => {
-                // Open Properties modal only for Processor / CS with
-                // detail loaded. No-op otherwise.
+            BrowserVerb::OpenProperties => {
+                // Open Properties modal only for Processor / CS with detail loaded.
                 let Some(&arena_idx) = state.browser.visible.get(state.browser.selected) else {
                     return Some(UpdateResult::default());
                 };
@@ -256,308 +88,267 @@ impl ViewKeyHandler for BrowserHandler {
                     state.modal = Some(Modal::Properties(
                         crate::view::browser::state::PropertiesModalState::new(arena_idx),
                     ));
-                    return Some(UpdateResult {
+                } else {
+                    return Some(UpdateResult::default());
+                }
+            }
+        }
+        Some(UpdateResult {
+            redraw: true,
+            intent: None,
+            tracer_followup: None,
+        })
+    }
+
+    fn handle_focus(state: &mut AppState, action: FocusAction) -> Option<UpdateResult> {
+        // Branch on whether we're in detail-section focus or tree focus.
+        if let DetailFocus::Section { idx, rows } = state.browser.detail_focus.clone() {
+            let Some(&arena_idx) = state.browser.visible.get(state.browser.selected) else {
+                return Some(UpdateResult::default());
+            };
+            let kind = state.browser.nodes[arena_idx].kind;
+            let sections = DetailSections::for_node(kind);
+            return match action {
+                FocusAction::Ascend => {
+                    // Return to tree focus.
+                    state.browser.detail_focus = DetailFocus::Tree;
+                    Some(UpdateResult {
                         redraw: true,
                         intent: None,
                         tracer_followup: None,
-                    });
+                    })
                 }
-                Some(UpdateResult::default())
-            }
-            KeyCode::Char('c') => {
-                // Copy selected node's id to clipboard.
-                let Some(&arena_idx) = state.browser.visible.get(state.browser.selected) else {
-                    return Some(UpdateResult::default());
-                };
-                let id = state.browser.nodes[arena_idx].id.clone();
-                match state.copy_to_clipboard(id.clone()) {
-                    Ok(()) => {
-                        state.status.banner = Some(Banner {
-                            severity: BannerSeverity::Info,
-                            message: format!("copied id: {id}"),
-                            detail: None,
-                        });
+                FocusAction::Left => {
+                    // Cycle to the previous section (wrap around).
+                    if sections.is_empty() {
+                        return Some(UpdateResult::default());
                     }
-                    Err(err) => {
-                        state.status.banner = Some(Banner {
-                            severity: BannerSeverity::Warning,
-                            message: format!("clipboard: {err}"),
-                            detail: None,
-                        });
-                    }
-                }
-                Some(UpdateResult {
-                    redraw: true,
-                    intent: None,
-                    tracer_followup: None,
-                })
-            }
-            KeyCode::Char('t') => {
-                // Emit the JumpToEvents cross-link for Processors only.
-                let Some(&arena_idx) = state.browser.visible.get(state.browser.selected) else {
-                    return Some(UpdateResult::default());
-                };
-                let node = &state.browser.nodes[arena_idx];
-                if !matches!(node.kind, crate::client::NodeKind::Processor) {
-                    return Some(UpdateResult::default());
-                }
-                let link = crate::intent::CrossLink::JumpToEvents {
-                    component_id: node.id.clone(),
-                };
-                Some(UpdateResult {
-                    redraw: true,
-                    intent: Some(PendingIntent::JumpTo(link)),
-                    tracer_followup: None,
-                })
-            }
-            KeyCode::Char('b') => {
-                let segments = state.browser.breadcrumb_segments();
-                if segments.len() > 1 {
-                    // Focus the last ancestor (parent of selected node).
-                    state.browser.breadcrumb_focus = Some(segments.len() - 2);
-                }
-                Some(UpdateResult {
-                    redraw: true,
-                    intent: None,
-                    tracer_followup: None,
-                })
-            }
-            KeyCode::Char('l') => {
-                // Enter detail focus at section 0, or show a banner if the
-                // selected node has no focusable sections.
-                let Some(&arena_idx) = state.browser.visible.get(state.browser.selected) else {
-                    return Some(UpdateResult::default());
-                };
-                let kind = state.browser.nodes[arena_idx].kind;
-                let sections = DetailSections::for_node(kind);
-                if sections.is_empty() {
-                    state.status.banner = Some(Banner {
-                        severity: BannerSeverity::Info,
-                        message: "no focusable sections for this node".to_string(),
-                        detail: None,
-                    });
-                    return Some(UpdateResult {
+                    let new_idx = if idx == 0 {
+                        sections.len() - 1
+                    } else {
+                        idx - 1
+                    };
+                    state.browser.detail_focus = DetailFocus::Section { idx: new_idx, rows };
+                    Some(UpdateResult {
                         redraw: true,
                         intent: None,
                         tracer_followup: None,
-                    });
+                    })
                 }
-                state.browser.detail_focus = DetailFocus::Section {
-                    idx: 0,
-                    rows: [0; MAX_DETAIL_SECTIONS],
-                };
+                FocusAction::Right => {
+                    // Cycle to the next section (wrap around).
+                    if sections.is_empty() {
+                        return Some(UpdateResult::default());
+                    }
+                    let new_idx = (idx + 1) % sections.len();
+                    state.browser.detail_focus = DetailFocus::Section { idx: new_idx, rows };
+                    Some(UpdateResult {
+                        redraw: true,
+                        intent: None,
+                        tracer_followup: None,
+                    })
+                }
+                FocusAction::Up => {
+                    let mut new_rows = rows;
+                    new_rows[idx] = new_rows[idx].saturating_sub(1);
+                    state.browser.detail_focus = DetailFocus::Section {
+                        idx,
+                        rows: new_rows,
+                    };
+                    Some(UpdateResult {
+                        redraw: true,
+                        intent: None,
+                        tracer_followup: None,
+                    })
+                }
+                FocusAction::Down => {
+                    // Capture section_len BEFORE mutating detail_focus to
+                    // avoid a double-borrow of state.browser.
+                    let current_section = sections.0[idx];
+                    let max = state
+                        .browser
+                        .section_len(current_section, &state.bulletins.ring);
+                    let mut new_rows = rows;
+                    if max > 0 {
+                        new_rows[idx] = (new_rows[idx] + 1).min(max - 1);
+                    }
+                    state.browser.detail_focus = DetailFocus::Section {
+                        idx,
+                        rows: new_rows,
+                    };
+                    Some(UpdateResult {
+                        redraw: true,
+                        intent: None,
+                        tracer_followup: None,
+                    })
+                }
+                FocusAction::Descend => {
+                    // On the ChildGroups section, drill into the selected child PG.
+                    if sections.0.get(idx) == Some(&DetailSection::ChildGroups) {
+                        let pg_id = match state.browser.details.get(&arena_idx) {
+                            Some(NodeDetail::ProcessGroup(d)) => d.id.clone(),
+                            _ => return Some(UpdateResult::default()),
+                        };
+                        let kids = state.browser.child_process_groups(&pg_id);
+                        let row = rows[idx];
+                        let Some(target) = kids.get(row) else {
+                            return Some(UpdateResult::default());
+                        };
+                        let target_id = target.id.clone();
+                        if state.browser.drill_into_group(&target_id) {
+                            state.browser.emit_detail_request_for_current_selection();
+                        }
+                        return Some(UpdateResult {
+                            redraw: true,
+                            intent: None,
+                            tracer_followup: None,
+                        });
+                    }
+                    // Other sections: no local descent.
+                    None
+                }
+                FocusAction::PageUp
+                | FocusAction::PageDown
+                | FocusAction::First
+                | FocusAction::Last => None,
+            };
+        }
+
+        // Tree focus.
+        match action {
+            FocusAction::Up => {
+                state.browser.move_up();
+                state.browser.emit_detail_request_for_current_selection();
                 Some(UpdateResult {
                     redraw: true,
                     intent: None,
                     tracer_followup: None,
                 })
             }
-            _ => None,
-        }
-    }
-
-    fn hints(state: &AppState) -> Vec<crate::widget::hint_bar::HintSpan> {
-        use crate::view::browser::state::{DetailFocus, DetailSection, DetailSections};
-        use crate::widget::hint_bar::HintSpan;
-
-        if state.browser.breadcrumb_focus.is_some() {
-            return vec![
-                HintSpan {
-                    key: "←/→",
-                    action: "nav",
-                },
-                HintSpan {
-                    key: "Enter",
-                    action: "jump",
-                },
-                HintSpan {
-                    key: "Esc",
-                    action: "cancel",
-                },
-            ];
-        }
-
-        match &state.browser.detail_focus {
-            DetailFocus::Tree => vec![
-                HintSpan {
-                    key: "↑/↓",
-                    action: "nav",
-                },
-                HintSpan {
-                    key: "Enter",
-                    action: "drill",
-                },
-                HintSpan {
-                    key: "l",
-                    action: "detail",
-                },
-                HintSpan {
-                    key: "e",
-                    action: "props",
-                },
-                HintSpan {
-                    key: "c",
-                    action: "copy id",
-                },
-                HintSpan {
-                    key: "t",
-                    action: "events",
-                },
-                HintSpan {
-                    key: "b",
-                    action: "crumb",
-                },
-            ],
-            DetailFocus::Section { idx, .. } => {
-                let Some(&arena_idx) = state.browser.visible.get(state.browser.selected) else {
-                    return vec![HintSpan {
-                        key: "h",
-                        action: "back",
-                    }];
-                };
+            FocusAction::Down => {
+                state.browser.move_down();
+                state.browser.emit_detail_request_for_current_selection();
+                Some(UpdateResult {
+                    redraw: true,
+                    intent: None,
+                    tracer_followup: None,
+                })
+            }
+            FocusAction::PageUp => {
+                state.browser.page_up(10);
+                state.browser.emit_detail_request_for_current_selection();
+                Some(UpdateResult {
+                    redraw: true,
+                    intent: None,
+                    tracer_followup: None,
+                })
+            }
+            FocusAction::PageDown => {
+                state.browser.page_down(10);
+                state.browser.emit_detail_request_for_current_selection();
+                Some(UpdateResult {
+                    redraw: true,
+                    intent: None,
+                    tracer_followup: None,
+                })
+            }
+            FocusAction::First => {
+                state.browser.jump_home();
+                state.browser.emit_detail_request_for_current_selection();
+                Some(UpdateResult {
+                    redraw: true,
+                    intent: None,
+                    tracer_followup: None,
+                })
+            }
+            FocusAction::Last => {
+                state.browser.jump_end();
+                state.browser.emit_detail_request_for_current_selection();
+                Some(UpdateResult {
+                    redraw: true,
+                    intent: None,
+                    tracer_followup: None,
+                })
+            }
+            FocusAction::Right => {
+                // Expand the selected node / move to first child (same as the
+                // old Enter/Right behavior).
+                state.browser.enter_selection();
+                state.browser.emit_detail_request_for_current_selection();
+                Some(UpdateResult {
+                    redraw: true,
+                    intent: None,
+                    tracer_followup: None,
+                })
+            }
+            FocusAction::Left => {
+                // Collapse the current node or jump to its parent.
+                state.browser.backspace_selection();
+                state.browser.emit_detail_request_for_current_selection();
+                Some(UpdateResult {
+                    redraw: true,
+                    intent: None,
+                    tracer_followup: None,
+                })
+            }
+            FocusAction::Descend => {
+                // For a ProcessGroup: expand it (same as Right). For a leaf
+                // Processor/ControllerService with focusable sections: enter
+                // detail focus. For other node kinds: no-op (return None so
+                // the default_cross_link fallback in the dispatcher can fire
+                // if applicable).
+                let &arena_idx = state.browser.visible.get(state.browser.selected)?;
                 let kind = state.browser.nodes[arena_idx].kind;
                 let sections = DetailSections::for_node(kind);
-                match sections.0.get(*idx).copied() {
-                    Some(DetailSection::Properties) => vec![
-                        HintSpan {
-                            key: "↑/↓",
-                            action: "row",
-                        },
-                        HintSpan {
-                            key: "l",
-                            action: "next",
-                        },
-                        HintSpan {
-                            key: "h",
-                            action: "back",
-                        },
-                        HintSpan {
-                            key: "c",
-                            action: "copy value",
-                        },
-                        HintSpan {
-                            key: "e",
-                            action: "full list",
-                        },
-                    ],
-                    Some(DetailSection::RecentBulletins) => vec![
-                        HintSpan {
-                            key: "↑/↓",
-                            action: "row",
-                        },
-                        HintSpan {
-                            key: "l",
-                            action: "next",
-                        },
-                        HintSpan {
-                            key: "h",
-                            action: "back",
-                        },
-                        HintSpan {
-                            key: "c",
-                            action: "copy msg",
-                        },
-                        HintSpan {
-                            key: "t",
-                            action: "trace",
-                        },
-                    ],
-                    Some(DetailSection::ControllerServices) => vec![
-                        HintSpan {
-                            key: "↑/↓",
-                            action: "row",
-                        },
-                        HintSpan {
-                            key: "l",
-                            action: "next",
-                        },
-                        HintSpan {
-                            key: "h",
-                            action: "back",
-                        },
-                        HintSpan {
-                            key: "c",
-                            action: "copy id",
-                        },
-                    ],
-                    Some(DetailSection::ChildGroups) => vec![
-                        HintSpan {
-                            key: "↑/↓",
-                            action: "row",
-                        },
-                        HintSpan {
-                            key: "l",
-                            action: "next",
-                        },
-                        HintSpan {
-                            key: "h",
-                            action: "back",
-                        },
-                        HintSpan {
-                            key: "c",
-                            action: "copy id",
-                        },
-                        HintSpan {
-                            key: "Enter",
-                            action: "drill",
-                        },
-                    ],
-                    _ => vec![HintSpan {
-                        key: "h",
-                        action: "back",
-                    }],
-                }
-            }
-        }
-    }
-}
-
-fn handle_breadcrumb_key(state: &mut AppState, key: KeyEvent) -> Option<UpdateResult> {
-    let focus = state.browser.breadcrumb_focus?;
-    let segments = state.browser.breadcrumb_segments();
-    let max_focus = segments.len().saturating_sub(2); // last segment is current node
-
-    match key.code {
-        KeyCode::Left => {
-            state.browser.breadcrumb_focus = Some(focus.saturating_sub(1));
-            Some(UpdateResult {
-                redraw: true,
-                intent: None,
-                tracer_followup: None,
-            })
-        }
-        KeyCode::Right => {
-            state.browser.breadcrumb_focus = Some((focus + 1).min(max_focus));
-            Some(UpdateResult {
-                redraw: true,
-                intent: None,
-                tracer_followup: None,
-            })
-        }
-        KeyCode::Enter => {
-            if let Some(seg) = segments.get(focus) {
-                let arena_idx = seg.arena_idx;
-                if let Some(pos) = state.browser.visible.iter().position(|&i| i == arena_idx) {
-                    state.browser.selected = pos;
+                use crate::client::NodeKind as NK;
+                if matches!(kind, NK::ProcessGroup) {
+                    state.browser.enter_selection();
                     state.browser.emit_detail_request_for_current_selection();
+                    Some(UpdateResult {
+                        redraw: true,
+                        intent: None,
+                        tracer_followup: None,
+                    })
+                } else if !sections.is_empty() {
+                    // Leaf node with focusable sections — enter detail focus.
+                    state.browser.detail_focus = DetailFocus::Section {
+                        idx: 0,
+                        rows: [0; MAX_DETAIL_SECTIONS],
+                    };
+                    Some(UpdateResult {
+                        redraw: true,
+                        intent: None,
+                        tracer_followup: None,
+                    })
+                } else {
+                    None
                 }
             }
-            state.browser.breadcrumb_focus = None;
-            Some(UpdateResult {
-                redraw: true,
-                intent: None,
-                tracer_followup: None,
-            })
+            FocusAction::Ascend => {
+                // In tree focus: Ascend collapses the current node if expanded,
+                // or jumps to the parent. Delegates to backspace_selection().
+                state.browser.backspace_selection();
+                state.browser.emit_detail_request_for_current_selection();
+                Some(UpdateResult {
+                    redraw: true,
+                    intent: None,
+                    tracer_followup: None,
+                })
+            }
         }
-        KeyCode::Esc => {
-            state.browser.breadcrumb_focus = None;
-            Some(UpdateResult {
-                redraw: true,
-                intent: None,
-                tracer_followup: None,
-            })
-        }
-        _ => Some(UpdateResult::default()), // consume all other keys in breadcrumb mode
+    }
+
+    /// Browser always handles descent locally (expand PG or enter detail focus).
+    fn default_cross_link(_state: &AppState) -> Option<crate::input::GoTarget> {
+        None
+    }
+
+    fn is_text_input_focused(_state: &AppState) -> bool {
+        false
+    }
+
+    fn handle_text_input(_state: &mut AppState, _key: KeyEvent) -> Option<UpdateResult> {
+        None
     }
 }
 
@@ -565,7 +356,10 @@ fn handle_breadcrumb_key(state: &mut AppState, key: KeyEvent) -> Option<UpdateRe
 mod tests {
     use super::super::tests::{fresh_state, key, seeded_browser_state, tiny_config};
     use super::super::update;
-    use crate::app::state::{AppState, BannerSeverity, Modal, PendingIntent, ViewId};
+    use super::BrowserHandler;
+    use crate::app::state::{
+        AppState, BannerSeverity, Modal, PendingIntent, ViewId, ViewKeyHandler,
+    };
     use crate::client::{NodeKind, NodeStatusSummary, RawNode, RecursiveSnapshot};
     use crate::config::Config;
     use crate::event::{AppEvent, BrowserPayload, ViewPayload};
@@ -718,12 +512,12 @@ mod tests {
     }
 
     #[test]
-    fn on_browser_tab_backspace_on_expanded_pg_collapses() {
+    fn on_browser_tab_left_on_expanded_pg_collapses() {
         let (mut s, c) = seeded_browser_state();
         s.browser.expanded.insert(2);
         crate::view::browser::state::rebuild_visible(&mut s.browser);
         s.browser.selected = 2;
-        update(&mut s, key(KeyCode::Backspace, KeyModifiers::NONE), &c);
+        update(&mut s, key(KeyCode::Left, KeyModifiers::NONE), &c);
         assert!(!s.browser.expanded.contains(&2));
     }
 
@@ -829,7 +623,7 @@ mod tests {
     }
 
     #[test]
-    fn e_on_processor_with_detail_opens_properties_modal() {
+    fn p_on_processor_with_detail_opens_properties_modal() {
         use crate::client::ProcessorDetail;
         use crate::view::browser::state::NodeDetail;
 
@@ -855,15 +649,24 @@ mod tests {
             }),
         );
         s.browser.selected = 1; // visible row for arena 1
-        update(&mut s, key(KeyCode::Char('e'), KeyModifiers::NONE), &c);
+        update(&mut s, key(KeyCode::Char('p'), KeyModifiers::NONE), &c);
         assert!(matches!(s.modal, Some(Modal::Properties(_))));
     }
 
     #[test]
-    fn e_on_processor_without_detail_is_noop() {
+    fn e_no_longer_opens_properties_modal() {
+        // `e` used to open properties; now it is a no-op — use `p` instead.
         let (mut s, c) = seeded_browser_state();
         s.browser.selected = 1;
         update(&mut s, key(KeyCode::Char('e'), KeyModifiers::NONE), &c);
+        assert!(s.modal.is_none());
+    }
+
+    #[test]
+    fn p_on_processor_without_detail_is_noop() {
+        let (mut s, c) = seeded_browser_state();
+        s.browser.selected = 1;
+        update(&mut s, key(KeyCode::Char('p'), KeyModifiers::NONE), &c);
         assert!(s.modal.is_none());
     }
 
@@ -884,16 +687,16 @@ mod tests {
     }
 
     #[test]
-    fn t_on_processor_emits_jump_to_events_crosslink() {
+    fn t_is_no_longer_a_jump_to_events_shortcut() {
+        // `t` used to emit JumpToEvents; that shortcut is retired.
+        // Users now navigate via `g e` (GoTarget::Events chord).
         let (mut s, c) = seeded_browser_state();
         s.browser.selected = 1; // "gen" processor
         let r = update(&mut s, key(KeyCode::Char('t'), KeyModifiers::NONE), &c);
-        match r.intent {
-            Some(PendingIntent::JumpTo(CrossLink::JumpToEvents { component_id, .. })) => {
-                assert_eq!(component_id, "gen");
-            }
-            other => panic!("expected JumpToEvents, got {other:?}"),
-        }
+        assert!(
+            r.intent.is_none(),
+            "t must no longer emit JumpToEvents; got {r:?}"
+        );
     }
 
     /// Build a 3-level tree: Root (PG) > Pipeline (PG) > Generate (Processor).
@@ -956,76 +759,131 @@ mod tests {
     }
 
     #[test]
-    fn b_enters_breadcrumb_mode() {
+    fn b_is_no_longer_breadcrumb_activation() {
+        // `b` used to enter breadcrumb mode; the interactive breadcrumb mode
+        // has been removed entirely. Pressing `b` must be a no-op.
         let (mut s, c) = three_level_browser_state();
-        // Select Generate (visible index 2, arena index 2).
         s.browser.selected = 2;
+        let before_selected = s.browser.selected;
         update(&mut s, key(KeyCode::Char('b'), KeyModifiers::NONE), &c);
-        // Breadcrumb segments for Generate: [Root, Pipeline, Generate].
-        // Focus should land on the last ancestor = index 1 (Pipeline).
-        assert_eq!(s.browser.breadcrumb_focus, Some(1));
+        assert_eq!(s.browser.selected, before_selected, "b must be a no-op");
     }
 
     #[test]
     fn b_at_root_is_noop() {
+        // `b` is a no-op on both leaf and root nodes.
         let (mut s, c) = three_level_browser_state();
-        // Select Root (visible index 0). Only 1 segment → no breadcrumb mode.
         s.browser.selected = 0;
+        let before_selected = s.browser.selected;
         update(&mut s, key(KeyCode::Char('b'), KeyModifiers::NONE), &c);
-        assert_eq!(s.browser.breadcrumb_focus, None);
+        assert_eq!(
+            s.browser.selected, before_selected,
+            "b must be a no-op at root"
+        );
     }
 
     #[test]
-    fn left_right_navigate_breadcrumb_segments() {
+    fn left_key_collapses_expanded_pg_in_tree_focus() {
+        // Left collapses an expanded PG (replaces old backspace/h behavior).
         let (mut s, c) = three_level_browser_state();
-        // Select Generate → breadcrumb segments: [Root(0), Pipeline(1), Generate(2)].
-        s.browser.selected = 2;
-        update(&mut s, key(KeyCode::Char('b'), KeyModifiers::NONE), &c);
-        assert_eq!(s.browser.breadcrumb_focus, Some(1)); // Pipeline
-
-        // Left → move to Root (index 0).
+        // Pipeline (arena 1) is expanded. Select it.
+        let pipeline_arena = s
+            .browser
+            .nodes
+            .iter()
+            .position(|n| n.id == "pipeline")
+            .unwrap();
+        let pipeline_vis = s
+            .browser
+            .visible
+            .iter()
+            .position(|&i| i == pipeline_arena)
+            .unwrap();
+        s.browser.selected = pipeline_vis;
+        assert!(s.browser.expanded.contains(&pipeline_arena));
         update(&mut s, key(KeyCode::Left, KeyModifiers::NONE), &c);
-        assert_eq!(s.browser.breadcrumb_focus, Some(0));
+        assert!(
+            !s.browser.expanded.contains(&pipeline_arena),
+            "Left on expanded PG should collapse it"
+        );
+    }
 
-        // Left again → still 0 (saturating).
-        update(&mut s, key(KeyCode::Left, KeyModifiers::NONE), &c);
-        assert_eq!(s.browser.breadcrumb_focus, Some(0));
-
-        // Right → back to 1 (Pipeline).
+    #[test]
+    fn right_key_expands_collapsed_pg_in_tree_focus() {
+        // Right expands a collapsed PG (replaces old Enter/Right behavior).
+        let (mut s, c) = three_level_browser_state();
+        // Collapse Pipeline first.
+        s.browser.expanded.remove(&1);
+        crate::view::browser::state::rebuild_visible(&mut s.browser);
+        let pipeline_arena = s
+            .browser
+            .nodes
+            .iter()
+            .position(|n| n.id == "pipeline")
+            .unwrap();
+        let pipeline_vis = s
+            .browser
+            .visible
+            .iter()
+            .position(|&i| i == pipeline_arena)
+            .unwrap();
+        s.browser.selected = pipeline_vis;
+        let before = s.browser.visible.clone();
         update(&mut s, key(KeyCode::Right, KeyModifiers::NONE), &c);
-        assert_eq!(s.browser.breadcrumb_focus, Some(1));
+        assert_ne!(s.browser.visible, before, "Right should expand the PG");
     }
 
     #[test]
-    fn enter_in_breadcrumb_jumps_to_ancestor() {
+    fn enter_on_collapsed_pg_expands_and_moves_to_child() {
+        // Enter (Descend) on a collapsed PG expands and selects the first child.
         let (mut s, c) = three_level_browser_state();
-        // Select Generate (visible index 2).
-        s.browser.selected = 2;
-        update(&mut s, key(KeyCode::Char('b'), KeyModifiers::NONE), &c);
-        assert_eq!(s.browser.breadcrumb_focus, Some(1)); // Pipeline
-
-        // Navigate to Root (index 0).
-        update(&mut s, key(KeyCode::Left, KeyModifiers::NONE), &c);
-        assert_eq!(s.browser.breadcrumb_focus, Some(0));
-
-        // Enter → jump to Root, exit breadcrumb mode.
+        // Collapse Pipeline so Enter on it will expand.
+        s.browser.expanded.remove(&1);
+        crate::view::browser::state::rebuild_visible(&mut s.browser);
+        let pipeline_arena = s
+            .browser
+            .nodes
+            .iter()
+            .position(|n| n.id == "pipeline")
+            .unwrap();
+        let pipeline_vis = s
+            .browser
+            .visible
+            .iter()
+            .position(|&i| i == pipeline_arena)
+            .unwrap();
+        s.browser.selected = pipeline_vis;
         update(&mut s, key(KeyCode::Enter, KeyModifiers::NONE), &c);
-        assert_eq!(s.browser.breadcrumb_focus, None);
-        // Root is visible index 0.
-        assert_eq!(s.browser.selected, 0);
+        assert!(
+            s.browser.expanded.contains(&pipeline_arena),
+            "Enter should expand the PG"
+        );
     }
 
     #[test]
-    fn esc_in_breadcrumb_cancels() {
+    fn esc_on_expanded_pg_in_tree_collapses_it() {
+        // Ascend (Esc) in tree focus on an expanded PG collapses it.
         let (mut s, c) = three_level_browser_state();
-        s.browser.selected = 2;
-        update(&mut s, key(KeyCode::Char('b'), KeyModifiers::NONE), &c);
-        assert_eq!(s.browser.breadcrumb_focus, Some(1));
-
-        let prev_selected = s.browser.selected;
+        // Pipeline (arena 1) is expanded. Select it.
+        let pipeline_arena = s
+            .browser
+            .nodes
+            .iter()
+            .position(|n| n.id == "pipeline")
+            .unwrap();
+        let pipeline_vis = s
+            .browser
+            .visible
+            .iter()
+            .position(|&i| i == pipeline_arena)
+            .unwrap();
+        s.browser.selected = pipeline_vis;
+        assert!(s.browser.expanded.contains(&pipeline_arena));
         update(&mut s, key(KeyCode::Esc, KeyModifiers::NONE), &c);
-        assert_eq!(s.browser.breadcrumb_focus, None);
-        assert_eq!(s.browser.selected, prev_selected);
+        assert!(
+            !s.browser.expanded.contains(&pipeline_arena),
+            "Esc (Ascend) on expanded PG should collapse it"
+        );
     }
 
     #[test]
@@ -1070,13 +928,14 @@ mod tests {
     }
 
     // -----------------------------------------------------------------------
-    // Task 11: Focus cycle (l/h/Esc)
+    // Task 11: Focus cycle — Enter=descend, Right/Left=section, Esc=ascend
     // -----------------------------------------------------------------------
 
     #[test]
-    fn l_on_processor_enters_detail_focus_at_section_zero() {
+    fn enter_on_processor_enters_detail_focus_at_section_zero() {
+        // Enter (Descend) on a leaf Processor enters detail focus at section 0.
         let (mut s, c) = fresh_browser_on_processor();
-        update(&mut s, key(KeyCode::Char('l'), KeyModifiers::NONE), &c);
+        update(&mut s, key(KeyCode::Enter, KeyModifiers::NONE), &c);
         match &s.browser.detail_focus {
             crate::view::browser::state::DetailFocus::Section { idx, .. } => {
                 assert_eq!(*idx, 0)
@@ -1088,12 +947,13 @@ mod tests {
     }
 
     #[test]
-    fn l_from_last_section_wraps_to_zero() {
+    fn right_from_last_section_wraps_to_zero() {
+        // Right cycles sections forward; wraps from last to first.
         let (mut s, c) = fresh_browser_on_processor();
-        // Processor has 2 focusable sections. Tree → 0 → 1 → 0 (wrap).
-        update(&mut s, key(KeyCode::Char('l'), KeyModifiers::NONE), &c);
-        update(&mut s, key(KeyCode::Char('l'), KeyModifiers::NONE), &c);
-        update(&mut s, key(KeyCode::Char('l'), KeyModifiers::NONE), &c);
+        // Processor has 2 focusable sections. Enter→0, Right→1, Right→0 (wrap).
+        update(&mut s, key(KeyCode::Enter, KeyModifiers::NONE), &c);
+        update(&mut s, key(KeyCode::Right, KeyModifiers::NONE), &c);
+        update(&mut s, key(KeyCode::Right, KeyModifiers::NONE), &c);
         match &s.browser.detail_focus {
             crate::view::browser::state::DetailFocus::Section { idx, .. } => {
                 assert_eq!(*idx, 0, "wrap")
@@ -1103,20 +963,10 @@ mod tests {
     }
 
     #[test]
-    fn h_returns_to_tree_focus() {
+    fn esc_returns_to_tree_focus_from_detail() {
+        // Esc (Ascend) in Section focus returns to Tree focus.
         let (mut s, c) = fresh_browser_on_processor();
-        update(&mut s, key(KeyCode::Char('l'), KeyModifiers::NONE), &c);
-        update(&mut s, key(KeyCode::Char('h'), KeyModifiers::NONE), &c);
-        assert_eq!(
-            s.browser.detail_focus,
-            crate::view::browser::state::DetailFocus::Tree
-        );
-    }
-
-    #[test]
-    fn esc_returns_to_tree_focus() {
-        let (mut s, c) = fresh_browser_on_processor();
-        update(&mut s, key(KeyCode::Char('l'), KeyModifiers::NONE), &c);
+        update(&mut s, key(KeyCode::Enter, KeyModifiers::NONE), &c);
         update(&mut s, key(KeyCode::Esc, KeyModifiers::NONE), &c);
         assert_eq!(
             s.browser.detail_focus,
@@ -1126,16 +976,15 @@ mod tests {
 
     #[test]
     fn moving_tree_selection_resets_detail_focus() {
+        // Moving the tree cursor while in detail focus resets focus to Tree.
         let (mut s, c) = fresh_browser_on_processor();
-        update(&mut s, key(KeyCode::Char('l'), KeyModifiers::NONE), &c);
+        update(&mut s, key(KeyCode::Enter, KeyModifiers::NONE), &c);
         assert!(matches!(
             s.browser.detail_focus,
             crate::view::browser::state::DetailFocus::Section { .. }
         ));
-        // Return to tree focus first (h), then move down — this mimics the
-        // real user flow where h exits section focus and Down re-moves the
-        // tree cursor, which calls reset_detail_focus().
-        update(&mut s, key(KeyCode::Char('h'), KeyModifiers::NONE), &c);
+        // Return to tree focus (Esc), then move down.
+        update(&mut s, key(KeyCode::Esc, KeyModifiers::NONE), &c);
         update(&mut s, key(KeyCode::Down, KeyModifiers::NONE), &c);
         assert_eq!(
             s.browser.detail_focus,
@@ -1144,21 +993,27 @@ mod tests {
     }
 
     #[test]
-    fn l_on_pg_enters_section_focus_at_idx_0() {
+    fn enter_on_pg_does_not_enter_section_focus() {
+        // Enter (Descend) on a ProcessGroup expands it — it does NOT enter
+        // detail section focus.
         let (mut s, c) = seeded_browser_state();
-        // Confirm we're on a PG (root, selected=0).
-        let idx = s.browser.visible[s.browser.selected];
-        assert!(matches!(
-            s.browser.nodes[idx].kind,
-            crate::client::NodeKind::ProcessGroup
-        ));
-        update(&mut s, key(KeyCode::Char('l'), KeyModifiers::NONE), &c);
-        // PG has 3 focusable sections (ControllerServices, ChildGroups,
-        // RecentBulletins), so `l` enters Section focus at idx 0.
-        assert!(matches!(
+        // Confirm we're on a PG (root, selected=0), and it's already expanded.
+        // Collapse it first so Enter will expand.
+        s.browser.expanded.remove(&0);
+        crate::view::browser::state::rebuild_visible(&mut s.browser);
+        s.browser.selected = 0;
+        update(&mut s, key(KeyCode::Enter, KeyModifiers::NONE), &c);
+        // Must still be in Tree focus — not Section focus.
+        assert_eq!(
             s.browser.detail_focus,
-            crate::view::browser::state::DetailFocus::Section { idx: 0, .. }
-        ));
+            crate::view::browser::state::DetailFocus::Tree,
+            "Enter on PG should expand, not enter section focus"
+        );
+        // And the PG should now be expanded.
+        assert!(
+            s.browser.expanded.contains(&0),
+            "PG should be expanded after Enter"
+        );
     }
 
     // -----------------------------------------------------------------------
@@ -1202,8 +1057,8 @@ mod tests {
     #[test]
     fn down_inside_focused_properties_advances_row() {
         let (mut s, c) = fresh_browser_on_processor_with_properties();
-        // Enter detail focus on Properties (section 0).
-        update(&mut s, key(KeyCode::Char('l'), KeyModifiers::NONE), &c);
+        // Enter detail focus on Properties (section 0) via Descend (Enter).
+        update(&mut s, key(KeyCode::Enter, KeyModifiers::NONE), &c);
 
         update(&mut s, key(KeyCode::Down, KeyModifiers::NONE), &c);
         match &s.browser.detail_focus {
@@ -1218,7 +1073,7 @@ mod tests {
     #[test]
     fn up_inside_focused_properties_clamps_at_zero() {
         let (mut s, c) = fresh_browser_on_processor_with_properties();
-        update(&mut s, key(KeyCode::Char('l'), KeyModifiers::NONE), &c);
+        update(&mut s, key(KeyCode::Enter, KeyModifiers::NONE), &c);
 
         update(&mut s, key(KeyCode::Up, KeyModifiers::NONE), &c);
         match &s.browser.detail_focus {
@@ -1234,7 +1089,7 @@ mod tests {
         use crate::view::browser::state::DetailSection;
 
         let (mut s, c) = fresh_browser_on_processor_with_properties();
-        update(&mut s, key(KeyCode::Char('l'), KeyModifiers::NONE), &c);
+        update(&mut s, key(KeyCode::Enter, KeyModifiers::NONE), &c);
 
         for _ in 0..100 {
             update(&mut s, key(KeyCode::Down, KeyModifiers::NONE), &c);
@@ -1257,8 +1112,8 @@ mod tests {
     #[test]
     fn c_in_focused_properties_copies_value_and_emits_banner() {
         let (mut s, c) = fresh_browser_on_processor_with_properties();
-        // Enter detail focus on Properties (section 0).
-        update(&mut s, key(KeyCode::Char('l'), KeyModifiers::NONE), &c);
+        // Enter detail focus on Properties (section 0) via Descend (Enter).
+        update(&mut s, key(KeyCode::Enter, KeyModifiers::NONE), &c);
 
         update(&mut s, key(KeyCode::Char('c'), KeyModifiers::NONE), &c);
 
@@ -1335,41 +1190,33 @@ mod tests {
     }
 
     #[test]
-    fn t_in_focused_recent_bulletins_emits_jump_to_events_crosslink() {
+    fn t_is_noop_in_focused_recent_bulletins() {
+        // `t` is retired; it is now a no-op in both tree and detail focus.
+        // Users use `g e` (GoTarget::Events) for cross-tab jumps instead.
         let (mut s, c) = fresh_browser_on_processor_with_bulletins();
         // Enter detail focus on Properties (section 0), then cycle to
-        // RecentBulletins (section 1).
-        update(&mut s, key(KeyCode::Char('l'), KeyModifiers::NONE), &c);
-        update(&mut s, key(KeyCode::Char('l'), KeyModifiers::NONE), &c);
+        // RecentBulletins (section 1) via Right.
+        update(&mut s, key(KeyCode::Enter, KeyModifiers::NONE), &c);
+        update(&mut s, key(KeyCode::Right, KeyModifiers::NONE), &c);
 
         let r = update(&mut s, key(KeyCode::Char('t'), KeyModifiers::NONE), &c);
-        match r.intent {
-            Some(PendingIntent::JumpTo(CrossLink::JumpToEvents { component_id })) => {
-                assert_eq!(component_id, "gen");
-            }
-            other => panic!("expected JumpToEvents cross-link, got {other:?}"),
-        }
+        assert!(
+            r.intent.is_none(),
+            "t must be a no-op in detail focus; got {r:?}"
+        );
     }
 
     #[test]
-    fn t_in_focused_properties_section_falls_through_to_tree_t() {
-        // When focus is on Properties (not RecentBulletins), t should fall
-        // through and emit the same JumpToEvents cross-link the tree-level
-        // t handler emits (since the processor is selected in the tree).
+    fn t_is_noop_in_focused_properties_section() {
+        // `t` is retired; no intent emitted from Properties section focus either.
         let (mut s, c) = fresh_browser_on_processor_with_properties();
-        // Enter detail focus on Properties (section 0 — NOT RecentBulletins).
-        update(&mut s, key(KeyCode::Char('l'), KeyModifiers::NONE), &c);
+        update(&mut s, key(KeyCode::Enter, KeyModifiers::NONE), &c);
 
         let r = update(&mut s, key(KeyCode::Char('t'), KeyModifiers::NONE), &c);
-        // The guard `sections.0.get(idx) == Some(&DetailSection::RecentBulletins)`
-        // is false on section 0 (Properties), so t falls through to the tree
-        // handler which also emits JumpToEvents for the selected Processor.
-        match r.intent {
-            Some(PendingIntent::JumpTo(CrossLink::JumpToEvents { component_id })) => {
-                assert_eq!(component_id, "gen");
-            }
-            other => panic!("expected JumpToEvents from tree handler, got {other:?}"),
-        }
+        assert!(
+            r.intent.is_none(),
+            "t must be a no-op in section focus; got {r:?}"
+        );
     }
 
     #[test]
@@ -1401,7 +1248,6 @@ mod tests {
     #[test]
     fn t_on_focused_pg_recent_bulletins_emits_crosslink_for_row_source() {
         use crate::client::{BulletinSnapshot, ProcessGroupDetail};
-        use crate::intent::CrossLink;
         use crate::view::browser::state::{DetailFocus, NodeDetail};
 
         let (mut s, c) = seeded_browser_state();
@@ -1461,18 +1307,13 @@ mod tests {
         });
 
         let r = update(&mut s, key(KeyCode::Char('t'), KeyModifiers::NONE), &c);
-        match r.intent {
-            Some(PendingIntent::JumpTo(CrossLink::JumpToEvents { component_id })) => {
-                assert_eq!(component_id, "p2");
-            }
-            other => panic!("unexpected intent: {other:?}"),
-        }
+        // `t` is now a no-op; cross-tab jump is via `g e`.
+        assert!(r.intent.is_none(), "t must be a no-op; got {r:?}");
     }
 
     #[test]
-    fn tree_drill_out_uses_backspace_or_left_only_no_h_alias() {
-        // Use three_level_browser_state: root(0), pipeline(1) expanded, gen(2).
-        // Select pipeline (arena 1, visible row 1), which is already expanded.
+    fn tree_drill_out_uses_left_only_no_h_alias() {
+        // `h` and Backspace are retired; only Left (Ascend) collapses a PG.
         let (mut s, c) = three_level_browser_state();
         let pipeline_arena = s
             .browser
@@ -1487,20 +1328,20 @@ mod tests {
             .position(|&i| i == pipeline_arena)
             .unwrap();
         s.browser.selected = pipeline_visible;
-        let after_drill = s.browser.visible.clone();
+        let before_visible = s.browser.visible.clone();
 
-        // `h` no longer drills out.
+        // `h` is a no-op.
         update(&mut s, key(KeyCode::Char('h'), KeyModifiers::NONE), &c);
         assert_eq!(
-            s.browser.visible, after_drill,
-            "h should no longer drill out"
+            s.browser.visible, before_visible,
+            "h must no longer collapse a PG"
         );
 
-        // Left still drills out (collapses the expanded pipeline PG).
+        // Left collapses the expanded pipeline PG.
         update(&mut s, key(KeyCode::Left, KeyModifiers::NONE), &c);
         assert_ne!(
-            s.browser.visible, after_drill,
-            "Left should still drill out"
+            s.browser.visible, before_visible,
+            "Left should collapse the PG"
         );
     }
 
@@ -1546,5 +1387,197 @@ mod tests {
         // Tree cursor now on ingest (arena idx 2), not gen (arena idx 1).
         assert_eq!(s.browser.visible[s.browser.selected], 2);
         assert_eq!(s.browser.detail_focus, DetailFocus::Tree);
+    }
+
+    // -----------------------------------------------------------------------
+    // Task 14: New typed-verb / typed-focus tests
+    // -----------------------------------------------------------------------
+
+    /// Seed a browser with a single Processor (gen, arena 1) and set
+    /// `current_tab = Browser`. Mirrors `seeded_browser_state` but exposes
+    /// the state at arena index 1 as a Processor.
+    fn seed_browser_with_processor(s: &mut AppState) {
+        use crate::client::{NodeKind, NodeStatusSummary, RawNode, RecursiveSnapshot};
+        use crate::event::{BrowserPayload, ViewPayload};
+        use std::time::SystemTime;
+
+        let c = tiny_config();
+        let snap = RecursiveSnapshot {
+            nodes: vec![
+                RawNode {
+                    parent_idx: None,
+                    kind: NodeKind::ProcessGroup,
+                    id: "root".into(),
+                    group_id: "root".into(),
+                    name: "root".into(),
+                    status_summary: NodeStatusSummary::ProcessGroup {
+                        running: 0,
+                        stopped: 0,
+                        invalid: 0,
+                        disabled: 0,
+                    },
+                },
+                RawNode {
+                    parent_idx: Some(0),
+                    kind: NodeKind::Processor,
+                    id: "gen".into(),
+                    group_id: "root".into(),
+                    name: "Gen".into(),
+                    status_summary: NodeStatusSummary::Processor {
+                        run_status: "Running".into(),
+                    },
+                },
+            ],
+            fetched_at: SystemTime::now(),
+        };
+        update(
+            s,
+            AppEvent::Data(ViewPayload::Browser(BrowserPayload::Tree(snap))),
+            &c,
+        );
+        s.current_tab = ViewId::Browser;
+        s.browser.selected = 1; // "gen" Processor
+    }
+
+    /// Seed a browser with a ProcessGroup child. The root (arena 0) has
+    /// one child PG named "ingest" (arena 1).
+    fn seed_browser_with_child_pg(s: &mut AppState) {
+        use crate::client::{NodeKind, NodeStatusSummary, RawNode, RecursiveSnapshot};
+        use crate::event::{BrowserPayload, ViewPayload};
+        use std::time::SystemTime;
+
+        let c = tiny_config();
+        let snap = RecursiveSnapshot {
+            nodes: vec![
+                RawNode {
+                    parent_idx: None,
+                    kind: NodeKind::ProcessGroup,
+                    id: "root".into(),
+                    group_id: "root".into(),
+                    name: "root".into(),
+                    status_summary: NodeStatusSummary::ProcessGroup {
+                        running: 0,
+                        stopped: 0,
+                        invalid: 0,
+                        disabled: 0,
+                    },
+                },
+                RawNode {
+                    parent_idx: Some(0),
+                    kind: NodeKind::ProcessGroup,
+                    id: "ingest".into(),
+                    group_id: "root".into(),
+                    name: "ingest".into(),
+                    status_summary: NodeStatusSummary::ProcessGroup {
+                        running: 0,
+                        stopped: 0,
+                        invalid: 0,
+                        disabled: 0,
+                    },
+                },
+            ],
+            fetched_at: SystemTime::now(),
+        };
+        update(
+            s,
+            AppEvent::Data(ViewPayload::Browser(BrowserPayload::Tree(snap))),
+            &c,
+        );
+        s.current_tab = ViewId::Browser;
+        // Select root (arena 0) — the parent of the child PG.
+        s.browser.selected = 0;
+    }
+
+    #[test]
+    fn p_opens_properties_modal() {
+        use crate::client::ProcessorDetail;
+        use crate::input::{BrowserVerb, ViewVerb};
+        use crate::view::browser::state::NodeDetail;
+
+        let mut s = fresh_state();
+        s.current_tab = ViewId::Browser;
+        seed_browser_with_processor(&mut s);
+        // Seed detail so the OpenProperties path has data.
+        s.browser.details.insert(
+            1,
+            NodeDetail::Processor(ProcessorDetail {
+                id: "gen".into(),
+                name: "Gen".into(),
+                type_name: "x".into(),
+                bundle: String::new(),
+                run_status: "Running".into(),
+                scheduling_strategy: String::new(),
+                scheduling_period: String::new(),
+                concurrent_tasks: 1,
+                run_duration_ms: 0,
+                penalty_duration: String::new(),
+                yield_duration: String::new(),
+                bulletin_level: String::new(),
+                properties: vec![],
+                validation_errors: vec![],
+            }),
+        );
+
+        BrowserHandler::handle_verb(&mut s, ViewVerb::Browser(BrowserVerb::OpenProperties));
+        assert!(matches!(s.modal, Some(Modal::Properties(_))));
+    }
+
+    #[test]
+    fn e_no_longer_opens_properties() {
+        use crossterm::event::{KeyEvent, KeyModifiers};
+        let mut s = fresh_state();
+        let c = tiny_config();
+        s.current_tab = ViewId::Browser;
+        seed_browser_with_processor(&mut s);
+        update(
+            &mut s,
+            AppEvent::Input(crossterm::event::Event::Key(KeyEvent::new(
+                KeyCode::Char('e'),
+                KeyModifiers::NONE,
+            ))),
+            &c,
+        );
+        assert!(
+            !matches!(s.modal, Some(Modal::Properties(_))),
+            "e must no longer open Properties; p does"
+        );
+    }
+
+    #[test]
+    fn descend_on_process_group_expands() {
+        use crate::input::FocusAction;
+        let mut s = fresh_state();
+        s.current_tab = ViewId::Browser;
+        seed_browser_with_child_pg(&mut s);
+        // Root (arena 0) is already expanded by seed; collapse it first.
+        s.browser.expanded.remove(&0);
+        crate::view::browser::state::rebuild_visible(&mut s.browser);
+        s.browser.selected = 0;
+        let before = s.browser.expanded.len();
+        BrowserHandler::handle_focus(&mut s, FocusAction::Descend);
+        assert!(
+            s.browser.expanded.len() > before,
+            "Descend on PG must expand it"
+        );
+    }
+
+    #[test]
+    fn breadcrumb_mode_no_longer_triggered_by_b() {
+        use crossterm::event::{KeyEvent, KeyModifiers};
+        let mut s = fresh_state();
+        let c = tiny_config();
+        s.current_tab = ViewId::Browser;
+        seed_browser_with_processor(&mut s);
+        let before_selected = s.browser.selected;
+        update(
+            &mut s,
+            AppEvent::Input(crossterm::event::Event::Key(KeyEvent::new(
+                KeyCode::Char('b'),
+                KeyModifiers::NONE,
+            ))),
+            &c,
+        );
+        // Interactive breadcrumb mode has been removed; `b` must be a no-op.
+        assert_eq!(s.browser.selected, before_selected, "b must be a no-op");
     }
 }

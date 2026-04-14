@@ -36,6 +36,22 @@ impl TracerState {
             last_error: None,
         }
     }
+
+    /// Returns the component ID that currently has focus in Tracer, or `None`
+    /// when no component is selected.  In `LatestEvents` mode the view itself
+    /// carries the component; in `Lineage` mode the selected event's
+    /// `component_id` is used.
+    pub fn selected_component_id(&self) -> Option<String> {
+        match &self.mode {
+            TracerMode::LatestEvents(v) => Some(v.component_id.clone()),
+            TracerMode::Lineage(v) => v
+                .snapshot
+                .events
+                .get(v.selected_event)
+                .map(|e| e.component_id.clone()),
+            _ => None,
+        }
+    }
 }
 
 impl Default for TracerState {
@@ -191,6 +207,71 @@ impl AttributeClass {
     }
 }
 
+// ── DetailTab ─────────────────────────────────────────────────────────────────
+
+/// Which detail-pane tab is active when `LineageFocus::Detail` is in effect.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum DetailTab {
+    /// Shows the event's attribute table (prev → current diff).
+    #[default]
+    Attributes,
+    /// Shows the input content claim.
+    Input,
+    /// Shows the output content claim.
+    Output,
+}
+
+impl DetailTab {
+    /// Steps to the next enabled tab, wrapping around.
+    ///
+    /// `has_input` / `has_output` reflect whether the currently loaded event
+    /// actually has a claim on that side. `Attributes` is always enabled.
+    pub fn cycle_right(self, has_input: bool, has_output: bool) -> Self {
+        let order = [Self::Attributes, Self::Input, Self::Output];
+        let enabled = |t: Self| match t {
+            Self::Attributes => true,
+            Self::Input => has_input,
+            Self::Output => has_output,
+        };
+        let start = match self {
+            Self::Attributes => 0,
+            Self::Input => 1,
+            Self::Output => 2,
+        };
+        for step in 1..=3 {
+            let idx = (start + step) % 3;
+            let t = order[idx];
+            if enabled(t) {
+                return t;
+            }
+        }
+        self
+    }
+
+    /// Steps to the previous enabled tab, wrapping around.
+    pub fn cycle_left(self, has_input: bool, has_output: bool) -> Self {
+        let order = [Self::Attributes, Self::Input, Self::Output];
+        let enabled = |t: Self| match t {
+            Self::Attributes => true,
+            Self::Input => has_input,
+            Self::Output => has_output,
+        };
+        let start = match self {
+            Self::Attributes => 0,
+            Self::Input => 1,
+            Self::Output => 2,
+        };
+        for step in 1..=3 {
+            let idx = (start + 3 - step) % 3;
+            let t = order[idx];
+            if enabled(t) {
+                return t;
+            }
+        }
+        self
+    }
+}
+
 /// State after the lineage query has finished.
 #[derive(Debug)]
 pub struct LineageView {
@@ -208,6 +289,10 @@ pub struct LineageView {
     pub fetched_at: SystemTime,
     /// Which sub-pane currently owns keyboard focus.
     pub focus: LineageFocus,
+    /// Which tab is shown in the detail pane (Attributes | Input | Output).
+    /// Only meaningful when `focus` is `LineageFocus::Detail` or when
+    /// an event detail has been loaded.
+    pub active_detail_tab: DetailTab,
 }
 
 impl ListNavigation for LineageView {
@@ -334,6 +419,7 @@ pub fn lineage_move_down(state: &mut TracerState) {
         if view.selected_event != prev {
             view.event_detail = EventDetail::NotLoaded;
             view.focus = LineageFocus::Timeline;
+            view.active_detail_tab = DetailTab::default();
         }
     }
 }
@@ -349,6 +435,7 @@ pub fn lineage_move_up(state: &mut TracerState) {
         if view.selected_event != prev {
             view.event_detail = EventDetail::NotLoaded;
             view.focus = LineageFocus::Timeline;
+            view.active_detail_tab = DetailTab::default();
         }
     }
 }
@@ -390,6 +477,7 @@ pub fn lineage_focus_attributes(state: &mut TracerState) -> bool {
         && !lineage_visible_attributes(view).is_empty()
     {
         view.focus = LineageFocus::Attributes { row: 0 };
+        view.active_detail_tab = DetailTab::Attributes;
         return true;
     }
     false
@@ -480,10 +568,14 @@ pub fn lineage_content_line_count(view: &LineageView) -> usize {
 pub fn lineage_focus_content(state: &mut TracerState) -> bool {
     if let TracerMode::Lineage(ref mut view) = state.mode
         && let EventDetail::Loaded {
-            content: ContentPane::Shown { .. },
+            content: ContentPane::Shown { side, .. },
             ..
         } = &view.event_detail
     {
+        view.active_detail_tab = match side {
+            ContentSide::Input => DetailTab::Input,
+            ContentSide::Output => DetailTab::Output,
+        };
         view.focus = LineageFocus::Content { scroll: 0 };
         return true;
     }
@@ -527,6 +619,44 @@ pub fn lineage_content_scroll_end(state: &mut TracerState) {
         if let LineageFocus::Content { ref mut scroll } = view.focus {
             *scroll = max;
         }
+    }
+}
+
+/// Returns `(has_input, has_output)` for the currently loaded event, or
+/// `(false, false)` when the detail is not loaded.
+pub fn lineage_content_availability(view: &LineageView) -> (bool, bool) {
+    if let EventDetail::Loaded { ref event, .. } = view.event_detail {
+        (event.input_available, event.output_available)
+    } else {
+        (false, false)
+    }
+}
+
+/// Cycles `active_detail_tab` to the right, skipping disabled tabs.
+/// Also adjusts `focus` to match the new tab.
+pub fn lineage_cycle_detail_tab_right(state: &mut TracerState) {
+    if let TracerMode::Lineage(ref mut view) = state.mode {
+        let (has_input, has_output) = lineage_content_availability(view);
+        let new_tab = view.active_detail_tab.cycle_right(has_input, has_output);
+        view.active_detail_tab = new_tab;
+        view.focus = match new_tab {
+            DetailTab::Attributes => LineageFocus::Attributes { row: 0 },
+            DetailTab::Input | DetailTab::Output => LineageFocus::Content { scroll: 0 },
+        };
+    }
+}
+
+/// Cycles `active_detail_tab` to the left, skipping disabled tabs.
+/// Also adjusts `focus` to match the new tab.
+pub fn lineage_cycle_detail_tab_left(state: &mut TracerState) {
+    if let TracerMode::Lineage(ref mut view) = state.mode {
+        let (has_input, has_output) = lineage_content_availability(view);
+        let new_tab = view.active_detail_tab.cycle_left(has_input, has_output);
+        view.active_detail_tab = new_tab;
+        view.focus = match new_tab {
+            DetailTab::Attributes => LineageFocus::Attributes { row: 0 },
+            DetailTab::Input | DetailTab::Output => LineageFocus::Content { scroll: 0 },
+        };
     }
 }
 
@@ -695,6 +825,7 @@ pub fn apply_payload(state: &mut TracerState, payload: TracerPayload) -> Option<
                     diff_mode: AttributeDiffMode::default(),
                     fetched_at,
                     focus: LineageFocus::default(),
+                    active_detail_tab: DetailTab::default(),
                 }));
                 return Some(Followup::DeleteLineageQuery {
                     query_id,
@@ -1434,6 +1565,7 @@ mod tests {
             diff_mode: AttributeDiffMode::default(),
             fetched_at: SystemTime::now(),
             focus: LineageFocus::default(),
+            active_detail_tab: DetailTab::default(),
         }));
     }
 

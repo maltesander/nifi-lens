@@ -133,9 +133,6 @@ pub struct BrowserState {
     /// `r` pushes a unit on it; the worker wakes and fetches immediately.
     /// Task 15 wires this.
     pub force_tick_tx: Option<oneshot::Sender<()>>,
-    /// `None` = tree pane has focus. `Some(i)` = breadcrumb segment `i`
-    /// is highlighted. Set by the `b` key, cleared by `Esc` or `Enter`.
-    pub breadcrumb_focus: Option<usize>,
     /// Phase 7: which focusable sub-section (if any) holds input focus.
     /// Always reset to `Tree` by `reset_detail_focus`, called from every
     /// selection-mutating method on `BrowserState`.
@@ -706,7 +703,6 @@ pub fn apply_tree_snapshot(state: &mut BrowserState, snap: RecursiveSnapshot) {
     state.expanded = new_expanded;
     state.details = new_details;
     state.pending_detail = None;
-    state.breadcrumb_focus = None;
     state.detail_focus = DetailFocus::Tree;
     state.last_tree_fetched_at = Some(snap.fetched_at);
 
@@ -1536,12 +1532,6 @@ mod tests {
         assert_eq!(segs[0].name, "Root");
         assert_eq!(segs[1].name, "Pipeline");
         assert_eq!(segs[2].name, "Generate");
-    }
-
-    #[test]
-    fn breadcrumb_focus_default_is_none() {
-        let state = BrowserState::default();
-        assert!(state.breadcrumb_focus.is_none());
     }
 
     #[test]

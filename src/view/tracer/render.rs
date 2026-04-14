@@ -21,8 +21,8 @@ use ratatui::widgets::{Cell, Gauge, Paragraph, Row, Table, TableState};
 use crate::client::tracer::{AttributeTriple, ContentRender, ContentSide};
 use crate::theme;
 use crate::view::tracer::state::{
-    AttributeClass, AttributeDiffMode, ContentPane, EntryState, EventDetail, LatestEventsView,
-    LineageFocus, LineageRunningState, LineageView, TracerMode, TracerState,
+    AttributeClass, AttributeDiffMode, ContentPane, DetailTab, EntryState, EventDetail,
+    LatestEventsView, LineageFocus, LineageRunningState, LineageView, TracerMode, TracerState,
 };
 use crate::widget::panel::Panel;
 
@@ -328,27 +328,14 @@ fn render_lineage_detail_loaded(
     let rel = s.relationship.as_deref().unwrap_or("");
     let details = s.details.as_deref().unwrap_or("");
 
-    // When focus is on the content pane, swap the split so content
-    // fills the detail area and attributes shrink to a minimal strip.
-    // Non-content focus uses the default attributes-dominant layout
-    // with a bordered content panel tall enough to read a few lines.
-    let content_focused = matches!(view.focus, LineageFocus::Content { .. });
-    let constraints: [Constraint; 3] = if content_focused {
-        [
-            Constraint::Length(1), // event header
-            Constraint::Length(5), // shrunken attributes (legend + header + 2 rows + border chrome)
-            Constraint::Fill(1),   // expanded content
-        ]
-    } else {
-        [
-            Constraint::Length(1), // event header
-            Constraint::Fill(1),   // attributes table
-            Constraint::Length(8), // content panel (border + header + 5 body lines)
-        ]
-    };
+    // Split into: header | tab bar | body
     let rows = Layout::default()
         .direction(Direction::Vertical)
-        .constraints(constraints)
+        .constraints([
+            Constraint::Length(1), // event header
+            Constraint::Length(1), // tab bar
+            Constraint::Fill(1),   // body (attributes or content)
+        ])
         .split(area);
 
     // ── Header ──
@@ -367,11 +354,58 @@ fn render_lineage_detail_loaded(
     ]);
     frame.render_widget(Paragraph::new(header_line), rows[0]);
 
-    // ── Attribute table ──
-    render_attribute_table(frame, rows[1], &event.attributes, view);
+    // ── Tab bar ──
+    let has_input = event.input_available;
+    let has_output = event.output_available;
+    render_detail_tab_bar(
+        frame,
+        rows[1],
+        view.active_detail_tab,
+        has_input,
+        has_output,
+    );
 
-    // ── Content panel ──
-    render_content_panel(frame, rows[2], content, view);
+    // ── Body driven by active tab ──
+    match view.active_detail_tab {
+        DetailTab::Attributes => {
+            render_attribute_table(frame, rows[2], &event.attributes, view);
+        }
+        DetailTab::Input | DetailTab::Output => {
+            render_content_panel(frame, rows[2], content, view);
+        }
+    }
+}
+
+/// Renders the "Attributes | Input | Output" tab bar.
+///
+/// The active tab is bold + accent colour. Disabled tabs (no claim) are
+/// rendered dimmed. Enabled-but-inactive tabs use plain muted style.
+fn render_detail_tab_bar(
+    frame: &mut Frame,
+    area: Rect,
+    active: DetailTab,
+    has_input: bool,
+    has_output: bool,
+) {
+    let tab_style = |tab: DetailTab, enabled: bool| {
+        if !enabled {
+            theme::border_dim()
+        } else if tab == active {
+            theme::accent().add_modifier(Modifier::BOLD)
+        } else {
+            theme::muted()
+        }
+    };
+
+    let sep = Span::styled(" | ", theme::border_dim());
+    let line = Line::from(vec![
+        Span::styled("Attributes", tab_style(DetailTab::Attributes, true)),
+        sep.clone(),
+        Span::styled("Input", tab_style(DetailTab::Input, has_input)),
+        sep,
+        Span::styled("Output", tab_style(DetailTab::Output, has_output)),
+    ]);
+    frame.render_widget(Paragraph::new(line), area);
 }
 
 /// Style helper — maps an [`AttributeClass`] onto the user-requested
@@ -892,7 +926,7 @@ mod tests {
     fn seed_lineage_state(state: &mut TracerState) {
         use crate::client::tracer::LineageSnapshot;
         use crate::view::tracer::state::{
-            AttributeDiffMode, EventDetail, LineageFocus, LineageView,
+            AttributeDiffMode, DetailTab, EventDetail, LineageFocus, LineageView,
         };
 
         state.mode = TracerMode::Lineage(Box::new(LineageView {
@@ -911,6 +945,7 @@ mod tests {
             diff_mode: AttributeDiffMode::All,
             fetched_at: SystemTime::now(),
             focus: LineageFocus::default(),
+            active_detail_tab: DetailTab::default(),
         }));
     }
 
@@ -944,12 +979,14 @@ mod tests {
     #[test]
     fn snapshot_lineage_view_expanded_text_content() {
         use crate::client::tracer::{ContentRender, ContentSide};
-        use crate::view::tracer::state::{ContentPane, EventDetail};
+        use crate::view::tracer::state::{ContentPane, DetailTab, EventDetail, LineageFocus};
         use std::sync::Arc;
 
         let mut state = TracerState::new();
         seed_lineage_state(&mut state);
         if let TracerMode::Lineage(ref mut view) = state.mode {
+            view.active_detail_tab = DetailTab::Output;
+            view.focus = LineageFocus::Content { scroll: 0 };
             view.event_detail = EventDetail::Loaded {
                 event: Box::new(make_lineage_detail(2)),
                 content: ContentPane::Shown {

@@ -1,130 +1,92 @@
+//! Help modal — generated from Verb::all() for every action enum.
+//!
+//! Lives in widget/ because it's a pure render helper. All content
+//! comes from the Verb trait impls — adding a new keybinding
+//! automatically shows up here without any change to this file.
+
 use ratatui::Frame;
-use ratatui::layout::{Alignment, Constraint, Direction, Layout, Rect};
-use ratatui::widgets::{Block, Borders, Clear, Paragraph};
+use ratatui::layout::{Constraint, Direction, Layout, Rect};
+use ratatui::style::{Modifier, Style};
+use ratatui::text::{Line, Span};
+use ratatui::widgets::{Block, Borders, Clear, Paragraph, Wrap};
 
 use crate::app::state::ViewId;
+use crate::input::{
+    AppAction, BrowserVerb, BulletinsVerb, EventsVerb, FocusAction, GoTarget, HistoryAction,
+    TabAction, TracerVerb, Verb,
+};
+use crate::theme;
 
-const GLOBAL_TEXT: &str = "\
-Global Keys:
-  Tab / Shift+Tab   Cycle tabs
-  F1..F5            Jump to tab (Overview/Bulletins/Browser/Events/Tracer)
-  K                 Switch context
-  f                 Global fuzzy find (requires Browser seed)
-  [                 Navigate back through cross-link history
-  ]                 Navigate forward through cross-link history
-  ?                 Toggle this help
-  q / Ctrl+Q        Quit
-  Esc               Close modal
-";
+/// One logical section of the help modal. Each section has a title
+/// plus a list of `(chord, label)` rows.
+pub struct HelpSection {
+    pub title: &'static str,
+    pub rows: Vec<(String, &'static str)>,
+}
 
-const OVERVIEW_TEXT: &str = "\
-Overview Tab:
-  (auto-refresh every 10s; no tab-local keys yet)
-";
+/// Build the full list of help sections for the given active view.
+pub fn build_help_sections(active_view: ViewId) -> Vec<HelpSection> {
+    let mut out = vec![
+        section("Navigation", FocusAction::all()),
+        section("History", HistoryAction::all()),
+        section("Tabs", TabAction::all()),
+        section("App", AppAction::all()),
+        section("Cross-tab", GoTarget::all()),
+    ];
 
-const BULLETINS_TEXT: &str = "\
-Bulletins Tab:
-  ↓                 Move selection down
-  ↑                 Move selection up
-  g / Home          Jump to oldest
-  G / End           Jump to newest (resume auto-scroll)
-  p                 Toggle auto-scroll pause
-  e / w / i         Toggle Error / Warning / Info chip
-  T                 Cycle component-type chip
-  /                 Enter text filter mode
-  c                 Clear all filters
-  Enter             Jump to component in Browser
-  t                 Trace component (latest events)
-  B                 Toggle consecutive-source grouping
-";
+    match active_view {
+        ViewId::Overview => {}
+        ViewId::Bulletins => out.push(section("Bulletins", BulletinsVerb::all())),
+        ViewId::Browser => out.push(section("Browser", BrowserVerb::all())),
+        ViewId::Events => out.push(section("Events", EventsVerb::all())),
+        ViewId::Tracer => out.push(section("Tracer", TracerVerb::all())),
+    }
 
-const BROWSER_TEXT: &str = "\
-Browser Tab:
-  ↑/↓               Move selection
-  PgUp/PgDn         Page scroll
-  Home/End          Jump to first / last row
-  Enter / →         Expand PG and drill in (leaf: no-op)
-  Backspace / ←     Collapse PG / move to parent
-  r                 Force-refresh tree
-  e                 Expand properties (Processor/CS with detail)
-  c                 Copy selected node id to clipboard
-  t                 Trace selected processor
-  b                 Enter breadcrumb navigation
-  f                 Open fuzzy find
+    out
+}
 
-Browser status icons:
-  ● (green)         Processor running
-  ◌ (yellow)        Processor stopped
-  ⚠ (red)           Processor invalid
-  ⌀ (gray)          Processor disabled
-  ◐ (blue)          Processor validating
-";
+fn section<V: Verb>(title: &'static str, variants: &[V]) -> HelpSection {
+    let rows = variants
+        .iter()
+        .map(|v| (v.chord().display(), v.label()))
+        .collect();
+    HelpSection { title, rows }
+}
 
-const EVENTS_TEXT: &str = "\
-Events Tab:
+/// Render the help modal into the given area for the given active
+/// view. Each section is rendered as a header row plus one row per
+/// chord.
+pub fn render(frame: &mut Frame, area: Rect, active_view: ViewId) {
+    let sections = build_help_sections(active_view);
+    let mut lines: Vec<Line<'static>> = Vec::new();
 
-Filter bar:
-  t                edit time window
-  T                edit type list
-  s                edit source component
-  u                edit file uuid
-  a                edit attribute filter
-  Enter            run query
-  n                new query (clear filters + results)
-  r                reset filters
-  L                raise cap 500 → 5000
+    for (i, s) in sections.iter().enumerate() {
+        if i > 0 {
+            lines.push(Line::from(""));
+        }
+        lines.push(Line::from(Span::styled(
+            s.title.to_string(),
+            theme::accent().add_modifier(Modifier::BOLD),
+        )));
+        for (chord, label) in &s.rows {
+            lines.push(Line::from(vec![
+                Span::styled(format!("  {chord:12}"), theme::accent()),
+                Span::styled(" ".to_string(), Style::default()),
+                Span::styled(label.to_string(), theme::muted()),
+            ]));
+        }
+    }
 
-Results list (↑/↓ to enter row nav):
-  ↑ / ↓            navigate rows
-  t                trace selected flowfile in Tracer
-  g                open selected component in Browser
-  c                copy flowfile uuid
-  Esc              back to filter bar
-";
-
-const TRACER_TEXT: &str = "\
-Tracer Tab:
-
-Entry mode (empty paste form):
-  Enter       submit UUID
-  Esc / Ctrl+U   clear input
-
-Latest events mode (from Bulletins/Browser):
-  ↑ / ↓          move selection
-  Enter          trace selected flowfile
-  r              refresh list
-  c              copy selected uuid
-  Esc            back to Entry
-
-Lineage running mode:
-  Esc            cancel query
-
-Lineage view mode:
-  ↑ / ↓          move selection (resets event detail)
-  Enter          load event detail
-  i              load input content
-  o              load output content
-  s              save content to file
-  a              toggle attribute diff mode (All / Changed)
-  r              re-run lineage query
-  c              copy selected event's flowfile uuid
-  Esc / /        back to Entry
-";
-
-pub fn render(frame: &mut Frame, area: Rect, current_tab: ViewId) {
-    let per_view = match current_tab {
-        ViewId::Overview => OVERVIEW_TEXT,
-        ViewId::Bulletins => BULLETINS_TEXT,
-        ViewId::Browser => BROWSER_TEXT,
-        ViewId::Events => EVENTS_TEXT,
-        ViewId::Tracer => TRACER_TEXT,
-    };
-    let text = format!("{GLOBAL_TEXT}\n{per_view}");
-    let modal = center(area, 70, 32);
+    let modal = center(area, 70, 34);
     frame.render_widget(Clear, modal);
-    let block = Block::default().title(" Help ").borders(Borders::ALL);
-    let p = Paragraph::new(text).alignment(Alignment::Left).block(block);
-    frame.render_widget(p, modal);
+    let block = Block::default()
+        .borders(Borders::ALL)
+        .title(" Help ")
+        .border_style(theme::accent());
+    let para = Paragraph::new(lines)
+        .block(block)
+        .wrap(Wrap { trim: false });
+    frame.render_widget(para, modal);
 }
 
 fn center(area: Rect, pct_x: u16, height: u16) -> Rect {
@@ -149,40 +111,38 @@ fn center(area: Rect, pct_x: u16, height: u16) -> Rect {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use ratatui::Terminal;
-    use ratatui::backend::TestBackend;
 
-    fn render_with(tab: ViewId) -> String {
-        let backend = TestBackend::new(80, 40);
-        let mut term = Terminal::new(backend).unwrap();
-        term.draw(|f| render(f, f.area(), tab)).unwrap();
-        format!("{}", term.backend())
+    #[test]
+    fn help_modal_lists_every_verb_once() {
+        // For the Tracer view, count the total rows across all sections
+        // and assert it matches the sum of variant counts.
+        let sections = build_help_sections(ViewId::Tracer);
+        let expected = FocusAction::all().len()
+            + HistoryAction::all().len()
+            + TabAction::all().len()
+            + AppAction::all().len()
+            + GoTarget::all().len()
+            + TracerVerb::all().len();
+        let total: usize = sections.iter().map(|s| s.rows.len()).sum();
+        assert_eq!(total, expected);
     }
 
     #[test]
-    fn bulletins_help_lists_view_local_keys() {
-        let out = render_with(ViewId::Bulletins);
-        assert!(out.contains("e / w / i"));
-        assert!(out.contains("Toggle auto-scroll pause"));
-        assert!(out.contains("Jump to component in Browser"));
+    fn help_modal_adapts_to_active_view() {
+        let bulletins = build_help_sections(ViewId::Bulletins);
+        let browser = build_help_sections(ViewId::Browser);
+        // Both should have 6 sections (Navigation, History, Tabs, App, Cross-tab, <view>).
+        assert_eq!(bulletins.len(), 6);
+        assert_eq!(browser.len(), 6);
+        // The last section title should match the active view.
+        assert_eq!(bulletins.last().unwrap().title, "Bulletins");
+        assert_eq!(browser.last().unwrap().title, "Browser");
     }
 
     #[test]
-    fn overview_help_does_not_list_bulletins_keys() {
-        let out = render_with(ViewId::Overview);
-        assert!(!out.contains("Toggle Error"));
-    }
-
-    #[test]
-    fn bulletins_help_mentions_shift_b_grouping() {
-        let out = render_with(ViewId::Bulletins);
-        assert!(out.contains("Toggle consecutive-source grouping"));
-    }
-
-    #[test]
-    fn browser_help_shows_status_icon_legend() {
-        let out = render_with(ViewId::Browser);
-        assert!(out.contains("Processor running"));
-        assert!(out.contains("Processor invalid"));
+    fn help_modal_overview_has_no_view_specific_section() {
+        let overview = build_help_sections(ViewId::Overview);
+        // Overview has no view-local verbs, so only the 5 universal sections.
+        assert_eq!(overview.len(), 5);
     }
 }

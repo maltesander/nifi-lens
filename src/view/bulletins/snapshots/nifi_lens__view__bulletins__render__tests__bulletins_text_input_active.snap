@@ -28,7 +28,7 @@ expression: render_to_string(&state)
 "│ERROR   IOException: timeout                                                                                          │"
 "│                                                                                                                      │"
 "│id  src-1   pg  root                                                                                                  │"
-"│t trace lineage · Enter jump to Browser · m mute source · c clear filters                                             │"
+"│Enter jump to Browser · ge events · m mute source · c clear filters                                                   │"
 "│                                                                                                                      │"
 "│                                                                                                                      │"
 "└──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┘"

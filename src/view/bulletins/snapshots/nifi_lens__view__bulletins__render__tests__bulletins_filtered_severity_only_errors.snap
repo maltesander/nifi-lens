@@ -4,7 +4,7 @@ expression: render_to_string(&state)
 ---
 "┌ Filters ─────────────────────────────────────────────────────────────────────────────────────────────────────────────┐"
 "│[E 2] [W 1] [I 1]   type: All   text: (none)                                                                          │"
-"│— e/w/i severity · T type · / text · g group: source+msg · m mute · c clear · p pause —                               │"
+"│— 1/2/3 severity · T type · / text · Y group: source+msg · m mute · c clear · p pause —                               │"
 "└──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┘"
 "┌ Bulletins ────────────────────────────────────────────────────────────────────────────────────────────── last <DUR> ago ┐"
 "│time            sev   #    source               pg path                  message                                      │"
@@ -28,7 +28,7 @@ expression: render_to_string(&state)
 "│ERROR   error two                                                                                                     │"
 "│                                                                                                                      │"
 "│id  src-4   pg  root                                                                                                  │"
-"│t trace lineage · Enter jump to Browser · m mute source · c clear filters                                             │"
+"│Enter jump to Browser · ge events · m mute source · c clear filters                                                   │"
 "│                                                                                                                      │"
 "│                                                                                                                      │"
 "└──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┘"

@@ -33,13 +33,35 @@ use crate::view::tracer::state::TracerState;
 /// Per-view key-handling trait. Uses static methods (not `&mut self`)
 /// because handlers need `&mut AppState`.
 pub(crate) trait ViewKeyHandler {
-    /// Handle a key event for this view. Returns `Some(UpdateResult)` if
-    /// the key was consumed, `None` to let it fall through to global
-    /// handlers.
-    fn handle_key(state: &mut AppState, key: KeyEvent) -> Option<UpdateResult>;
+    /// Handle a typed view-local verb. Returns `Some(UpdateResult)` if
+    /// the verb was consumed, `None` to let it fall through.
+    fn handle_verb(state: &mut AppState, verb: crate::input::ViewVerb) -> Option<UpdateResult>;
 
-    /// Return context-sensitive hint spans for this view's current state.
-    fn hints(state: &AppState) -> Vec<crate::widget::hint_bar::HintSpan>;
+    /// Handle a typed focus action. Returns `Some(UpdateResult)` if
+    /// the action was consumed, `None` to let it fall through.
+    fn handle_focus(
+        state: &mut AppState,
+        action: crate::input::FocusAction,
+    ) -> Option<UpdateResult>;
+
+    /// The single "most natural cross-link" for the current selection,
+    /// used by Rule 1a (Enter-fallback). Default: none.
+    fn default_cross_link(_state: &AppState) -> Option<crate::input::GoTarget> {
+        None
+    }
+
+    /// True when the view is in a text-input mode (search box, UUID
+    /// entry, etc). The dispatcher bypasses `KeyMap` entirely in that
+    /// case and forwards the raw `KeyEvent` to `handle_text_input`.
+    fn is_text_input_focused(_state: &AppState) -> bool {
+        false
+    }
+
+    /// Handle a raw `KeyEvent` while in text-input mode. Default: drop
+    /// (return `None`). Views with text-input mode override this.
+    fn handle_text_input(_state: &mut AppState, _key: KeyEvent) -> Option<UpdateResult> {
+        None
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -120,6 +142,8 @@ pub struct AppState {
     pub pending_worker_restart: bool,
     /// Cross-link back/forward history.
     pub history: crate::app::history::TabHistory,
+    /// Typed input layer — translates raw `KeyEvent`s into `InputEvent`s.
+    pub keymap: crate::input::KeyMap,
     /// Persistent arboard clipboard handle, lazily initialized on first
     /// use. Kept alive for the life of the TUI to prevent arboard's
     /// X11 `Drop` teardown from running on every keypress — that teardown
@@ -153,6 +177,7 @@ impl AppState {
             should_quit: false,
             pending_worker_restart: false,
             history: crate::app::history::TabHistory::default(),
+            keymap: crate::input::KeyMap::default(),
             clipboard: None,
         }
     }
@@ -167,6 +192,61 @@ impl AppState {
     /// `strong_count` at `MIN_OWNERS` forever, so the teardown branch
     /// in its `Drop` impl (which writes to stderr and corrupts the
     /// ratatui alt-screen grid) never runs until the TUI exits.
+    /// Returns the set of `GoTarget`s that are meaningful for the
+    /// current tab + selection. The oracle for `GoTarget::enabled`.
+    pub fn selection_cross_links(&self) -> Vec<crate::input::GoTarget> {
+        use crate::input::GoTarget;
+        let mut out = Vec::new();
+        for target in [GoTarget::Browser, GoTarget::Events, GoTarget::Tracer] {
+            if build_go_crosslink(self, target).is_some() {
+                out.push(target);
+            }
+        }
+        out
+    }
+
+    pub fn browser_selection_has_properties(&self) -> bool {
+        if self.current_tab != ViewId::Browser {
+            return false;
+        }
+        let Some(&arena) = self.browser.visible.get(self.browser.selected) else {
+            return false;
+        };
+        let Some(node) = self.browser.nodes.get(arena) else {
+            return false;
+        };
+        matches!(
+            node.kind,
+            crate::client::NodeKind::Processor | crate::client::NodeKind::ControllerService
+        )
+    }
+
+    pub fn tracer_content_tab_is_active(&self) -> bool {
+        if self.current_tab != ViewId::Tracer {
+            return false;
+        }
+        if let crate::view::tracer::state::TracerMode::Lineage(ref view) = self.tracer.mode {
+            matches!(
+                view.active_detail_tab,
+                crate::view::tracer::state::DetailTab::Input
+                    | crate::view::tracer::state::DetailTab::Output
+            )
+        } else {
+            false
+        }
+    }
+
+    pub fn tracer_attributes_tab_is_active(&self) -> bool {
+        if self.current_tab != ViewId::Tracer {
+            return false;
+        }
+        if let crate::view::tracer::state::TracerMode::Lineage(ref view) = self.tracer.mode {
+            view.active_detail_tab == crate::view::tracer::state::DetailTab::Attributes
+        } else {
+            false
+        }
+    }
+
     pub fn copy_to_clipboard(&mut self, text: String) -> Result<(), String> {
         if self.clipboard.is_none() {
             match arboard::Clipboard::new() {
@@ -309,98 +389,224 @@ pub struct PendingSave {
 
 /// Collect the hint spans for the current state, respecting modal priority.
 pub fn collect_hints(state: &AppState) -> Vec<crate::widget::hint_bar::HintSpan> {
+    use crate::input::{
+        AppAction, BrowserVerb, BulletinsVerb, EventsVerb, FocusAction, GoTarget, HistoryAction,
+        KeyMapState, TracerVerb, Verb,
+    };
     use crate::widget::hint_bar::HintSpan;
 
-    // Modal hints take full priority — no global hints appended.
+    // Modal-priority hints remain hand-written because they're short
+    // and context-specific.
     if let Some(ref modal) = state.modal {
-        return match modal {
-            Modal::Help => vec![HintSpan {
-                key: "Esc",
-                action: "close",
-            }],
-            Modal::ContextSwitcher(_) => vec![
-                HintSpan {
-                    key: "↑/↓",
-                    action: "nav",
-                },
-                HintSpan {
-                    key: "Enter",
-                    action: "switch",
-                },
-                HintSpan {
-                    key: "Esc",
-                    action: "cancel",
-                },
-            ],
-            Modal::FuzzyFind(_) => vec![
-                HintSpan {
-                    key: "type",
-                    action: "filter",
-                },
-                HintSpan {
-                    key: "Enter",
-                    action: "select",
-                },
-                HintSpan {
-                    key: "Esc",
-                    action: "cancel",
-                },
-            ],
-            Modal::Properties(_) => vec![
-                HintSpan {
-                    key: "↑/↓",
-                    action: "scroll",
-                },
-                HintSpan {
-                    key: "Esc",
-                    action: "close",
-                },
-            ],
-            Modal::ErrorDetail => vec![HintSpan {
-                key: "Esc",
-                action: "close",
-            }],
-            Modal::SaveEventContent(_) => vec![
-                HintSpan {
-                    key: "Enter",
-                    action: "confirm",
-                },
-                HintSpan {
-                    key: "Esc",
-                    action: "cancel",
-                },
-            ],
-        };
+        return modal_hints(modal);
     }
 
-    // Per-view hints
-    let mut hints = match state.current_tab {
-        ViewId::Overview => overview::OverviewHandler::hints(state),
-        ViewId::Bulletins => bulletins::BulletinsHandler::hints(state),
-        ViewId::Browser => browser::BrowserHandler::hints(state),
-        ViewId::Events => events::EventsHandler::hints(state),
-        ViewId::Tracer => tracer::TracerHandler::hints(state),
+    // Pending-Go chord: show the go-menu only, replacing everything else.
+    if state.keymap.pending_state() == KeyMapState::PendingGo {
+        let ctx = crate::input::HintContext::new(state);
+        let mut spans: Vec<HintSpan> = Vec::new();
+        spans.push(HintSpan {
+            key: "Go to:",
+            action: "",
+            enabled: true,
+        });
+        for &t in GoTarget::all() {
+            let follower: &'static str = match t {
+                GoTarget::Browser => "b",
+                GoTarget::Events => "e",
+                GoTarget::Tracer => "t",
+            };
+            spans.push(HintSpan {
+                key: follower,
+                action: t.hint(),
+                enabled: t.enabled(&ctx),
+            });
+        }
+        spans.push(HintSpan {
+            key: "Esc",
+            action: "cancel",
+            enabled: true,
+        });
+        return spans;
+    }
+
+    // Text-input-focused views show their own edit-mode hint strip.
+    // The keymap is bypassed in this mode; the hint bar advertises
+    // the conventional type/apply/cancel contract.
+    let text_input = match state.current_tab {
+        ViewId::Overview => overview::OverviewHandler::is_text_input_focused(state),
+        ViewId::Bulletins => bulletins::BulletinsHandler::is_text_input_focused(state),
+        ViewId::Browser => browser::BrowserHandler::is_text_input_focused(state),
+        ViewId::Events => events::EventsHandler::is_text_input_focused(state),
+        ViewId::Tracer => tracer::TracerHandler::is_text_input_focused(state),
     };
+    if text_input {
+        return vec![
+            HintSpan {
+                key: "type",
+                action: "filter",
+                enabled: true,
+            },
+            HintSpan {
+                key: "Enter",
+                action: "apply",
+                enabled: true,
+            },
+            HintSpan {
+                key: "Esc",
+                action: "cancel",
+                enabled: true,
+            },
+        ];
+    }
 
-    // Global hints appended
-    if state.history.can_go_back() {
-        hints.push(HintSpan {
-            key: "[",
-            action: "back",
+    // Default path: generate from Verb::all() for the current view.
+    let ctx = crate::input::HintContext::new(state);
+    let mut out: Vec<HintSpan> = Vec::new();
+
+    // Helper — convert a Chord display (String) to a &'static str.
+    // HintSpan fields are &'static str, so we must leak the strings. The
+    // hint bar rebuilds every redraw but chord strings are bounded by
+    // the small set of distinct chords in the app (< 40). Leaking is
+    // acceptable here. A follow-up task can convert HintSpan to use
+    // owned String if needed.
+    fn push_verb<V: crate::input::Verb>(
+        out: &mut Vec<HintSpan>,
+        v: V,
+        ctx: &crate::input::HintContext<'_>,
+    ) {
+        let chord_str: &'static str = Box::leak(v.chord().display().into_boxed_str());
+        out.push(HintSpan {
+            key: chord_str,
+            action: v.hint(),
+            enabled: v.enabled(ctx),
         });
     }
-    if state.history.can_go_forward() {
-        hints.push(HintSpan {
-            key: "]",
-            action: "fwd",
-        });
-    }
-    hints.push(HintSpan {
-        key: "?",
-        action: "help",
-    });
 
-    hints
+    // Focus actions (Enter, Esc, arrows) — universal.
+    for &a in FocusAction::all() {
+        push_verb(&mut out, a, &ctx);
+    }
+
+    // History
+    for &h in HistoryAction::all() {
+        push_verb(&mut out, h, &ctx);
+    }
+
+    // Per-view verbs
+    match state.current_tab {
+        ViewId::Overview => {}
+        ViewId::Bulletins => {
+            for &v in BulletinsVerb::all() {
+                push_verb(&mut out, v, &ctx);
+            }
+        }
+        ViewId::Browser => {
+            for &v in BrowserVerb::all() {
+                push_verb(&mut out, v, &ctx);
+            }
+        }
+        ViewId::Events => {
+            for &v in EventsVerb::all() {
+                push_verb(&mut out, v, &ctx);
+            }
+        }
+        ViewId::Tracer => {
+            for &v in TracerVerb::all() {
+                push_verb(&mut out, v, &ctx);
+            }
+        }
+    }
+
+    // Cross-tab Go targets
+    for &g in GoTarget::all() {
+        push_verb(&mut out, g, &ctx);
+    }
+
+    // App actions (help, context switcher, etc.)
+    for &a in AppAction::all() {
+        // Skip Quit — it's universal and too noisy for the hint bar.
+        if matches!(a, AppAction::Quit) {
+            continue;
+        }
+        push_verb(&mut out, a, &ctx);
+    }
+
+    out
+}
+
+fn modal_hints(modal: &Modal) -> Vec<crate::widget::hint_bar::HintSpan> {
+    use crate::widget::hint_bar::HintSpan;
+    match modal {
+        Modal::Help => vec![HintSpan {
+            key: "Esc",
+            action: "close",
+            enabled: true,
+        }],
+        Modal::ContextSwitcher(_) => vec![
+            HintSpan {
+                key: "\u{2191}/\u{2193}",
+                action: "nav",
+                enabled: true,
+            },
+            HintSpan {
+                key: "Enter",
+                action: "switch",
+                enabled: true,
+            },
+            HintSpan {
+                key: "Esc",
+                action: "cancel",
+                enabled: true,
+            },
+        ],
+        Modal::FuzzyFind(_) => vec![
+            HintSpan {
+                key: "type",
+                action: "filter",
+                enabled: true,
+            },
+            HintSpan {
+                key: "Enter",
+                action: "select",
+                enabled: true,
+            },
+            HintSpan {
+                key: "Esc",
+                action: "cancel",
+                enabled: true,
+            },
+        ],
+        Modal::Properties(_) => vec![
+            HintSpan {
+                key: "\u{2191}/\u{2193}",
+                action: "scroll",
+                enabled: true,
+            },
+            HintSpan {
+                key: "Esc",
+                action: "close",
+                enabled: true,
+            },
+        ],
+        Modal::ErrorDetail => vec![HintSpan {
+            key: "Esc",
+            action: "close",
+            enabled: true,
+        }],
+        Modal::SaveEventContent(_) => vec![
+            HintSpan {
+                key: "Enter",
+                action: "confirm",
+                enabled: true,
+            },
+            HintSpan {
+                key: "Esc",
+                action: "cancel",
+                enabled: true,
+            },
+        ],
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -625,6 +831,295 @@ fn update_inner(state: &mut AppState, event: AppEvent, config: &Config) -> Updat
 // ---------------------------------------------------------------------------
 
 fn handle_key(state: &mut AppState, key: KeyEvent, config: &Config) -> UpdateResult {
+    use crate::input::{AppAction, HistoryAction, InputEvent, TabAction};
+
+    if matches!(key.code, KeyCode::F(12)) {
+        let table = state.keymap.reverse_table();
+        for (chord, source) in &table {
+            tracing::info!(target: "nifi_lens::input", "{chord:12} = {source}");
+        }
+        return UpdateResult::default();
+    }
+
+    // Text-input bypass: if the active view is in text-input mode, skip
+    // the KeyMap entirely and forward the raw KeyEvent. This preserves
+    // the spec's rule that text-input modes own Esc/Enter semantics.
+    if state.modal.is_none() {
+        let text_input = match state.current_tab {
+            ViewId::Overview => overview::OverviewHandler::is_text_input_focused(state),
+            ViewId::Bulletins => bulletins::BulletinsHandler::is_text_input_focused(state),
+            ViewId::Browser => browser::BrowserHandler::is_text_input_focused(state),
+            ViewId::Events => events::EventsHandler::is_text_input_focused(state),
+            ViewId::Tracer => tracer::TracerHandler::is_text_input_focused(state),
+        };
+        if text_input {
+            let handler_result = match state.current_tab {
+                ViewId::Overview => overview::OverviewHandler::handle_text_input(state, key),
+                ViewId::Bulletins => bulletins::BulletinsHandler::handle_text_input(state, key),
+                ViewId::Browser => browser::BrowserHandler::handle_text_input(state, key),
+                ViewId::Events => events::EventsHandler::handle_text_input(state, key),
+                ViewId::Tracer => tracer::TracerHandler::handle_text_input(state, key),
+            };
+            if let Some(r) = handler_result {
+                return r;
+            }
+        }
+    }
+
+    // Translate FIRST so the keymap state transitions on every keystroke.
+    // This is important for the `g <letter>` combo: even if a per-view
+    // handler consumes the next keystroke, translate() still runs and
+    // resets PendingGo, preventing the latching bug.
+    let input_event = state.keymap.translate(key, state.current_tab);
+
+    // Central dispatch for typed InputEvent variants. History / Tab / App /
+    // Go are handled here and return early. Focus / View dispatch to per-view
+    // handlers. Pending / Unmapped fall through to the modal block then drop.
+    match input_event {
+        InputEvent::Unmapped => {
+            // Key has no typed mapping — fall through to the modal block.
+            // If no modal is active, the key is dropped.
+        }
+        InputEvent::History(HistoryAction::Back) => {
+            if state.modal.is_some() {
+                return UpdateResult::default();
+            }
+            let anchor = capture_anchor(state);
+            let current = crate::app::history::HistoryEntry {
+                tab: state.current_tab,
+                anchor,
+            };
+            if let Some(entry) = state.history.pop_back(current) {
+                state.current_tab = entry.tab;
+                restore_anchor(state, &entry);
+            }
+            return UpdateResult {
+                redraw: true,
+                intent: None,
+                tracer_followup: None,
+            };
+        }
+        InputEvent::History(HistoryAction::Forward) => {
+            if state.modal.is_some() {
+                return UpdateResult::default();
+            }
+            let anchor = capture_anchor(state);
+            let current = crate::app::history::HistoryEntry {
+                tab: state.current_tab,
+                anchor,
+            };
+            if let Some(entry) = state.history.pop_forward(current) {
+                state.current_tab = entry.tab;
+                restore_anchor(state, &entry);
+            }
+            return UpdateResult {
+                redraw: true,
+                intent: None,
+                tracer_followup: None,
+            };
+        }
+        InputEvent::Tab(TabAction::Next) => {
+            if state.modal.is_some() || view_text_input_active(state) {
+                return UpdateResult::default();
+            }
+            state.current_tab = state.current_tab.next();
+            return UpdateResult {
+                redraw: true,
+                intent: None,
+                tracer_followup: None,
+            };
+        }
+        InputEvent::Tab(TabAction::Prev) => {
+            if state.modal.is_some() || view_text_input_active(state) {
+                return UpdateResult::default();
+            }
+            state.current_tab = state.current_tab.prev();
+            return UpdateResult {
+                redraw: true,
+                intent: None,
+                tracer_followup: None,
+            };
+        }
+        InputEvent::Tab(TabAction::Jump(n)) => {
+            if state.modal.is_some() || view_text_input_active(state) {
+                return UpdateResult::default();
+            }
+            state.current_tab = match n {
+                1 => ViewId::Overview,
+                2 => ViewId::Bulletins,
+                3 => ViewId::Browser,
+                4 => ViewId::Events,
+                5 => ViewId::Tracer,
+                _ => return UpdateResult::default(),
+            };
+            return UpdateResult {
+                redraw: true,
+                intent: None,
+                tracer_followup: None,
+            };
+        }
+        InputEvent::App(AppAction::Quit) => {
+            // Quit always fires, even in modal or text-input mode.
+            state.should_quit = true;
+            return UpdateResult {
+                redraw: false,
+                intent: Some(PendingIntent::Quit),
+                tracer_followup: None,
+            };
+        }
+        InputEvent::App(_) if state.modal.is_some() || view_text_input_active(state) => {
+            // All other App actions fall through when a modal is active or
+            // a per-view text-input mode is active:
+            //  - modal active: let the modal handler run (e.g. `?` closes
+            //    Help modal; `f` types into FuzzyFind query bar).
+            //  - text-input active: let per-view handler capture the key
+            //    (e.g. Shift+K is a printable char in the filter bar).
+        }
+        InputEvent::App(AppAction::Help) => {
+            state.modal = Some(Modal::Help);
+            return UpdateResult {
+                redraw: true,
+                intent: None,
+                tracer_followup: None,
+            };
+        }
+        InputEvent::App(AppAction::ContextSwitcher) => {
+            let cs = ContextSwitcherState::from_config(
+                config,
+                &state.context_name,
+                &state.detected_version,
+            );
+            state.modal = Some(Modal::ContextSwitcher(cs));
+            return UpdateResult {
+                redraw: true,
+                intent: None,
+                tracer_followup: None,
+            };
+        }
+        InputEvent::App(AppAction::FuzzyFind) => {
+            if state.flow_index.is_none() {
+                state.status.banner = Some(Banner {
+                    severity: BannerSeverity::Warning,
+                    message: "fuzzy find: flow not indexed yet, open Browser to seed".into(),
+                    detail: None,
+                });
+                return UpdateResult {
+                    redraw: true,
+                    intent: None,
+                    tracer_followup: None,
+                };
+            }
+            let mut fs = crate::widget::fuzzy_find::FuzzyFindState::new();
+            if let Some(idx) = state.flow_index.as_ref() {
+                fs.rebuild_matches(idx);
+            }
+            state.modal = Some(Modal::FuzzyFind(fs));
+            return UpdateResult {
+                redraw: true,
+                intent: None,
+                tracer_followup: None,
+            };
+        }
+        InputEvent::Go(target) => {
+            if state.modal.is_some() {
+                return UpdateResult::default();
+            }
+            if let Some(link) = build_go_crosslink(state, target) {
+                return UpdateResult {
+                    redraw: true,
+                    intent: Some(PendingIntent::JumpTo(link)),
+                    tracer_followup: None,
+                };
+            }
+            return UpdateResult::default();
+        }
+        InputEvent::Pending => {
+            // Leader-combo in flight (e.g. `g` pressed). Fall through to the
+            // modal block. The keymap state has already transitioned to
+            // PendingGo via translate() above.
+        }
+        InputEvent::Focus(action) => {
+            // Special-case the error banner as the outermost focus target:
+            // Descend (Enter) expands it; Ascend (Esc) dismisses it.
+            // These checks run before per-view dispatch so the banner takes
+            // priority over any view's own Descend/Ascend handling.
+            if state.modal.is_none() {
+                if matches!(action, crate::input::FocusAction::Descend)
+                    && let Some(b) = &state.status.banner
+                    && let Some(detail) = &b.detail
+                {
+                    state.error_detail = Some(detail.clone());
+                    state.modal = Some(Modal::ErrorDetail);
+                    return UpdateResult {
+                        redraw: true,
+                        intent: None,
+                        tracer_followup: None,
+                    };
+                }
+                if matches!(action, crate::input::FocusAction::Ascend)
+                    && state.status.banner.is_some()
+                {
+                    state.status.banner = None;
+                    return UpdateResult {
+                        redraw: true,
+                        intent: None,
+                        tracer_followup: None,
+                    };
+                }
+            }
+            // Dispatch through typed handle_focus.
+            if state.modal.is_none() {
+                let consumed = match state.current_tab {
+                    ViewId::Bulletins => bulletins::BulletinsHandler::handle_focus(state, action),
+                    ViewId::Browser => browser::BrowserHandler::handle_focus(state, action),
+                    ViewId::Events => events::EventsHandler::handle_focus(state, action),
+                    ViewId::Tracer => tracer::TracerHandler::handle_focus(state, action),
+                    _ => None,
+                };
+                if let Some(r) = consumed {
+                    return r;
+                }
+                // Rule 1a: ported view returned None for Descend →
+                // fall back to default_cross_link.
+                if matches!(action, crate::input::FocusAction::Descend) {
+                    let cross_target = match state.current_tab {
+                        ViewId::Bulletins => bulletins::BulletinsHandler::default_cross_link(state),
+                        ViewId::Browser => browser::BrowserHandler::default_cross_link(state),
+                        ViewId::Events => events::EventsHandler::default_cross_link(state),
+                        ViewId::Tracer => tracer::TracerHandler::default_cross_link(state),
+                        _ => None,
+                    };
+                    if let Some(target) = cross_target
+                        && let Some(cross) = build_go_crosslink(state, target)
+                    {
+                        return UpdateResult {
+                            redraw: true,
+                            intent: Some(PendingIntent::JumpTo(cross)),
+                            tracer_followup: None,
+                        };
+                    }
+                }
+                // Unhandled actions fall through to the modal block then drop.
+            }
+        }
+        InputEvent::View(verb) => {
+            // Dispatch through typed handle_verb.
+            if state.modal.is_none() {
+                let consumed = match state.current_tab {
+                    ViewId::Bulletins => bulletins::BulletinsHandler::handle_verb(state, verb),
+                    ViewId::Browser => browser::BrowserHandler::handle_verb(state, verb),
+                    ViewId::Events => events::EventsHandler::handle_verb(state, verb),
+                    ViewId::Tracer => tracer::TracerHandler::handle_verb(state, verb),
+                    _ => None,
+                };
+                if let Some(r) = consumed {
+                    return r;
+                }
+                // Unhandled verbs fall through.
+            }
+        }
+    }
+
     // Modal-specific handling takes priority.
     if let Some(modal) = state.modal.as_mut() {
         match modal {
@@ -640,7 +1135,7 @@ fn handle_key(state: &mut AppState, key: KeyEvent, config: &Config) -> UpdateRes
                 return UpdateResult::default();
             }
             Modal::ErrorDetail => {
-                if matches!(key.code, KeyCode::Esc | KeyCode::Char('e')) {
+                if matches!(key.code, KeyCode::Esc) {
                     state.modal = None;
                     return UpdateResult {
                         redraw: true,
@@ -864,199 +1359,80 @@ fn handle_key(state: &mut AppState, key: KeyEvent, config: &Config) -> UpdateRes
         }
     }
 
-    // Per-view key dispatch via ViewKeyHandler trait.
-    if state.modal.is_none() {
-        let consumed = match state.current_tab {
-            ViewId::Overview => overview::OverviewHandler::handle_key(state, key),
-            ViewId::Bulletins => bulletins::BulletinsHandler::handle_key(state, key),
-            ViewId::Browser => browser::BrowserHandler::handle_key(state, key),
-            ViewId::Events => events::EventsHandler::handle_key(state, key),
-            ViewId::Tracer => tracer::TracerHandler::handle_key(state, key),
-        };
-        if let Some(r) = consumed {
-            return r;
-        }
-    }
+    UpdateResult::default()
+}
 
-    // Global key handling.
-    match (key.code, key.modifiers) {
-        (KeyCode::Esc, _) => {
-            if state.status.banner.is_some() {
-                state.status.banner = None;
-                return UpdateResult {
-                    redraw: true,
-                    intent: None,
-                    tracer_followup: None,
-                };
-            }
-            UpdateResult::default()
+// ---------------------------------------------------------------------------
+// Text-input guard
+// ---------------------------------------------------------------------------
+
+/// Returns `true` when the current view is in a text-input mode that should
+/// capture raw keystrokes (e.g. Bulletins filter bar, Events filter edit).
+/// Used to prevent App-level key bindings from firing while the user is typing
+/// in a per-view input field.
+fn view_text_input_active(state: &AppState) -> bool {
+    match state.current_tab {
+        ViewId::Bulletins => state.bulletins.text_input.is_some(),
+        ViewId::Events => state.events.filter_edit.is_some(),
+        _ => false,
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Go cross-link builder
+// ---------------------------------------------------------------------------
+
+fn build_go_crosslink(state: &AppState, target: crate::input::GoTarget) -> Option<CrossLink> {
+    use crate::input::GoTarget;
+
+    match (state.current_tab, target) {
+        (ViewId::Bulletins, GoTarget::Browser) => {
+            let idx = state.bulletins.selected_ring_index()?;
+            let b = state.bulletins.ring.get(idx)?;
+            Some(CrossLink::OpenInBrowser {
+                component_id: b.source_id.clone(),
+                group_id: b.group_id.clone(),
+            })
         }
-        (KeyCode::Char('q'), KeyModifiers::NONE)
-        | (KeyCode::Char('q'), KeyModifiers::CONTROL)
-        | (KeyCode::Char('Q'), KeyModifiers::CONTROL) => {
-            state.should_quit = true;
-            UpdateResult {
-                redraw: false,
-                intent: Some(PendingIntent::Quit),
-                tracer_followup: None,
-            }
+        (ViewId::Bulletins, GoTarget::Events) => {
+            let idx = state.bulletins.selected_ring_index()?;
+            let b = state.bulletins.ring.get(idx)?;
+            Some(CrossLink::JumpToEvents {
+                component_id: b.source_id.clone(),
+            })
         }
-        (KeyCode::Char('c'), KeyModifiers::CONTROL) => {
-            state.should_quit = true;
-            UpdateResult {
-                redraw: false,
-                intent: Some(PendingIntent::Quit),
-                tracer_followup: None,
-            }
+        (ViewId::Browser, GoTarget::Events) => {
+            let arena_idx = *state.browser.visible.get(state.browser.selected)?;
+            let node = state.browser.nodes.get(arena_idx)?;
+            Some(CrossLink::JumpToEvents {
+                component_id: node.id.clone(),
+            })
         }
-        (KeyCode::Char('['), KeyModifiers::NONE) => {
-            let anchor = capture_anchor(state);
-            let current = crate::app::history::HistoryEntry {
-                tab: state.current_tab,
-                anchor,
-            };
-            if let Some(entry) = state.history.pop_back(current) {
-                state.current_tab = entry.tab;
-                restore_anchor(state, &entry);
-            }
-            UpdateResult {
-                redraw: true,
-                intent: None,
-                tracer_followup: None,
-            }
+        (ViewId::Events, GoTarget::Browser) => {
+            let event = state.events.selected_event()?;
+            Some(CrossLink::OpenInBrowser {
+                component_id: event.component_id.clone(),
+                group_id: event.group_id.clone(),
+            })
         }
-        (KeyCode::Char(']'), KeyModifiers::NONE) => {
-            let anchor = capture_anchor(state);
-            let current = crate::app::history::HistoryEntry {
-                tab: state.current_tab,
-                anchor,
-            };
-            if let Some(entry) = state.history.pop_forward(current) {
-                state.current_tab = entry.tab;
-                restore_anchor(state, &entry);
-            }
-            UpdateResult {
-                redraw: true,
-                intent: None,
-                tracer_followup: None,
-            }
+        (ViewId::Events, GoTarget::Tracer) => {
+            let event = state.events.selected_event()?;
+            Some(CrossLink::TraceByUuid {
+                uuid: event.flow_file_uuid.clone(),
+            })
         }
-        (KeyCode::Tab, _) => {
-            state.current_tab = state.current_tab.next();
-            UpdateResult {
-                redraw: true,
-                intent: None,
-                tracer_followup: None,
-            }
+        (ViewId::Tracer, GoTarget::Browser) => {
+            let component_id = state.tracer.selected_component_id()?;
+            Some(CrossLink::OpenInBrowser {
+                component_id,
+                group_id: String::new(),
+            })
         }
-        (KeyCode::BackTab, _) => {
-            state.current_tab = state.current_tab.prev();
-            UpdateResult {
-                redraw: true,
-                intent: None,
-                tracer_followup: None,
-            }
+        (ViewId::Tracer, GoTarget::Events) => {
+            let component_id = state.tracer.selected_component_id()?;
+            Some(CrossLink::JumpToEvents { component_id })
         }
-        (KeyCode::F(1), _) => {
-            state.current_tab = ViewId::Overview;
-            UpdateResult {
-                redraw: true,
-                intent: None,
-                tracer_followup: None,
-            }
-        }
-        (KeyCode::F(2), _) => {
-            state.current_tab = ViewId::Bulletins;
-            UpdateResult {
-                redraw: true,
-                intent: None,
-                tracer_followup: None,
-            }
-        }
-        (KeyCode::F(3), _) => {
-            state.current_tab = ViewId::Browser;
-            UpdateResult {
-                redraw: true,
-                intent: None,
-                tracer_followup: None,
-            }
-        }
-        (KeyCode::F(4), _) => {
-            state.current_tab = ViewId::Events;
-            UpdateResult {
-                redraw: true,
-                intent: None,
-                tracer_followup: None,
-            }
-        }
-        (KeyCode::F(5), _) => {
-            state.current_tab = ViewId::Tracer;
-            UpdateResult {
-                redraw: true,
-                intent: None,
-                tracer_followup: None,
-            }
-        }
-        (KeyCode::Char('?'), _) => {
-            state.modal = Some(Modal::Help);
-            UpdateResult {
-                redraw: true,
-                intent: None,
-                tracer_followup: None,
-            }
-        }
-        (KeyCode::Char('K'), KeyModifiers::NONE | KeyModifiers::SHIFT) => {
-            let cs = ContextSwitcherState::from_config(
-                config,
-                &state.context_name,
-                &state.detected_version,
-            );
-            state.modal = Some(Modal::ContextSwitcher(cs));
-            UpdateResult {
-                redraw: true,
-                intent: None,
-                tracer_followup: None,
-            }
-        }
-        (KeyCode::Char('f'), KeyModifiers::NONE) => {
-            if state.flow_index.is_none() {
-                state.status.banner = Some(Banner {
-                    severity: BannerSeverity::Warning,
-                    message: "fuzzy find: flow not indexed yet, open Browser to seed".into(),
-                    detail: None,
-                });
-                return UpdateResult {
-                    redraw: true,
-                    intent: None,
-                    tracer_followup: None,
-                };
-            }
-            let mut fs = crate::widget::fuzzy_find::FuzzyFindState::new();
-            if let Some(idx) = state.flow_index.as_ref() {
-                fs.rebuild_matches(idx);
-            }
-            state.modal = Some(Modal::FuzzyFind(fs));
-            UpdateResult {
-                redraw: true,
-                intent: None,
-                tracer_followup: None,
-            }
-        }
-        (KeyCode::Char('e'), KeyModifiers::NONE) => {
-            if let Some(b) = &state.status.banner
-                && let Some(detail) = &b.detail
-            {
-                state.error_detail = Some(detail.clone());
-                state.modal = Some(Modal::ErrorDetail);
-                return UpdateResult {
-                    redraw: true,
-                    intent: None,
-                    tracer_followup: None,
-                };
-            }
-            UpdateResult::default()
-        }
-        _ => UpdateResult::default(),
+        _ => None,
     }
 }
 
@@ -1582,7 +1958,9 @@ mod tests {
     }
 
     #[test]
-    fn left_bracket_navigates_back() {
+    fn shift_left_navigates_history_back_replaces_bracket() {
+        // `[` is unmapped; history back is now Shift+Left via the central
+        // InputEvent::History(Back) dispatch.
         let mut s = fresh_state();
         let c = tiny_config();
         s.current_tab = ViewId::Bulletins;
@@ -1592,12 +1970,14 @@ mod tests {
         });
         s.current_tab = ViewId::Browser;
 
-        update(&mut s, key(KeyCode::Char('['), KeyModifiers::NONE), &c);
+        update(&mut s, key(KeyCode::Left, KeyModifiers::SHIFT), &c);
         assert_eq!(s.current_tab, ViewId::Bulletins);
     }
 
     #[test]
-    fn right_bracket_navigates_forward() {
+    fn shift_right_navigates_forward() {
+        // `]` is unmapped; history forward is now Shift+Right via the central
+        // InputEvent::History(Forward) dispatch.
         let mut s = fresh_state();
         let c = tiny_config();
         // Simulate: was on Bulletins, pushed history, moved to Browser,
@@ -1617,7 +1997,7 @@ mod tests {
         s.current_tab = ViewId::Bulletins;
         assert!(s.history.can_go_forward());
 
-        update(&mut s, key(KeyCode::Char(']'), KeyModifiers::NONE), &c);
+        update(&mut s, key(KeyCode::Right, KeyModifiers::SHIFT), &c);
         assert_eq!(s.current_tab, ViewId::Browser);
     }
 
@@ -1689,16 +2069,16 @@ mod tests {
     }
 
     #[test]
-    fn capital_k_opens_context_switcher_without_explicit_shift_modifier() {
-        // Some terminals deliver capital letters as KeyCode::Char('K') with
-        // KeyModifiers::NONE instead of SHIFT. Match the loose pattern used by
-        // other capital handlers in the codebase.
+    fn capital_k_with_shift_opens_context_switcher() {
+        // ContextSwitcher is bound to Shift+K via the central
+        // InputEvent::App(ContextSwitcher) dispatch. The legacy loose match
+        // for K-without-SHIFT is no longer supported.
         let mut s = fresh_state();
         let c = tiny_config();
-        update(&mut s, key(KeyCode::Char('K'), KeyModifiers::NONE), &c);
+        update(&mut s, key(KeyCode::Char('K'), KeyModifiers::SHIFT), &c);
         assert!(
             matches!(s.modal, Some(Modal::ContextSwitcher(_))),
-            "K without SHIFT modifier should still open the context switcher"
+            "Shift+K should open the context switcher"
         );
     }
 
@@ -2032,5 +2412,165 @@ mod tests {
             matches!(s.events.status, EventsQueryStatus::Idle),
             "leaving Events must reset Failed to Idle"
         );
+    }
+
+    fn seed_one_bulletin(state: &mut AppState) {
+        use crate::client::BulletinSnapshot;
+        state.bulletins.ring.push_back(BulletinSnapshot {
+            id: 1,
+            level: "ERROR".into(),
+            message: "test-msg".into(),
+            source_id: "src-42".into(),
+            source_name: "Proc-42".into(),
+            source_type: "PROCESSOR".into(),
+            group_id: "root".into(),
+            timestamp_iso: "2026-04-14T00:00:00Z".into(),
+            timestamp_human: String::new(),
+        });
+    }
+
+    #[test]
+    fn shift_left_navigates_history_back() {
+        use crossterm::event::{KeyEvent, KeyModifiers};
+
+        let mut s = fresh_state();
+        let c = tiny_config();
+
+        // Build a history: start on Overview, move to Bulletins, then
+        // history back should return to Overview.
+        s.history.push(crate::app::history::HistoryEntry {
+            tab: ViewId::Overview,
+            anchor: None,
+        });
+        s.current_tab = ViewId::Bulletins;
+
+        let r = update(
+            &mut s,
+            AppEvent::Input(Event::Key(KeyEvent::new(
+                KeyCode::Left,
+                KeyModifiers::SHIFT,
+            ))),
+            &c,
+        );
+        assert!(r.redraw);
+        assert_eq!(s.current_tab, ViewId::Overview);
+    }
+
+    #[test]
+    fn go_b_from_bulletins_jumps_to_browser() {
+        use crossterm::event::{KeyEvent, KeyModifiers};
+
+        let mut s = fresh_state();
+        let c = tiny_config();
+        s.current_tab = ViewId::Bulletins;
+        seed_one_bulletin(&mut s);
+
+        // First press `g` — enters PendingGo; no redraw required for the
+        // leader keystroke itself (Bulletins is ported, legacy g is gone).
+        let r1 = update(
+            &mut s,
+            AppEvent::Input(Event::Key(KeyEvent::new(
+                KeyCode::Char('g'),
+                KeyModifiers::NONE,
+            ))),
+            &c,
+        );
+        assert!(r1.intent.is_none());
+
+        // Then press `b`.
+        let r2 = update(
+            &mut s,
+            AppEvent::Input(Event::Key(KeyEvent::new(
+                KeyCode::Char('b'),
+                KeyModifiers::NONE,
+            ))),
+            &c,
+        );
+        assert!(matches!(
+            r2.intent,
+            Some(PendingIntent::JumpTo(CrossLink::OpenInBrowser { .. }))
+        ));
+    }
+
+    #[test]
+    fn handle_verb_toggles_error_filter_after_port() {
+        // After the Bulletins port (Phase 3 Task 12), handle_verb dispatches
+        // directly — ToggleSeverity(Error) flips show_error immediately.
+        use crate::input::{Severity, ViewVerb};
+
+        let mut s = fresh_state();
+        s.current_tab = ViewId::Bulletins;
+        let before = s.bulletins.filters.show_error;
+        let _ = bulletins::BulletinsHandler::handle_verb(
+            &mut s,
+            ViewVerb::Bulletins(crate::input::BulletinsVerb::ToggleSeverity(Severity::Error)),
+        );
+        assert_ne!(
+            s.bulletins.filters.show_error, before,
+            "handle_verb must toggle show_error after Bulletins port"
+        );
+    }
+
+    #[test]
+    fn bare_e_does_not_open_error_detail() {
+        use crossterm::event::{KeyEvent, KeyModifiers};
+        let mut s = fresh_state();
+        let c = tiny_config();
+        s.status.banner = Some(Banner {
+            severity: BannerSeverity::Error,
+            message: "test".into(),
+            detail: Some("detail".into()),
+        });
+        update(
+            &mut s,
+            AppEvent::Input(Event::Key(KeyEvent::new(
+                KeyCode::Char('e'),
+                KeyModifiers::NONE,
+            ))),
+            &c,
+        );
+        assert!(
+            !matches!(s.modal, Some(Modal::ErrorDetail)),
+            "bare 'e' must not open error detail"
+        );
+    }
+
+    #[test]
+    fn enter_on_error_banner_opens_detail() {
+        use crossterm::event::{KeyEvent, KeyModifiers};
+        let mut s = fresh_state();
+        let c = tiny_config();
+        s.status.banner = Some(Banner {
+            severity: BannerSeverity::Error,
+            message: "test".into(),
+            detail: Some("detail".into()),
+        });
+        update(
+            &mut s,
+            AppEvent::Input(Event::Key(KeyEvent::new(
+                KeyCode::Enter,
+                KeyModifiers::NONE,
+            ))),
+            &c,
+        );
+        assert!(matches!(s.modal, Some(Modal::ErrorDetail)));
+    }
+
+    #[test]
+    fn esc_dismisses_error_banner_via_ascend() {
+        use crossterm::event::{KeyEvent, KeyModifiers};
+        let mut s = fresh_state();
+        let c = tiny_config();
+        s.status.banner = Some(Banner {
+            severity: BannerSeverity::Error,
+            message: "test".into(),
+            detail: None,
+        });
+        update(
+            &mut s,
+            AppEvent::Input(Event::Key(KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE))),
+            &c,
+        );
+        assert!(s.status.banner.is_none(), "Esc must dismiss the banner");
     }
 }
