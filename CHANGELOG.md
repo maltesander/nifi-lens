@@ -9,6 +9,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **`nifi-rust-client` upgraded to 0.10.1.** API surface flattened
+  (`*_api()` accessors dropped the suffix, sub-accessor chains collapsed
+  into single calls that take the resource id as the first argument),
+  the `traits` module is gone, and `update_run_status_{1,2,3,4}` fold
+  into a single `update_run_status` per resource. Lineage and provenance
+  submissions and event-detail / content fetches now populate
+  `clusterNodeId` from the node pinned at login, so clustered NiFi
+  deployments no longer hit `400: The cluster node identifier must be
+  specified`.
 - Browser detail panes for Connection and Process Group now use the same
   nested sub-panel + `Table` visual language as Processor and Controller
   Service. Process Group sub-panels (Controller services, Child groups,
