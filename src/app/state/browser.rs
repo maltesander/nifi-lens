@@ -117,10 +117,11 @@ impl ViewKeyHandler for BrowserHandler {
                 KeyCode::Char('t')
                     if sections.0.get(idx) == Some(&DetailSection::RecentBulletins) =>
                 {
-                    let Some(&arena_idx) = state.browser.visible.get(state.browser.selected) else {
+                    let Some(source_id) =
+                        state.browser.focused_row_source_id(&state.bulletins.ring)
+                    else {
                         return Some(UpdateResult::default());
                     };
-                    let source_id = state.browser.nodes[arena_idx].id.clone();
                     let link = crate::intent::CrossLink::JumpToEvents {
                         component_id: source_id,
                     };
@@ -1375,6 +1376,77 @@ mod tests {
             s.browser.visible, before_visible,
             "Enter should still drill in"
         );
+    }
+
+    #[test]
+    fn t_on_focused_pg_recent_bulletins_emits_crosslink_for_row_source() {
+        use crate::client::{BulletinSnapshot, ProcessGroupDetail};
+        use crate::intent::CrossLink;
+        use crate::view::browser::state::{DetailFocus, NodeDetail};
+
+        let (mut s, c) = seeded_browser_state();
+        // Put the tree cursor on `root` (arena idx 0).
+        s.browser.selected = s
+            .browser
+            .visible
+            .iter()
+            .position(|&i| i == 0)
+            .expect("root visible");
+        // Inject a PG detail for root so focused_row_source_id resolves.
+        s.browser.details.insert(
+            0,
+            NodeDetail::ProcessGroup(ProcessGroupDetail {
+                id: "root".into(),
+                name: "root".into(),
+                parent_group_id: None,
+                running: 0,
+                stopped: 0,
+                invalid: 0,
+                disabled: 0,
+                active_threads: 0,
+                flow_files_queued: 0,
+                bytes_queued: 0,
+                queued_display: "".into(),
+                controller_services: vec![],
+            }),
+        );
+        // Focus PG's RecentBulletins section (idx 2 per for_node(PG)).
+        s.browser.detail_focus = DetailFocus::Section {
+            idx: 2,
+            rows: [0, 0, 0, 0],
+        };
+
+        // Ring: newest at the back. Newest-first iteration → row 0 = p2.
+        s.bulletins.ring.push_back(BulletinSnapshot {
+            id: 1,
+            level: "WARN".into(),
+            message: "old".into(),
+            source_id: "p1".into(),
+            source_name: "p1".into(),
+            source_type: "PROCESSOR".into(),
+            group_id: "root".into(),
+            timestamp_iso: "".into(),
+            timestamp_human: "".into(),
+        });
+        s.bulletins.ring.push_back(BulletinSnapshot {
+            id: 2,
+            level: "WARN".into(),
+            message: "new".into(),
+            source_id: "p2".into(),
+            source_name: "p2".into(),
+            source_type: "PROCESSOR".into(),
+            group_id: "root".into(),
+            timestamp_iso: "".into(),
+            timestamp_human: "".into(),
+        });
+
+        let r = update(&mut s, key(KeyCode::Char('t'), KeyModifiers::NONE), &c);
+        match r.intent {
+            Some(PendingIntent::JumpTo(CrossLink::JumpToEvents { component_id })) => {
+                assert_eq!(component_id, "p2");
+            }
+            other => panic!("unexpected intent: {other:?}"),
+        }
     }
 
     #[test]
