@@ -11,29 +11,29 @@
 
 ## Screenshots
 
-**Overview** — cluster health at a glance
+**Overview** — Cluster health at a glance: "Is this cluster OK right now?"
 
-![Overview tab](assets/screenshots/v0.1.0_overview.png)
+![Overview tab](assets/screenshots/overview.png)
 
-**Bulletins** — live cluster-wide bulletin tail
+**Bulletins** — Live cluster-wide bulletin tail: "What is the cluster complaining about?"
 
-![Bulletins tab](assets/screenshots/v0.1.0_bulletins.png)
+![Bulletins tab](assets/screenshots/bulletins.png)
 
-**Browser** — flow tree with per-node detail
+**Browser** — Flow tree with per-node detail: "Where does X live and what is it doing?"
 
-![Browser tab](assets/screenshots/v0.1.0_browser.png)
+![Browser tab](assets/screenshots/browser.png)
 
-**Events** — provenance search and detail
+**Events** — Provenance search and detail: "What just happened across the cluster?"
 
-![Events tab](assets/screenshots/v0.1.0_events.png)
+![Events tab](assets/screenshots/events.png)
 
-**Tracer** — flowfile lineage with attribute diff
+**Tracer** — Flowfile lineage with attribute diff: "Why did this flowfile fail?"
 
-![Tracer — attribute diff](assets/screenshots/v0.1.0_tracer_diff.png)
+![Tracer — attribute diff](assets/screenshots/tracer_attributes.png)
 
-**Tracer** — content preview (Input / Output tabs)
+**Tracer** — Content preview (Input / Output tabs): "Why did this flowfile fail?"
 
-![Tracer — content preview](assets/screenshots/v0.1.0_tracer_input.png)
+![Tracer — content preview](assets/screenshots/tracer_content.png)
 
 ## Features
 
