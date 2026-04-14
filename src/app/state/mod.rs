@@ -1079,8 +1079,8 @@ fn handle_key(state: &mut AppState, key: KeyEvent, config: &Config) -> UpdateRes
                     ViewId::Bulletins => bulletins::BulletinsHandler::handle_focus(state, action),
                     ViewId::Browser => browser::BrowserHandler::handle_focus(state, action),
                     ViewId::Events => events::EventsHandler::handle_focus(state, action),
+                    ViewId::Overview => overview::OverviewHandler::handle_focus(state, action),
                     ViewId::Tracer => tracer::TracerHandler::handle_focus(state, action),
-                    _ => None,
                 };
                 if let Some(r) = consumed {
                     return r;
