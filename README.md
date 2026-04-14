@@ -11,31 +11,40 @@
 
 ## Status
 
-Pre-release. The tool is being built in phases; see the roadmap in
-[`AGENTS.md`](AGENTS.md#phase-roadmap).
+Pre-release, approaching v0.1.0. Read-only, keyboard-driven, and usable
+against live NiFi 2.x clusters today. See
+[`CHANGELOG.md`](CHANGELOG.md) for the latest changes.
 
 ## Screencasts
 
-*Coming in v0.1.0.* This section is intentionally reserved.
+*Coming with v0.1.0.* This section is intentionally reserved.
 
 ## Features
 
+- **Cluster overview dashboard** — cluster identity, component counts,
+  bulletin-rate sparkline, per-node heap/GC/load strips, repository fill
+  bars, unhealthy-queue leaderboard, and noisiest components. Dual-cadence
+  refresh (10 s PG status, 30 s system diagnostics).
+- **Cluster-wide bulletin tail** — live, filterable, with auto-scroll
+  pause, severity / component / free-text filters, and source-based
+  deduplication so repeating errors collapse into a single row with an
+  `×N` count column.
+- **Flow browser** — two-pane PG tree + per-node detail
+  (Processor / Connection / ProcessGroup / Controller Service). Global
+  `f` fuzzy find across all known components, `e` for a full properties
+  modal, `c` to copy a node id to the clipboard.
+- **Cluster-wide provenance events** — pre-filtered provenance search
+  (time / type / source / uuid / attribute) with results colored by
+  event type; cross-linked from Bulletins and Browser.
 - **Forensic flowfile tracing** — paste a UUID, get the full provenance
-  lineage with attribute diffs and on-demand content previews.
-- **Cluster-wide bulletin tail** — live, filterable, with auto-scroll pause
-  and severity / component / free-text filters.
-- **Cluster health dashboard** *(shipped)* — two-pane ops view with queue
-  backpressure leaderboard, repository fill bars, per-node heap/GC/load
-  strips, and processor thread leaderboard. Dual-cadence refresh (10 s
-  PG status, 30 s system diagnostics). `Enter` jumps to Browser.
-- **Flow browser** *(shipped)* — two-pane PG tree + per-node detail
-  (Processor / Connection / ProcessGroup / Controller Service);
-  `f` fuzzy find across all known components; `e` for a full
-  properties modal; `c` to copy a node id to the clipboard.
-- **Multi-cluster, multi-version** — kubeconfig-style contexts; one binary
-  works against every supported NiFi 2.x version via
-  [`nifi-rust-client`](https://docs.rs/nifi-rust-client)'s `dynamic` feature.
-- **Read-only and safe by construction** — v1 never mutates cluster state.
+  lineage with attribute diffs and on-demand content previews
+  (text, JSON prettyprint, or hex dump).
+- **Multi-cluster, multi-version** — kubeconfig-style contexts; one
+  binary works against every supported NiFi 2.x version via
+  [`nifi-rust-client`](https://docs.rs/nifi-rust-client)'s `dynamic`
+  feature.
+- **Read-only and safe by construction** — v0.1 never mutates cluster
+  state.
 
 ## Install
 
@@ -93,30 +102,34 @@ counts, bulletin-rate sparkline, queue backpressure metrics, repository fill
 status, per-node health strips, and noisiest components. Dual-cadence refresh
 (PG status every 10 s, system diagnostics every 30 s).
 
-**Bulletins** *(shipped)* — cluster-wide bulletin tail with severity,
-component-type, and free-text filters; auto-scroll pause with a new-
-bulletin badge; `Enter` on a row jumps directly to the component in
-the Browser tab. Rows are deduplicated by
-`(source_id, message_stem)` — repeating errors collapse into a
+**Bulletins** — "What is the cluster complaining about?" Cluster-wide
+bulletin tail with severity, component-type, and free-text filters;
+auto-scroll pause with a new-bulletin badge; `Enter` on a row jumps
+directly to the component in the Browser tab. Rows are deduplicated
+by `(source_id, message_stem)` — repeating errors collapse into a
 single row with an `×N` count column. `g` cycles group-by modes
 (`source+msg` / `source` / `off`), `m` mutes the selected row's
 source for the session, and severity chips carry live ring counts
 (`[E 87] [W 32] [I 0]`).
 
-**Browser** *(shipped)* — "Where does X live and what is it doing?"
-Two-pane PG tree with drill-in, per-node detail pane, and global
-`f` fuzzy find across all known components via
+**Browser** — "Where does X live and what is it doing?" Two-pane PG
+tree with drill-in, per-node detail pane, and global `f` fuzzy find
+across all known components via
 [`nucleo`](https://crates.io/crates/nucleo). Press `e` for a full
 properties modal on Processor / Controller Service nodes; `c` to copy
 the selected node's id to the clipboard.
 
-**Tracer** *(shipped)* — "Why did this flowfile fail?" Paste a flowfile UUID
-to trace its full lineage as a chronological event timeline. Expand any event
-to see the attribute diff (All / Changed toggle) and fetch input or output
-content on demand (text, JSON prettyprint, or hex dump for binary). Press `s`
-to save the raw content bytes to a file. Cross-links from the Bulletins tab
-(`t`) and Browser tab (`t`) land on a latest-provenance-events mini list for
-the selected component.
+**Events** — "What just happened across the cluster?" Provenance
+search with a 2-row filter bar (time / type / source / flowfile uuid /
+attribute), results list colored by event type, and a detail pane for
+the selected event. Cross-linked from Bulletins and Browser via `t`,
+pre-filtered to the source component and the last 15 minutes.
+
+**Tracer** — "Why did this flowfile fail?" Paste a flowfile UUID to
+trace its full lineage as a chronological event timeline. Expand any
+event to see the attribute diff (All / Changed toggle) and fetch
+input or output content on demand (text, JSON prettyprint, or hex
+dump for binary). Press `s` to save the raw content bytes to a file.
 
 ### Browser tab
 
@@ -143,23 +156,21 @@ into a process group; `Backspace` or `←` drill out.
 
 ### Tracer tab
 
-Forensic flowfile investigation in four modes:
+Forensic flowfile investigation:
 
-- **Entry** — type or paste a flowfile UUID into the input bar and press
-  `Enter` to start a lineage query.
-- **Lineage running** — a progress bar shows the NiFi server's completion
-  percentage while the query is in flight.
+- **Entry** — type or paste a flowfile UUID into the input bar and
+  press `Enter` to start a lineage query. Cross-links from the Events
+  tab (`t`) populate the UUID automatically.
+- **Lineage running** — a progress bar shows the NiFi server's
+  completion percentage while the query is in flight.
 - **Lineage** — chronological event timeline. Navigate with `↑`/`↓`.
   Press `Enter` or `Space` to expand an event into the detail pane.
-  - **Detail pane**: attribute diff table with `d` to toggle All / Changed
-    view. Press `i` or `o` to fetch input or output content respectively.
+  - **Detail pane**: attribute diff table with `d` to toggle
+    All / Changed view. Press `i` or `o` to fetch input or output
+    content respectively.
   - **Content pane**: text rendered as-is, JSON pretty-printed
-    automatically, binary shown as a hex dump. Press `s` to save the raw
-    bytes to a file; press `Esc` to dismiss.
-- **Latest events** — when arriving via a cross-link (`t` in Bulletins or
-  Browser), the Tracer shows the 20 most recent provenance events for the
-  linked component. Press `Enter` on any event row to open it as a lineage
-  query.
+    automatically, binary shown as a hex dump. Press `s` to save the
+    raw bytes to a file; press `Esc` to dismiss.
 
 ## Keybindings
 
