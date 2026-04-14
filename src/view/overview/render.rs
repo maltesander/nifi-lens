@@ -8,7 +8,7 @@
 //! ├─ Nodes (N connected) ─────────────────────────────────────────────────────┤ ← nodes panel (variable, capped)
 //! │   node-name   heap  N%   gc Nms/5m   load N.N                            │
 //! │   repositories  content  N%   flowfile  N%   provenance  N%              │
-//! ├─ Bulletins / min ──────────────┬─ Noisy components ─────────────────────┤ ← bulletins+noisy panel (10 rows)
+//! ├─ Bulletins / min ──────────────┬─ Noisy components ─────────────────────┤ ← bulletins+noisy panel (6 rows)
 //! │  sparkline                     │  cnt  source              worst          │
 //! ├─ Unhealthy queues ─────────────────────────────────────────────────────────┤ ← unhealthy queues panel (fills rest)
 //! │ fill  queue             src → dst                      ffiles             │
@@ -38,7 +38,7 @@ pub fn render(frame: &mut Frame, area: Rect, state: &OverviewState) {
         .constraints([
             Constraint::Length(3),            // processors panel (1 row + 2 border)
             Constraint::Length(nodes_height), // nodes panel
-            Constraint::Length(10),           // bulletins/noisy panel (8 content + 2 border)
+            Constraint::Length(6),            // bulletins/noisy panel (4 content + 2 border)
             Constraint::Fill(1),              // unhealthy queues panel
         ])
         .split(area);

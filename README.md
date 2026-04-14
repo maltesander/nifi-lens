@@ -9,15 +9,31 @@
 [![License: Apache-2.0](https://img.shields.io/badge/License-Apache--2.0-blue.svg)](LICENSE)
 ![MSRV: 1.88](https://img.shields.io/badge/MSRV-1.88-blue.svg)
 
-## Status
+## Screenshots
 
-Pre-release, approaching v0.1.0. Read-only, keyboard-driven, and usable
-against live NiFi 2.x clusters today. See
-[`CHANGELOG.md`](CHANGELOG.md) for the latest changes.
+**Overview** — cluster health at a glance
 
-## Screencasts
+![Overview tab](assets/screenshots/v0.1.0_overview.png)
 
-*Coming with v0.1.0.* This section is intentionally reserved.
+**Bulletins** — live cluster-wide bulletin tail
+
+![Bulletins tab](assets/screenshots/v0.1.0_bulletins.png)
+
+**Browser** — flow tree with per-node detail
+
+![Browser tab](assets/screenshots/v0.1.0_browser.png)
+
+**Events** — provenance search and detail
+
+![Events tab](assets/screenshots/v0.1.0_events.png)
+
+**Tracer** — flowfile lineage with attribute diff
+
+![Tracer — attribute diff](assets/screenshots/v0.1.0_tracer_diff.png)
+
+**Tracer** — content preview (Input / Output tabs)
+
+![Tracer — content preview](assets/screenshots/v0.1.0_tracer_input.png)
 
 ## Features
 
