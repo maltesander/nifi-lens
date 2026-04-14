@@ -1,6 +1,6 @@
 //! Overview tab key handler.
 
-use super::{AppState, UpdateResult, ViewKeyHandler};
+use super::{AppState, Modal, UpdateResult, ViewKeyHandler};
 
 /// Zero-sized dispatch struct for the Overview tab.
 pub(crate) struct OverviewHandler;
@@ -11,41 +11,338 @@ impl ViewKeyHandler for OverviewHandler {
     }
 
     fn handle_focus(
-        _state: &mut AppState,
-        _action: crate::input::FocusAction,
+        state: &mut AppState,
+        action: crate::input::FocusAction,
     ) -> Option<UpdateResult> {
-        None
+        use crate::input::FocusAction as FA;
+        use crate::view::overview::state::OverviewFocus;
+
+        let done = || {
+            Some(UpdateResult {
+                redraw: true,
+                intent: None,
+                tracer_followup: None,
+            })
+        };
+
+        match state.overview.focus {
+            OverviewFocus::None => match action {
+                FA::Descend => {
+                    state.overview.focus = OverviewFocus::Nodes;
+                    done()
+                }
+                _ => None,
+            },
+            OverviewFocus::Nodes => match action {
+                FA::Ascend => {
+                    state.overview.focus = OverviewFocus::None;
+                    done()
+                }
+                FA::Right => {
+                    state.overview.focus = OverviewFocus::Noisy;
+                    done()
+                }
+                FA::Left => {
+                    state.overview.focus = OverviewFocus::Queues;
+                    done()
+                }
+                FA::Up => {
+                    state.overview.nodes.selected = state.overview.nodes.selected.saturating_sub(1);
+                    done()
+                }
+                FA::Down => {
+                    let max = state.overview.nodes.nodes.len().saturating_sub(1);
+                    state.overview.nodes.selected = (state.overview.nodes.selected + 1).min(max);
+                    done()
+                }
+                FA::Descend => {
+                    if let Some(row) = state
+                        .overview
+                        .nodes
+                        .nodes
+                        .get(state.overview.nodes.selected)
+                    {
+                        state.modal = Some(Modal::NodeDetail(Box::new(row.clone())));
+                    }
+                    done()
+                }
+                _ => None,
+            },
+            OverviewFocus::Noisy => match action {
+                FA::Ascend => {
+                    state.overview.focus = OverviewFocus::None;
+                    done()
+                }
+                FA::Right => {
+                    state.overview.focus = OverviewFocus::Queues;
+                    done()
+                }
+                FA::Left => {
+                    state.overview.focus = OverviewFocus::Nodes;
+                    done()
+                }
+                FA::Up => {
+                    state.overview.noisy_selected = state.overview.noisy_selected.saturating_sub(1);
+                    done()
+                }
+                FA::Down => {
+                    let max = state.overview.noisy.len().saturating_sub(1);
+                    state.overview.noisy_selected = (state.overview.noisy_selected + 1).min(max);
+                    done()
+                }
+                _ => None,
+            },
+            OverviewFocus::Queues => match action {
+                FA::Ascend => {
+                    state.overview.focus = OverviewFocus::None;
+                    done()
+                }
+                FA::Right => {
+                    state.overview.focus = OverviewFocus::Nodes;
+                    done()
+                }
+                FA::Left => {
+                    state.overview.focus = OverviewFocus::Noisy;
+                    done()
+                }
+                FA::Up => {
+                    state.overview.queues_selected =
+                        state.overview.queues_selected.saturating_sub(1);
+                    done()
+                }
+                FA::Down => {
+                    let max = state.overview.unhealthy.len().saturating_sub(1);
+                    state.overview.queues_selected = (state.overview.queues_selected + 1).min(max);
+                    done()
+                }
+                _ => None,
+            },
+        }
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::super::tests::{fresh_state, tiny_config};
-    use super::super::update;
-    use crate::client::{
-        AboutSnapshot, BulletinBoardSnapshot, ControllerStatusSnapshot, RootPgStatusSnapshot,
-    };
-    use crate::event::{AppEvent, OverviewPayload, OverviewPgStatusPayload, ViewPayload};
-    use std::time::SystemTime;
+    use super::super::{ViewKeyHandler, update};
+    use super::OverviewHandler;
+    use crate::app::state::{Modal, ViewId};
+    use crate::client::health::NodeHealthRow;
+    use crate::input::FocusAction;
+    use crate::view::overview::state::OverviewFocus;
+
+    fn set_nodes(s: &mut crate::app::state::AppState, count: usize) {
+        s.overview.nodes.nodes = (0..count)
+            .map(|i| NodeHealthRow {
+                node_address: format!("node{}:8080", i),
+                heap_used_bytes: 512 * 1024 * 1024,
+                heap_max_bytes: 1024 * 1024 * 1024,
+                heap_percent: 50,
+                heap_severity: crate::client::health::Severity::Green,
+                gc_collection_count: 10,
+                gc_delta: None,
+                gc_millis: 50,
+                load_average: Some(1.5),
+                available_processors: Some(4),
+                uptime: "1h".into(),
+                total_threads: 40,
+                gc: vec![],
+                content_repos: vec![],
+                flowfile_repo: None,
+                provenance_repos: vec![],
+            })
+            .collect();
+    }
 
     #[test]
-    fn overview_handle_verb_is_noop() {
-        use crate::app::state::ViewKeyHandler;
-        use crate::input::{BulletinsVerb, FocusAction, ViewVerb};
+    fn descend_from_none_enters_nodes() {
         let mut s = fresh_state();
-        s.current_tab = crate::app::state::ViewId::Overview;
+        s.current_tab = ViewId::Overview;
+        let r = OverviewHandler::handle_focus(&mut s, FocusAction::Descend);
+        assert!(r.unwrap().redraw);
+        assert_eq!(s.overview.focus, OverviewFocus::Nodes);
+    }
+
+    #[test]
+    fn other_action_from_none_falls_through() {
+        let mut s = fresh_state();
+        s.current_tab = ViewId::Overview;
+        assert!(OverviewHandler::handle_focus(&mut s, FocusAction::Up).is_none());
+        assert!(OverviewHandler::handle_focus(&mut s, FocusAction::Down).is_none());
+        assert!(OverviewHandler::handle_focus(&mut s, FocusAction::Left).is_none());
+    }
+
+    #[test]
+    fn ascend_returns_to_none() {
+        let mut s = fresh_state();
+        s.current_tab = ViewId::Overview;
+        s.overview.focus = OverviewFocus::Nodes;
+        OverviewHandler::handle_focus(&mut s, FocusAction::Ascend);
+        assert_eq!(s.overview.focus, OverviewFocus::None);
+    }
+
+    #[test]
+    fn right_cycles_nodes_noisy_queues_nodes() {
+        let mut s = fresh_state();
+        s.current_tab = ViewId::Overview;
+        s.overview.focus = OverviewFocus::Nodes;
+        OverviewHandler::handle_focus(&mut s, FocusAction::Right);
+        assert_eq!(s.overview.focus, OverviewFocus::Noisy);
+        OverviewHandler::handle_focus(&mut s, FocusAction::Right);
+        assert_eq!(s.overview.focus, OverviewFocus::Queues);
+        OverviewHandler::handle_focus(&mut s, FocusAction::Right);
+        assert_eq!(s.overview.focus, OverviewFocus::Nodes);
+    }
+
+    #[test]
+    fn left_cycles_in_reverse() {
+        let mut s = fresh_state();
+        s.current_tab = ViewId::Overview;
+        s.overview.focus = OverviewFocus::Nodes;
+        OverviewHandler::handle_focus(&mut s, FocusAction::Left);
+        assert_eq!(s.overview.focus, OverviewFocus::Queues);
+        OverviewHandler::handle_focus(&mut s, FocusAction::Left);
+        assert_eq!(s.overview.focus, OverviewFocus::Noisy);
+        OverviewHandler::handle_focus(&mut s, FocusAction::Left);
+        assert_eq!(s.overview.focus, OverviewFocus::Nodes);
+    }
+
+    #[test]
+    fn down_in_nodes_increments_cursor() {
+        let mut s = fresh_state();
+        s.current_tab = ViewId::Overview;
+        s.overview.focus = OverviewFocus::Nodes;
+        set_nodes(&mut s, 3);
+        OverviewHandler::handle_focus(&mut s, FocusAction::Down);
+        assert_eq!(s.overview.nodes.selected, 1);
+    }
+
+    #[test]
+    fn down_in_nodes_clamped_at_last_row() {
+        let mut s = fresh_state();
+        s.current_tab = ViewId::Overview;
+        s.overview.focus = OverviewFocus::Nodes;
+        set_nodes(&mut s, 2);
+        s.overview.nodes.selected = 1;
+        OverviewHandler::handle_focus(&mut s, FocusAction::Down);
+        assert_eq!(s.overview.nodes.selected, 1, "should not go past len-1");
+    }
+
+    #[test]
+    fn up_in_nodes_saturates_at_zero() {
+        let mut s = fresh_state();
+        s.current_tab = ViewId::Overview;
+        s.overview.focus = OverviewFocus::Nodes;
+        set_nodes(&mut s, 3);
+        s.overview.nodes.selected = 0;
+        OverviewHandler::handle_focus(&mut s, FocusAction::Up);
+        assert_eq!(s.overview.nodes.selected, 0);
+    }
+
+    #[test]
+    fn descend_in_nodes_opens_node_detail_modal() {
+        let mut s = fresh_state();
+        s.current_tab = ViewId::Overview;
+        s.overview.focus = OverviewFocus::Nodes;
+        set_nodes(&mut s, 2);
+        s.overview.nodes.selected = 1;
+        OverviewHandler::handle_focus(&mut s, FocusAction::Descend);
         assert!(
-            super::OverviewHandler::handle_verb(
-                &mut s,
-                ViewVerb::Bulletins(BulletinsVerb::Refresh)
-            )
-            .is_none()
+            matches!(&s.modal, Some(Modal::NodeDetail(row)) if row.node_address == "node1:8080"),
+            "modal should be NodeDetail for node1"
         );
-        assert!(super::OverviewHandler::handle_focus(&mut s, FocusAction::Descend).is_none());
+    }
+
+    #[test]
+    fn descend_in_nodes_noop_when_empty() {
+        let mut s = fresh_state();
+        s.current_tab = ViewId::Overview;
+        s.overview.focus = OverviewFocus::Nodes;
+        // No nodes populated.
+        let r = OverviewHandler::handle_focus(&mut s, FocusAction::Descend);
+        assert!(r.is_some()); // returns a result (redraw=true)
+        assert!(s.modal.is_none());
+    }
+
+    #[test]
+    fn down_in_noisy_increments_cursor() {
+        let mut s = fresh_state();
+        s.current_tab = ViewId::Overview;
+        s.overview.focus = OverviewFocus::Noisy;
+        s.overview.noisy = vec![
+            crate::view::overview::state::NoisyComponent {
+                source_id: "a".into(),
+                group_id: "g".into(),
+                source_name: "A".into(),
+                count: 1,
+                max_severity: crate::view::overview::state::Severity::Info,
+            },
+            crate::view::overview::state::NoisyComponent {
+                source_id: "b".into(),
+                group_id: "g".into(),
+                source_name: "B".into(),
+                count: 1,
+                max_severity: crate::view::overview::state::Severity::Info,
+            },
+        ];
+        OverviewHandler::handle_focus(&mut s, FocusAction::Down);
+        assert_eq!(s.overview.noisy_selected, 1);
+    }
+
+    #[test]
+    fn down_in_queues_increments_cursor() {
+        use crate::view::overview::state::UnhealthyQueue;
+        let mut s = fresh_state();
+        s.current_tab = ViewId::Overview;
+        s.overview.focus = OverviewFocus::Queues;
+        s.overview.unhealthy = vec![
+            UnhealthyQueue {
+                id: "c0".into(),
+                group_id: "g".into(),
+                name: "q0".into(),
+                source_name: "A".into(),
+                destination_name: "B".into(),
+                fill_percent: 80,
+                flow_files_queued: 100,
+                bytes_queued: 0,
+                queued_display: "100".into(),
+            },
+            UnhealthyQueue {
+                id: "c1".into(),
+                group_id: "g".into(),
+                name: "q1".into(),
+                source_name: "C".into(),
+                destination_name: "D".into(),
+                fill_percent: 70,
+                flow_files_queued: 50,
+                bytes_queued: 0,
+                queued_display: "50".into(),
+            },
+        ];
+        OverviewHandler::handle_focus(&mut s, FocusAction::Down);
+        assert_eq!(s.overview.queues_selected, 1);
+    }
+
+    // Keep the existing noop / data-event tests:
+    #[test]
+    fn overview_handle_verb_is_noop() {
+        use crate::input::{BulletinsVerb, ViewVerb};
+        let mut s = fresh_state();
+        s.current_tab = ViewId::Overview;
+        assert!(
+            OverviewHandler::handle_verb(&mut s, ViewVerb::Bulletins(BulletinsVerb::Refresh))
+                .is_none()
+        );
+        assert!(OverviewHandler::handle_focus(&mut s, FocusAction::Descend).is_some());
     }
 
     #[test]
     fn overview_data_event_updates_state_and_triggers_redraw() {
+        use crate::client::{
+            AboutSnapshot, BulletinBoardSnapshot, ControllerStatusSnapshot, RootPgStatusSnapshot,
+        };
+        use crate::event::{AppEvent, OverviewPayload, OverviewPgStatusPayload, ViewPayload};
+        use std::time::SystemTime;
         let mut s = fresh_state();
         let c = tiny_config();
         let payload = OverviewPayload::PgStatus(OverviewPgStatusPayload {
@@ -68,7 +365,6 @@ mod tests {
         });
         let r = update(&mut s, AppEvent::Data(ViewPayload::Overview(payload)), &c);
         assert!(r.redraw);
-        let snap = s.overview.snapshot.as_ref().unwrap();
-        assert_eq!(snap.controller.running, 7);
+        assert_eq!(s.overview.snapshot.as_ref().unwrap().controller.running, 7);
     }
 }
