@@ -29,7 +29,7 @@ use super::state::{
     SPARKLINE_MINUTES, Severity, UnhealthyQueue,
 };
 use crate::theme;
-use crate::widget::gauge::{fill_bar, spark_bar};
+use crate::widget::gauge::fill_bar;
 use crate::widget::panel::Panel;
 
 pub fn render(frame: &mut Frame, area: Rect, state: &OverviewState) {
@@ -183,19 +183,19 @@ fn render_nodes_zone(frame: &mut Frame, area: Rect, state: &OverviewState) {
         Cell::from(Line::from(vec![
             Span::raw("cont "),
             Span::styled(
-                fill_bar(4, repos.content_percent),
+                fill_bar(5, repos.content_percent),
                 fill_style(repos.content_percent),
             ),
-            Span::raw("  "),
+            Span::raw(" "),
             Span::styled(
                 format!("{:>3}%", repos.content_percent),
                 fill_style(repos.content_percent),
             ),
         ])),
         Cell::from(Line::from(vec![
-            Span::raw("ff   "),
+            Span::raw("ff  "),
             Span::styled(
-                fill_bar(4, repos.flowfile_percent),
+                fill_bar(5, repos.flowfile_percent),
                 fill_style(repos.flowfile_percent),
             ),
             Span::raw(" "),
@@ -260,8 +260,10 @@ fn node_to_row(node: &crate::client::health::NodeHealthRow) -> Row<'static> {
     let heap_style = health_severity_style(node.heap_severity);
     let heap_bar = fill_bar(5, node.heap_percent);
     let load_bar = match (node.load_average, node.available_processors) {
-        (Some(l), Some(cpus)) if cpus > 0 => spark_bar(l as f32, cpus as f32, 4),
-        _ => "░░░░".to_string(),
+        (Some(l), Some(cpus)) if cpus > 0 => {
+            format!("{:.2}", (l / cpus as f64).min(9.99))
+        }
+        _ => "    ".to_string(),
     };
     Row::new(vec![
         Cell::from(Span::styled(
@@ -602,11 +604,11 @@ fn render_node_system_summary(
             (
                 format!("{l:.1}"),
                 style,
-                spark_bar(l as f32, cpus as f32, 5),
+                format!("{:>5.2}", ratio.min(9.99)),
             )
         }
-        (Some(l), _) => (format!("{l:.1}"), Style::default(), "░░░░░".to_string()),
-        (None, _) => ("\u{2014}".to_string(), theme::muted(), "░░░░░".to_string()),
+        (Some(l), _) => (format!("{l:.1}"), Style::default(), "     ".to_string()),
+        (None, _) => ("\u{2014}".to_string(), theme::muted(), "     ".to_string()),
     };
 
     let lines = vec![
