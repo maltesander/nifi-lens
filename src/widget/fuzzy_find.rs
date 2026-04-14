@@ -9,9 +9,8 @@
 use nucleo::{Config, Matcher, Utf32Str};
 use ratatui::Frame;
 use ratatui::layout::Rect;
-use ratatui::style::Style;
 use ratatui::text::{Line, Span};
-use ratatui::widgets::{Block, Borders, Clear, Paragraph};
+use ratatui::widgets::{Clear, Paragraph};
 
 use crate::client::NodeKind;
 use crate::theme;
@@ -121,17 +120,16 @@ impl FuzzyFindState {
     }
 }
 
-/// Render the fuzzy-find overlay.
-///
-/// This is a transitional implementation — still a `Paragraph` of
-/// pre-formatted lines. Task 6 rewrites it to use `Table` with
-/// structured columns.
+/// Render the fuzzy-find overlay as a titled table.
 pub fn render(
     frame: &mut Frame,
     area: Rect,
     fuzz: &FuzzyFindState,
     flow_index: &Option<FlowIndex>,
 ) {
+    use ratatui::layout::{Constraint, Direction, Layout};
+    use ratatui::widgets::{Cell, Row, Table, TableState};
+
     let w = area.width.min(80);
     let h = area.height.min(16);
     let x = area.x + (area.width - w) / 2;
@@ -143,40 +141,121 @@ pub fn render(
         height: h,
     };
 
-    let block = Block::default()
-        .borders(Borders::ALL)
-        .title(" Fuzzy Find — esc to close ");
-    let inner = block.inner(rect);
     frame.render_widget(Clear, rect);
+    let block = crate::widget::panel::Panel::new(" Fuzzy Find — esc to close ").into_block();
+    let inner = block.inner(rect);
     frame.render_widget(block, rect);
 
-    let mut lines: Vec<Line> = Vec::new();
-    lines.push(Line::from(format!("> {}_", fuzz.query)));
-    lines.push(Line::from(Span::styled(
-        "─".repeat(inner.width as usize),
-        theme::muted(),
-    )));
-    if let Some(idx) = flow_index {
-        let max_rows = (inner.height as usize).saturating_sub(3);
-        for (i, m) in fuzz.matches.iter().enumerate().take(max_rows) {
-            let Some(entry) = idx.entries.get(m.index_entry) else {
-                continue;
-            };
-            let marker = if i == fuzz.selected { "▸ " } else { "  " };
-            let style = if i == fuzz.selected {
-                theme::cursor_row()
-            } else {
-                Style::default()
-            };
-            lines.push(Line::from(vec![
-                Span::raw(marker),
-                Span::styled(format!("{}   {}", entry.name, entry.group_path), style),
-            ]));
-        }
-    } else {
-        lines.push(Line::from(Span::styled("no index", theme::muted())));
+    // Inner layout: query line, separator, table body.
+    let chunks = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([
+            Constraint::Length(1),
+            Constraint::Length(1),
+            Constraint::Min(0),
+        ])
+        .split(inner);
+
+    frame.render_widget(
+        Paragraph::new(Line::from(format!("> {}_", fuzz.query))),
+        chunks[0],
+    );
+    frame.render_widget(
+        Paragraph::new(Line::from(Span::styled(
+            "─".repeat(chunks[1].width as usize),
+            theme::muted(),
+        ))),
+        chunks[1],
+    );
+
+    let Some(idx) = flow_index else {
+        let body = Paragraph::new(Line::from(Span::styled(
+            "no index (visit Browser tab first)",
+            theme::muted(),
+        )));
+        frame.render_widget(body, chunks[2]);
+        return;
+    };
+
+    if fuzz.matches.is_empty() {
+        let msg = if fuzz.query.is_empty() {
+            "no entries"
+        } else {
+            "no matches"
+        };
+        let body = Paragraph::new(Line::from(Span::styled(msg, theme::muted())));
+        frame.render_widget(body, chunks[2]);
+        return;
     }
-    frame.render_widget(Paragraph::new(lines), inner);
+
+    let header = Row::new(vec![
+        Cell::from(Span::styled("Kind", theme::muted())),
+        Cell::from(Span::styled("Name", theme::muted())),
+        Cell::from(Span::styled("Path", theme::muted())),
+        Cell::from(Span::styled("State", theme::muted())),
+    ]);
+
+    let rows: Vec<Row> = fuzz
+        .matches
+        .iter()
+        .filter_map(|m| {
+            let entry = idx.entries.get(m.index_entry)?;
+            let kind_cell = Cell::from(Span::styled(kind_short_label(entry.kind), theme::muted()));
+            let name_cell = Cell::from(Line::from(Span::raw(entry.name.clone())));
+            let path_cell = Cell::from(Span::styled(entry.group_path.clone(), theme::muted()));
+            let state_cell = state_cell(&entry.state);
+            Some(Row::new(vec![kind_cell, name_cell, path_cell, state_cell]))
+        })
+        .collect();
+
+    let widths = [
+        Constraint::Length(6),
+        Constraint::Percentage(45),
+        Constraint::Percentage(45),
+        Constraint::Length(8),
+    ];
+    let table = Table::new(rows, widths)
+        .header(header)
+        .row_highlight_style(theme::cursor_row());
+
+    let mut ts = TableState::default();
+    ts.select(Some(fuzz.selected));
+    frame.render_stateful_widget(table, chunks[2], &mut ts);
+}
+
+fn kind_short_label(kind: NodeKind) -> &'static str {
+    match kind {
+        NodeKind::Processor => "Proc",
+        NodeKind::ProcessGroup => "PG",
+        NodeKind::Connection => "Conn",
+        NodeKind::ControllerService => "CS",
+        NodeKind::InputPort => "In",
+        NodeKind::OutputPort => "Out",
+    }
+}
+
+fn state_cell<'a>(
+    badge: &'a crate::view::browser::state::StateBadge,
+) -> ratatui::widgets::Cell<'a> {
+    use crate::view::browser::state::StateBadge;
+    use ratatui::widgets::Cell;
+    match badge {
+        StateBadge::Processor { glyph, style } => {
+            Cell::from(Span::styled(glyph.to_string(), *style))
+        }
+        StateBadge::Cs { label, style } => Cell::from(Span::styled(label.clone(), *style)),
+        StateBadge::Pg { invalid } => {
+            if *invalid > 0 {
+                Cell::from(Span::styled(format!("\u{26A0}{invalid}"), theme::warning()))
+            } else {
+                Cell::from("")
+            }
+        }
+        StateBadge::Conn { fill_percent } => {
+            Cell::from(Span::styled(format!("{fill_percent}%"), theme::muted()))
+        }
+        StateBadge::Port => Cell::from(""),
+    }
 }
 
 #[cfg(test)]
@@ -262,6 +341,29 @@ mod tests {
             s.move_down();
         }
         assert!(s.selected < s.matches.len());
+    }
+
+    #[test]
+    fn fuzzy_table_renders_header_row_and_columns() {
+        use ratatui::Terminal;
+        use ratatui::backend::TestBackend;
+
+        let idx = sample_index();
+        let mut fuzz = FuzzyFindState::new();
+        fuzz.rebuild_matches(&idx);
+
+        let backend = TestBackend::new(100, 20);
+        let mut term = Terminal::new(backend).unwrap();
+        term.draw(|f| render(f, f.area(), &fuzz, &Some(idx.clone())))
+            .unwrap();
+        let out = format!("{}", term.backend());
+
+        assert!(out.contains("Kind"), "expected Kind header in:\n{out}");
+        assert!(out.contains("Name"), "expected Name header in:\n{out}");
+        assert!(out.contains("Path"), "expected Path header in:\n{out}");
+        assert!(out.contains("State"), "expected State header in:\n{out}");
+        assert!(out.contains("PutKafka"), "expected sample row in:\n{out}");
+        assert!(out.contains("Proc"), "expected Kind cell Proc in:\n{out}");
     }
 
     #[test]
