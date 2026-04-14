@@ -1087,8 +1087,8 @@ mod tests {
             }),
         );
 
-        // Five noisy components with distinct names. visible_rows=4, so
-        // selected=4 forces scroll_offset=1. "alfa" scrolls away; "echo" appears.
+        // Five noisy components with distinct names. zone[2] inner height=4,
+        // visible_rows=3, so selected=4 forces scroll_offset=2. "alfa" scrolls away; "echo" appears.
         state.noisy = vec![
             NoisyComponent {
                 source_id: "a".into(),
