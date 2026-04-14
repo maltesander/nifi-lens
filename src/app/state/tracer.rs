@@ -279,16 +279,36 @@ impl ViewKeyHandler for TracerHandler {
                         }
                         FocusAction::Descend => {
                             if let Some(event_id) = ts::lineage_selected_event_id(&state.tracer) {
-                                ts::lineage_mark_detail_loading(&mut state.tracer);
-                                // Set active_detail_tab to Attributes on detail load.
+                                // If the detail for the selected event is
+                                // already loaded, skip the re-fetch — just
+                                // move focus into the detail pane. Otherwise
+                                // mark loading and dispatch the fetch.
+                                let already_loaded = matches!(
+                                    &state.tracer.mode,
+                                    TracerMode::Lineage(v)
+                                        if matches!(
+                                            &v.event_detail,
+                                            EventDetail::Loaded { event, .. }
+                                                if event.summary.event_id == event_id
+                                        )
+                                );
+                                let intent = if already_loaded {
+                                    None
+                                } else {
+                                    ts::lineage_mark_detail_loading(&mut state.tracer);
+                                    Some(PendingIntent::Dispatch(Intent::LoadEventDetail {
+                                        event_id,
+                                    }))
+                                };
+                                // Move focus into the detail pane, defaulting
+                                // to the Attributes tab.
                                 if let TracerMode::Lineage(ref mut v) = state.tracer.mode {
                                     v.active_detail_tab = DetailTab::Attributes;
+                                    v.focus = LineageFocus::Attributes { row: 0 };
                                 }
                                 Some(UpdateResult {
                                     redraw: true,
-                                    intent: Some(PendingIntent::Dispatch(
-                                        Intent::LoadEventDetail { event_id },
-                                    )),
+                                    intent,
                                     tracer_followup: None,
                                 })
                             } else {
@@ -903,5 +923,60 @@ mod tests {
             ts::DetailTab::Attributes,
             "'i' must not switch to Input — use Left/Right"
         );
+    }
+
+    #[test]
+    fn descend_on_timeline_focuses_detail_pane() {
+        // Regression: pressing Enter on a Timeline selection must move
+        // focus into the Detail pane. Before the fix, handle_focus only
+        // set `active_detail_tab` and `lineage_mark_detail_loading`
+        // reset `focus` back to Timeline, so users couldn't reach the
+        // detail pane to check attribute values or cycle tabs.
+        use crate::input::FocusAction;
+        let mut s = fresh_state();
+        s.current_tab = ViewId::Tracer;
+        seed_tracer_with_loaded_detail(&mut s);
+        // Start with focus on the timeline, matching the state after a
+        // lineage query completes.
+        if let TracerMode::Lineage(ref mut v) = s.tracer.mode {
+            v.focus = ts::LineageFocus::Timeline;
+        }
+
+        let r = super::TracerHandler::handle_focus(&mut s, FocusAction::Descend)
+            .expect("Descend on Timeline must be consumed");
+        assert!(r.redraw);
+
+        let TracerMode::Lineage(ref v) = s.tracer.mode else {
+            panic!("expected Lineage");
+        };
+        assert!(
+            matches!(v.focus, ts::LineageFocus::Attributes { .. }),
+            "Descend must move focus into the Attributes tab, got {:?}",
+            v.focus
+        );
+        assert_eq!(v.active_detail_tab, ts::DetailTab::Attributes);
+    }
+
+    #[test]
+    fn right_from_timeline_descent_cycles_to_input_tab() {
+        // After Descend lands focus on Attributes, pressing Right must
+        // cycle to the Input tab (and set focus to Content). This
+        // verifies the full Timeline → Detail → tab-cycle flow.
+        use crate::input::FocusAction;
+        let mut s = fresh_state();
+        s.current_tab = ViewId::Tracer;
+        seed_tracer_with_loaded_detail(&mut s);
+        if let TracerMode::Lineage(ref mut v) = s.tracer.mode {
+            v.focus = ts::LineageFocus::Timeline;
+        }
+
+        super::TracerHandler::handle_focus(&mut s, FocusAction::Descend);
+        super::TracerHandler::handle_focus(&mut s, FocusAction::Right);
+
+        let TracerMode::Lineage(ref v) = s.tracer.mode else {
+            panic!("expected Lineage");
+        };
+        assert_eq!(v.active_detail_tab, ts::DetailTab::Input);
+        assert!(matches!(v.focus, ts::LineageFocus::Content { .. }));
     }
 }

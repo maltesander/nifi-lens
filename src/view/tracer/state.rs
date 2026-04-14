@@ -447,7 +447,6 @@ pub fn lineage_move_up(state: &mut TracerState) {
 pub fn lineage_mark_detail_loading(state: &mut TracerState) {
     if let TracerMode::Lineage(ref mut view) = state.mode {
         view.event_detail = EventDetail::Loading;
-        view.focus = LineageFocus::Timeline;
     }
 }
 

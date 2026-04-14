@@ -390,8 +390,7 @@ pub struct PendingSave {
 /// Collect the hint spans for the current state, respecting modal priority.
 pub fn collect_hints(state: &AppState) -> Vec<crate::widget::hint_bar::HintSpan> {
     use crate::input::{
-        AppAction, BrowserVerb, BulletinsVerb, EventsVerb, FocusAction, GoTarget, HistoryAction,
-        KeyMapState, TracerVerb, Verb,
+        BrowserVerb, BulletinsVerb, EventsVerb, GoTarget, KeyMapState, TracerVerb, Verb,
     };
     use crate::widget::hint_bar::HintSpan;
 
@@ -460,16 +459,18 @@ pub fn collect_hints(state: &AppState) -> Vec<crate::widget::hint_bar::HintSpan>
         ];
     }
 
-    // Default path: generate from Verb::all() for the current view.
+    // Default path: tab-specific verbs only. General navigation,
+    // history, tab cycling, fuzzy find, quit, and the help modal are
+    // documented via `?` — no point repeating them in every frame.
     let ctx = crate::input::HintContext::new(state);
     let mut out: Vec<HintSpan> = Vec::new();
 
     // Helper — convert a Chord display (String) to a &'static str.
-    // HintSpan fields are &'static str, so we must leak the strings. The
-    // hint bar rebuilds every redraw but chord strings are bounded by
-    // the small set of distinct chords in the app (< 40). Leaking is
-    // acceptable here. A follow-up task can convert HintSpan to use
-    // owned String if needed.
+    // HintSpan fields are &'static str, so we must leak the strings.
+    // The hint bar rebuilds every redraw but chord strings are bounded
+    // by the small set of distinct chords in the app (< 40). Leaking is
+    // acceptable here. A follow-up can convert HintSpan to owned String
+    // if needed.
     fn push_verb<V: crate::input::Verb>(
         out: &mut Vec<HintSpan>,
         v: V,
@@ -483,17 +484,9 @@ pub fn collect_hints(state: &AppState) -> Vec<crate::widget::hint_bar::HintSpan>
         });
     }
 
-    // Focus actions (Enter, Esc, arrows) — universal.
-    for &a in FocusAction::all() {
-        push_verb(&mut out, a, &ctx);
-    }
-
-    // History
-    for &h in HistoryAction::all() {
-        push_verb(&mut out, h, &ctx);
-    }
-
-    // Per-view verbs
+    // Per-view verbs — these are the tab-specific commands. Disabled
+    // verbs (e.g. Browser Properties with no eligible selection) stay
+    // in the bar but render dim, so users learn what's possible.
     match state.current_tab {
         ViewId::Overview => {}
         ViewId::Bulletins => {
@@ -518,19 +511,24 @@ pub fn collect_hints(state: &AppState) -> Vec<crate::widget::hint_bar::HintSpan>
         }
     }
 
-    // Cross-tab Go targets
+    // Cross-tab jumps — filtered to destinations that are actionable
+    // for the current selection, so the bar doesn't advertise dead
+    // combos. When nothing's selected the whole group disappears.
     for &g in GoTarget::all() {
-        push_verb(&mut out, g, &ctx);
+        if g.enabled(&ctx) {
+            push_verb(&mut out, g, &ctx);
+        }
     }
 
-    // App actions (help, context switcher, etc.)
-    for &a in AppAction::all() {
-        // Skip Quit — it's universal and too noisy for the hint bar.
-        if matches!(a, AppAction::Quit) {
-            continue;
-        }
-        push_verb(&mut out, a, &ctx);
-    }
+    // Trailing `?` pointer so users always know where to find the
+    // full reference. Everything else (navigation, history, tab
+    // cycling, quit, fuzzy find, context switcher) lives in the help
+    // modal.
+    out.push(HintSpan {
+        key: "?",
+        action: "help",
+        enabled: true,
+    });
 
     out
 }
