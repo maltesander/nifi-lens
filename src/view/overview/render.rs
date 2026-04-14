@@ -72,10 +72,19 @@ pub fn render(frame: &mut Frame, area: Rect, state: &OverviewState) {
     render_bulletins_and_noisy(frame, bn_chunks[0], bn_chunks[1], state);
 
     // Unhealthy queues panel
-    let queues_block = Panel::new(" Unhealthy queues ").into_block();
+    let queues_focused = state.focus == OverviewFocus::Queues;
+    let queues_block = Panel::new(" Unhealthy queues ")
+        .focused(queues_focused)
+        .into_block();
     let queues_inner = queues_block.inner(zones[3]);
     frame.render_widget(queues_block, zones[3]);
-    render_unhealthy_queues(frame, queues_inner, &state.unhealthy);
+    render_unhealthy_queues(
+        frame,
+        queues_inner,
+        &state.unhealthy,
+        queues_focused,
+        state.queues_selected,
+    );
 }
 
 /// Compute how many rows the nodes panel needs. One row per visible node +
@@ -289,10 +298,19 @@ fn render_bulletins_and_noisy(
     frame.render_widget(bulletins_block, bulletins_area);
     render_bulletin_sparkline(frame, bulletins_inner, &state.sparkline);
 
-    let noisy_block = Panel::new(" Noisy components ").into_block();
+    let noisy_focused = state.focus == OverviewFocus::Noisy;
+    let noisy_block = Panel::new(" Noisy components ")
+        .focused(noisy_focused)
+        .into_block();
     let noisy_inner = noisy_block.inner(noisy_area);
     frame.render_widget(noisy_block, noisy_area);
-    render_noisy_components(frame, noisy_inner, &state.noisy);
+    render_noisy_components(
+        frame,
+        noisy_inner,
+        &state.noisy,
+        noisy_focused,
+        state.noisy_selected,
+    );
 }
 
 fn render_bulletin_sparkline(frame: &mut Frame, area: Rect, buckets: &[BulletinBucket]) {
@@ -315,7 +333,13 @@ fn render_bulletin_sparkline(frame: &mut Frame, area: Rect, buckets: &[BulletinB
     frame.render_widget(spark, inner_chunks[1]);
 }
 
-fn render_noisy_components(frame: &mut Frame, area: Rect, noisy: &[NoisyComponent]) {
+fn render_noisy_components(
+    frame: &mut Frame,
+    area: Rect,
+    noisy: &[NoisyComponent],
+    focused: bool,
+    selected: usize,
+) {
     let rows: Vec<Row> = if noisy.is_empty() {
         vec![Row::new(vec![
             Cell::from(""),
@@ -325,13 +349,20 @@ fn render_noisy_components(frame: &mut Frame, area: Rect, noisy: &[NoisyComponen
     } else {
         noisy
             .iter()
-            .map(|n| {
+            .enumerate()
+            .map(|(idx, n)| {
                 let sev_style = severity_style(n.max_severity);
+                let row_style = if focused && idx == selected {
+                    theme::cursor_row()
+                } else {
+                    Style::default()
+                };
                 Row::new(vec![
                     Cell::from(format!("{:>3}", n.count)).style(theme::bold()),
                     Cell::from(n.source_name.clone()),
                     Cell::from(format!("{:?}", n.max_severity)).style(sev_style),
                 ])
+                .style(row_style)
             })
             .collect()
     };
@@ -347,7 +378,13 @@ fn render_noisy_components(frame: &mut Frame, area: Rect, noisy: &[NoisyComponen
     frame.render_widget(table, area);
 }
 
-fn render_unhealthy_queues(frame: &mut Frame, area: Rect, queues: &[UnhealthyQueue]) {
+fn render_unhealthy_queues(
+    frame: &mut Frame,
+    area: Rect,
+    queues: &[UnhealthyQueue],
+    focused: bool,
+    selected: usize,
+) {
     let rows: Vec<Row> = if queues.is_empty() {
         vec![Row::new(vec![
             Cell::from(""),
@@ -358,14 +395,21 @@ fn render_unhealthy_queues(frame: &mut Frame, area: Rect, queues: &[UnhealthyQue
     } else {
         queues
             .iter()
-            .map(|q| {
+            .enumerate()
+            .map(|(idx, q)| {
                 let style = fill_style(q.fill_percent);
+                let row_style = if focused && idx == selected {
+                    theme::cursor_row()
+                } else {
+                    Style::default()
+                };
                 Row::new(vec![
                     Cell::from(format!("{:>3}%", q.fill_percent)).style(style),
                     Cell::from(q.name.clone()),
                     Cell::from(format!("{} → {}", q.source_name, q.destination_name)),
                     Cell::from(q.flow_files_queued.to_string()),
                 ])
+                .style(row_style)
             })
             .collect()
     };
