@@ -441,6 +441,46 @@ impl ViewKeyHandler for BrowserHandler {
                             action: "trace",
                         },
                     ],
+                    Some(DetailSection::ControllerServices) => vec![
+                        HintSpan {
+                            key: "↑/↓",
+                            action: "row",
+                        },
+                        HintSpan {
+                            key: "l",
+                            action: "next",
+                        },
+                        HintSpan {
+                            key: "h",
+                            action: "back",
+                        },
+                        HintSpan {
+                            key: "c",
+                            action: "copy id",
+                        },
+                    ],
+                    Some(DetailSection::ChildGroups) => vec![
+                        HintSpan {
+                            key: "↑/↓",
+                            action: "row",
+                        },
+                        HintSpan {
+                            key: "l",
+                            action: "next",
+                        },
+                        HintSpan {
+                            key: "h",
+                            action: "back",
+                        },
+                        HintSpan {
+                            key: "c",
+                            action: "copy id",
+                        },
+                        HintSpan {
+                            key: "Enter",
+                            action: "drill",
+                        },
+                    ],
                     _ => vec![HintSpan {
                         key: "h",
                         action: "back",
@@ -1083,7 +1123,7 @@ mod tests {
     }
 
     #[test]
-    fn l_on_pg_emits_no_focusable_sections_banner() {
+    fn l_on_pg_enters_section_focus_at_idx_0() {
         let (mut s, c) = seeded_browser_state();
         // Confirm we're on a PG (root, selected=0).
         let idx = s.browser.visible[s.browser.selected];
@@ -1092,17 +1132,12 @@ mod tests {
             crate::client::NodeKind::ProcessGroup
         ));
         update(&mut s, key(KeyCode::Char('l'), KeyModifiers::NONE), &c);
-        assert_eq!(
+        // PG has 3 focusable sections (ControllerServices, ChildGroups,
+        // RecentBulletins), so `l` enters Section focus at idx 0.
+        assert!(matches!(
             s.browser.detail_focus,
-            crate::view::browser::state::DetailFocus::Tree
-        );
-        assert!(
-            s.status
-                .banner
-                .as_ref()
-                .map(|b| b.message.contains("no focusable"))
-                .unwrap_or(false)
-        );
+            crate::view::browser::state::DetailFocus::Section { idx: 0, .. }
+        ));
     }
 
     // -----------------------------------------------------------------------
