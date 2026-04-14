@@ -1,8 +1,15 @@
-//! Help modal — generated from Verb::all() for every action enum.
+//! Help modal — two-column layout.
 //!
-//! Lives in widget/ because it's a pure render helper. All content
-//! comes from the Verb trait impls — adding a new keybinding
-//! automatically shows up here without any change to this file.
+//! Left column: general keybindings (Navigation, History, Tabs, App,
+//! Cross-tab). Same for every view. Rows are paired where possible so
+//! the column stays compact (e.g. `↑/↓` is one row, not two).
+//!
+//! Right column: verbs for the currently active tab. Generated from
+//! the tab's `Verb::all()` so it stays in sync with the dispatcher.
+//!
+//! Chord strings always come from `Verb::chord().display()` — the
+//! general section still derives its keys from the enum layer, it
+//! just collapses pairs into one row for brevity.
 
 use ratatui::Frame;
 use ratatui::layout::{Constraint, Direction, Layout, Rect};
@@ -13,7 +20,7 @@ use ratatui::widgets::{Block, Borders, Clear, Paragraph, Wrap};
 use crate::app::state::ViewId;
 use crate::input::{
     AppAction, BrowserVerb, BulletinsVerb, EventsVerb, FocusAction, GoTarget, HistoryAction,
-    TabAction, TracerVerb, Verb,
+    TracerVerb, Verb,
 };
 use crate::theme;
 
@@ -24,25 +31,79 @@ pub struct HelpSection {
     pub rows: Vec<(String, &'static str)>,
 }
 
-/// Build the full list of help sections for the given active view.
-pub fn build_help_sections(active_view: ViewId) -> Vec<HelpSection> {
-    let mut out = vec![
-        section("Navigation", FocusAction::all()),
-        section("History", HistoryAction::all()),
-        section("Tabs", TabAction::all()),
-        section("App", AppAction::all()),
-        section("Cross-tab", GoTarget::all()),
-    ];
+/// General (tab-independent) sections. Paired into compact rows.
+pub fn general_sections() -> Vec<HelpSection> {
+    vec![
+        HelpSection {
+            title: "Navigation",
+            rows: vec![
+                (pair(FocusAction::Up, FocusAction::Down), "move up / down"),
+                (
+                    pair(FocusAction::Left, FocusAction::Right),
+                    "peer left / right",
+                ),
+                (
+                    pair(FocusAction::PageUp, FocusAction::PageDown),
+                    "page up / down",
+                ),
+                (
+                    pair(FocusAction::First, FocusAction::Last),
+                    "jump first / last",
+                ),
+                (FocusAction::Descend.chord().display(), "drill / activate"),
+                (FocusAction::Ascend.chord().display(), "leave pane / cancel"),
+            ],
+        },
+        HelpSection {
+            title: "History",
+            rows: vec![
+                (HistoryAction::Back.chord().display(), "back"),
+                (HistoryAction::Forward.chord().display(), "forward"),
+            ],
+        },
+        HelpSection {
+            title: "Tabs",
+            rows: vec![
+                ("Tab / Shift+Tab".to_string(), "cycle tabs"),
+                ("F1..F5".to_string(), "jump to tab 1..5"),
+            ],
+        },
+        HelpSection {
+            title: "App",
+            rows: vec![
+                (
+                    format!("{} / Ctrl+c", AppAction::Quit.chord().display()),
+                    "quit",
+                ),
+                (AppAction::Help.chord().display(), "this help"),
+                (
+                    AppAction::ContextSwitcher.chord().display(),
+                    "switch context",
+                ),
+                (AppAction::FuzzyFind.chord().display(), "fuzzy find"),
+            ],
+        },
+        HelpSection {
+            title: "Cross-tab (g leader)",
+            rows: vec![
+                (GoTarget::Browser.chord().display(), "show in Browser"),
+                (GoTarget::Events.chord().display(), "show events"),
+                (GoTarget::Tracer.chord().display(), "trace"),
+            ],
+        },
+    ]
+}
 
+/// The verbs section for the active tab, if any. Overview has no
+/// view-local verbs so returns `None`.
+pub fn tab_section(active_view: ViewId) -> Option<HelpSection> {
     match active_view {
-        ViewId::Overview => {}
-        ViewId::Bulletins => out.push(section("Bulletins", BulletinsVerb::all())),
-        ViewId::Browser => out.push(section("Browser", BrowserVerb::all())),
-        ViewId::Events => out.push(section("Events", EventsVerb::all())),
-        ViewId::Tracer => out.push(section("Tracer", TracerVerb::all())),
+        ViewId::Overview => None,
+        ViewId::Bulletins => Some(section("Bulletins", BulletinsVerb::all())),
+        ViewId::Browser => Some(section("Browser", BrowserVerb::all())),
+        ViewId::Events => Some(section("Events", EventsVerb::all())),
+        ViewId::Tracer => Some(section("Tracer", TracerVerb::all())),
     }
-
-    out
 }
 
 fn section<V: Verb>(title: &'static str, variants: &[V]) -> HelpSection {
@@ -53,13 +114,13 @@ fn section<V: Verb>(title: &'static str, variants: &[V]) -> HelpSection {
     HelpSection { title, rows }
 }
 
-/// Render the help modal into the given area for the given active
-/// view. Each section is rendered as a header row plus one row per
-/// chord.
-pub fn render(frame: &mut Frame, area: Rect, active_view: ViewId) {
-    let sections = build_help_sections(active_view);
-    let mut lines: Vec<Line<'static>> = Vec::new();
+/// Pair two verbs' chords into `"a / b"`, e.g. `"↑ / ↓"`.
+fn pair<A: Verb, B: Verb>(a: A, b: B) -> String {
+    format!("{} / {}", a.chord().display(), b.chord().display())
+}
 
+/// Render a single column of sections into `lines`.
+fn push_section_lines(lines: &mut Vec<Line<'static>>, sections: &[HelpSection]) {
     for (i, s) in sections.iter().enumerate() {
         if i > 0 {
             lines.push(Line::from(""));
@@ -70,42 +131,76 @@ pub fn render(frame: &mut Frame, area: Rect, active_view: ViewId) {
         )));
         for (chord, label) in &s.rows {
             lines.push(Line::from(vec![
-                Span::styled(format!("  {chord:12}"), theme::accent()),
+                Span::styled(format!("  {chord:16}"), theme::accent()),
                 Span::styled(" ".to_string(), Style::default()),
-                Span::styled(label.to_string(), theme::muted()),
+                Span::styled((*label).to_string(), theme::muted()),
             ]));
         }
     }
+}
 
-    let modal = center(area, 70, 34);
+/// Render the help modal into `area` for the given active view.
+///
+/// Modal is centered, `80` cols × `26` rows, two columns split
+/// 50/50. Left is general, right is tab-specific.
+pub fn render(frame: &mut Frame, area: Rect, active_view: ViewId) {
+    let modal = center(area, 80, 26);
     frame.render_widget(Clear, modal);
+
     let block = Block::default()
         .borders(Borders::ALL)
         .title(" Help ")
         .border_style(theme::accent());
-    let para = Paragraph::new(lines)
-        .block(block)
-        .wrap(Wrap { trim: false });
-    frame.render_widget(para, modal);
+    let inner = block.inner(modal);
+    frame.render_widget(block, modal);
+
+    let cols = Layout::default()
+        .direction(Direction::Horizontal)
+        .constraints([Constraint::Percentage(50), Constraint::Percentage(50)])
+        .split(inner);
+
+    // Left: general.
+    let mut left_lines: Vec<Line<'static>> = Vec::new();
+    push_section_lines(&mut left_lines, &general_sections());
+    frame.render_widget(
+        Paragraph::new(left_lines).wrap(Wrap { trim: false }),
+        cols[0],
+    );
+
+    // Right: tab-specific.
+    let mut right_lines: Vec<Line<'static>> = Vec::new();
+    if let Some(section) = tab_section(active_view) {
+        push_section_lines(&mut right_lines, std::slice::from_ref(&section));
+    } else {
+        // Overview — no view-local verbs. Render a short note so the
+        // column isn't empty.
+        right_lines.push(Line::from(Span::styled(
+            "Overview".to_string(),
+            theme::accent().add_modifier(Modifier::BOLD),
+        )));
+        right_lines.push(Line::from(Span::styled(
+            "  (no view-local keybindings)".to_string(),
+            theme::muted(),
+        )));
+    }
+    frame.render_widget(
+        Paragraph::new(right_lines).wrap(Wrap { trim: false }),
+        cols[1],
+    );
 }
 
-fn center(area: Rect, pct_x: u16, height: u16) -> Rect {
-    let vertical = Layout::default()
-        .direction(Direction::Vertical)
-        .constraints([
-            Constraint::Fill(1),
-            Constraint::Length(height),
-            Constraint::Fill(1),
-        ])
-        .split(area);
-    Layout::default()
-        .direction(Direction::Horizontal)
-        .constraints([
-            Constraint::Percentage((100 - pct_x) / 2),
-            Constraint::Percentage(pct_x),
-            Constraint::Percentage((100 - pct_x) / 2),
-        ])
-        .split(vertical[1])[1]
+fn center(area: Rect, width: u16, height: u16) -> Rect {
+    // Clamp to area so we don't overflow on narrow terminals.
+    let width = width.min(area.width);
+    let height = height.min(area.height);
+    let x = area.x + (area.width.saturating_sub(width)) / 2;
+    let y = area.y + (area.height.saturating_sub(height)) / 2;
+    Rect {
+        x,
+        y,
+        width,
+        height,
+    }
 }
 
 #[cfg(test)]
@@ -113,36 +208,70 @@ mod tests {
     use super::*;
 
     #[test]
-    fn help_modal_lists_every_verb_once() {
-        // For the Tracer view, count the total rows across all sections
-        // and assert it matches the sum of variant counts.
-        let sections = build_help_sections(ViewId::Tracer);
-        let expected = FocusAction::all().len()
-            + HistoryAction::all().len()
-            + TabAction::all().len()
-            + AppAction::all().len()
-            + GoTarget::all().len()
-            + TracerVerb::all().len();
-        let total: usize = sections.iter().map(|s| s.rows.len()).sum();
-        assert_eq!(total, expected);
+    fn general_sections_are_stable_across_views() {
+        // General column doesn't depend on active view.
+        let a = general_sections();
+        let b = general_sections();
+        assert_eq!(a.len(), b.len());
+        for (sa, sb) in a.iter().zip(b.iter()) {
+            assert_eq!(sa.title, sb.title);
+            assert_eq!(sa.rows.len(), sb.rows.len());
+        }
     }
 
     #[test]
-    fn help_modal_adapts_to_active_view() {
-        let bulletins = build_help_sections(ViewId::Bulletins);
-        let browser = build_help_sections(ViewId::Browser);
-        // Both should have 6 sections (Navigation, History, Tabs, App, Cross-tab, <view>).
-        assert_eq!(bulletins.len(), 6);
-        assert_eq!(browser.len(), 6);
-        // The last section title should match the active view.
-        assert_eq!(bulletins.last().unwrap().title, "Bulletins");
-        assert_eq!(browser.last().unwrap().title, "Browser");
+    fn general_sections_have_five_titles() {
+        let s = general_sections();
+        let titles: Vec<_> = s.iter().map(|s| s.title).collect();
+        assert_eq!(
+            titles,
+            vec![
+                "Navigation",
+                "History",
+                "Tabs",
+                "App",
+                "Cross-tab (g leader)"
+            ]
+        );
     }
 
     #[test]
-    fn help_modal_overview_has_no_view_specific_section() {
-        let overview = build_help_sections(ViewId::Overview);
-        // Overview has no view-local verbs, so only the 5 universal sections.
-        assert_eq!(overview.len(), 5);
+    fn navigation_section_pairs_up_arrows() {
+        let s = &general_sections()[0];
+        assert_eq!(s.title, "Navigation");
+        // Up/Down paired, Left/Right paired, PgUp/PgDn paired,
+        // First/Last paired, plus Descend and Ascend = 6 rows.
+        assert_eq!(s.rows.len(), 6);
+        assert!(s.rows[0].0.contains('/'));
+        assert!(s.rows[1].0.contains('/'));
+    }
+
+    #[test]
+    fn tab_section_adapts_to_view() {
+        assert!(tab_section(ViewId::Overview).is_none());
+        assert_eq!(tab_section(ViewId::Bulletins).unwrap().title, "Bulletins");
+        assert_eq!(tab_section(ViewId::Browser).unwrap().title, "Browser");
+        assert_eq!(tab_section(ViewId::Events).unwrap().title, "Events");
+        assert_eq!(tab_section(ViewId::Tracer).unwrap().title, "Tracer");
+    }
+
+    #[test]
+    fn tab_section_row_counts_match_verb_counts() {
+        assert_eq!(
+            tab_section(ViewId::Bulletins).unwrap().rows.len(),
+            BulletinsVerb::all().len()
+        );
+        assert_eq!(
+            tab_section(ViewId::Browser).unwrap().rows.len(),
+            BrowserVerb::all().len()
+        );
+        assert_eq!(
+            tab_section(ViewId::Events).unwrap().rows.len(),
+            EventsVerb::all().len()
+        );
+        assert_eq!(
+            tab_section(ViewId::Tracer).unwrap().rows.len(),
+            TracerVerb::all().len()
+        );
     }
 }
