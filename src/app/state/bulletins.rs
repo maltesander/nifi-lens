@@ -2,7 +2,7 @@
 
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 
-use super::{AppState, UpdateResult, ViewKeyHandler};
+use super::{AppState, Banner, BannerSeverity, UpdateResult, ViewKeyHandler};
 use crate::input::{BulletinsVerb, FocusAction, GoTarget, Severity, ViewVerb};
 
 /// Zero-sized dispatch struct for the Bulletins tab.
@@ -22,6 +22,32 @@ impl ViewKeyHandler for BulletinsHandler {
             BulletinsVerb::CycleGroupBy => state.bulletins.cycle_group_mode(),
             BulletinsVerb::TogglePause => state.bulletins.toggle_pause(),
             BulletinsVerb::MuteSource => state.bulletins.mute_selected_source(),
+            BulletinsVerb::CopyMessage => {
+                let raw = state
+                    .bulletins
+                    .group_details()
+                    .map(|d| d.raw_message.clone());
+                let Some(msg) = raw else {
+                    return Some(UpdateResult::default());
+                };
+                let preview: String = msg.chars().take(40).collect();
+                match state.copy_to_clipboard(msg) {
+                    Ok(()) => {
+                        state.status.banner = Some(Banner {
+                            severity: BannerSeverity::Info,
+                            message: format!("copied: {preview}"),
+                            detail: None,
+                        });
+                    }
+                    Err(err) => {
+                        state.status.banner = Some(Banner {
+                            severity: BannerSeverity::Warning,
+                            message: format!("clipboard: {err}"),
+                            detail: None,
+                        });
+                    }
+                }
+            }
             BulletinsVerb::ClearFilters => state.bulletins.clear_filters(),
             BulletinsVerb::OpenSearch => state.bulletins.enter_text_input_mode(),
             // Bulletins auto-refreshes; verb kept for parity but no state mutation.

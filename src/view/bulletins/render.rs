@@ -384,7 +384,7 @@ fn render_detail(
 
     // Row N+1: action hints.
     lines.push(Line::from(Span::styled(
-        "Enter jump to Browser · ge events · m mute source · c clear filters".to_string(),
+        "Enter jump to Browser · ge events · m mute · c copy message · C clear filters".to_string(),
         theme::muted(),
     )));
 

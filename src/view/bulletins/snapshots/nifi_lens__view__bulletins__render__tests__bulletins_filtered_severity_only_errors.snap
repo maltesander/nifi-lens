@@ -28,7 +28,7 @@ expression: render_to_string(&state)
 "│ERROR   error two                                                                                                     │"
 "│                                                                                                                      │"
 "│id  src-4   pg  root                                                                                                  │"
-"│Enter jump to Browser · ge events · m mute source · c clear filters                                                   │"
+"│Enter jump to Browser · ge events · m mute · c copy message · C clear filters                                         │"
 "│                                                                                                                      │"
 "│                                                                                                                      │"
 "└──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┘"
