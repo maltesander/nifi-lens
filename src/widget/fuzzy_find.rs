@@ -212,14 +212,15 @@ pub fn render(
         Constraint::Length(6),
         Constraint::Percentage(45),
         Constraint::Percentage(45),
-        Constraint::Length(8),
+        Constraint::Length(10),
     ];
+    let row_count = rows.len();
     let table = Table::new(rows, widths)
         .header(header)
         .row_highlight_style(theme::cursor_row());
 
     let mut ts = TableState::default();
-    ts.select(Some(fuzz.selected));
+    ts.select(Some(fuzz.selected.min(row_count.saturating_sub(1))));
     frame.render_stateful_widget(table, chunks[2], &mut ts);
 }
 
@@ -243,7 +244,7 @@ fn state_cell<'a>(
         StateBadge::Processor { glyph, style } => {
             Cell::from(Span::styled(glyph.to_string(), *style))
         }
-        StateBadge::Cs { label, style } => Cell::from(Span::styled(label.clone(), *style)),
+        StateBadge::Cs { label, style } => Cell::from(Span::styled(label.as_str(), *style)),
         StateBadge::Pg { invalid } => {
             if *invalid > 0 {
                 Cell::from(Span::styled(format!("\u{26A0}{invalid}"), theme::warning()))
@@ -402,5 +403,43 @@ mod tests {
         s.rebuild_matches(&index);
         let first = s.selected_entry(&index).unwrap();
         assert_eq!(first.id, "p1", "processor should tie-break above PG");
+    }
+
+    #[test]
+    fn fuzzy_table_renders_no_index_message_when_flow_index_is_none() {
+        use ratatui::Terminal;
+        use ratatui::backend::TestBackend;
+
+        let fuzz = FuzzyFindState::new();
+        let backend = TestBackend::new(100, 20);
+        let mut term = Terminal::new(backend).unwrap();
+        term.draw(|f| render(f, f.area(), &fuzz, &None)).unwrap();
+        let out = format!("{}", term.backend());
+        assert!(
+            out.contains("no index"),
+            "expected 'no index' placeholder in:\n{out}"
+        );
+    }
+
+    #[test]
+    fn fuzzy_table_renders_no_matches_when_query_excludes_everything() {
+        use ratatui::Terminal;
+        use ratatui::backend::TestBackend;
+
+        let idx = sample_index();
+        let mut fuzz = FuzzyFindState::new();
+        fuzz.query = "zzzzzzzz_no_such".into();
+        fuzz.rebuild_matches(&idx);
+        assert!(fuzz.matches.is_empty(), "precondition: query excludes all");
+
+        let backend = TestBackend::new(100, 20);
+        let mut term = Terminal::new(backend).unwrap();
+        term.draw(|f| render(f, f.area(), &fuzz, &Some(idx)))
+            .unwrap();
+        let out = format!("{}", term.backend());
+        assert!(
+            out.contains("no matches"),
+            "expected 'no matches' placeholder in:\n{out}"
+        );
     }
 }
