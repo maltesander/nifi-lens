@@ -44,6 +44,7 @@ nifi-lens/
     ├── error.rs              # NifiLensError (snafu, full variant set)
     ├── logging.rs            # tracing-subscriber + rotating file + StderrToggle
     ├── theme.rs              # color / style constants
+    ├── timestamp.rs          # TimestampFormat / TimestampTz parsing and formatting
     ├── event.rs              # AppEvent, IntentOutcome, ViewPayload
     ├── test_support.rs       # fresh_state / tiny_config helpers for widget tests
     ├── config/               # schema, loader, init

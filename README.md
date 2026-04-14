@@ -310,6 +310,7 @@ name = "dev"
 url = "https://nifi-dev.internal:8443"
 version_strategy = "closest"   # strict | closest | latest
 insecure_tls = false
+# ca_cert_path = "/etc/nifi-lens/certs/dev-ca.crt"   # optional extra CA cert (PEM)
 
 [contexts.auth]
 type = "password"              # password | token | mtls

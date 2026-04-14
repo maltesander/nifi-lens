@@ -10,6 +10,24 @@ use std::{env, fs, path::PathBuf};
 
 fn main() {
     let manifest_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+
+    // Emit the nifi-rust-client version from Cargo.lock so src/lib.rs can
+    // print it in the version command without a hardcoded string.
+    let cargo_lock = manifest_dir.join("Cargo.lock");
+    println!("cargo:rerun-if-changed={}", cargo_lock.display());
+    let lock_str = fs::read_to_string(&cargo_lock)
+        .unwrap_or_else(|e| panic!("failed to read Cargo.lock: {e}"));
+    let lock: toml::Value =
+        toml::from_str(&lock_str).unwrap_or_else(|e| panic!("failed to parse Cargo.lock: {e}"));
+    let nifi_version = lock["package"]
+        .as_array()
+        .expect("Cargo.lock must have [[package]] entries")
+        .iter()
+        .find(|pkg| pkg["name"].as_str() == Some("nifi-rust-client"))
+        .and_then(|pkg| pkg["version"].as_str())
+        .expect("nifi-rust-client not found in Cargo.lock");
+    println!("cargo:rustc-env=NIFI_RUST_CLIENT_VERSION={nifi_version}");
+
     let versions_toml = manifest_dir.join("integration-tests").join("versions.toml");
     println!("cargo:rerun-if-changed={}", versions_toml.display());
 

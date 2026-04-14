@@ -56,7 +56,7 @@ fn run_inner(args: cli::Args) -> Result<ExitCode, NifiLensError> {
     match args.command {
         Some(cli::Command::Version) => {
             println!("nifilens {}", env!("CARGO_PKG_VERSION"));
-            println!("nifi-rust-client 0.5.0");
+            println!("nifi-rust-client {}", env!("NIFI_RUST_CLIENT_VERSION"));
             Ok(ExitCode::SUCCESS)
         }
         Some(cli::Command::Config { ref action }) => match action {
