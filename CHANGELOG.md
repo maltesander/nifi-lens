@@ -9,6 +9,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- Browser detail panes for Connection and Process Group now use the same
+  nested sub-panel + `Table` visual language as Processor and Controller
+  Service. Process Group sub-panels (Controller services, Child groups,
+  Recent bulletins) are focusable via `l`, with per-row `c` (copy id),
+  `t` (Events cross-link on Recent bulletins), and `Enter` (drill into
+  child group).
 - Fuzzy find (`f`) now renders as a table with `Kind · Name · Path · State`
   columns; matched characters in the Name column are highlighted bold +
   accent. Equal-score matches tie-break by kind (processors first).
