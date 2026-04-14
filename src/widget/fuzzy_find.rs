@@ -7,6 +7,11 @@
 //! time and writes results into its own `matches` field.
 
 use nucleo::{Config, Matcher, Utf32Str};
+use ratatui::Frame;
+use ratatui::layout::Rect;
+use ratatui::style::Style;
+use ratatui::text::{Line, Span};
+use ratatui::widgets::{Block, Borders, Clear, Paragraph};
 
 use crate::client::NodeKind;
 use crate::view::browser::state::{FlowIndex, FlowIndexEntry};
@@ -113,6 +118,64 @@ impl FuzzyFindState {
             .get(self.selected)
             .and_then(|m| index.entries.get(m.index_entry))
     }
+}
+
+/// Render the fuzzy-find overlay.
+///
+/// This is a transitional implementation — still a `Paragraph` of
+/// pre-formatted lines. Task 6 rewrites it to use `Table` with
+/// structured columns.
+pub fn render(
+    frame: &mut Frame,
+    area: Rect,
+    fuzz: &FuzzyFindState,
+    flow_index: &Option<FlowIndex>,
+) {
+    let w = area.width.min(80);
+    let h = area.height.min(16);
+    let x = area.x + (area.width - w) / 2;
+    let y = area.y + (area.height - h) / 2;
+    let rect = Rect {
+        x,
+        y,
+        width: w,
+        height: h,
+    };
+
+    let block = Block::default()
+        .borders(Borders::ALL)
+        .title(" Fuzzy Find — esc to close ");
+    let inner = block.inner(rect);
+    frame.render_widget(Clear, rect);
+    frame.render_widget(block, rect);
+
+    let mut lines: Vec<Line> = Vec::new();
+    lines.push(Line::from(format!("> {}_", fuzz.query)));
+    lines.push(Line::from(Span::styled(
+        "─".repeat(inner.width as usize),
+        crate::theme::muted(),
+    )));
+    if let Some(idx) = flow_index {
+        let max_rows = (inner.height as usize).saturating_sub(3);
+        for (i, m) in fuzz.matches.iter().enumerate().take(max_rows) {
+            let Some(entry) = idx.entries.get(m.index_entry) else {
+                continue;
+            };
+            let marker = if i == fuzz.selected { "▸ " } else { "  " };
+            let style = if i == fuzz.selected {
+                crate::theme::cursor_row()
+            } else {
+                Style::default()
+            };
+            lines.push(Line::from(vec![
+                Span::raw(marker),
+                Span::styled(format!("{}   {}", entry.name, entry.group_path), style),
+            ]));
+        }
+    } else {
+        lines.push(Line::from(Span::styled("no index", crate::theme::muted())));
+    }
+    frame.render_widget(Paragraph::new(lines), inner);
 }
 
 #[cfg(test)]
