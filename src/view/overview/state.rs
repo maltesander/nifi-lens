@@ -63,6 +63,20 @@ pub struct NoisyComponent {
     pub max_severity: Severity,
 }
 
+/// Which overview panel (if any) currently holds keyboard focus.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum OverviewFocus {
+    /// No panel focused — default.
+    #[default]
+    None,
+    /// The Nodes panel is focused; row cursor = `OverviewState.nodes.selected`.
+    Nodes,
+    /// The Noisy components panel is focused; row cursor = `OverviewState.noisy_selected`.
+    Noisy,
+    /// The Unhealthy queues panel is focused; row cursor = `OverviewState.queues_selected`.
+    Queues,
+}
+
 /// Snapshot of the Overview tab at one point in time. `None` until the
 /// first poll completes.
 #[derive(Debug, Clone, Default)]
@@ -94,6 +108,13 @@ pub struct OverviewState {
     /// `src/app/state/mod.rs`, not by `apply_payload`, because the
     /// warn-once banner write is an AppState-level side effect.
     pub sysdiag_mode: Option<SysdiagMode>,
+
+    /// Which panel holds focus. `None` by default.
+    pub focus: OverviewFocus,
+    /// Selected row index in the Noisy components panel.
+    pub noisy_selected: usize,
+    /// Selected row index in the Unhealthy queues panel.
+    pub queues_selected: usize,
 }
 
 /// Cluster-aggregate repository fill bars shown in the Overview "Nodes"
@@ -157,6 +178,11 @@ fn apply_pg_status(state: &mut OverviewState, payload: OverviewPgStatusPayload) 
         .cloned()
         .map(UnhealthyQueue::from)
         .collect();
+    if !state.unhealthy.is_empty() {
+        state.queues_selected = state.queues_selected.min(state.unhealthy.len() - 1);
+    } else {
+        state.queues_selected = 0;
+    }
 
     // Sparkline: assign each bulletin to a minute bucket relative to
     // fetched_at. sparkline[0] is the OLDEST minute (SPARKLINE_MINUTES-1
@@ -224,6 +250,11 @@ fn apply_pg_status(state: &mut OverviewState, payload: OverviewPgStatusPayload) 
     });
     noisy.truncate(TOP_NOISY);
     state.noisy = noisy;
+    if !state.noisy.is_empty() {
+        state.noisy_selected = state.noisy_selected.min(state.noisy.len() - 1);
+    } else {
+        state.noisy_selected = 0;
+    }
 
     // Advance the bulletin-id cursor (informational — Phase 2 will actually
     // use this for the Bulletins tab's `after-id` paging).
@@ -548,6 +579,51 @@ mod tests {
             ),
         );
         assert_eq!(state.last_bulletin_id, Some(9));
+    }
+
+    #[test]
+    fn noisy_cursor_clamped_when_data_shrinks() {
+        let mut state = OverviewState::new();
+        state.noisy_selected = 4;
+        // Payload with 2 noisy sources (ids "a" and "b").
+        let bulletins = vec![
+            bulletin(1, "INFO", "a", "2026-04-11T10:14:10Z"),
+            bulletin(2, "INFO", "b", "2026-04-11T10:14:10Z"),
+        ];
+        apply_payload(
+            &mut state,
+            payload(ControllerStatusSnapshot::default(), vec![], bulletins),
+        );
+        assert_eq!(state.noisy_selected, 1, "cursor clamped to len-1 = 1");
+    }
+
+    #[test]
+    fn noisy_cursor_reset_to_zero_when_noisy_empty() {
+        let mut state = OverviewState::new();
+        state.noisy_selected = 3;
+        apply_payload(
+            &mut state,
+            payload(ControllerStatusSnapshot::default(), vec![], vec![]),
+        );
+        assert_eq!(state.noisy_selected, 0);
+    }
+
+    #[test]
+    fn queues_cursor_clamped_when_data_shrinks() {
+        let mut state = OverviewState::new();
+        state.queues_selected = 9;
+        let queues = vec![q("c0", 90), q("c1", 80), q("c2", 70)];
+        apply_payload(
+            &mut state,
+            payload(ControllerStatusSnapshot::default(), queues, vec![]),
+        );
+        assert_eq!(state.queues_selected, 2, "cursor clamped to len-1 = 2");
+    }
+
+    #[test]
+    fn overview_focus_default_is_none() {
+        let state = OverviewState::new();
+        assert_eq!(state.focus, OverviewFocus::None);
     }
 
     #[test]
