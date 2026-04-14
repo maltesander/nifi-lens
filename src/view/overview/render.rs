@@ -148,17 +148,26 @@ fn render_nodes_zone(frame: &mut Frame, area: Rect, state: &OverviewState) {
         return;
     }
 
-    let max_visible: usize = 8;
     let selected = state.nodes.selected;
+    // Reserve 1 row at the bottom for the repositories aggregate.
+    let visible_node_rows = area.height.saturating_sub(1) as usize;
+    let scroll_offset = if visible_node_rows == 0 {
+        0
+    } else if selected >= visible_node_rows {
+        selected + 1 - visible_node_rows
+    } else {
+        0
+    };
 
     let mut rows: Vec<Row> = state
         .nodes
         .nodes
         .iter()
-        .take(max_visible)
+        .skip(scroll_offset)
+        .take(visible_node_rows)
         .enumerate()
         .map(|(idx, node)| {
-            let row_style = if focused && idx == selected {
+            let row_style = if focused && idx == selected.saturating_sub(scroll_offset) {
                 theme::cursor_row()
             } else {
                 Style::default()
@@ -166,18 +175,6 @@ fn render_nodes_zone(frame: &mut Frame, area: Rect, state: &OverviewState) {
             node_to_row(node).style(row_style)
         })
         .collect();
-
-    if total > max_visible {
-        rows.push(Row::new(vec![
-            Cell::from(Span::styled(
-                format!("  … +{} more", total - max_visible),
-                theme::muted(),
-            )),
-            Cell::from(""),
-            Cell::from(""),
-            Cell::from(""),
-        ]));
-    }
 
     // Cluster-aggregate repositories row (not selectable).
     let repos = &state.repositories_summary;
@@ -426,12 +423,23 @@ fn render_noisy_components(
             Cell::from(""),
         ])]
     } else {
+        let visible_rows = area.height.saturating_sub(1) as usize;
+        let scroll_offset = if visible_rows == 0 {
+            0
+        } else if selected >= visible_rows {
+            selected + 1 - visible_rows
+        } else {
+            0
+        };
+        let selected_in_window = selected.saturating_sub(scroll_offset);
         noisy
             .iter()
+            .skip(scroll_offset)
+            .take(visible_rows)
             .enumerate()
             .map(|(idx, n)| {
                 let sev_style = severity_style(n.max_severity);
-                let row_style = if focused && idx == selected {
+                let row_style = if focused && idx == selected_in_window {
                     theme::cursor_row()
                 } else {
                     Style::default()
@@ -472,12 +480,23 @@ fn render_unhealthy_queues(
             Cell::from(""),
         ])]
     } else {
+        let visible_rows = area.height.saturating_sub(1) as usize;
+        let scroll_offset = if visible_rows == 0 {
+            0
+        } else if selected >= visible_rows {
+            selected + 1 - visible_rows
+        } else {
+            0
+        };
+        let selected_in_window = selected.saturating_sub(scroll_offset);
         queues
             .iter()
+            .skip(scroll_offset)
+            .take(visible_rows)
             .enumerate()
             .map(|(idx, q)| {
                 let style = fill_style(q.fill_percent);
-                let row_style = if focused && idx == selected {
+                let row_style = if focused && idx == selected_in_window {
                     theme::cursor_row()
                 } else {
                     Style::default()
@@ -1012,5 +1031,266 @@ mod tests {
         term.draw(|f| super::render_node_detail_modal(f, f.area(), &row))
             .unwrap();
         insta::assert_snapshot!("node_detail_modal", format!("{}", term.backend()));
+    }
+
+    #[test]
+    fn nodes_panel_scrolls_to_selected() {
+        use crate::client::health::{
+            GcSnapshot, NodeDiagnostics, RepoUsage, SystemDiagAggregate, SystemDiagSnapshot,
+        };
+        use std::time::Instant;
+
+        let mut state = OverviewState::new();
+        state.focus = crate::view::overview::state::OverviewFocus::Nodes;
+
+        let node = |i: usize| NodeDiagnostics {
+            address: format!("node{}:8080", i),
+            heap_used_bytes: 256 * 1024 * 1024,
+            heap_max_bytes: 1024 * 1024 * 1024,
+            gc: vec![GcSnapshot {
+                name: "G1 Young".into(),
+                collection_count: 1,
+                collection_millis: 5,
+            }],
+            load_average: Some(0.5),
+            available_processors: Some(4),
+            total_threads: 20,
+            uptime: "1h".into(),
+            content_repos: vec![RepoUsage {
+                identifier: "c".into(),
+                used_bytes: 10,
+                total_bytes: 100,
+                free_bytes: 90,
+                utilization_percent: 10,
+            }],
+            flowfile_repo: Some(RepoUsage {
+                identifier: "f".into(),
+                used_bytes: 10,
+                total_bytes: 100,
+                free_bytes: 90,
+                utilization_percent: 10,
+            }),
+            provenance_repos: vec![RepoUsage {
+                identifier: "p".into(),
+                used_bytes: 10,
+                total_bytes: 100,
+                free_bytes: 90,
+                utilization_percent: 10,
+            }],
+        };
+
+        apply_payload(
+            &mut state,
+            OverviewPayload::SystemDiag(SystemDiagSnapshot {
+                aggregate: SystemDiagAggregate {
+                    content_repos: vec![RepoUsage {
+                        identifier: "c".into(),
+                        used_bytes: 10,
+                        total_bytes: 100,
+                        free_bytes: 90,
+                        utilization_percent: 10,
+                    }],
+                    flowfile_repo: Some(RepoUsage {
+                        identifier: "f".into(),
+                        used_bytes: 10,
+                        total_bytes: 100,
+                        free_bytes: 90,
+                        utilization_percent: 10,
+                    }),
+                    provenance_repos: vec![RepoUsage {
+                        identifier: "p".into(),
+                        used_bytes: 10,
+                        total_bytes: 100,
+                        free_bytes: 90,
+                        utilization_percent: 10,
+                    }],
+                },
+                nodes: (0..10).map(node).collect(),
+                fetched_at: Instant::now(),
+            }),
+        );
+        state.nodes.selected = 9;
+
+        let output = render_to_string(&state);
+
+        assert!(
+            output.contains("node9:8080"),
+            "selected row must be visible after scroll"
+        );
+        assert!(
+            !output.contains("node0:8080"),
+            "node0 must be scrolled out of view"
+        );
+        assert!(
+            !output.contains("node1:8080"),
+            "node1 must be scrolled out of view"
+        );
+        assert!(
+            !output.contains("more"),
+            "'... +N more' placeholder must not appear"
+        );
+    }
+
+    #[test]
+    fn noisy_panel_scrolls_to_selected() {
+        use crate::client::{
+            AboutSnapshot, BulletinBoardSnapshot, ControllerStatusSnapshot, RootPgStatusSnapshot,
+        };
+        use crate::event::{OverviewPayload, OverviewPgStatusPayload};
+        use crate::view::overview::state::{NoisyComponent, Severity as OvSev, apply_payload};
+        use std::time::{Duration, UNIX_EPOCH};
+
+        let mut state = OverviewState::new();
+        state.focus = crate::view::overview::state::OverviewFocus::Noisy;
+
+        // Populate with a PG-status payload so the layout renders properly.
+        apply_payload(
+            &mut state,
+            OverviewPayload::PgStatus(OverviewPgStatusPayload {
+                about: AboutSnapshot {
+                    version: "2.8.0".into(),
+                    title: "NiFi".into(),
+                },
+                controller: ControllerStatusSnapshot {
+                    running: 1,
+                    stopped: 0,
+                    invalid: 0,
+                    disabled: 0,
+                    active_threads: 0,
+                    flow_files_queued: 0,
+                    bytes_queued: 0,
+                },
+                root_pg: RootPgStatusSnapshot::default(),
+                bulletin_board: BulletinBoardSnapshot::default(),
+                fetched_at: UNIX_EPOCH + Duration::from_secs(T0),
+            }),
+        );
+
+        // Five noisy components with distinct names. zone[2] inner height=4,
+        // visible_rows=3, so selected=4 forces scroll_offset=2. "alfa" scrolls away; "echo" appears.
+        state.noisy = vec![
+            NoisyComponent {
+                source_id: "a".into(),
+                group_id: "g".into(),
+                source_name: "alfa".into(),
+                count: 1,
+                max_severity: OvSev::Info,
+            },
+            NoisyComponent {
+                source_id: "b".into(),
+                group_id: "g".into(),
+                source_name: "bravo".into(),
+                count: 1,
+                max_severity: OvSev::Info,
+            },
+            NoisyComponent {
+                source_id: "c".into(),
+                group_id: "g".into(),
+                source_name: "charlie".into(),
+                count: 1,
+                max_severity: OvSev::Info,
+            },
+            NoisyComponent {
+                source_id: "d".into(),
+                group_id: "g".into(),
+                source_name: "delta".into(),
+                count: 1,
+                max_severity: OvSev::Info,
+            },
+            NoisyComponent {
+                source_id: "e".into(),
+                group_id: "g".into(),
+                source_name: "echo".into(),
+                count: 1,
+                max_severity: OvSev::Info,
+            },
+        ];
+        state.noisy_selected = 4;
+
+        let output = render_to_string(&state);
+
+        assert!(
+            output.contains("echo"),
+            "selected row 'echo' must be visible after scroll"
+        );
+        assert!(
+            !output.contains("alfa"),
+            "'alfa' must be scrolled out of view"
+        );
+    }
+
+    #[test]
+    fn queues_panel_scrolls_to_selected() {
+        use crate::client::{
+            AboutSnapshot, BulletinBoardSnapshot, ControllerStatusSnapshot, QueueSnapshot,
+            RootPgStatusSnapshot,
+        };
+        use crate::event::{OverviewPayload, OverviewPgStatusPayload};
+        use crate::view::overview::state::apply_payload;
+        use std::time::{Duration, UNIX_EPOCH};
+
+        let mut state = OverviewState::new();
+        state.focus = crate::view::overview::state::OverviewFocus::Queues;
+
+        // Ten queues with distinct names. With 0 nodes the queues inner area
+        // is 10 rows tall, giving visible_rows=9 (one row is the header).
+        // selected=9 forces scroll_offset=1. "alfa" scrolls away; "juliet" appears.
+        let names = [
+            "alfa", "bravo", "charlie", "delta", "echo", "foxtrot", "golf", "hotel", "india",
+            "juliet",
+        ];
+        let connections: Vec<QueueSnapshot> = names
+            .iter()
+            .enumerate()
+            .map(|(i, &name)| QueueSnapshot {
+                id: format!("c{i}"),
+                group_id: "root".into(),
+                name: name.into(),
+                source_name: "Src".into(),
+                destination_name: "Dst".into(),
+                fill_percent: 99,
+                flow_files_queued: 100,
+                bytes_queued: 0,
+                queued_display: "100".into(),
+            })
+            .collect();
+
+        apply_payload(
+            &mut state,
+            OverviewPayload::PgStatus(OverviewPgStatusPayload {
+                about: AboutSnapshot {
+                    version: "2.8.0".into(),
+                    title: "NiFi".into(),
+                },
+                controller: ControllerStatusSnapshot {
+                    running: 1,
+                    stopped: 0,
+                    invalid: 0,
+                    disabled: 0,
+                    active_threads: 0,
+                    flow_files_queued: 0,
+                    bytes_queued: 0,
+                },
+                root_pg: RootPgStatusSnapshot {
+                    flow_files_queued: 0,
+                    bytes_queued: 0,
+                    connections,
+                },
+                bulletin_board: BulletinBoardSnapshot::default(),
+                fetched_at: UNIX_EPOCH + Duration::from_secs(T0),
+            }),
+        );
+        state.queues_selected = 9;
+
+        let output = render_to_string(&state);
+
+        assert!(
+            output.contains("juliet"),
+            "selected row 'juliet' must be visible after scroll"
+        );
+        assert!(
+            !output.contains("alfa"),
+            "'alfa' must be scrolled out of view"
+        );
     }
 }
