@@ -1462,8 +1462,10 @@ fn build_go_crosslink(state: &AppState, target: crate::input::GoTarget) -> Optio
                     .overview
                     .unhealthy
                     .get(state.overview.queues_selected)?;
+                // Connections are not nodes in the browser tree — navigate to
+                // the process group that owns the connection instead.
                 Some(CrossLink::OpenInBrowser {
-                    component_id: q.id.clone(),
+                    component_id: q.group_id.clone(),
                     group_id: q.group_id.clone(),
                 })
             }
@@ -2686,7 +2688,7 @@ mod tests {
         let link = build_go_crosslink(&s, crate::input::GoTarget::Browser);
         assert!(
             matches!(&link, Some(CrossLink::OpenInBrowser { component_id, group_id })
-                if component_id == "conn-1" && group_id == "grp-3"),
+                if component_id == "grp-3" && group_id == "grp-3"),
             "got {link:?}"
         );
     }
