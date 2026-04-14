@@ -3,8 +3,8 @@
 //! Per-kind detail renderers live in sibling files (`pg.rs`,
 //! `processor.rs`, `connection.rs`, `controller_service.rs`). This
 //! module owns the outer layout, the tree pane, the dispatch to the
-//! per-kind renderer, the loading / empty states, and the fuzzy-find /
-//! properties modal overlays.
+//! per-kind renderer, the loading / empty states, and the properties
+//! modal overlay.
 
 pub mod connection;
 pub mod controller_service;
@@ -120,7 +120,7 @@ fn render_tree(frame: &mut Frame, area: Rect, state: &BrowserState) {
         // can carry a per-status glyph char alongside a color style.
         let (glyph_owned, glyph_style): (String, Style) = match (&node.kind, &node.status_summary) {
             (NodeKind::Processor, NodeStatusSummary::Processor { run_status }) => {
-                let (c, s) = processor_run_icon(run_status);
+                let (c, s) = crate::widget::run_icon::processor_run_icon(run_status);
                 (c.to_string(), s)
             }
             _ => (kind_glyph(&node.kind).to_owned(), Style::default()),
@@ -174,23 +174,6 @@ fn kind_glyph(kind: &NodeKind) -> &'static str {
         NodeKind::InputPort => "⇥",
         NodeKind::OutputPort => "⇤",
         NodeKind::ControllerService => "⚙",
-    }
-}
-
-/// Maps NiFi's `run_status` string to a (glyph, style) pair for the
-/// Browser tree Processor row. Unknown values fall back to the
-/// default ● glyph unstyled.
-fn processor_run_icon(run_status: &str) -> (char, ratatui::style::Style) {
-    // NiFi's DTO emits uppercase enum values, but be tolerant of both
-    // cases in case a future schema change or a test fixture uses
-    // title-case.
-    match run_status.to_ascii_uppercase().as_str() {
-        "RUNNING" => ('\u{25CF}', crate::theme::success()),
-        "STOPPED" => ('\u{25CC}', crate::theme::warning()),
-        "INVALID" => ('\u{26A0}', crate::theme::error()),
-        "DISABLED" => ('\u{2300}', crate::theme::disabled()),
-        "VALIDATING" => ('\u{25D0}', crate::theme::info()),
-        _ => ('\u{25CF}', ratatui::style::Style::default()),
     }
 }
 
@@ -291,60 +274,6 @@ fn kind_label(kind: &NodeKind) -> &'static str {
     }
 }
 
-/// Render the fuzzy-find overlay if `Modal::FuzzyFind` is active.
-pub fn render_fuzzy_find_modal(
-    frame: &mut Frame,
-    area: Rect,
-    fuzz: &crate::widget::fuzzy_find::FuzzyFindState,
-    flow_index: &Option<FlowIndex>,
-) {
-    let w = area.width.min(80);
-    let h = area.height.min(16);
-    let x = area.x + (area.width - w) / 2;
-    let y = area.y + (area.height - h) / 2;
-    let rect = Rect {
-        x,
-        y,
-        width: w,
-        height: h,
-    };
-
-    let block = Block::default()
-        .borders(Borders::ALL)
-        .title(" Fuzzy Find — esc to close ");
-    let inner = block.inner(rect);
-    frame.render_widget(ratatui::widgets::Clear, rect);
-    frame.render_widget(block, rect);
-
-    let mut lines: Vec<Line> = Vec::new();
-    lines.push(Line::from(format!("> {}_", fuzz.query)));
-    lines.push(Line::from(Span::styled(
-        "─".repeat(inner.width as usize),
-        theme::muted(),
-    )));
-    if let Some(idx) = flow_index {
-        let max_rows = (inner.height as usize).saturating_sub(3);
-        for (i, m) in fuzz.matches.iter().enumerate().take(max_rows) {
-            let Some(entry) = idx.entries.get(m.index_entry) else {
-                continue;
-            };
-            let marker = if i == fuzz.selected { "▸ " } else { "  " };
-            let style = if i == fuzz.selected {
-                theme::cursor_row()
-            } else {
-                Style::default()
-            };
-            lines.push(Line::from(vec![
-                Span::raw(marker),
-                Span::styled(entry.display.clone(), style),
-            ]));
-        }
-    } else {
-        lines.push(Line::from(Span::styled("no index", theme::muted())));
-    }
-    frame.render_widget(Paragraph::new(lines), inner);
-}
-
 /// Render the processor/CS properties modal overlay.
 pub fn render_properties_modal(
     frame: &mut Frame,
@@ -438,52 +367,6 @@ mod tests {
         assert!(text.contains("Root"));
         assert!(text.contains("Generate"));
         assert!(text.contains(" > "));
-    }
-
-    #[test]
-    fn processor_icon_running_is_green_filled_circle() {
-        let (glyph, style) = processor_run_icon("RUNNING");
-        assert_eq!(glyph, '\u{25CF}'); // ●
-        assert_eq!(style, crate::theme::success());
-    }
-
-    #[test]
-    fn processor_icon_stopped_is_yellow_dotted_circle() {
-        let (glyph, style) = processor_run_icon("STOPPED");
-        assert_eq!(glyph, '\u{25CC}'); // ◌
-        assert_eq!(style, crate::theme::warning());
-    }
-
-    #[test]
-    fn processor_icon_invalid_is_red_warning() {
-        let (glyph, style) = processor_run_icon("INVALID");
-        assert_eq!(glyph, '\u{26A0}'); // ⚠
-        assert_eq!(style, crate::theme::error());
-    }
-
-    #[test]
-    fn processor_icon_disabled_is_gray_empty() {
-        let (glyph, style) = processor_run_icon("DISABLED");
-        assert_eq!(glyph, '\u{2300}'); // ⌀
-        assert_eq!(style, crate::theme::disabled());
-    }
-
-    #[test]
-    fn processor_icon_validating_is_blue_half() {
-        let (glyph, style) = processor_run_icon("VALIDATING");
-        assert_eq!(glyph, '\u{25D0}'); // ◐
-        assert_eq!(style, crate::theme::info());
-    }
-
-    #[test]
-    fn processor_icon_unknown_falls_back_to_default() {
-        let (glyph, style) = processor_run_icon("");
-        assert_eq!(glyph, '\u{25CF}'); // ●
-        assert_eq!(style, ratatui::style::Style::default());
-
-        let (glyph2, style2) = processor_run_icon("garbage");
-        assert_eq!(glyph2, '\u{25CF}');
-        assert_eq!(style2, ratatui::style::Style::default());
     }
 }
 

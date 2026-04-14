@@ -33,12 +33,7 @@ pub fn render(frame: &mut Frame, state: &AppState) {
             Modal::ContextSwitcher(cs) => context_switcher::render(frame, root, cs),
             Modal::ErrorDetail => render_error_detail(frame, root, state),
             Modal::FuzzyFind(fs) => {
-                crate::view::browser::render::render_fuzzy_find_modal(
-                    frame,
-                    frame.area(),
-                    fs,
-                    &state.flow_index,
-                );
+                crate::widget::fuzzy_find::render(frame, frame.area(), fs, &state.flow_index);
             }
             Modal::Properties(ps) => {
                 crate::view::browser::render::render_properties_modal(

@@ -9,6 +9,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- Fuzzy find (`f`) now renders as a table with `Kind · Name · Path · State`
+  columns; matched characters in the Name column are highlighted bold +
+  accent. Equal-score matches tie-break by kind (processors first).
+- Context switcher (`K`) now renders as a table with `Name · URL · Version
+  · Active` columns; the active context shows `(*)` in its own column and
+  the selected row is highlighted via row style instead of a leading
+  chevron.
 - Row navigation is now arrow-keys only. `j`/`k` aliases removed from
   every interactive list: Browser tree, Bulletins list, Events list, Tracer
   lineage + latest-events, fuzzy-find modal, context switcher, Browser
