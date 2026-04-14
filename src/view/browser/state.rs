@@ -483,7 +483,6 @@ impl BrowserState {
                 let source_id = &self.nodes[arena_idx].id;
                 bulletins
                     .iter()
-                    .rev()
                     .filter(|b| b.source_id == *source_id)
                     .nth(row)
                     .map(|b| b.source_id.clone())
