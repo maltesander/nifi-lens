@@ -4,7 +4,7 @@ use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 
 use super::{AppState, Banner, BannerSeverity, Modal, PendingIntent, UpdateResult, ViewKeyHandler};
 use crate::view::browser::state::{
-    DetailFocus, DetailSection, DetailSections, MAX_DETAIL_SECTIONS,
+    DetailFocus, DetailSection, DetailSections, MAX_DETAIL_SECTIONS, NodeDetail,
 };
 
 /// Zero-sized dispatch struct for the Browser tab.
@@ -128,6 +128,26 @@ impl ViewKeyHandler for BrowserHandler {
                     return Some(UpdateResult {
                         redraw: true,
                         intent: Some(PendingIntent::JumpTo(link)),
+                        tracer_followup: None,
+                    });
+                }
+                KeyCode::Enter if sections.0.get(idx) == Some(&DetailSection::ChildGroups) => {
+                    let pg_id = match state.browser.details.get(&arena_idx) {
+                        Some(NodeDetail::ProcessGroup(d)) => d.id.clone(),
+                        _ => return Some(UpdateResult::default()),
+                    };
+                    let kids = state.browser.child_process_groups(&pg_id);
+                    let row = rows[idx];
+                    let Some(target) = kids.get(row) else {
+                        return Some(UpdateResult::default());
+                    };
+                    let target_id = target.id.clone();
+                    if state.browser.drill_into_group(&target_id) {
+                        state.browser.emit_detail_request_for_current_selection();
+                    }
+                    return Some(UpdateResult {
+                        redraw: true,
+                        intent: None,
                         tracer_followup: None,
                     });
                 }
@@ -1482,5 +1502,49 @@ mod tests {
             s.browser.visible, after_drill,
             "Left should still drill out"
         );
+    }
+
+    #[test]
+    fn enter_on_focused_pg_child_groups_drills_in() {
+        use crate::client::ProcessGroupDetail;
+        use crate::view::browser::state::{DetailFocus, NodeDetail};
+
+        let (mut s, c) = seeded_browser_state();
+        // Put the tree cursor on `root` (arena idx 0).
+        s.browser.selected = s
+            .browser
+            .visible
+            .iter()
+            .position(|&i| i == 0)
+            .expect("root visible");
+        // Inject a PG detail for root so the handler can read `d.id`.
+        s.browser.details.insert(
+            0,
+            NodeDetail::ProcessGroup(ProcessGroupDetail {
+                id: "root".into(),
+                name: "root".into(),
+                parent_group_id: None,
+                running: 0,
+                stopped: 0,
+                invalid: 0,
+                disabled: 0,
+                active_threads: 0,
+                flow_files_queued: 0,
+                bytes_queued: 0,
+                queued_display: "".into(),
+                controller_services: vec![],
+            }),
+        );
+        // Focus PG's ChildGroups section, row 0 → `ingest`.
+        s.browser.detail_focus = DetailFocus::Section {
+            idx: 1,
+            rows: [0, 0, 0, 0],
+        };
+
+        let r = update(&mut s, key(KeyCode::Enter, KeyModifiers::NONE), &c);
+        assert!(r.redraw);
+        // Tree cursor now on ingest (arena idx 2), not gen (arena idx 1).
+        assert_eq!(s.browser.visible[s.browser.selected], 2);
+        assert_eq!(s.browser.detail_focus, DetailFocus::Tree);
     }
 }
