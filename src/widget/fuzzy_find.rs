@@ -201,7 +201,10 @@ pub fn render(
         .filter_map(|m| {
             let entry = idx.entries.get(m.index_entry)?;
             let kind_cell = Cell::from(Span::styled(kind_short_label(entry.kind), theme::muted()));
-            let name_cell = Cell::from(Line::from(Span::raw(entry.name.clone())));
+            let name_cell = Cell::from(Line::from(highlight_spans_for_name(
+                &entry.name,
+                &m.highlights,
+            )));
             let path_cell = Cell::from(Span::styled(entry.group_path.clone(), theme::muted()));
             let state_cell = state_cell(&entry.state);
             Some(Row::new(vec![kind_cell, name_cell, path_cell, state_cell]))
@@ -222,6 +225,68 @@ pub fn render(
     let mut ts = TableState::default();
     ts.select(Some(fuzz.selected.min(row_count.saturating_sub(1))));
     frame.render_stateful_widget(table, chunks[2], &mut ts);
+}
+
+/// Emit a name-column `Span` list with matched characters highlighted
+/// (bold + accent). `highlights` are character offsets into the
+/// haystack; only positions that fall inside `0..name.chars().count()`
+/// are rendered as highlighted.
+fn highlight_spans_for_name<'a>(name: &'a str, highlights: &[u32]) -> Vec<Span<'a>> {
+    use ratatui::style::Modifier;
+    let name_len = name.chars().count() as u32;
+    let mut positions: Vec<u32> = highlights
+        .iter()
+        .copied()
+        .filter(|p| *p < name_len)
+        .collect();
+    positions.sort_unstable();
+    positions.dedup();
+    if positions.is_empty() {
+        return vec![Span::raw(name)];
+    }
+
+    let highlight_style = theme::accent().add_modifier(Modifier::BOLD);
+    let mut spans: Vec<Span<'a>> = Vec::new();
+    let mut cursor: usize = 0;
+    let chars: Vec<(usize, char)> = name.char_indices().collect();
+    let mut p_iter = positions.into_iter().peekable();
+
+    while cursor < chars.len() {
+        if let Some(&next_p) = p_iter.peek()
+            && next_p as usize == cursor
+        {
+            // Consume the contiguous run of highlighted positions.
+            let start_byte = chars[cursor].0;
+            let mut end_char = cursor;
+            while let Some(&p) = p_iter.peek() {
+                if p as usize == end_char {
+                    end_char += 1;
+                    p_iter.next();
+                } else {
+                    break;
+                }
+            }
+            let end_byte = if end_char < chars.len() {
+                chars[end_char].0
+            } else {
+                name.len()
+            };
+            spans.push(Span::styled(&name[start_byte..end_byte], highlight_style));
+            cursor = end_char;
+        } else {
+            let start_byte = chars[cursor].0;
+            let next_highlight_char = p_iter.peek().map(|p| *p as usize).unwrap_or(chars.len());
+            let end_char = next_highlight_char.min(chars.len());
+            let end_byte = if end_char < chars.len() {
+                chars[end_char].0
+            } else {
+                name.len()
+            };
+            spans.push(Span::raw(&name[start_byte..end_byte]));
+            cursor = end_char;
+        }
+    }
+    spans
 }
 
 fn kind_short_label(kind: NodeKind) -> &'static str {
@@ -418,6 +483,63 @@ mod tests {
         assert!(
             out.contains("no index"),
             "expected 'no index' placeholder in:\n{out}"
+        );
+    }
+
+    #[test]
+    fn highlight_spans_for_name_only_uses_name_range_positions() {
+        // "PutKafka" has 8 chars; haystack starts with "putkafka".
+        // Query "pk" should match positions 0 (P) and 3 (K) inside the
+        // name. Positions outside 0..8 must be dropped.
+        let name = "PutKafka";
+        let highlights: Vec<u32> = vec![0, 3, 12]; // 12 is in "processor"
+        let spans = highlight_spans_for_name(name, &highlights);
+        // Flatten the rendered span strings back to a (string, bold?) pair.
+        let flattened: Vec<(String, bool)> = spans
+            .iter()
+            .map(|s| {
+                let bold = s
+                    .style
+                    .add_modifier
+                    .contains(ratatui::style::Modifier::BOLD);
+                (s.content.to_string(), bold)
+            })
+            .collect();
+        assert_eq!(
+            flattened,
+            vec![
+                ("P".into(), true),
+                ("ut".into(), false),
+                ("K".into(), true),
+                ("afka".into(), false),
+            ]
+        );
+    }
+
+    #[test]
+    fn fuzzy_table_highlights_matched_name_chars_in_rendered_buffer() {
+        use ratatui::Terminal;
+        use ratatui::backend::TestBackend;
+        use ratatui::style::Modifier;
+
+        let idx = sample_index();
+        let mut fuzz = FuzzyFindState::new();
+        fuzz.query = "put".into();
+        fuzz.rebuild_matches(&idx);
+
+        let backend = TestBackend::new(100, 20);
+        let mut term = Terminal::new(backend).unwrap();
+        term.draw(|f| render(f, f.area(), &fuzz, &Some(idx.clone())))
+            .unwrap();
+        let buffer = term.backend().buffer();
+        // Find at least one cell containing 'P' with BOLD set.
+        let bold_p_found = buffer
+            .content()
+            .iter()
+            .any(|cell| cell.symbol() == "P" && cell.style().add_modifier.contains(Modifier::BOLD));
+        assert!(
+            bold_p_found,
+            "expected at least one bold 'P' cell in the rendered fuzzy table"
         );
     }
 
