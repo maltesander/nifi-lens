@@ -4,7 +4,7 @@ use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 
 use super::{AppState, Banner, BannerSeverity, Modal, PendingIntent, UpdateResult, ViewKeyHandler};
 use crate::view::browser::state::{
-    DetailFocus, DetailSection, DetailSections, MAX_DETAIL_SECTIONS,
+    DetailFocus, DetailSection, DetailSections, MAX_DETAIL_SECTIONS, NodeDetail,
 };
 
 /// Zero-sized dispatch struct for the Browser tab.
@@ -117,16 +117,37 @@ impl ViewKeyHandler for BrowserHandler {
                 KeyCode::Char('t')
                     if sections.0.get(idx) == Some(&DetailSection::RecentBulletins) =>
                 {
-                    let Some(&arena_idx) = state.browser.visible.get(state.browser.selected) else {
+                    let Some(source_id) =
+                        state.browser.focused_row_source_id(&state.bulletins.ring)
+                    else {
                         return Some(UpdateResult::default());
                     };
-                    let source_id = state.browser.nodes[arena_idx].id.clone();
                     let link = crate::intent::CrossLink::JumpToEvents {
                         component_id: source_id,
                     };
                     return Some(UpdateResult {
                         redraw: true,
                         intent: Some(PendingIntent::JumpTo(link)),
+                        tracer_followup: None,
+                    });
+                }
+                KeyCode::Enter if sections.0.get(idx) == Some(&DetailSection::ChildGroups) => {
+                    let pg_id = match state.browser.details.get(&arena_idx) {
+                        Some(NodeDetail::ProcessGroup(d)) => d.id.clone(),
+                        _ => return Some(UpdateResult::default()),
+                    };
+                    let kids = state.browser.child_process_groups(&pg_id);
+                    let row = rows[idx];
+                    let Some(target) = kids.get(row) else {
+                        return Some(UpdateResult::default());
+                    };
+                    let target_id = target.id.clone();
+                    if state.browser.drill_into_group(&target_id) {
+                        state.browser.emit_detail_request_for_current_selection();
+                    }
+                    return Some(UpdateResult {
+                        redraw: true,
+                        intent: None,
                         tracer_followup: None,
                     });
                 }
@@ -439,6 +460,46 @@ impl ViewKeyHandler for BrowserHandler {
                         HintSpan {
                             key: "t",
                             action: "trace",
+                        },
+                    ],
+                    Some(DetailSection::ControllerServices) => vec![
+                        HintSpan {
+                            key: "↑/↓",
+                            action: "row",
+                        },
+                        HintSpan {
+                            key: "l",
+                            action: "next",
+                        },
+                        HintSpan {
+                            key: "h",
+                            action: "back",
+                        },
+                        HintSpan {
+                            key: "c",
+                            action: "copy id",
+                        },
+                    ],
+                    Some(DetailSection::ChildGroups) => vec![
+                        HintSpan {
+                            key: "↑/↓",
+                            action: "row",
+                        },
+                        HintSpan {
+                            key: "l",
+                            action: "next",
+                        },
+                        HintSpan {
+                            key: "h",
+                            action: "back",
+                        },
+                        HintSpan {
+                            key: "c",
+                            action: "copy id",
+                        },
+                        HintSpan {
+                            key: "Enter",
+                            action: "drill",
                         },
                     ],
                     _ => vec![HintSpan {
@@ -1083,7 +1144,7 @@ mod tests {
     }
 
     #[test]
-    fn l_on_pg_emits_no_focusable_sections_banner() {
+    fn l_on_pg_enters_section_focus_at_idx_0() {
         let (mut s, c) = seeded_browser_state();
         // Confirm we're on a PG (root, selected=0).
         let idx = s.browser.visible[s.browser.selected];
@@ -1092,17 +1153,12 @@ mod tests {
             crate::client::NodeKind::ProcessGroup
         ));
         update(&mut s, key(KeyCode::Char('l'), KeyModifiers::NONE), &c);
-        assert_eq!(
+        // PG has 3 focusable sections (ControllerServices, ChildGroups,
+        // RecentBulletins), so `l` enters Section focus at idx 0.
+        assert!(matches!(
             s.browser.detail_focus,
-            crate::view::browser::state::DetailFocus::Tree
-        );
-        assert!(
-            s.status
-                .banner
-                .as_ref()
-                .map(|b| b.message.contains("no focusable"))
-                .unwrap_or(false)
-        );
+            crate::view::browser::state::DetailFocus::Section { idx: 0, .. }
+        ));
     }
 
     // -----------------------------------------------------------------------
@@ -1343,6 +1399,77 @@ mod tests {
     }
 
     #[test]
+    fn t_on_focused_pg_recent_bulletins_emits_crosslink_for_row_source() {
+        use crate::client::{BulletinSnapshot, ProcessGroupDetail};
+        use crate::intent::CrossLink;
+        use crate::view::browser::state::{DetailFocus, NodeDetail};
+
+        let (mut s, c) = seeded_browser_state();
+        // Put the tree cursor on `root` (arena idx 0).
+        s.browser.selected = s
+            .browser
+            .visible
+            .iter()
+            .position(|&i| i == 0)
+            .expect("root visible");
+        // Inject a PG detail for root so focused_row_source_id resolves.
+        s.browser.details.insert(
+            0,
+            NodeDetail::ProcessGroup(ProcessGroupDetail {
+                id: "root".into(),
+                name: "root".into(),
+                parent_group_id: None,
+                running: 0,
+                stopped: 0,
+                invalid: 0,
+                disabled: 0,
+                active_threads: 0,
+                flow_files_queued: 0,
+                bytes_queued: 0,
+                queued_display: "".into(),
+                controller_services: vec![],
+            }),
+        );
+        // Focus PG's RecentBulletins section (idx 2 per for_node(PG)).
+        s.browser.detail_focus = DetailFocus::Section {
+            idx: 2,
+            rows: [0, 0, 0, 0],
+        };
+
+        // Ring: newest at the back. Newest-first iteration → row 0 = p2.
+        s.bulletins.ring.push_back(BulletinSnapshot {
+            id: 1,
+            level: "WARN".into(),
+            message: "old".into(),
+            source_id: "p1".into(),
+            source_name: "p1".into(),
+            source_type: "PROCESSOR".into(),
+            group_id: "root".into(),
+            timestamp_iso: "".into(),
+            timestamp_human: "".into(),
+        });
+        s.bulletins.ring.push_back(BulletinSnapshot {
+            id: 2,
+            level: "WARN".into(),
+            message: "new".into(),
+            source_id: "p2".into(),
+            source_name: "p2".into(),
+            source_type: "PROCESSOR".into(),
+            group_id: "root".into(),
+            timestamp_iso: "".into(),
+            timestamp_human: "".into(),
+        });
+
+        let r = update(&mut s, key(KeyCode::Char('t'), KeyModifiers::NONE), &c);
+        match r.intent {
+            Some(PendingIntent::JumpTo(CrossLink::JumpToEvents { component_id })) => {
+                assert_eq!(component_id, "p2");
+            }
+            other => panic!("unexpected intent: {other:?}"),
+        }
+    }
+
+    #[test]
     fn tree_drill_out_uses_backspace_or_left_only_no_h_alias() {
         // Use three_level_browser_state: root(0), pipeline(1) expanded, gen(2).
         // Select pipeline (arena 1, visible row 1), which is already expanded.
@@ -1375,5 +1502,49 @@ mod tests {
             s.browser.visible, after_drill,
             "Left should still drill out"
         );
+    }
+
+    #[test]
+    fn enter_on_focused_pg_child_groups_drills_in() {
+        use crate::client::ProcessGroupDetail;
+        use crate::view::browser::state::{DetailFocus, NodeDetail};
+
+        let (mut s, c) = seeded_browser_state();
+        // Put the tree cursor on `root` (arena idx 0).
+        s.browser.selected = s
+            .browser
+            .visible
+            .iter()
+            .position(|&i| i == 0)
+            .expect("root visible");
+        // Inject a PG detail for root so the handler can read `d.id`.
+        s.browser.details.insert(
+            0,
+            NodeDetail::ProcessGroup(ProcessGroupDetail {
+                id: "root".into(),
+                name: "root".into(),
+                parent_group_id: None,
+                running: 0,
+                stopped: 0,
+                invalid: 0,
+                disabled: 0,
+                active_threads: 0,
+                flow_files_queued: 0,
+                bytes_queued: 0,
+                queued_display: "".into(),
+                controller_services: vec![],
+            }),
+        );
+        // Focus PG's ChildGroups section, row 0 → `ingest`.
+        s.browser.detail_focus = DetailFocus::Section {
+            idx: 1,
+            rows: [0, 0, 0, 0],
+        };
+
+        let r = update(&mut s, key(KeyCode::Enter, KeyModifiers::NONE), &c);
+        assert!(r.redraw);
+        // Tree cursor now on ingest (arena idx 2), not gen (arena idx 1).
+        assert_eq!(s.browser.visible[s.browser.selected], 2);
+        assert_eq!(s.browser.detail_focus, DetailFocus::Tree);
     }
 }

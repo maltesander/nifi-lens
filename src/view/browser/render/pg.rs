@@ -1,20 +1,22 @@
 //! Process Group detail renderer.
 //!
-//! Phase 7 wraps the existing labeled-sections content in a bordered
-//! outer `Panel`. PG detail has no focusable sub-sections, so the
-//! `_detail_focus` parameter is threaded for signature consistency
-//! with processor / controller_service renderers and currently
-//! ignored.
+//! Task 6 rewrites PG detail into four nested sub-panels:
+//! ` Identity ` (non-focusable Paragraph) and three focusable `Table`
+//! widgets — ` Controller services `, ` Child groups `, ` Recent bulletins `.
+
+use std::collections::VecDeque;
 
 use ratatui::Frame;
-use ratatui::layout::Rect;
-use ratatui::style::Modifier;
+use ratatui::layout::{Constraint, Direction, Layout, Rect};
+use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
-use ratatui::widgets::Paragraph;
+use ratatui::widgets::{Cell, Paragraph, Row, Table, TableState};
 
-use crate::client::ProcessGroupDetail;
+use crate::client::{BulletinSnapshot, ControllerServiceSummary, NodeKind, ProcessGroupDetail};
 use crate::theme;
-use crate::view::browser::state::{BrowserState, DetailFocus};
+use crate::view::browser::state::{
+    BrowserState, ChildPgSummary, DetailFocus, DetailSection, DetailSections,
+};
 use crate::widget::panel::Panel;
 use crate::widget::severity::{format_severity_label, severity_style};
 
@@ -23,25 +25,40 @@ pub fn render(
     area: Rect,
     d: &ProcessGroupDetail,
     state: &BrowserState,
-    bulletins: &std::collections::VecDeque<crate::client::BulletinSnapshot>,
-    _detail_focus: &DetailFocus,
+    bulletins: &VecDeque<BulletinSnapshot>,
+    detail_focus: &DetailFocus,
 ) {
     // Outer panel: " <name> · process group "
     let outer = Panel::new(build_header_title(d)).into_block();
     let inner = outer.inner(area);
     frame.render_widget(outer, area);
 
-    render_content(frame, inner, d, state, bulletins);
+    // Inner vertical layout.
+    //   identity:  5 rows  (2 borders + 3 content lines)
+    //   cs:        Fill(1) — split with child groups
+    //   kids:      Fill(1)
+    //   bulletins: 8 rows  (2 borders + 6 content rows)
+    let rows = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([
+            Constraint::Length(5),
+            Constraint::Fill(1),
+            Constraint::Fill(1),
+            Constraint::Length(8),
+        ])
+        .split(inner);
+
+    render_identity_panel(frame, rows[0], d);
+    render_controller_services_panel(frame, rows[1], d, detail_focus);
+    render_child_groups_panel(frame, rows[2], d, state, detail_focus);
+    render_recent_bulletins_panel(frame, rows[3], d, bulletins, detail_focus);
 }
 
 /// Build the outer panel title: ` <name> · process group `.
 fn build_header_title(d: &ProcessGroupDetail) -> Line<'_> {
     Line::from(vec![
         Span::raw(" "),
-        Span::styled(
-            d.name.as_str(),
-            theme::accent().add_modifier(Modifier::BOLD),
-        ),
+        Span::styled(d.name.as_str(), theme::accent()),
         Span::raw(" "),
         Span::styled("·", theme::muted()),
         Span::raw(" "),
@@ -50,110 +67,261 @@ fn build_header_title(d: &ProcessGroupDetail) -> Line<'_> {
     ])
 }
 
-fn render_content(
+fn render_identity_panel(frame: &mut Frame, area: Rect, d: &ProcessGroupDetail) {
+    let block = Panel::new(" Identity ").into_block();
+    let inner = block.inner(area);
+    frame.render_widget(block, area);
+
+    let lines = vec![
+        Line::from(vec![
+            Span::styled("Processors ", theme::muted()),
+            Span::raw(format!(
+                "{} running · {} stopped · {} invalid · {} disabled",
+                d.running, d.stopped, d.invalid, d.disabled
+            )),
+        ]),
+        Line::from(vec![
+            Span::styled("Threads    ", theme::muted()),
+            Span::raw(format!("{} active", d.active_threads)),
+        ]),
+        Line::from(vec![
+            Span::styled("Queued     ", theme::muted()),
+            Span::raw(format!(
+                "{} ffiles · {}",
+                d.flow_files_queued, d.queued_display
+            )),
+        ]),
+    ];
+    frame.render_widget(Paragraph::new(lines), inner);
+}
+
+fn render_controller_services_panel(
+    frame: &mut Frame,
+    area: Rect,
+    d: &ProcessGroupDetail,
+    detail_focus: &DetailFocus,
+) {
+    let sections = DetailSections::for_node(NodeKind::ProcessGroup);
+    let my_idx = sections
+        .0
+        .iter()
+        .position(|s| *s == DetailSection::ControllerServices)
+        .unwrap_or(0);
+    let is_focused = matches!(
+        detail_focus,
+        DetailFocus::Section { idx, .. } if *idx == my_idx
+    );
+
+    let total = d.controller_services.len();
+    let panel = Panel::new(" Controller services ")
+        .right(Line::from(format!(" {total} ")))
+        .focused(is_focused)
+        .into_block();
+    let inner = panel.inner(area);
+    frame.render_widget(panel, area);
+
+    let header = Row::new(vec![
+        Cell::from("STATE"),
+        Cell::from("NAME"),
+        Cell::from("TYPE"),
+    ])
+    .style(theme::muted().add_modifier(Modifier::BOLD));
+
+    let rows_data: Vec<Row> = d
+        .controller_services
+        .iter()
+        .map(|cs: &ControllerServiceSummary| {
+            Row::new(vec![
+                Cell::from(cs.state.clone()).style(cs_state_style(&cs.state)),
+                Cell::from(cs.name.clone()),
+                Cell::from(cs.type_short.clone()),
+            ])
+        })
+        .collect();
+    let widths = [
+        Constraint::Length(10),
+        Constraint::Length(24),
+        Constraint::Fill(1),
+    ];
+    let table = Table::new(rows_data, widths)
+        .header(header)
+        .row_highlight_style(theme::cursor_row());
+
+    let mut state = TableState::default();
+    if let DetailFocus::Section { rows, .. } = detail_focus
+        && is_focused
+    {
+        state.select(Some(rows[my_idx]));
+    }
+    frame.render_stateful_widget(table, inner, &mut state);
+}
+
+fn cs_state_style(state: &str) -> Style {
+    match state {
+        "ENABLED" => theme::success(),
+        "DISABLED" => theme::disabled(),
+        _ => theme::warning(),
+    }
+}
+
+fn render_child_groups_panel(
     frame: &mut Frame,
     area: Rect,
     d: &ProcessGroupDetail,
     state: &BrowserState,
-    bulletins: &std::collections::VecDeque<crate::client::BulletinSnapshot>,
+    detail_focus: &DetailFocus,
 ) {
-    let mut lines: Vec<Line> = Vec::new();
+    let sections = DetailSections::for_node(NodeKind::ProcessGroup);
+    let my_idx = sections
+        .0
+        .iter()
+        .position(|s| *s == DetailSection::ChildGroups)
+        .unwrap_or(1);
+    let is_focused = matches!(
+        detail_focus,
+        DetailFocus::Section { idx, .. } if *idx == my_idx
+    );
 
-    // Processors line: counts by state.
-    lines.push(Line::from(vec![
-        Span::styled("Processors  ".to_string(), theme::muted()),
-        Span::raw(format!("{} running", d.running)),
-        Span::raw("  "),
-        Span::raw(format!("{} stopped", d.stopped)),
-        Span::raw("  "),
-        Span::raw(format!("{} invalid", d.invalid)),
-        Span::raw("  "),
-        Span::raw(format!("{} disabled", d.disabled)),
-    ]));
+    let kids: Vec<ChildPgSummary> = state.child_process_groups(&d.id);
+    let total = kids.len();
 
-    // Threads line.
-    lines.push(Line::from(vec![
-        Span::styled("Threads     ".to_string(), theme::muted()),
-        Span::raw(format!("{} active", d.active_threads)),
-    ]));
+    let panel = Panel::new(" Child groups ")
+        .right(Line::from(format!(" {total} ")))
+        .focused(is_focused)
+        .into_block();
+    let inner = panel.inner(area);
+    frame.render_widget(panel, area);
 
-    // Queued line.
-    lines.push(Line::from(vec![
-        Span::styled("Queued      ".to_string(), theme::muted()),
-        Span::raw(format!(
-            "{} ffiles · {}",
-            d.flow_files_queued, d.queued_display
-        )),
-    ]));
+    let header = Row::new(vec![
+        Cell::from("NAME"),
+        Cell::from("RUN"),
+        Cell::from("STOP"),
+        Cell::from("INVALID"),
+    ])
+    .style(theme::muted().add_modifier(Modifier::BOLD));
 
-    // Controller services section.
-    lines.push(Line::from(""));
-    lines.push(Line::from(Span::styled(
-        format!("Controller services ({})", d.controller_services.len()),
-        theme::accent(),
-    )));
-    for cs in d.controller_services.iter().take(8) {
-        lines.push(Line::from(format!(
-            "  {state}  {name}   {type_}",
-            state = cs.state,
-            name = cs.name,
-            type_ = cs.type_short
-        )));
+    let rows_data: Vec<Row> = kids
+        .iter()
+        .map(|k| {
+            Row::new(vec![
+                Cell::from(k.name.clone()),
+                Cell::from(k.running.to_string()),
+                Cell::from(k.stopped.to_string()),
+                Cell::from(k.invalid.to_string()),
+            ])
+        })
+        .collect();
+    let widths = [
+        Constraint::Fill(1),
+        Constraint::Length(6),
+        Constraint::Length(6),
+        Constraint::Length(8),
+    ];
+    let table = Table::new(rows_data, widths)
+        .header(header)
+        .row_highlight_style(theme::cursor_row());
+
+    let mut ts = TableState::default();
+    if let DetailFocus::Section { rows, .. } = detail_focus
+        && is_focused
+    {
+        ts.select(Some(rows[my_idx]));
     }
-    if d.controller_services.len() > 8 {
-        lines.push(Line::from(Span::styled(
-            format!("  …{} more", d.controller_services.len() - 8),
-            theme::muted(),
-        )));
-    }
+    frame.render_stateful_widget(table, inner, &mut ts);
+}
 
-    // Child groups section.
-    let kids = state.child_process_groups(&d.id);
-    lines.push(Line::from(""));
-    lines.push(Line::from(Span::styled(
-        format!("Child groups ({})", kids.len()),
-        theme::accent(),
-    )));
-    for kid in kids.iter().take(8) {
-        lines.push(Line::from(format!(
-            "  {name}   {running} run · {stopped} stop · {invalid} invalid",
-            name = kid.name,
-            running = kid.running,
-            stopped = kid.stopped,
-            invalid = kid.invalid,
-        )));
-    }
-    if kids.len() > 8 {
-        lines.push(Line::from(Span::styled(
-            format!("  …{} more", kids.len() - 8),
-            theme::muted(),
-        )));
-    }
+fn render_recent_bulletins_panel(
+    frame: &mut Frame,
+    area: Rect,
+    d: &ProcessGroupDetail,
+    bulletins: &VecDeque<BulletinSnapshot>,
+    detail_focus: &DetailFocus,
+) {
+    let sections = DetailSections::for_node(NodeKind::ProcessGroup);
+    let my_idx = sections
+        .0
+        .iter()
+        .position(|s| *s == DetailSection::RecentBulletins)
+        .unwrap_or(2);
+    let is_focused = matches!(
+        detail_focus,
+        DetailFocus::Section { idx, .. } if *idx == my_idx
+    );
 
-    // Recent bulletins section.
-    let recent = crate::view::bulletins::state::recent_for_group_id(bulletins, &d.id, 3);
-    // Total count for the header (walks the ring once more — small ring, cheap).
-    let total_in_pg = bulletins.iter().filter(|b| b.group_id == d.id).count();
-    lines.push(Line::from(""));
-    lines.push(Line::from(Span::styled(
-        format!("Recent bulletins ({total_in_pg} in this PG)"),
-        theme::accent(),
-    )));
-    for b in &recent {
-        let sev = format_severity_label(&b.level);
-        let sev_style = severity_style(&b.level);
-        let stripped = crate::view::bulletins::state::strip_component_prefix(&b.message);
-        lines.push(Line::from(vec![
-            Span::raw("  "),
-            Span::styled(sev, sev_style),
-            Span::raw("  "),
-            Span::raw(b.source_name.clone()),
-            Span::raw("  "),
-            Span::raw(stripped.to_string()),
-        ]));
-    }
+    // Newest-first, no cap.
+    let matching: Vec<&BulletinSnapshot> = bulletins
+        .iter()
+        .rev()
+        .filter(|b| b.group_id == d.id)
+        .collect();
+    let total = matching.len();
 
-    frame.render_widget(Paragraph::new(lines), area);
+    let panel = Panel::new(" Recent bulletins ")
+        .right(Line::from(format!(" {total} ")))
+        .focused(is_focused)
+        .into_block();
+    let inner = panel.inner(area);
+    frame.render_widget(panel, area);
+
+    let header = Row::new(vec![
+        Cell::from("TIME"),
+        Cell::from("SEV"),
+        Cell::from("SOURCE"),
+        Cell::from("MESSAGE"),
+    ])
+    .style(theme::muted().add_modifier(Modifier::BOLD));
+
+    let rows_data: Vec<Row> = matching
+        .iter()
+        .map(|b| {
+            let sev_label = format_severity_label(&b.level);
+            let sev_style = severity_style(&b.level);
+            Row::new(vec![
+                Cell::from(short_time(&b.timestamp_iso, &b.timestamp_human)),
+                Cell::from(sev_label).style(sev_style),
+                Cell::from(b.source_name.clone()),
+                Cell::from(
+                    crate::view::bulletins::state::strip_component_prefix(&b.message).to_string(),
+                ),
+            ])
+        })
+        .collect();
+    let widths = [
+        Constraint::Length(8),
+        Constraint::Length(4),
+        Constraint::Length(20),
+        Constraint::Fill(1),
+    ];
+    let table = Table::new(rows_data, widths)
+        .header(header)
+        .row_highlight_style(theme::cursor_row());
+
+    let mut ts = TableState::default();
+    if let DetailFocus::Section { rows, .. } = detail_focus
+        && is_focused
+    {
+        ts.select(Some(rows[my_idx]));
+    }
+    frame.render_stateful_widget(table, inner, &mut ts);
+}
+
+/// Extract `HH:MM:SS` from an ISO-8601 timestamp, falling back to a
+/// short slice of the human-readable form when the ISO field is empty.
+fn short_time(iso: &str, human: &str) -> String {
+    if iso.len() >= 19 {
+        let t = &iso[11..19];
+        if t.as_bytes().get(2) == Some(&b':') && t.as_bytes().get(5) == Some(&b':') {
+            return t.to_string();
+        }
+    }
+    // Fallback: if the human string has `HH:MM:SS` somewhere, grab it.
+    for i in 0..human.len().saturating_sub(7) {
+        let slice = &human[i..i + 8];
+        if slice.as_bytes()[2] == b':' && slice.as_bytes()[5] == b':' {
+            return slice.to_string();
+        }
+    }
+    "--:--:--".to_string()
 }
 
 #[cfg(test)]
@@ -163,9 +331,8 @@ mod snapshots {
     use ratatui::Terminal;
     use ratatui::backend::TestBackend;
 
-    #[test]
-    fn pg_detail_with_cs_list() {
-        let d = ProcessGroupDetail {
+    fn seeded_pg_detail() -> ProcessGroupDetail {
+        ProcessGroupDetail {
             id: "ingest".into(),
             name: "ingest".into(),
             parent_group_id: Some("root".into()),
@@ -178,27 +345,99 @@ mod snapshots {
             bytes_queued: 2048,
             queued_display: "4 / 2 KB".into(),
             controller_services: vec![
-                crate::client::ControllerServiceSummary {
+                ControllerServiceSummary {
                     id: "cs1".into(),
                     name: "http-pool".into(),
                     type_short: "StandardRestrictedSSLContextService".into(),
                     state: "ENABLED".into(),
                 },
-                crate::client::ControllerServiceSummary {
+                ControllerServiceSummary {
                     id: "cs2".into(),
                     name: "kafka-brokers".into(),
                     type_short: "Kafka3ConnectionService".into(),
                     state: "DISABLED".into(),
                 },
             ],
-        };
+        }
+    }
+
+    #[test]
+    fn pg_detail_with_cs_list() {
+        let d = seeded_pg_detail();
         let state = BrowserState::new();
-        let bulletins: std::collections::VecDeque<crate::client::BulletinSnapshot> =
-            std::collections::VecDeque::new();
+        let bulletins: VecDeque<BulletinSnapshot> = VecDeque::new();
         let mut terminal = Terminal::new(TestBackend::new(100, 24)).unwrap();
         terminal
             .draw(|f| render(f, f.area(), &d, &state, &bulletins, &DetailFocus::Tree))
             .unwrap();
         assert_snapshot!("pg_detail_with_cs_list", format!("{}", terminal.backend()));
+    }
+
+    #[test]
+    fn pg_detail_controller_services_focused() {
+        let d = seeded_pg_detail();
+        let state = BrowserState::new();
+        let bulletins: VecDeque<BulletinSnapshot> = VecDeque::new();
+        let focus = DetailFocus::Section {
+            idx: 0, // ControllerServices
+            rows: [1, 0, 0, 0],
+        };
+        let mut terminal = Terminal::new(TestBackend::new(100, 28)).unwrap();
+        terminal
+            .draw(|f| render(f, f.area(), &d, &state, &bulletins, &focus))
+            .unwrap();
+        assert_snapshot!(
+            "pg_detail_controller_services_focused",
+            format!("{}", terminal.backend())
+        );
+    }
+
+    #[test]
+    fn pg_detail_child_groups_focused() {
+        let d = seeded_pg_detail();
+        let state = BrowserState::new();
+        let bulletins: VecDeque<BulletinSnapshot> = VecDeque::new();
+        let focus = DetailFocus::Section {
+            idx: 1, // ChildGroups
+            rows: [0, 0, 0, 0],
+        };
+        let mut terminal = Terminal::new(TestBackend::new(100, 28)).unwrap();
+        terminal
+            .draw(|f| render(f, f.area(), &d, &state, &bulletins, &focus))
+            .unwrap();
+        assert_snapshot!(
+            "pg_detail_child_groups_focused",
+            format!("{}", terminal.backend())
+        );
+    }
+
+    #[test]
+    fn pg_detail_recent_bulletins_focused() {
+        let d = seeded_pg_detail();
+        let state = BrowserState::new();
+        let mut bulletins: VecDeque<BulletinSnapshot> = VecDeque::new();
+        bulletins.push_back(BulletinSnapshot {
+            id: 1,
+            level: "WARN".into(),
+            message: "hi".into(),
+            source_id: "p1".into(),
+            source_name: "p1".into(),
+            source_type: "PROCESSOR".into(),
+            group_id: "ingest".into(),
+            timestamp_iso: "2026-04-14T10:14:10.000Z".into(),
+            timestamp_human: "04/14/2026 10:14:10 UTC".into(),
+        });
+        let focus = DetailFocus::Section {
+            idx: 2, // RecentBulletins
+            rows: [0, 0, 0, 0],
+        };
+        let mut terminal = Terminal::new(TestBackend::new(100, 28)).unwrap();
+        terminal
+            .draw(|f| render(f, f.area(), &d, &state, &bulletins, &focus))
+            .unwrap();
+        assert_snapshot!(
+            "pg_detail_recent_bulletins_focused",
+            format!("{}", terminal.backend())
+        );
     }
 }

@@ -890,7 +890,22 @@ usable state.
     scores by kind priority (Processor > PG > CS > Conn > Ports).
     `processor_run_icon` helper relocated to `src/widget/run_icon.rs`
     so both the Browser tree and the fuzzy State column share it.
-18. **Phase 7 — Write-path scaffolding.** Dry-run mode, confirmation modal
+18. **Browser detail panel parity.** *(shipped)* Connection and Process
+    Group detail panes rewritten to match the nested sub-panel + Table
+    visual language used by Processor and Controller Service. PG's
+    `Controller services`, `Child groups`, and `Recent bulletins`
+    sub-panels join the `DetailFocus` state machine as focusable
+    sections; the existing `l`/`h`/arrow/`c`/`t` keybindings apply, and
+    `Enter` on a focused Child-groups row drills into that PG via a
+    new `BrowserState::drill_into_group` helper. `DetailSection` gains
+    two variants (`ControllerServices`, `ChildGroups`). The PG `t`
+    handler now resolves the bulletin row's own `source_id` via a new
+    `BrowserState::focused_row_source_id` helper so the cross-link
+    lands on the emitting component instead of the PG itself.
+    Connection sub-panels are visual-only (`DetailSections::for_node`
+    still returns `&[]` for Connection); its row interactivity is an
+    accepted non-goal.
+19. **Phase 7 — Write-path scaffolding.** Dry-run mode, confirmation modal
     primitive, audit log, `--allow-writes` flag. No writes enabled yet —
     this just lays the rails for v2.
 
