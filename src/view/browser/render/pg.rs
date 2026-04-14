@@ -58,10 +58,7 @@ pub fn render(
 fn build_header_title(d: &ProcessGroupDetail) -> Line<'_> {
     Line::from(vec![
         Span::raw(" "),
-        Span::styled(
-            d.name.as_str(),
-            theme::accent().add_modifier(Modifier::BOLD),
-        ),
+        Span::styled(d.name.as_str(), theme::accent()),
         Span::raw(" "),
         Span::styled("·", theme::muted()),
         Span::raw(" "),
@@ -308,13 +305,20 @@ fn render_recent_bulletins_panel(
     frame.render_stateful_widget(table, inner, &mut ts);
 }
 
-/// Extract `HH:MM:SS` from an ISO-8601 timestamp. Falls back to
-/// `--:--:--` when the string is not a recognized shape.
-fn short_time(iso: &str, _human: &str) -> String {
+/// Extract `HH:MM:SS` from an ISO-8601 timestamp, falling back to a
+/// short slice of the human-readable form when the ISO field is empty.
+fn short_time(iso: &str, human: &str) -> String {
     if iso.len() >= 19 {
         let t = &iso[11..19];
         if t.as_bytes().get(2) == Some(&b':') && t.as_bytes().get(5) == Some(&b':') {
             return t.to_string();
+        }
+    }
+    // Fallback: if the human string has `HH:MM:SS` somewhere, grab it.
+    for i in 0..human.len().saturating_sub(7) {
+        let slice = &human[i..i + 8];
+        if slice.as_bytes()[2] == b':' && slice.as_bytes()[5] == b':' {
+            return slice.to_string();
         }
     }
     "--:--:--".to_string()
