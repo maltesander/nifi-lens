@@ -49,69 +49,86 @@ fn build_header_title(d: &ConnectionDetail) -> Line<'_> {
 }
 
 fn render_content(frame: &mut Frame, area: Rect, d: &ConnectionDetail) {
-    use crate::widget::gauge::fill_bar;
-    let mut lines: Vec<Line> = Vec::new();
+    use ratatui::layout::{Constraint, Direction, Layout};
 
-    // Fill gauge: prominent visual block.
-    let gauge_width: u16 = area.width.saturating_sub(12).clamp(8, 40);
+    let rows = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([Constraint::Length(6), Constraint::Fill(1)])
+        .split(area);
+
+    render_endpoints_panel(frame, rows[0], d);
+    render_back_pressure_panel(frame, rows[1], d);
+}
+
+fn render_endpoints_panel(frame: &mut Frame, area: Rect, d: &ConnectionDetail) {
+    use crate::widget::gauge::fill_bar;
+
+    let block = Panel::new(" Endpoints ").into_block();
+    let inner = block.inner(area);
+    frame.render_widget(block, area);
+
+    // Prominent fill gauge on the first content line.
+    let gauge_width: u16 = inner.width.saturating_sub(12).clamp(8, 40);
     let bar = fill_bar(gauge_width, d.fill_percent);
     let gauge_style = fill_style(d.fill_percent);
-    lines.push(Line::from(vec![
-        Span::styled("Fill        ".to_string(), theme::muted()),
-        Span::styled(bar, gauge_style),
-        Span::raw(format!(
-            "  {}% ({} ff / {})",
-            d.fill_percent, d.flow_files_queued, d.queued_display
-        )),
-    ]));
 
-    // Source / Destination block.
-    lines.push(Line::from(""));
-    lines.push(Line::from(vec![
-        Span::styled("From        ".to_string(), theme::muted()),
-        Span::raw(format!("{} ({})", d.source_name, d.source_type)),
-    ]));
-    lines.push(Line::from(vec![
-        Span::styled("To          ".to_string(), theme::muted()),
-        Span::raw(format!("{} ({})", d.destination_name, d.destination_type)),
-    ]));
-    lines.push(Line::from(vec![
-        Span::styled("Relations   ".to_string(), theme::muted()),
-        Span::raw(if d.selected_relationships.is_empty() {
-            "(none)".to_string()
-        } else {
-            d.selected_relationships.join(", ")
-        }),
-    ]));
+    let lines = vec![
+        Line::from(vec![
+            Span::styled("Fill      ".to_string(), theme::muted()),
+            Span::styled(bar, gauge_style),
+            Span::raw(format!(
+                "  {}% ({} ff / {})",
+                d.fill_percent, d.flow_files_queued, d.queued_display
+            )),
+        ]),
+        Line::from(vec![
+            Span::styled("From      ".to_string(), theme::muted()),
+            Span::raw(format!("{} ({})", d.source_name, d.source_type)),
+        ]),
+        Line::from(vec![
+            Span::styled("To        ".to_string(), theme::muted()),
+            Span::raw(format!("{} ({})", d.destination_name, d.destination_type)),
+        ]),
+        Line::from(vec![
+            Span::styled("Relations ".to_string(), theme::muted()),
+            Span::raw(if d.selected_relationships.is_empty() {
+                "(none)".to_string()
+            } else {
+                d.selected_relationships.join(", ")
+            }),
+        ]),
+    ];
+    frame.render_widget(Paragraph::new(lines), inner);
+}
 
-    // Back-pressure block.
-    lines.push(Line::from(""));
-    lines.push(Line::from(Span::styled(
-        "Back-pressure".to_string(),
-        theme::accent(),
-    )));
-    lines.push(Line::from(vec![
-        Span::styled("  count     ".to_string(), theme::muted()),
-        Span::raw(format!("{}", d.back_pressure_object_threshold)),
-    ]));
-    lines.push(Line::from(vec![
-        Span::styled("  size      ".to_string(), theme::muted()),
-        Span::raw(d.back_pressure_data_size_threshold.clone()),
-    ]));
-    lines.push(Line::from(vec![
-        Span::styled("  expire    ".to_string(), theme::muted()),
-        Span::raw(if d.flow_file_expiration.is_empty() {
-            "none".to_string()
-        } else {
-            d.flow_file_expiration.clone()
-        }),
-    ]));
-    lines.push(Line::from(vec![
-        Span::styled("  load-bal  ".to_string(), theme::muted()),
-        Span::raw(d.load_balance_strategy.clone()),
-    ]));
+fn render_back_pressure_panel(frame: &mut Frame, area: Rect, d: &ConnectionDetail) {
+    let block = Panel::new(" Back-pressure ").into_block();
+    let inner = block.inner(area);
+    frame.render_widget(block, area);
 
-    frame.render_widget(Paragraph::new(lines), area);
+    let lines = vec![
+        Line::from(vec![
+            Span::styled("count    ".to_string(), theme::muted()),
+            Span::raw(format!("{}", d.back_pressure_object_threshold)),
+        ]),
+        Line::from(vec![
+            Span::styled("size     ".to_string(), theme::muted()),
+            Span::raw(d.back_pressure_data_size_threshold.clone()),
+        ]),
+        Line::from(vec![
+            Span::styled("expire   ".to_string(), theme::muted()),
+            Span::raw(if d.flow_file_expiration.is_empty() {
+                "none".to_string()
+            } else {
+                d.flow_file_expiration.clone()
+            }),
+        ]),
+        Line::from(vec![
+            Span::styled("load-bal ".to_string(), theme::muted()),
+            Span::raw(d.load_balance_strategy.clone()),
+        ]),
+    ];
+    frame.render_widget(Paragraph::new(lines), inner);
 }
 
 /// Fill-percent → gauge color. Mirrors the Overview repositories
