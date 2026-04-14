@@ -70,13 +70,9 @@ pub async fn seed(client: &DynamicClient, parent_pg_id: &str) -> Result<()> {
         component.back_pressure_data_size_threshold = Some("1 KB".to_string());
     }
 
-    use nifi_rust_client::dynamic::traits::{
-        ProcessGroupsApi as _, ProcessGroupsConnectionsApi as _,
-    };
     client
-        .processgroups_api()
-        .connections(&pg_id)
-        .create_connection(&conn_body)
+        .processgroups()
+        .create_connection(&pg_id, &conn_body)
         .await
         .map_err(|e| SeederError::Api {
             message: "create backpressure-pipeline connection".into(),

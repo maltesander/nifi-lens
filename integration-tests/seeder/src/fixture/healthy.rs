@@ -18,17 +18,7 @@
 
 use std::time::Duration;
 
-use nifi_rust_client::dynamic::{
-    DynamicClient,
-    traits::{
-        InputPortsApi as _, InputPortsRunStatusApi as _, OutputPortsApi as _,
-        OutputPortsRunStatusApi as _, ProcessGroupsApi as _, ProcessGroupsConnectionsApi as _,
-        ProcessGroupsInputPortsApi as _, ProcessGroupsOutputPortsApi as _,
-        ProcessGroupsProcessGroupsApi as _, ProcessGroupsProcessorsApi as _, ProcessorsApi as _,
-        ProcessorsRunStatusApi as _,
-    },
-    types,
-};
+use nifi_rust_client::dynamic::{DynamicClient, types};
 
 use crate::entities::{make_connection, make_pg, make_port, make_processor, props};
 use crate::error::{Result, SeederError};
@@ -221,9 +211,8 @@ pub(crate) async fn create_child_pg(
 ) -> Result<String> {
     let body = make_pg(name);
     let created = client
-        .processgroups_api()
-        .process_groups(parent_pg_id)
-        .create_process_group(None, &body)
+        .processgroups()
+        .create_process_group(parent_pg_id, None, &body)
         .await
         .map_err(|e| SeederError::Api {
             message: format!("create child PG {name}"),
@@ -245,9 +234,8 @@ pub(crate) async fn create_processor(
     name: &str,
 ) -> Result<String> {
     let created = client
-        .processgroups_api()
-        .processors(pg_id)
-        .create_processor(&body)
+        .processgroups()
+        .create_processor(pg_id, &body)
         .await
         .map_err(|e| SeederError::Api {
             message: format!("create processor {name}"),
@@ -269,9 +257,8 @@ pub(crate) async fn create_input_port(
 ) -> Result<String> {
     let body = make_port(name);
     let created = client
-        .processgroups_api()
-        .input_ports(pg_id)
-        .create_input_port(&body)
+        .processgroups()
+        .create_input_port(pg_id, &body)
         .await
         .map_err(|e| SeederError::Api {
             message: format!("create input port {name}"),
@@ -293,9 +280,8 @@ pub(crate) async fn create_output_port(
 ) -> Result<String> {
     let body = make_port(name);
     let created = client
-        .processgroups_api()
-        .output_ports(pg_id)
-        .create_output_port(&body)
+        .processgroups()
+        .create_output_port(pg_id, &body)
         .await
         .map_err(|e| SeederError::Api {
             message: format!("create output port {name}"),
@@ -373,9 +359,8 @@ pub(crate) async fn create_connection_between(
         relationships,
     );
     let created = client
-        .processgroups_api()
-        .connections(container_pg_id)
-        .create_connection(&body)
+        .processgroups()
+        .create_connection(container_pg_id, &body)
         .await
         .map_err(|e| SeederError::Api {
             message: format!("create connection in pg {container_pg_id}"),
@@ -402,14 +387,15 @@ pub(crate) async fn wait_for_valid(
     poll_until(what, "VALID+STOPPED", Duration::from_secs(15), || {
         let id = id.clone();
         async move {
-            let got = client
-                .processors_api()
-                .get_processor(&id)
-                .await
-                .map_err(|e| SeederError::Api {
-                    message: format!("poll processor {id} validation"),
-                    source: Box::new(e),
-                })?;
+            let got =
+                client
+                    .processors()
+                    .get_processor(&id)
+                    .await
+                    .map_err(|e| SeederError::Api {
+                        message: format!("poll processor {id} validation"),
+                        source: Box::new(e),
+                    })?;
             let Some(component) = got.component else {
                 return Ok(None);
             };
@@ -429,7 +415,7 @@ pub(crate) async fn start_processor(client: &DynamicClient, id: &str) -> Result<
     // NiFi uses optimistic concurrency — we must send the current revision,
     // not a hardcoded 0. Fetch it just before the PUT.
     let current = client
-        .processors_api()
+        .processors()
         .get_processor(id)
         .await
         .map_err(|e| SeederError::Api {
@@ -445,9 +431,8 @@ pub(crate) async fn start_processor(client: &DynamicClient, id: &str) -> Result<
     body.revision = Some(revision);
 
     client
-        .processors_api()
-        .run_status(id)
-        .update_run_status_4(&body)
+        .processors()
+        .update_run_status(id, &body)
         .await
         .map_err(|e| SeederError::Api {
             message: format!("start processor {id}"),
@@ -462,14 +447,15 @@ pub(crate) async fn start_processor(client: &DynamicClient, id: &str) -> Result<
         || {
             let id = id_owned.clone();
             async move {
-                let got = client
-                    .processors_api()
-                    .get_processor(&id)
-                    .await
-                    .map_err(|e| SeederError::Api {
-                        message: format!("poll processor {id} run"),
-                        source: Box::new(e),
-                    })?;
+                let got =
+                    client
+                        .processors()
+                        .get_processor(&id)
+                        .await
+                        .map_err(|e| SeederError::Api {
+                            message: format!("poll processor {id} run"),
+                            source: Box::new(e),
+                        })?;
                 let state = got.component.and_then(|c| c.state).unwrap_or_default();
                 if state == "RUNNING" {
                     Ok(Some(()))
@@ -494,21 +480,22 @@ async fn start_port(client: &DynamicClient, id: &str, kind: PortKind) -> Result<
     // Fetch current revision — NiFi rejects stale revisions on PUT.
     let revision = match kind {
         PortKind::Input => {
-            let current = client
-                .inputports_api()
-                .get_input_port(id)
-                .await
-                .map_err(|e| SeederError::Api {
-                    message: format!("fetch revision for input port {id}"),
-                    source: Box::new(e),
-                })?;
+            let current =
+                client
+                    .inputports()
+                    .get_input_port(id)
+                    .await
+                    .map_err(|e| SeederError::Api {
+                        message: format!("fetch revision for input port {id}"),
+                        source: Box::new(e),
+                    })?;
             current.revision.ok_or_else(|| SeederError::Invariant {
                 message: format!("input port {id} has no revision"),
             })?
         }
         PortKind::Output => {
             let current = client
-                .outputports_api()
+                .outputports()
                 .get_output_port(id)
                 .await
                 .map_err(|e| SeederError::Api {
@@ -528,9 +515,8 @@ async fn start_port(client: &DynamicClient, id: &str, kind: PortKind) -> Result<
     match kind {
         PortKind::Input => {
             client
-                .inputports_api()
-                .run_status(id)
-                .update_run_status_2(&body)
+                .inputports()
+                .update_run_status(id, &body)
                 .await
                 .map_err(|e| SeederError::Api {
                     message: format!("start input port {id}"),
@@ -539,9 +525,8 @@ async fn start_port(client: &DynamicClient, id: &str, kind: PortKind) -> Result<
         }
         PortKind::Output => {
             client
-                .outputports_api()
-                .run_status(id)
-                .update_run_status_3(&body)
+                .outputports()
+                .update_run_status(id, &body)
                 .await
                 .map_err(|e| SeederError::Api {
                     message: format!("start output port {id}"),
@@ -560,7 +545,7 @@ async fn start_port(client: &DynamicClient, id: &str, kind: PortKind) -> Result<
             async move {
                 let state = match kind {
                     PortKind::Input => client
-                        .inputports_api()
+                        .inputports()
                         .get_input_port(&id)
                         .await
                         .map_err(|e| SeederError::Api {
@@ -571,7 +556,7 @@ async fn start_port(client: &DynamicClient, id: &str, kind: PortKind) -> Result<
                         .and_then(|c| c.state)
                         .unwrap_or_default(),
                     PortKind::Output => client
-                        .outputports_api()
+                        .outputports()
                         .get_output_port(&id)
                         .await
                         .map_err(|e| SeederError::Api {

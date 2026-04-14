@@ -3,10 +3,7 @@
 //! presence means the cluster already holds the current fixture version
 //! and `--skip-if-seeded` can short-circuit.
 
-use nifi_rust_client::dynamic::{
-    DynamicClient,
-    traits::{ProcessGroupsApi as _, ProcessGroupsProcessGroupsApi as _},
-};
+use nifi_rust_client::dynamic::DynamicClient;
 
 use crate::error::{Result, SeederError};
 
@@ -19,9 +16,8 @@ pub const FIXTURE_MARKER_NAME: &str = "nifilens-fixture-v1";
 /// root, `None` otherwise.
 pub async fn find_marker(client: &DynamicClient) -> Result<Option<String>> {
     let entity = client
-        .processgroups_api()
-        .process_groups("root")
-        .get_process_groups()
+        .processgroups()
+        .get_process_groups("root")
         .await
         .map_err(|e| SeederError::Api {
             message: "list root process groups".into(),

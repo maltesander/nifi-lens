@@ -9,10 +9,7 @@ pub mod services;
 pub mod stress;
 pub mod stress_payload;
 
-use nifi_rust_client::dynamic::{
-    DynamicClient,
-    traits::{ProcessGroupsApi as _, ProcessGroupsProcessGroupsApi as _},
-};
+use nifi_rust_client::dynamic::DynamicClient;
 
 use crate::entities::make_pg;
 use crate::error::{Result, SeederError};
@@ -31,9 +28,8 @@ pub async fn seed(client: &DynamicClient, detected_version: &semver::Version) ->
     tracing::info!(marker = FIXTURE_MARKER_NAME, "creating fixture marker PG");
     let body = make_pg(FIXTURE_MARKER_NAME);
     let created = client
-        .processgroups_api()
-        .process_groups("root")
-        .create_process_group(None, &body)
+        .processgroups()
+        .create_process_group("root", None, &body)
         .await
         .map_err(|e| SeederError::Api {
             message: "create fixture marker PG".into(),

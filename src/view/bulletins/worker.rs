@@ -1,6 +1,6 @@
 //! Bulletins tab polling worker.
 //!
-//! Polls `flow_api().get_bulletin_board(after, limit)` on a 5-second
+//! Polls `flow().get_bulletin_board(after, limit)` on a 5-second
 //! cadence and ships each batch back to the UI task as
 //! `AppEvent::Data(ViewPayload::Bulletins(...))`. The cursor (`last_id`)
 //! is kept locally: the worker receives it at spawn time, updates it on

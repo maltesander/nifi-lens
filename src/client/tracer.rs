@@ -9,9 +9,6 @@
 use std::sync::Arc;
 use std::time::SystemTime;
 
-use nifi_rust_client::dynamic::traits::ProvenanceApi as _;
-use nifi_rust_client::dynamic::traits::ProvenanceEventsApi as _;
-use nifi_rust_client::dynamic::traits::ProvenanceEventsContentApi as _;
 use nifi_rust_client::dynamic::types::{LineageDto, LineageEntity, LineageRequestDto};
 
 use crate::client::NifiClient;
@@ -127,7 +124,7 @@ impl NifiClient {
 
         let dto = self
             .inner
-            .provenanceevents_api()
+            .provenanceevents()
             .get_latest_provenance_events(component_id, Some(limit))
             .await
             .map_err(|err| {
@@ -180,6 +177,9 @@ impl NifiClient {
         let mut request = LineageRequestDto::default();
         request.lineage_request_type = Some("FLOWFILE".to_string());
         request.uuid = Some(flow_file_uuid.to_string());
+        // In clustered mode NiFi rejects lineage submissions that don't
+        // name a node; DynamicClient pins this at login.
+        request.cluster_node_id = self.inner.cluster_node_id().map(String::from);
 
         let mut lineage_dto = LineageDto::default();
         lineage_dto.request = Some(request);
@@ -190,7 +190,7 @@ impl NifiClient {
 
         let dto = self
             .inner
-            .provenance_api()
+            .provenance()
             .submit_lineage_request(&body)
             .await
             .map_err(|err| {
@@ -234,7 +234,7 @@ impl NifiClient {
 
         let dto = self
             .inner
-            .provenance_api()
+            .provenance()
             .get_lineage(query_id, cluster_node_id)
             .await
             .map_err(|err| {
@@ -279,8 +279,8 @@ impl NifiClient {
 
         let dto = self
             .inner
-            .provenanceevents_api()
-            .get_provenance_event(&event_id.to_string(), None)
+            .provenanceevents()
+            .get_provenance_event(&event_id.to_string(), self.inner.cluster_node_id())
             .await
             .map_err(|err| {
                 classify_or_fallback(self.context_name(), Box::new(err), |source| {
@@ -336,7 +336,7 @@ impl NifiClient {
         );
 
         self.inner
-            .provenance_api()
+            .provenance()
             .delete_lineage(query_id, cluster_node_id)
             .await
             .map_err(|err| {
@@ -371,12 +371,20 @@ impl NifiClient {
         );
 
         let id_str = event_id.to_string();
-        let events_api = self.inner.provenanceevents_api();
-        let content_api = events_api.content(&id_str);
+        let events_api = self.inner.provenanceevents();
+        let cluster_node_id = self.inner.cluster_node_id();
 
         let bytes = match side {
-            ContentSide::Input => content_api.get_input_content(None).await,
-            ContentSide::Output => content_api.get_output_content(None).await,
+            ContentSide::Input => {
+                events_api
+                    .get_input_content(&id_str, cluster_node_id, None)
+                    .await
+            }
+            ContentSide::Output => {
+                events_api
+                    .get_output_content(&id_str, cluster_node_id, None)
+                    .await
+            }
         }
         .map_err(|err| {
             classify_or_fallback(self.context_name(), Box::new(err), |source| {

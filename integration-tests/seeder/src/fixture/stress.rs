@@ -22,14 +22,7 @@
 
 use std::time::Duration;
 
-use nifi_rust_client::dynamic::{
-    DynamicClient,
-    traits::{
-        ControllerServicesApi as _, ControllerServicesRunStatusApi as _, ProcessGroupsApi as _,
-        ProcessGroupsConnectionsApi as _, ProcessGroupsControllerServicesApi as _,
-    },
-    types,
-};
+use nifi_rust_client::dynamic::{DynamicClient, types};
 
 use crate::entities::{make_connection, make_controller_service, make_processor, props};
 use crate::error::{Result, SeederError};
@@ -98,9 +91,8 @@ async fn create_and_enable_cs(
     tracing::info!(%name, "creating controller service");
     let body = make_controller_service(name, cs_type, properties);
     let created = client
-        .processgroups_api()
-        .controller_services("root")
-        .create_controller_service_1(&body)
+        .processgroups()
+        .create_controller_service("root", &body)
         .await
         .map_err(|e| SeederError::Api {
             message: format!("create {name}"),
@@ -124,7 +116,7 @@ async fn create_and_enable_cs(
             let id = id_poll.clone();
             async move {
                 let got = client
-                    .controller_services_api()
+                    .controller_services()
                     .get_controller_service(&id, None)
                     .await
                     .map_err(|e| SeederError::Api {
@@ -144,7 +136,7 @@ async fn create_and_enable_cs(
 
     // Flip to ENABLED — fetch current revision first.
     let current = client
-        .controller_services_api()
+        .controller_services()
         .get_controller_service(&id, None)
         .await
         .map_err(|e| SeederError::Api {
@@ -159,9 +151,8 @@ async fn create_and_enable_cs(
     run_status.state = Some("ENABLED".to_string());
     run_status.revision = Some(revision);
     client
-        .controller_services_api()
-        .run_status(&id)
-        .update_run_status_1(&run_status)
+        .controller_services()
+        .update_run_status(&id, &run_status)
         .await
         .map_err(|e| SeederError::Api {
             message: format!("enable {name}"),
@@ -173,7 +164,7 @@ async fn create_and_enable_cs(
         let id = id_poll.clone();
         async move {
             let got = client
-                .controller_services_api()
+                .controller_services()
                 .get_controller_service(&id, None)
                 .await
                 .map_err(|e| SeederError::Api {
@@ -564,9 +555,8 @@ async fn create_connection_with_backpressure(
     }
 
     let created = client
-        .processgroups_api()
-        .connections(pg_id)
-        .create_connection(&body)
+        .processgroups()
+        .create_connection(pg_id, &body)
         .await
         .map_err(|e| SeederError::Api {
             message: format!("create connection with backpressure in pg {pg_id}"),

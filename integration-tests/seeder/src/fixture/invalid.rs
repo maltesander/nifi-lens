@@ -9,7 +9,7 @@
 
 use std::time::Duration;
 
-use nifi_rust_client::dynamic::{DynamicClient, traits::ProcessorsApi as _};
+use nifi_rust_client::dynamic::DynamicClient;
 
 use crate::entities::{make_processor, props};
 use crate::error::{Result, SeederError};
@@ -45,14 +45,15 @@ pub async fn seed(client: &DynamicClient, parent_pg_id: &str) -> Result<()> {
         || {
             let id = id_poll.clone();
             async move {
-                let got = client
-                    .processors_api()
-                    .get_processor(&id)
-                    .await
-                    .map_err(|e| SeederError::Api {
-                        message: format!("poll invalid processor {id}"),
-                        source: Box::new(e),
-                    })?;
+                let got =
+                    client
+                        .processors()
+                        .get_processor(&id)
+                        .await
+                        .map_err(|e| SeederError::Api {
+                            message: format!("poll invalid processor {id}"),
+                            source: Box::new(e),
+                        })?;
                 let errs = got
                     .component
                     .and_then(|c| c.validation_errors)

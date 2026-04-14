@@ -18,15 +18,7 @@
 
 use std::time::Duration;
 
-use nifi_rust_client::dynamic::{
-    DynamicClient,
-    traits::{
-        ControllerServicesApi as _, ControllerServicesRunStatusApi as _, FlowApi as _,
-        FlowControllerServicesApi as _, ProcessGroupsApi as _,
-        ProcessGroupsEmptyAllConnectionsRequestsApi as _, ProcessGroupsProcessGroupsApi as _,
-    },
-    types,
-};
+use nifi_rust_client::dynamic::{DynamicClient, types};
 
 use crate::error::{Result, SeederError};
 use crate::state::poll_until;
@@ -58,7 +50,7 @@ async fn stop_all_under_root(client: &DynamicClient) -> Result<()> {
     body.state = Some("STOPPED".to_string());
 
     client
-        .flow_api()
+        .flow()
         .schedule_components("root", &body)
         .await
         .map_err(|e| SeederError::Api {
@@ -75,9 +67,14 @@ async fn stop_all_under_root(client: &DynamicClient) -> Result<()> {
 async fn disable_all_controller_services(client: &DynamicClient) -> Result<()> {
     // List every CS reachable from root (recursive).
     let entity = client
-        .flow_api()
-        .controller_services("root")
-        .get_controller_services_from_group(Some(false), Some(true), Some(false), Some(false))
+        .flow()
+        .get_controller_services_from_group(
+            "root",
+            Some(false),
+            Some(true),
+            Some(false),
+            Some(false),
+        )
         .await
         .map_err(|e| SeederError::Api {
             message: "list controller services under root".into(),
@@ -103,9 +100,8 @@ async fn disable_all_controller_services(client: &DynamicClient) -> Result<()> {
             run_status.revision = Some(rev);
         }
         client
-            .controller_services_api()
-            .run_status(&id)
-            .update_run_status_1(&run_status)
+            .controller_services()
+            .update_run_status(&id, &run_status)
             .await
             .map_err(|e| SeederError::Api {
                 message: format!("disable controller service {id}"),
@@ -122,7 +118,7 @@ async fn disable_all_controller_services(client: &DynamicClient) -> Result<()> {
                 let id = id_for_poll.clone();
                 async move {
                     let got = client
-                        .controller_services_api()
+                        .controller_services()
                         .get_controller_service(&id, None)
                         .await
                         .map_err(|e| SeederError::Api {
@@ -145,9 +141,8 @@ async fn disable_all_controller_services(client: &DynamicClient) -> Result<()> {
 
 async fn delete_all_child_pgs(client: &DynamicClient) -> Result<()> {
     let entity = client
-        .processgroups_api()
-        .process_groups("root")
-        .get_process_groups()
+        .processgroups()
+        .get_process_groups("root")
         .await
         .map_err(|e| SeederError::Api {
             message: "list root child PGs".into(),
@@ -171,9 +166,8 @@ async fn delete_all_child_pgs(client: &DynamicClient) -> Result<()> {
         // empty-all-connections request is fire-and-forget; flowfiles
         // drop within ~100ms.
         if let Err(e) = client
-            .processgroups_api()
-            .empty_all_connections_requests(&id)
-            .create_empty_all_connections_request()
+            .processgroups()
+            .create_empty_all_connections_request(&id)
             .await
         {
             tracing::debug!(%id, error = %e, "empty-all-connections request failed; continuing");
@@ -185,7 +179,7 @@ async fn delete_all_child_pgs(client: &DynamicClient) -> Result<()> {
             .and_then(|r| r.version)
             .map(|v| v.to_string());
         client
-            .processgroups_api()
+            .processgroups()
             .remove_process_group(&id, version.as_deref(), None, None)
             .await
             .map_err(|e| SeederError::Api {
@@ -200,9 +194,14 @@ async fn delete_all_root_controller_services(client: &DynamicClient) -> Result<(
     // Only the services directly on root (no descendants) — the child PG
     // delete pass above cascade-deletes any services inside them.
     let entity = client
-        .flow_api()
-        .controller_services("root")
-        .get_controller_services_from_group(Some(false), Some(false), Some(false), Some(false))
+        .flow()
+        .get_controller_services_from_group(
+            "root",
+            Some(false),
+            Some(false),
+            Some(false),
+            Some(false),
+        )
         .await
         .map_err(|e| SeederError::Api {
             message: "list root controller services".into(),
@@ -218,7 +217,7 @@ async fn delete_all_root_controller_services(client: &DynamicClient) -> Result<(
             .and_then(|r| r.version)
             .map(|v| v.to_string());
         client
-            .controller_services_api()
+            .controller_services()
             .remove_controller_service(&id, version.as_deref(), None, None)
             .await
             .map_err(|e| SeederError::Api {

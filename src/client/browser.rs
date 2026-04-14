@@ -3,10 +3,6 @@
 
 use std::time::SystemTime;
 
-use nifi_rust_client::dynamic::traits::{
-    FlowApi as _, FlowControllerServicesApi as _, FlowStatusApi as _, ProcessGroupsApi as _,
-};
-
 use crate::client::NifiClient;
 use crate::client::classify_or_fallback;
 use crate::error::NifiLensError;
@@ -81,9 +77,8 @@ impl NifiClient {
         );
         let entity = self
             .inner
-            .flow_api()
-            .status("root")
-            .get_process_group_status(Some(true), None, None)
+            .flow()
+            .get_process_group_status("root", Some(true), None, None)
             .await
             .map_err(|err| {
                 classify_or_fallback(self.context_name(), Box::new(err), |source| {
@@ -261,7 +256,7 @@ impl NifiClient {
         // 1) Base PG entity — identity + component counts.
         let pg_entity = self
             .inner
-            .processgroups_api()
+            .processgroups()
             .get_process_group(pg_id)
             .await
             .map_err(|err| {
@@ -282,9 +277,8 @@ impl NifiClient {
         // 2) CS list for this PG.
         let cs_entity = self
             .inner
-            .flow_api()
-            .controller_services(pg_id)
-            .get_controller_services_from_group(None, None, None, None)
+            .flow()
+            .get_controller_services_from_group(pg_id, None, None, None, None)
             .await
             .map_err(|err| {
                 classify_or_fallback(self.context_name(), Box::new(err), |source| {
@@ -392,11 +386,9 @@ impl NifiClient {
         &self,
         proc_id: &str,
     ) -> Result<ProcessorDetail, NifiLensError> {
-        use nifi_rust_client::dynamic::traits::ProcessorsApi as _;
-
         tracing::debug!(context = %self.context_name(), %proc_id, "fetching processor detail");
         let entity = self
-            .processors_api()
+            .processors()
             .get_processor(proc_id)
             .await
             .map_err(|err| {
@@ -514,11 +506,9 @@ impl NifiClient {
         &self,
         conn_id: &str,
     ) -> Result<ConnectionDetail, NifiLensError> {
-        use nifi_rust_client::dynamic::traits::ConnectionsApi as _;
-
         tracing::debug!(context = %self.context_name(), %conn_id, "fetching connection detail");
         let entity = self
-            .connections_api()
+            .connections()
             .get_connection(conn_id)
             .await
             .map_err(|err| {
@@ -604,11 +594,9 @@ impl NifiClient {
         &self,
         cs_id: &str,
     ) -> Result<ControllerServiceDetail, NifiLensError> {
-        use nifi_rust_client::dynamic::traits::ControllerServicesApi as _;
-
         tracing::debug!(context = %self.context_name(), %cs_id, "fetching CS detail");
         let entity = self
-            .controller_services_api()
+            .controller_services()
             .get_controller_service(cs_id, None)
             .await
             .map_err(|err| {

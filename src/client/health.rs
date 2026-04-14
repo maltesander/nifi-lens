@@ -2,7 +2,6 @@
 
 use std::time::Instant;
 
-use nifi_rust_client::dynamic::traits::SystemDiagnosticsApi as _;
 use nifi_rust_client::dynamic::types::common::StorageUsageDto;
 
 use crate::client::NifiClient;
@@ -205,7 +204,7 @@ impl NifiClient {
         );
         let entity = self
             .inner
-            .systemdiagnostics_api()
+            .systemdiagnostics()
             .get_system_diagnostics(Some(nodewise), None, None)
             .await
             .map_err(|err| {

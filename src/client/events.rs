@@ -11,7 +11,6 @@
 use std::collections::HashMap;
 use std::time::SystemTime;
 
-use nifi_rust_client::dynamic::traits::ProvenanceApi as _;
 use nifi_rust_client::dynamic::types::{
     ProvenanceDto, ProvenanceEntity, ProvenanceRequestDto, ProvenanceSearchValueDto,
 };
@@ -117,6 +116,9 @@ impl NifiClient {
         }
 
         let mut request = ProvenanceRequestDto::default();
+        // In clustered mode NiFi rejects provenance submissions that
+        // don't name a node; DynamicClient pins this at login.
+        request.cluster_node_id = self.inner.cluster_node_id().map(String::from);
         request.end_date = query.end_time_iso.clone();
         request.incremental_results = Some(false);
         // saturating cast: u32::MAX > i32::MAX; clamp instead of panic
@@ -144,7 +146,7 @@ impl NifiClient {
         // ProvenanceEntity — unlike the lineage counterpart.
         let prov = self
             .inner
-            .provenance_api()
+            .provenance()
             .submit_provenance_request(&body)
             .await
             .map_err(|err| {
@@ -189,7 +191,7 @@ impl NifiClient {
 
         let prov = self
             .inner
-            .provenance_api()
+            .provenance()
             .get_provenance(
                 &handle.query_id,
                 handle.cluster_node_id.as_deref(),
@@ -255,7 +257,7 @@ impl NifiClient {
         );
 
         self.inner
-            .provenance_api()
+            .provenance()
             .delete_provenance(&handle.query_id, handle.cluster_node_id.as_deref())
             .await
             .map(|_| ())

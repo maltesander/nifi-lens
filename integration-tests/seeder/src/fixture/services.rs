@@ -3,14 +3,7 @@
 
 use std::time::Duration;
 
-use nifi_rust_client::dynamic::{
-    DynamicClient,
-    traits::{
-        ControllerServicesApi as _, ControllerServicesRunStatusApi as _, ProcessGroupsApi as _,
-        ProcessGroupsControllerServicesApi as _,
-    },
-    types,
-};
+use nifi_rust_client::dynamic::{DynamicClient, types};
 
 use crate::entities::{make_controller_service, props};
 use crate::error::{Result, SeederError};
@@ -31,9 +24,8 @@ async fn create_enabled_json_reader(client: &DynamicClient, parent_pg_id: &str) 
         props(&[]),
     );
     let created = client
-        .processgroups_api()
-        .controller_services(parent_pg_id)
-        .create_controller_service_1(&body)
+        .processgroups()
+        .create_controller_service(parent_pg_id, &body)
         .await
         .map_err(|e| SeederError::Api {
             message: "create fixture-json-reader".into(),
@@ -57,7 +49,7 @@ async fn create_enabled_json_reader(client: &DynamicClient, parent_pg_id: &str) 
             let id = id_poll.clone();
             async move {
                 let got = client
-                    .controller_services_api()
+                    .controller_services()
                     .get_controller_service(&id, None)
                     .await
                     .map_err(|e| SeederError::Api {
@@ -78,7 +70,7 @@ async fn create_enabled_json_reader(client: &DynamicClient, parent_pg_id: &str) 
     // Flip to ENABLED — fetch the current revision first; NiFi uses
     // optimistic concurrency and rejects stale revision numbers.
     let current = client
-        .controller_services_api()
+        .controller_services()
         .get_controller_service(&id, None)
         .await
         .map_err(|e| SeederError::Api {
@@ -93,9 +85,8 @@ async fn create_enabled_json_reader(client: &DynamicClient, parent_pg_id: &str) 
     run_status.state = Some("ENABLED".to_string());
     run_status.revision = Some(revision);
     client
-        .controller_services_api()
-        .run_status(&id)
-        .update_run_status_1(&run_status)
+        .controller_services()
+        .update_run_status(&id, &run_status)
         .await
         .map_err(|e| SeederError::Api {
             message: "enable fixture-json-reader".into(),
@@ -111,7 +102,7 @@ async fn create_enabled_json_reader(client: &DynamicClient, parent_pg_id: &str) 
             let id = id_poll.clone();
             async move {
                 let got = client
-                    .controller_services_api()
+                    .controller_services()
                     .get_controller_service(&id, None)
                     .await
                     .map_err(|e| SeederError::Api {
@@ -141,9 +132,8 @@ async fn create_disabled_csv_reader(client: &DynamicClient, parent_pg_id: &str) 
         props(&[]),
     );
     client
-        .processgroups_api()
-        .controller_services(parent_pg_id)
-        .create_controller_service_1(&body)
+        .processgroups()
+        .create_controller_service(parent_pg_id, &body)
         .await
         .map_err(|e| SeederError::Api {
             message: "create fixture-csv-reader".into(),
@@ -164,9 +154,8 @@ async fn create_invalid_json_writer(client: &DynamicClient, parent_pg_id: &str) 
         props(&[]),
     );
     let created = client
-        .processgroups_api()
-        .controller_services(parent_pg_id)
-        .create_controller_service_1(&body)
+        .processgroups()
+        .create_controller_service(parent_pg_id, &body)
         .await
         .map_err(|e| SeederError::Api {
             message: "create fixture-broken-writer".into(),
@@ -198,7 +187,7 @@ async fn create_invalid_json_writer(client: &DynamicClient, parent_pg_id: &str) 
             let id = id_poll.clone();
             async move {
                 let got = client
-                    .controller_services_api()
+                    .controller_services()
                     .get_controller_service(&id, None)
                     .await
                     .map_err(|e| SeederError::Api {

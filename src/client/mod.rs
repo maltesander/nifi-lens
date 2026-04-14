@@ -3,7 +3,7 @@
 //! The wrapper owns a `nifi_rust_client::dynamic::DynamicClient`, the
 //! originating context's name, and the version that the library detected at
 //! login time. The wrapped client is exposed via `Deref` so callers can write
-//! `client.flow_api().get_about_info()` without an explicit accessor.
+//! `client.flow().get_about_info()` without an explicit accessor.
 
 pub mod browser;
 pub mod build;
@@ -14,7 +14,7 @@ pub mod tracer;
 use std::ops::{Deref, DerefMut};
 
 use nifi_rust_client::NifiError;
-use nifi_rust_client::dynamic::{DynamicClient, traits::FlowApi as _};
+use nifi_rust_client::dynamic::DynamicClient;
 use semver::Version;
 
 use crate::config::{ResolvedAuth, ResolvedContext};
@@ -198,23 +198,18 @@ impl NifiClient {
         &self.detected_version
     }
 
-    /// Convenience wrapper around `flow_api().get_about_info()` that maps
+    /// Convenience wrapper around `flow().get_about_info()` that maps
     /// the error into `NifiLensError`.
     pub async fn about(&self) -> Result<AboutSnapshot, NifiLensError> {
         tracing::debug!(context = %self.context_name, "fetching /flow/about");
-        let about = self
-            .inner
-            .flow_api()
-            .get_about_info()
-            .await
-            .map_err(|err| {
-                classify_or_fallback(&self.context_name, Box::new(err), |source| {
-                    NifiLensError::AboutFailed {
-                        context: self.context_name.clone(),
-                        source,
-                    }
-                })
-            })?;
+        let about = self.inner.flow().get_about_info().await.map_err(|err| {
+            classify_or_fallback(&self.context_name, Box::new(err), |source| {
+                NifiLensError::AboutFailed {
+                    context: self.context_name.clone(),
+                    source,
+                }
+            })
+        })?;
 
         Ok(AboutSnapshot {
             version: about.version.clone().unwrap_or_default(),
@@ -222,12 +217,12 @@ impl NifiClient {
         })
     }
 
-    /// Calls `flow_api().get_controller_status()` and flattens the response.
+    /// Calls `flow().get_controller_status()` and flattens the response.
     pub async fn controller_status(&self) -> Result<ControllerStatusSnapshot, NifiLensError> {
         tracing::debug!(context = %self.context_name, "fetching /flow/status");
         let entity = self
             .inner
-            .flow_api()
+            .flow()
             .get_controller_status()
             .await
             .map_err(|err| {
@@ -249,17 +244,15 @@ impl NifiClient {
         })
     }
 
-    /// Calls `flow_api().status("root").get_process_group_status(recursive=true)`
+    /// Calls `flow().get_process_group_status("root", recursive=true)`
     /// and flattens every descendant connection into a sorted `QueueSnapshot`
     /// list.
     pub async fn root_pg_status(&self) -> Result<RootPgStatusSnapshot, NifiLensError> {
-        use nifi_rust_client::dynamic::traits::{FlowApi as _, FlowStatusApi as _};
         tracing::debug!(context = %self.context_name, "fetching /flow/process-groups/root/status");
         let entity = self
             .inner
-            .flow_api()
-            .status("root")
-            .get_process_group_status(Some(true), None, None)
+            .flow()
+            .get_process_group_status("root", Some(true), None, None)
             .await
             .map_err(|err| {
                 classify_or_fallback(&self.context_name, Box::new(err), |source| {
@@ -285,7 +278,7 @@ impl NifiClient {
         Ok(snapshot)
     }
 
-    /// Calls `flow_api().get_bulletin_board(after, None, None, None, None, limit)`
+    /// Calls `flow().get_bulletin_board(after, None, None, None, None, limit)`
     /// and flattens the response for the Overview reducer.
     pub async fn bulletin_board(
         &self,
@@ -297,7 +290,7 @@ impl NifiClient {
         let limit_s = limit.map(|n| n.to_string());
         let board = self
             .inner
-            .flow_api()
+            .flow()
             .get_bulletin_board(after.as_deref(), None, None, None, None, limit_s.as_deref())
             .await
             .map_err(|err| {
@@ -340,7 +333,7 @@ pub struct AboutSnapshot {
     pub title: String,
 }
 
-/// Global component counts pulled from `flow_api().get_controller_status()`.
+/// Global component counts pulled from `flow().get_controller_status()`.
 /// Used by the Overview tab's "component counts" strip.
 #[derive(Debug, Clone, Default)]
 pub struct ControllerStatusSnapshot {
