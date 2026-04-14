@@ -881,7 +881,16 @@ usable state.
     rewritten to switch on `DetailFocus` so the sticky footer shows
     context-appropriate hint spans. `Cargo.toml` unchanged — no new
     dependencies.
-17. **Phase 7 — Write-path scaffolding.** Dry-run mode, confirmation modal
+17. **Modal tables polish.** *(shipped)* Fuzzy Find (`f`) and Context
+    Switcher (`K`) modals rewritten as ratatui `Table` widgets with
+    header rows and aligned columns. `FlowIndexEntry` extended with
+    `name` / `group_path` / `state: StateBadge` fields populated at
+    `build_flow_index` time. Matched characters in the fuzzy Name
+    column render bold + accent. `rebuild_matches` tie-breaks equal
+    scores by kind priority (Processor > PG > CS > Conn > Ports).
+    `processor_run_icon` helper relocated to `src/widget/run_icon.rs`
+    so both the Browser tree and the fuzzy State column share it.
+18. **Phase 7 — Write-path scaffolding.** Dry-run mode, confirmation modal
     primitive, audit log, `--allow-writes` flag. No writes enabled yet —
     this just lays the rails for v2.
 
