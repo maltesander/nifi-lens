@@ -57,7 +57,7 @@ pub fn render(frame: &mut Frame, area: Rect, state: &ContextSwitcherState) {
 
     let widths = [
         Constraint::Length(20),
-        Constraint::Percentage(100),
+        Constraint::Min(0),
         Constraint::Length(12),
         Constraint::Length(8),
     ];
