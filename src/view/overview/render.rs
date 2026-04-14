@@ -344,12 +344,23 @@ fn render_noisy_components(
             Cell::from(""),
         ])]
     } else {
+        let visible_rows = area.height.saturating_sub(1) as usize;
+        let scroll_offset = if visible_rows == 0 {
+            0
+        } else if selected >= visible_rows {
+            selected + 1 - visible_rows
+        } else {
+            0
+        };
+        let selected_in_window = selected.saturating_sub(scroll_offset);
         noisy
             .iter()
+            .skip(scroll_offset)
+            .take(visible_rows)
             .enumerate()
             .map(|(idx, n)| {
                 let sev_style = severity_style(n.max_severity);
-                let row_style = if focused && idx == selected {
+                let row_style = if focused && idx == selected_in_window {
                     theme::cursor_row()
                 } else {
                     Style::default()
@@ -1027,6 +1038,94 @@ mod tests {
         assert!(
             !output.contains("more"),
             "'... +N more' placeholder must not appear"
+        );
+    }
+
+    #[test]
+    fn noisy_panel_scrolls_to_selected() {
+        use crate::client::{
+            AboutSnapshot, BulletinBoardSnapshot, ControllerStatusSnapshot, RootPgStatusSnapshot,
+        };
+        use crate::event::{OverviewPayload, OverviewPgStatusPayload};
+        use crate::view::overview::state::{NoisyComponent, Severity as OvSev, apply_payload};
+        use std::time::{Duration, UNIX_EPOCH};
+
+        let mut state = OverviewState::new();
+        state.focus = crate::view::overview::state::OverviewFocus::Noisy;
+
+        // Populate with a PG-status payload so the layout renders properly.
+        apply_payload(
+            &mut state,
+            OverviewPayload::PgStatus(OverviewPgStatusPayload {
+                about: AboutSnapshot {
+                    version: "2.8.0".into(),
+                    title: "NiFi".into(),
+                },
+                controller: ControllerStatusSnapshot {
+                    running: 1,
+                    stopped: 0,
+                    invalid: 0,
+                    disabled: 0,
+                    active_threads: 0,
+                    flow_files_queued: 0,
+                    bytes_queued: 0,
+                },
+                root_pg: RootPgStatusSnapshot::default(),
+                bulletin_board: BulletinBoardSnapshot::default(),
+                fetched_at: UNIX_EPOCH + Duration::from_secs(T0),
+            }),
+        );
+
+        // Five noisy components with distinct names. visible_rows=4, so
+        // selected=4 forces scroll_offset=1. "alfa" scrolls away; "echo" appears.
+        state.noisy = vec![
+            NoisyComponent {
+                source_id: "a".into(),
+                group_id: "g".into(),
+                source_name: "alfa".into(),
+                count: 1,
+                max_severity: OvSev::Info,
+            },
+            NoisyComponent {
+                source_id: "b".into(),
+                group_id: "g".into(),
+                source_name: "bravo".into(),
+                count: 1,
+                max_severity: OvSev::Info,
+            },
+            NoisyComponent {
+                source_id: "c".into(),
+                group_id: "g".into(),
+                source_name: "charlie".into(),
+                count: 1,
+                max_severity: OvSev::Info,
+            },
+            NoisyComponent {
+                source_id: "d".into(),
+                group_id: "g".into(),
+                source_name: "delta".into(),
+                count: 1,
+                max_severity: OvSev::Info,
+            },
+            NoisyComponent {
+                source_id: "e".into(),
+                group_id: "g".into(),
+                source_name: "echo".into(),
+                count: 1,
+                max_severity: OvSev::Info,
+            },
+        ];
+        state.noisy_selected = 4;
+
+        let output = render_to_string(&state);
+
+        assert!(
+            output.contains("echo"),
+            "selected row 'echo' must be visible after scroll"
+        );
+        assert!(
+            !output.contains("alfa"),
+            "'alfa' must be scrolled out of view"
         );
     }
 }
