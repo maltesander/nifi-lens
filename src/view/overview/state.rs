@@ -21,6 +21,9 @@ pub const TOP_NOISY: usize = 5;
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct BulletinBucket {
     pub count: u32,
+    pub error_count: u32,
+    pub warning_count: u32,
+    pub info_count: u32,
     pub max_severity: Severity,
 }
 
@@ -91,6 +94,11 @@ pub struct OverviewSnapshot {
 pub struct OverviewState {
     pub snapshot: Option<OverviewSnapshot>,
     pub sparkline: [BulletinBucket; SPARKLINE_MINUTES],
+    /// Unix seconds at the start of `sparkline[SPARKLINE_MINUTES-1]` (the
+    /// newest bucket). `None` until the first PG-status poll lands. Aligned
+    /// to a minute boundary so that `(fetched_secs - epoch) / 60` gives the
+    /// number of complete minutes that have elapsed and need to be rolled.
+    pub sparkline_epoch_secs: Option<i64>,
     pub unhealthy: Vec<UnhealthyQueue>,
     pub noisy: Vec<NoisyComponent>,
     /// Highest bulletin id we've seen so the sparkline does not double-count
@@ -184,23 +192,57 @@ fn apply_pg_status(state: &mut OverviewState, payload: OverviewPgStatusPayload) 
         state.queues_selected = 0;
     }
 
-    // Sparkline: assign each bulletin to a minute bucket relative to
-    // fetched_at. sparkline[0] is the OLDEST minute (SPARKLINE_MINUTES-1
-    // minutes before fetched_at); sparkline[SPARKLINE_MINUTES-1] is the
-    // NEWEST minute (the one containing fetched_at). Bulletins older than
-    // the window are discarded for the sparkline but still count toward
-    // "noisy".
-    let mut sparkline = [BulletinBucket::default(); SPARKLINE_MINUTES];
+    // Sparkline: rolling 15-minute bulletin-rate chart.
+    //
+    // sparkline[0] is the OLDEST minute; sparkline[SPARKLINE_MINUTES-1] is
+    // the NEWEST minute. The array accumulates across polls instead of being
+    // replaced each time, so that a system producing >200 bulletins/minute
+    // (which would cause all fetched bulletins to fall in the same second)
+    // still builds up a meaningful rate history over time.
+    //
+    // Mechanics:
+    //   1. `sparkline_epoch_secs` tracks the Unix-second start of the current
+    //      newest bucket.  On the first poll it is initialised to the
+    //      minute-floor of `fetched_at`.
+    //   2. When one or more full minutes have elapsed since the epoch, the
+    //      array is rotated left by that many positions (old data slides toward
+    //      index 0 and falls off; new zero-filled buckets appear at the tail).
+    //   3. Only bulletins with id > `last_bulletin_id` (i.e. bulletins not yet
+    //      counted) are accumulated.  On the very first poll
+    //      `last_bulletin_id` is None, so every bulletin in the current board
+    //      is treated as new — this provides an immediate historical backfill.
     let fetched_secs = fetched_at
         .duration_since(std::time::UNIX_EPOCH)
         .map(|d| d.as_secs() as i64)
         .unwrap_or(0);
 
+    // Step 1: initialise or advance the epoch.
+    let epoch_secs = state
+        .sparkline_epoch_secs
+        .unwrap_or_else(|| (fetched_secs / 60) * 60);
+    let minutes_elapsed = ((fetched_secs - epoch_secs) / 60).max(0) as usize;
+    let new_epoch = if minutes_elapsed > 0 {
+        let shift = minutes_elapsed.min(SPARKLINE_MINUTES);
+        state.sparkline.rotate_left(shift);
+        for i in (SPARKLINE_MINUTES - shift)..SPARKLINE_MINUTES {
+            state.sparkline[i] = BulletinBucket::default();
+        }
+        epoch_secs + (minutes_elapsed as i64 * 60)
+    } else {
+        epoch_secs
+    };
+    state.sparkline_epoch_secs = Some(new_epoch);
+
+    // Step 2: accumulate only new bulletins.
+    let cursor = state.last_bulletin_id.unwrap_or(i64::MIN);
     for b in &bulletin_board.bulletins {
+        if b.id <= cursor {
+            continue;
+        }
         let Some(ts) = parse_iso_seconds(&b.timestamp_iso) else {
             continue;
         };
-        let age_secs = fetched_secs.saturating_sub(ts);
+        let age_secs = fetched_secs - ts;
         if age_secs < 0 {
             continue;
         }
@@ -208,14 +250,25 @@ fn apply_pg_status(state: &mut OverviewState, payload: OverviewPgStatusPayload) 
         if minute >= SPARKLINE_MINUTES {
             continue;
         }
-        let bucket = &mut sparkline[SPARKLINE_MINUTES - 1 - minute];
+        let bucket = &mut state.sparkline[SPARKLINE_MINUTES - 1 - minute];
         bucket.count = bucket.count.saturating_add(1);
         let sev = Severity::parse(&b.level);
+        match sev {
+            Severity::Error => {
+                bucket.error_count = bucket.error_count.saturating_add(1);
+            }
+            Severity::Warning => {
+                bucket.warning_count = bucket.warning_count.saturating_add(1);
+            }
+            Severity::Info => {
+                bucket.info_count = bucket.info_count.saturating_add(1);
+            }
+            Severity::Unknown => {}
+        }
         if sev > bucket.max_severity {
             bucket.max_severity = sev;
         }
     }
-    state.sparkline = sparkline;
 
     // Noisy components: aggregate counts by source_id across *this poll's*
     // bulletins. Phase 1 is snapshot-style — not a running tally — because
@@ -395,6 +448,26 @@ mod tests {
         }
     }
 
+    /// Like `payload` but with a custom `fetched_at` offset (seconds from
+    /// `UNIX_EPOCH`).  Used by multi-poll tests that need to simulate elapsed
+    /// wall-clock time between polls.
+    fn payload_at(bulletins: Vec<BulletinSnapshot>, fetched_secs: u64) -> OverviewPayload {
+        OverviewPayload::PgStatus(OverviewPgStatusPayload {
+            about: AboutSnapshot {
+                version: "2.8.0".into(),
+                title: "NiFi".into(),
+            },
+            controller: ControllerStatusSnapshot::default(),
+            root_pg: RootPgStatusSnapshot {
+                flow_files_queued: 0,
+                bytes_queued: 0,
+                connections: vec![],
+            },
+            bulletin_board: BulletinBoardSnapshot { bulletins },
+            fetched_at: UNIX_EPOCH + Duration::from_secs(fetched_secs),
+        })
+    }
+
     #[test]
     fn apply_populates_snapshot() {
         let mut state = OverviewState::new();
@@ -491,6 +564,80 @@ mod tests {
             payload(ControllerStatusSnapshot::default(), vec![], bulletins),
         );
         assert!(state.sparkline.iter().all(|b| b.count == 0));
+    }
+
+    #[test]
+    fn sparkline_does_not_double_count_bulletins_across_polls() {
+        // Simulate two polls 10 seconds apart where the second poll still
+        // returns the same bulletin (id=1) alongside a genuinely new one
+        // (id=2).  Only id=2 should increment the newest bucket.
+        let mut state = OverviewState::new();
+
+        // Poll 1 at T0: one bulletin in the current minute.
+        apply_payload(
+            &mut state,
+            payload_at(
+                vec![bulletin(1, "INFO", "a", "2026-04-11T10:14:20Z")],
+                T0, // 10:14:22Z
+            ),
+        );
+        assert_eq!(state.sparkline[SPARKLINE_MINUTES - 1].count, 1);
+
+        // Poll 2 at T0+10s: bulletin id=1 is still on the board (NiFi hasn't
+        // evicted it), plus a brand-new id=2.
+        apply_payload(
+            &mut state,
+            payload_at(
+                vec![
+                    bulletin(1, "INFO", "a", "2026-04-11T10:14:20Z"),
+                    bulletin(2, "WARN", "b", "2026-04-11T10:14:30Z"),
+                ],
+                T0 + 10,
+            ),
+        );
+        // Bucket 14 should have count 2 (id=1 from poll 1, id=2 from poll 2),
+        // NOT 3 (which would happen if id=1 were counted twice).
+        assert_eq!(
+            state.sparkline[SPARKLINE_MINUTES - 1].count,
+            2,
+            "id=1 must not be counted again on the second poll"
+        );
+    }
+
+    #[test]
+    fn sparkline_rolls_window_forward_when_minute_elapses() {
+        // Poll 1 at T0 (10:14:22Z): one bulletin lands in bucket 14.
+        let mut state = OverviewState::new();
+        apply_payload(
+            &mut state,
+            payload_at(vec![bulletin(1, "INFO", "a", "2026-04-11T10:14:20Z")], T0),
+        );
+        assert_eq!(state.sparkline[SPARKLINE_MINUTES - 1].count, 1);
+
+        // Poll 2 at T0+70s (10:15:32Z): a full minute has elapsed, so the
+        // window rolls left by 1.  The bulletin from poll 1 (now 72s old →
+        // minute 1) should have moved to bucket 13.  A new bulletin (id=2)
+        // lands in the fresh bucket 14.
+        apply_payload(
+            &mut state,
+            payload_at(
+                vec![
+                    bulletin(1, "INFO", "a", "2026-04-11T10:14:20Z"), // old, not re-counted
+                    bulletin(2, "WARN", "b", "2026-04-11T10:15:30Z"), // new
+                ],
+                T0 + 70,
+            ),
+        );
+        assert_eq!(
+            state.sparkline[SPARKLINE_MINUTES - 1].count,
+            1,
+            "only id=2 in the new current bucket"
+        );
+        assert_eq!(
+            state.sparkline[SPARKLINE_MINUTES - 2].count,
+            1,
+            "id=1 from poll 1 rolled into the previous-minute bucket"
+        );
     }
 
     #[test]
