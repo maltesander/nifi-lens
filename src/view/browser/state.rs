@@ -430,10 +430,71 @@ impl BrowserState {
                 let source_id = &self.nodes[arena_idx].id;
                 bulletins
                     .iter()
+                    .rev()
                     .filter(|b| b.source_id == *source_id)
                     .nth(row)
                     .map(|b| b.message.clone())
             }
+            (DetailSection::ControllerServices, NodeDetail::ProcessGroup(d)) => {
+                d.controller_services.get(row).map(|cs| cs.id.clone())
+            }
+            (DetailSection::ChildGroups, NodeDetail::ProcessGroup(d)) => self
+                .child_process_groups(&d.id)
+                .get(row)
+                .map(|k| k.id.clone()),
+            (DetailSection::RecentBulletins, NodeDetail::ProcessGroup(d)) => {
+                let group_id = &d.id;
+                bulletins
+                    .iter()
+                    .rev()
+                    .filter(|b| b.group_id == *group_id)
+                    .nth(row)
+                    .map(|b| b.message.clone())
+            }
+            _ => None,
+        }
+    }
+
+    /// Return the `source_id` of the bulletin row under detail focus,
+    /// or `None` if focus is not on a Recent bulletins row.
+    ///
+    /// Used by the `t` cross-link on the PG detail pane: the PG itself
+    /// is not the bulletin source, so the handler must walk the ring to
+    /// find the per-row source. For Processor nodes, the nth matching
+    /// bulletin's `source_id` equals the processor id — the helper works
+    /// there too, so the handler can use it unconditionally.
+    pub fn focused_row_source_id(
+        &self,
+        bulletins: &std::collections::VecDeque<crate::client::BulletinSnapshot>,
+    ) -> Option<String> {
+        let DetailFocus::Section { idx, rows } = &self.detail_focus else {
+            return None;
+        };
+        let arena_idx = *self.visible.get(self.selected)?;
+        let detail = self.details.get(&arena_idx)?;
+        let kind = self.nodes[arena_idx].kind;
+        let sections = DetailSections::for_node(kind);
+        let section = *sections.0.get(*idx)?;
+        if section != DetailSection::RecentBulletins {
+            return None;
+        }
+        let row = rows[*idx];
+        match detail {
+            NodeDetail::Processor(_) => {
+                let source_id = &self.nodes[arena_idx].id;
+                bulletins
+                    .iter()
+                    .rev()
+                    .filter(|b| b.source_id == *source_id)
+                    .nth(row)
+                    .map(|b| b.source_id.clone())
+            }
+            NodeDetail::ProcessGroup(d) => bulletins
+                .iter()
+                .rev()
+                .filter(|b| b.group_id == d.id)
+                .nth(row)
+                .map(|b| b.source_id.clone()),
             _ => None,
         }
     }
@@ -1926,5 +1987,132 @@ mod tests {
         assert_eq!(s.section_len(DetailSection::ControllerServices, &ring), 2);
         assert_eq!(s.section_len(DetailSection::ChildGroups, &ring), 0);
         assert_eq!(s.section_len(DetailSection::RecentBulletins, &ring), 1);
+    }
+
+    #[test]
+    fn focused_row_copy_value_pg_controller_services() {
+        use crate::client::{
+            ControllerServiceSummary, NodeKind, NodeStatusSummary, ProcessGroupDetail,
+        };
+        use std::collections::VecDeque;
+
+        let mut s = BrowserState::new();
+        s.nodes.push(TreeNode {
+            parent: None,
+            children: vec![],
+            kind: NodeKind::ProcessGroup,
+            id: "pg-1".into(),
+            group_id: String::new(),
+            name: "pg-1".into(),
+            status_summary: NodeStatusSummary::ProcessGroup {
+                running: 0,
+                stopped: 0,
+                invalid: 0,
+                disabled: 0,
+            },
+        });
+        s.visible = vec![0];
+        s.selected = 0;
+        s.details.insert(
+            0,
+            NodeDetail::ProcessGroup(ProcessGroupDetail {
+                id: "pg-1".into(),
+                name: "pg-1".into(),
+                parent_group_id: None,
+                running: 0,
+                stopped: 0,
+                invalid: 0,
+                disabled: 0,
+                active_threads: 0,
+                flow_files_queued: 0,
+                bytes_queued: 0,
+                queued_display: "0 / 0 B".into(),
+                controller_services: vec![
+                    ControllerServiceSummary {
+                        id: "cs-a".into(),
+                        name: "cs-a".into(),
+                        type_short: "T".into(),
+                        state: "ENABLED".into(),
+                    },
+                    ControllerServiceSummary {
+                        id: "cs-b".into(),
+                        name: "cs-b".into(),
+                        type_short: "T".into(),
+                        state: "ENABLED".into(),
+                    },
+                ],
+            }),
+        );
+        s.detail_focus = DetailFocus::Section {
+            idx: 0, // ControllerServices is the first section for PG
+            rows: [1, 0, 0, 0],
+        };
+
+        let ring: VecDeque<crate::client::BulletinSnapshot> = VecDeque::new();
+        assert_eq!(s.focused_row_copy_value(&ring).as_deref(), Some("cs-b"),);
+    }
+
+    #[test]
+    fn focused_row_source_id_pg_recent_bulletins_returns_nth_newest_source() {
+        use crate::client::{BulletinSnapshot, NodeKind, NodeStatusSummary, ProcessGroupDetail};
+        use std::collections::VecDeque;
+
+        let mut s = BrowserState::new();
+        s.nodes.push(TreeNode {
+            parent: None,
+            children: vec![],
+            kind: NodeKind::ProcessGroup,
+            id: "pg-1".into(),
+            group_id: String::new(),
+            name: "pg-1".into(),
+            status_summary: NodeStatusSummary::ProcessGroup {
+                running: 0,
+                stopped: 0,
+                invalid: 0,
+                disabled: 0,
+            },
+        });
+        s.visible = vec![0];
+        s.selected = 0;
+        s.details.insert(
+            0,
+            NodeDetail::ProcessGroup(ProcessGroupDetail {
+                id: "pg-1".into(),
+                name: "pg-1".into(),
+                parent_group_id: None,
+                running: 0,
+                stopped: 0,
+                invalid: 0,
+                disabled: 0,
+                active_threads: 0,
+                flow_files_queued: 0,
+                bytes_queued: 0,
+                queued_display: "".into(),
+                controller_services: vec![],
+            }),
+        );
+        // Focus is PG's RecentBulletins section (idx 2).
+        s.detail_focus = DetailFocus::Section {
+            idx: 2,
+            rows: [0, 0, 1, 0],
+        };
+
+        // Ring: older → newer. Newest-first iteration should be [b3, b2, b1].
+        let mut ring: VecDeque<BulletinSnapshot> = VecDeque::new();
+        for (i, src) in ["p1", "p2", "p3"].iter().enumerate() {
+            ring.push_back(BulletinSnapshot {
+                id: (10 + i) as i64,
+                level: "INFO".into(),
+                message: format!("m{i}"),
+                source_id: (*src).into(),
+                source_name: (*src).into(),
+                source_type: "PROCESSOR".into(),
+                group_id: "pg-1".into(),
+                timestamp_iso: "".into(),
+                timestamp_human: "".into(),
+            });
+        }
+        // Row 1 newest-first → p2.
+        assert_eq!(s.focused_row_source_id(&ring).as_deref(), Some("p2"),);
     }
 }
