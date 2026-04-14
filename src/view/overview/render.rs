@@ -22,7 +22,8 @@ use ratatui::text::{Line, Span};
 use ratatui::widgets::{Cell, Clear, Paragraph, Row, Sparkline, Table};
 
 use super::state::{
-    BulletinBucket, NoisyComponent, OverviewSnapshot, OverviewState, Severity, UnhealthyQueue,
+    BulletinBucket, NoisyComponent, OverviewFocus, OverviewSnapshot, OverviewState, Severity,
+    UnhealthyQueue,
 };
 use crate::theme;
 use crate::widget::gauge::{fill_bar, spark_bar};
@@ -56,7 +57,9 @@ pub fn render(frame: &mut Frame, area: Rect, state: &OverviewState) {
     } else {
         format!(" Nodes ({total} connected) ")
     };
-    let nodes_block = Panel::new(nodes_title).into_block();
+    let nodes_block = Panel::new(nodes_title)
+        .focused(state.focus == OverviewFocus::Nodes)
+        .into_block();
     let nodes_inner = nodes_block.inner(zones[1]);
     frame.render_widget(nodes_block, zones[1]);
     render_nodes_zone(frame, nodes_inner, state);
@@ -119,32 +122,56 @@ fn render_processor_info_line(frame: &mut Frame, area: Rect, snapshot: Option<&O
 }
 
 fn render_nodes_zone(frame: &mut Frame, area: Rect, state: &OverviewState) {
-    let mut lines: Vec<Line> = Vec::new();
     let total = state.nodes.nodes.len();
+    let focused = state.focus == OverviewFocus::Nodes;
 
-    if state.nodes.nodes.is_empty() {
-        lines.push(Line::from(Span::styled(
-            "  loading system diagnostics…",
-            theme::muted(),
-        )));
-    } else {
-        // Up to 8 node rows, then "+N more" if there are extras.
-        let max_visible = 8;
-        let visible = state.nodes.nodes.iter().take(max_visible);
-        for node in visible {
-            lines.push(format_node_row(node));
-        }
-        if total > max_visible {
-            lines.push(Line::from(Span::styled(
+    if total == 0 {
+        frame.render_widget(
+            Paragraph::new(Span::styled(
+                "  loading system diagnostics…",
+                theme::muted(),
+            )),
+            area,
+        );
+        return;
+    }
+
+    let max_visible: usize = 8;
+    let selected = state.nodes.selected;
+
+    let mut rows: Vec<Row> = state
+        .nodes
+        .nodes
+        .iter()
+        .take(max_visible)
+        .enumerate()
+        .map(|(idx, node)| {
+            let row_style = if focused && idx == selected {
+                theme::cursor_row()
+            } else {
+                Style::default()
+            };
+            node_to_row(node).style(row_style)
+        })
+        .collect();
+
+    if total > max_visible {
+        rows.push(Row::new(vec![
+            Cell::from(Span::styled(
                 format!("  … +{} more", total - max_visible),
                 theme::muted(),
-            )));
-        }
+            )),
+            Cell::from(""),
+            Cell::from(""),
+            Cell::from(""),
+        ]));
+    }
 
-        // Repositories aggregate row with inline fill bars.
-        let repos = &state.repositories_summary;
-        lines.push(Line::from(vec![
-            Span::styled("  repositories  ", theme::muted()),
+    // Cluster-aggregate repositories row (not selectable).
+    let repos = &state.repositories_summary;
+    rows.push(Row::new(vec![
+        Cell::from(Span::styled("  repositories", theme::muted())),
+        Cell::from(Line::from(vec![
             Span::raw("content "),
             Span::styled(
                 fill_bar(4, repos.content_percent),
@@ -155,7 +182,9 @@ fn render_nodes_zone(frame: &mut Frame, area: Rect, state: &OverviewState) {
                 format!("{:>3}%", repos.content_percent),
                 fill_style(repos.content_percent),
             ),
-            Span::raw("   flowfile "),
+        ])),
+        Cell::from(Line::from(vec![
+            Span::raw("flowfile "),
             Span::styled(
                 fill_bar(4, repos.flowfile_percent),
                 fill_style(repos.flowfile_percent),
@@ -165,7 +194,9 @@ fn render_nodes_zone(frame: &mut Frame, area: Rect, state: &OverviewState) {
                 format!("{:>3}%", repos.flowfile_percent),
                 fill_style(repos.flowfile_percent),
             ),
-            Span::raw("   provenance "),
+        ])),
+        Cell::from(Line::from(vec![
+            Span::raw("provenance "),
             Span::styled(
                 fill_bar(4, repos.provenance_percent),
                 fill_style(repos.provenance_percent),
@@ -175,15 +206,24 @@ fn render_nodes_zone(frame: &mut Frame, area: Rect, state: &OverviewState) {
                 format!("{:>3}%", repos.provenance_percent),
                 fill_style(repos.provenance_percent),
             ),
-        ]));
-    }
+        ])),
+    ]));
 
-    frame.render_widget(Paragraph::new(lines), area);
+    let table = Table::new(
+        rows,
+        [
+            Constraint::Fill(1),
+            Constraint::Length(18),
+            Constraint::Length(16),
+            Constraint::Length(18),
+        ],
+    );
+    frame.render_widget(table, area);
 }
 
-/// Format a single node row using fields from `NodeHealthRow`.
-fn format_node_row(node: &crate::client::health::NodeHealthRow) -> Line<'static> {
-    // GC severity: treat > 5 new collections per poll as warning-level.
+/// Convert a `NodeHealthRow` to a ratatui `Row` with four styled cells:
+/// address | heap bar+% | gc | load bar+value.
+fn node_to_row(node: &crate::client::health::NodeHealthRow) -> Row<'static> {
     let gc_style = match node.gc_delta {
         Some(d) if d > 5 => theme::error(),
         Some(_) => theme::warning(),
@@ -193,8 +233,6 @@ fn format_node_row(node: &crate::client::health::NodeHealthRow) -> Line<'static>
         Some(d) => format!("{:>4}ms (+{})", node.gc_millis, d),
         None => format!("{:>4}ms", node.gc_millis),
     };
-
-    // Load severity derived from load_average vs available_processors.
     let (load_str, load_style) = match (node.load_average, node.available_processors) {
         (Some(l), Some(cpus)) if cpus > 0 => {
             let ratio = l / cpus as f64;
@@ -210,29 +248,33 @@ fn format_node_row(node: &crate::client::health::NodeHealthRow) -> Line<'static>
         (Some(l), _) => (format!("{l:>4.1}"), Style::default()),
         (None, _) => ("\u{2014}   ".to_string(), theme::muted()),
     };
-
     let heap_style = health_severity_style(node.heap_severity);
     let heap_bar = fill_bar(5, node.heap_percent);
-    // Load bar shows load average as a fraction of available processors
-    // (1.0 = fully loaded). Falls back to an empty bar when either value
-    // is missing.
     let load_bar = match (node.load_average, node.available_processors) {
         (Some(l), Some(cpus)) if cpus > 0 => spark_bar(l as f32, cpus as f32, 4),
         _ => "░░░░".to_string(),
     };
-    Line::from(vec![
-        Span::raw("  "),
-        Span::styled(node.node_address.clone(), theme::accent()),
-        Span::raw("   heap "),
-        Span::styled(heap_bar, heap_style),
-        Span::raw(" "),
-        Span::styled(format!("{:>3}%", node.heap_percent), heap_style),
-        Span::raw("   gc "),
-        Span::styled(gc_str, gc_style),
-        Span::raw("   load "),
-        Span::styled(load_bar, load_style),
-        Span::raw(" "),
-        Span::styled(load_str, load_style),
+    Row::new(vec![
+        Cell::from(Span::styled(
+            format!("  {}", node.node_address),
+            theme::accent(),
+        )),
+        Cell::from(Line::from(vec![
+            Span::raw("heap "),
+            Span::styled(heap_bar, heap_style),
+            Span::raw(" "),
+            Span::styled(format!("{:>3}%", node.heap_percent), heap_style),
+        ])),
+        Cell::from(Line::from(vec![
+            Span::raw("gc "),
+            Span::styled(gc_str, gc_style),
+        ])),
+        Cell::from(Line::from(vec![
+            Span::raw("load "),
+            Span::styled(load_bar, load_style),
+            Span::raw(" "),
+            Span::styled(load_str, load_style),
+        ])),
     ])
 }
 
