@@ -124,7 +124,7 @@ machine (`Idle` ↔ `PendingGo`) translates `crossterm::KeyEvent` into
 - `FocusAction` (Up/Down/Left/Right/PgUp/PgDn/First/Last/Descend/Ascend/NextPane/PrevPane — Tab/BackTab)
 - `HistoryAction` (Back/Forward — `Shift+←`/`Shift+→`)
 - `TabAction` (Jump(n) — F1–F5)
-- `AppAction` (Quit/Help/ContextSwitcher/FuzzyFind)
+- `AppAction` (Quit/Help/ContextSwitcher/FuzzyFind/Jump/Paste/Cut)
 - `GoTarget` (Browser/Events/Tracer — reached via the two-key `g <letter>` combo)
 - `ViewVerb` — wraps per-view enums (`BulletinsVerb`, `BrowserVerb`, `EventsVerb`, `TracerVerb`)
 

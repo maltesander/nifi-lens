@@ -619,7 +619,7 @@ mod tests {
                 haystack: "x   processor   root".into(),
             }],
         });
-        update(&mut s, key(KeyCode::Char('f'), KeyModifiers::NONE), &c);
+        update(&mut s, key(KeyCode::Char('F'), KeyModifiers::SHIFT), &c);
         let r = update(&mut s, key(KeyCode::Esc, KeyModifiers::NONE), &c);
         assert!(s.modal.is_none());
         assert!(r.intent.is_none());

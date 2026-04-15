@@ -390,6 +390,19 @@ mod tests {
     }
 
     #[test]
+    fn app_all_covers_every_variant() {
+        let all = AppAction::all();
+        assert_eq!(all.len(), 7);
+        assert!(all.contains(&AppAction::Quit));
+        assert!(all.contains(&AppAction::Help));
+        assert!(all.contains(&AppAction::ContextSwitcher));
+        assert!(all.contains(&AppAction::FuzzyFind));
+        assert!(all.contains(&AppAction::Jump));
+        assert!(all.contains(&AppAction::Paste));
+        assert!(all.contains(&AppAction::Cut));
+    }
+
+    #[test]
     fn go_target_chords_use_g_leader() {
         assert_eq!(GoTarget::Browser.chord(), Chord::go(KeyCode::Char('b')));
         assert_eq!(GoTarget::Events.chord(), Chord::go(KeyCode::Char('e')));
