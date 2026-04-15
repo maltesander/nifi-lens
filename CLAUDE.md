@@ -7,7 +7,7 @@ Read and follow @AGENTS.md — it contains architecture, patterns, and procedure
 - Always ask to update @AGENTS.md when architecture and patterns change, or new knowledge is acquired.
 - Always add unit, wiremock or integration tests for new functionality.
 - Always update each README.md for any changes or new features.
-- Always refer to <https://docs.rs/crate/nifi-rust-client/0.5.0> documentation.
+- Always refer to <https://docs.rs/crate/nifi-rust-client/latest> documentation.
 
 ## Scope
 
