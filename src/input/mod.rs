@@ -507,13 +507,13 @@ mod keymap_tests {
     }
 
     #[test]
-    fn r_on_events_produces_events_reset_not_bulletins_refresh() {
+    fn r_on_events_produces_events_refresh_not_bulletins_refresh() {
         // Cross-view chord collision: `r` is bound to both BulletinsVerb::Refresh
-        // and EventsVerb::Reset. With view-aware translate, the active view wins.
+        // and EventsVerb::Refresh. With view-aware translate, the active view wins.
         let mut km = KeyMap::default();
         assert_eq!(
             km.translate(press(KeyCode::Char('r')), ViewId::Events),
-            InputEvent::View(ViewVerb::Events(EventsVerb::Reset))
+            InputEvent::View(ViewVerb::Events(EventsVerb::Refresh))
         );
         assert_eq!(
             km.translate(press(KeyCode::Char('r')), ViewId::Bulletins),

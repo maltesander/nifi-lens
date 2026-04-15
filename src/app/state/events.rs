@@ -49,6 +49,11 @@ impl ViewKeyHandler for EventsHandler {
             EventsVerb::RaiseCap => {
                 state.events.raise_cap();
             }
+            EventsVerb::Refresh => {
+                if let Some(r) = submit_query(state) {
+                    return Some(r);
+                }
+            }
         }
         Some(UpdateResult {
             redraw: true,
@@ -314,11 +319,11 @@ mod tests {
     }
 
     #[test]
-    fn t_on_filter_bar_enters_time_edit() {
+    fn shift_d_on_filter_bar_enters_time_edit() {
         let mut s = fresh_state();
         let c = tiny_config();
         s.current_tab = ViewId::Events;
-        update(&mut s, key(KeyCode::Char('t'), KeyModifiers::NONE), &c);
+        update(&mut s, key(KeyCode::Char('D'), KeyModifiers::SHIFT), &c);
         assert_eq!(
             s.events.filter_edit.as_ref().map(|(f, _)| *f),
             Some(FilterField::Time)
@@ -343,7 +348,7 @@ mod tests {
         let c = tiny_config();
         s.current_tab = ViewId::Events;
         s.events.filters.source = "old".into();
-        update(&mut s, key(KeyCode::Char('s'), KeyModifiers::NONE), &c);
+        update(&mut s, key(KeyCode::Char('S'), KeyModifiers::SHIFT), &c);
         update(&mut s, key(KeyCode::Char('X'), KeyModifiers::SHIFT), &c);
         assert_eq!(s.events.filters.source, "oldX");
         update(&mut s, key(KeyCode::Esc, KeyModifiers::NONE), &c);
@@ -352,12 +357,12 @@ mod tests {
     }
 
     #[test]
-    fn r_on_filter_bar_resets_filters() {
+    fn shift_r_on_filter_bar_resets_filters() {
         let mut s = fresh_state();
         let c = tiny_config();
         s.current_tab = ViewId::Events;
         s.events.filters.source = "proc-1".into();
-        update(&mut s, key(KeyCode::Char('r'), KeyModifiers::NONE), &c);
+        update(&mut s, key(KeyCode::Char('R'), KeyModifiers::SHIFT), &c);
         assert!(s.events.filters.source.is_empty());
     }
 
@@ -475,7 +480,7 @@ mod tests {
     }
 
     #[test]
-    fn t_in_row_nav_enters_time_filter_edit_not_trace() {
+    fn shift_d_in_row_nav_enters_time_filter_edit_not_trace() {
         let mut s = fresh_state();
         let c = tiny_config();
         s.current_tab = ViewId::Events;
@@ -498,16 +503,16 @@ mod tests {
             &c,
         );
         s.events.enter_row_nav();
-        // `t` alone in row-nav mode must enter Time filter edit, not trace.
-        let r = update(&mut s, key(KeyCode::Char('t'), KeyModifiers::NONE), &c);
+        // `Shift+D` in row-nav mode must enter Time filter edit, not trace.
+        let r = update(&mut s, key(KeyCode::Char('D'), KeyModifiers::SHIFT), &c);
         assert!(
             r.intent.is_none(),
-            "t in row-nav must not emit a TraceByUuid intent"
+            "Shift+D in row-nav must not emit a TraceByUuid intent"
         );
         assert_eq!(
             s.events.filter_edit.as_ref().map(|(f, _)| *f),
             Some(FilterField::Time),
-            "t in row-nav must enter Time filter edit mode"
+            "Shift+D in row-nav must enter Time filter edit mode"
         );
         // Row-nav must be exited when entering filter edit.
         assert!(

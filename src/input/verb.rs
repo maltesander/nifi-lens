@@ -45,6 +45,7 @@ pub enum EventsVerb {
     NewQuery,
     Reset,
     RaiseCap,
+    Refresh,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -168,14 +169,15 @@ impl Verb for BrowserVerb {
 impl Verb for EventsVerb {
     fn chord(self) -> Chord {
         match self {
-            Self::EditField(FilterField::Time) => Chord::simple(KeyCode::Char('t')),
+            Self::EditField(FilterField::Time) => Chord::shift(KeyCode::Char('D')),
             Self::EditField(FilterField::Types) => Chord::shift(KeyCode::Char('T')),
-            Self::EditField(FilterField::Source) => Chord::simple(KeyCode::Char('s')),
-            Self::EditField(FilterField::Uuid) => Chord::simple(KeyCode::Char('u')),
-            Self::EditField(FilterField::Attr) => Chord::simple(KeyCode::Char('a')),
-            Self::NewQuery => Chord::simple(KeyCode::Char('n')),
-            Self::Reset => Chord::simple(KeyCode::Char('r')),
+            Self::EditField(FilterField::Source) => Chord::shift(KeyCode::Char('S')),
+            Self::EditField(FilterField::Uuid) => Chord::shift(KeyCode::Char('U')),
+            Self::EditField(FilterField::Attr) => Chord::shift(KeyCode::Char('A')),
+            Self::NewQuery => Chord::shift(KeyCode::Char('N')),
+            Self::Reset => Chord::shift(KeyCode::Char('R')),
             Self::RaiseCap => Chord::shift(KeyCode::Char('L')),
+            Self::Refresh => Chord::simple(KeyCode::Char('r')),
         }
     }
     fn label(self) -> &'static str {
@@ -188,6 +190,7 @@ impl Verb for EventsVerb {
             Self::NewQuery => "clear filters and submit new query",
             Self::Reset => "reset filters (no submit)",
             Self::RaiseCap => "raise result cap 500 -> 5000",
+            Self::Refresh => "re-run current query",
         }
     }
     fn hint(self) -> &'static str {
@@ -200,12 +203,13 @@ impl Verb for EventsVerb {
             Self::NewQuery => "new",
             Self::Reset => "reset",
             Self::RaiseCap => "cap",
+            Self::Refresh => "refresh",
         }
     }
     fn priority(self) -> u8 {
         match self {
-            Self::NewQuery => 80,
-            _ => 40,
+            Self::EditField(_) | Self::NewQuery | Self::Reset | Self::RaiseCap => 10,
+            Self::Refresh => 50,
         }
     }
     fn all() -> &'static [Self] {
@@ -218,6 +222,7 @@ impl Verb for EventsVerb {
             Self::NewQuery,
             Self::Reset,
             Self::RaiseCap,
+            Self::Refresh,
         ]
     }
 }
@@ -349,11 +354,11 @@ mod tests {
     }
 
     #[test]
-    fn events_filter_fields_keep_letter_shortcuts() {
+    fn events_filter_fields_use_shift_variants() {
         use EventsVerb::EditField;
         assert_eq!(
             EditField(FilterField::Time).chord(),
-            Chord::simple(KeyCode::Char('t'))
+            Chord::shift(KeyCode::Char('D'))
         );
         assert_eq!(
             EditField(FilterField::Types).chord(),
@@ -361,16 +366,45 @@ mod tests {
         );
         assert_eq!(
             EditField(FilterField::Source).chord(),
-            Chord::simple(KeyCode::Char('s'))
+            Chord::shift(KeyCode::Char('S'))
         );
         assert_eq!(
             EditField(FilterField::Uuid).chord(),
-            Chord::simple(KeyCode::Char('u'))
+            Chord::shift(KeyCode::Char('U'))
         );
         assert_eq!(
             EditField(FilterField::Attr).chord(),
-            Chord::simple(KeyCode::Char('a'))
+            Chord::shift(KeyCode::Char('A'))
         );
+    }
+
+    #[test]
+    fn events_new_query_is_shift_n() {
+        assert_eq!(
+            EventsVerb::NewQuery.chord(),
+            Chord::shift(KeyCode::Char('N'))
+        );
+    }
+
+    #[test]
+    fn events_reset_is_shift_r() {
+        assert_eq!(EventsVerb::Reset.chord(), Chord::shift(KeyCode::Char('R')));
+    }
+
+    #[test]
+    fn events_refresh_is_r() {
+        assert_eq!(
+            EventsVerb::Refresh.chord(),
+            Chord::simple(KeyCode::Char('r'))
+        );
+    }
+
+    #[test]
+    fn events_filter_verbs_have_priority_10() {
+        use EventsVerb::EditField;
+        assert_eq!(EditField(FilterField::Time).priority(), 10);
+        assert_eq!(EditField(FilterField::Source).priority(), 10);
+        assert_eq!(EventsVerb::Reset.priority(), 10);
     }
 
     #[test]
