@@ -183,8 +183,8 @@ impl AppState {
         }
     }
 
-    /// Returns the set of [`GoTarget`]s meaningful for the current tab + selection.
-    /// Used by [`AppAction::Jump`]'s enabled predicate.
+    /// Returns the set of `GoTarget`s meaningful for the current tab + selection.
+    /// Used by `AppAction::Jump`'s enabled predicate.
     pub fn selection_cross_links(&self) -> Vec<crate::input::GoTarget> {
         use crate::input::GoTarget;
         let mut out = Vec::new();

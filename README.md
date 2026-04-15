@@ -213,8 +213,10 @@ tool.
 | `Tab` / `Shift+Tab` | Focus next / prev pane |
 | `F1`..`F5` | Jump to tab 1..5 (Overview / Bulletins / Browser / Events / Tracer) |
 | `?` | Context-aware help modal |
-| `K` | Switch cluster context |
+| `Shift+K` | Switch cluster context |
 | `Shift+F` | Global component fuzzy find (available once Browser has loaded once to seed the index) |
+| `v` | Paste from clipboard (text-input fields) |
+| `x` | Cut to clipboard (text-input fields) |
 | `q` / `Ctrl+C` | Quit |
 | `F12` | Dump the keymap reverse table to the log file (dev/support) |
 
@@ -260,9 +262,10 @@ Available destinations (context-dependent):
 | Key | Action |
 |---|---|
 | `Shift+D` / `Shift+T` / `Shift+S` / `Shift+U` / `Shift+A` | Edit Time / Types / Source / UUID / Attributes filter |
-| `n` | Clear filters and submit a new query |
-| `r` | Reset filters (no submit) |
+| `Shift+N` | Clear filters and submit a new query |
+| `Shift+R` | Reset filters (no submit) |
 | `Shift+L` | Raise result cap (500 → 5000) |
+| `r` | Re-run current query |
 | `Enter` (filter bar) | Submit query |
 
 ### Tracer

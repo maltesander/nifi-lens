@@ -168,7 +168,7 @@ Rows in the list are additionally deduplicated by
 `ComponentName[id=<uuid>]` prefix and normalizes dynamic `[...]` regions
 before hashing, so repeating errors from the same component collapse
 into a single row with an `×N` count column. Grouping mode is cycled by
-the `Y` key (`source+msg` / `source` / `off`). `g` triggers
+`Shift+G` (`source+msg` / `source` / `off`). `g` triggers
 `AppAction::Jump` — a context-sensitive cross-tab jump menu.
 
 ### Visual language
