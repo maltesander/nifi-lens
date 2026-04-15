@@ -495,6 +495,12 @@ impl BulletinsState {
         }
     }
 
+    /// Returns the current text-input buffer value, or `None` when not in
+    /// text-input mode.
+    pub fn text_input_value(&self) -> Option<&str> {
+        self.text_input.as_deref()
+    }
+
     // ---- navigation / pause ----
 
     pub fn move_selection_up(&mut self) {

@@ -204,6 +204,12 @@ impl EventsState {
         self.pre_edit_value = None;
     }
 
+    /// Returns the current filter-edit buffer value, or `None` when no field
+    /// is being edited.
+    pub fn current_filter_value(&self) -> Option<&str> {
+        self.filter_edit.as_ref().map(|(_, s)| s.as_str())
+    }
+
     /// Cancel the active filter-edit: restores the pre-edit value.
     pub fn cancel_filter_edit(&mut self) {
         if let Some((field, _)) = self.filter_edit.take() {

@@ -2,7 +2,7 @@
 
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 
-use super::{AppState, PendingIntent, UpdateResult, ViewKeyHandler};
+use super::{AppState, Banner, BannerSeverity, PendingIntent, UpdateResult, ViewKeyHandler};
 use crate::input::FilterField as InputFilterField;
 use crate::input::{EventsVerb, FocusAction, GoTarget, ViewVerb};
 use crate::view::events::state::FilterField;
@@ -264,6 +264,35 @@ fn handle_filter_edit(state: &mut AppState, key: KeyEvent) -> Option<UpdateResul
         }
         KeyCode::Backspace => {
             state.events.pop_filter_char();
+            redraw()
+        }
+        KeyCode::Char('v') if key.modifiers == KeyModifiers::NONE => {
+            match state.get_from_clipboard() {
+                Ok(text) => {
+                    for ch in text.chars() {
+                        state.events.push_filter_char(ch);
+                    }
+                }
+                Err(err) => {
+                    state.status.banner = Some(Banner {
+                        severity: BannerSeverity::Warning,
+                        message: format!("clipboard paste: {err}"),
+                        detail: None,
+                    });
+                }
+            }
+            redraw()
+        }
+        KeyCode::Char('x') if key.modifiers == KeyModifiers::NONE => {
+            let text = state
+                .events
+                .current_filter_value()
+                .unwrap_or_default()
+                .to_owned();
+            if !text.is_empty() {
+                let _ = state.copy_to_clipboard(text);
+            }
+            state.events.cancel_filter_edit();
             redraw()
         }
         KeyCode::Char(ch) => {

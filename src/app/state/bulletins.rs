@@ -139,6 +139,45 @@ fn handle_text_input(state: &mut AppState, key: KeyEvent) -> Option<UpdateResult
                 tracer_followup: None,
             })
         }
+        KeyCode::Char('v') if key.modifiers == KeyModifiers::NONE => {
+            match state.get_from_clipboard() {
+                Ok(text) => {
+                    let prev = state.bulletins.selected_ring_index();
+                    for ch in text.chars() {
+                        state.bulletins.push_text_input(ch, prev);
+                    }
+                }
+                Err(err) => {
+                    state.status.banner = Some(Banner {
+                        severity: BannerSeverity::Warning,
+                        message: format!("clipboard paste: {err}"),
+                        detail: None,
+                    });
+                }
+            }
+            Some(UpdateResult {
+                redraw: true,
+                intent: None,
+                tracer_followup: None,
+            })
+        }
+        KeyCode::Char('x') if key.modifiers == KeyModifiers::NONE => {
+            let text = state
+                .bulletins
+                .text_input_value()
+                .unwrap_or_default()
+                .to_owned();
+            if !text.is_empty() {
+                let _ = state.copy_to_clipboard(text);
+            }
+            let prev = state.bulletins.selected_ring_index();
+            state.bulletins.cancel_text_input(prev);
+            Some(UpdateResult {
+                redraw: true,
+                intent: None,
+                tracer_followup: None,
+            })
+        }
         KeyCode::Char(ch) => {
             let prev = state.bulletins.selected_ring_index();
             state.bulletins.push_text_input(ch, prev);
@@ -640,5 +679,53 @@ mod tests {
         let before = s.bulletins.selected;
         super::BulletinsHandler::handle_focus(&mut s, FocusAction::Down);
         assert_eq!(s.bulletins.selected, before + 1);
+    }
+
+    #[test]
+    fn paste_inserts_clipboard_text_into_search() {
+        let mut s = fresh_state();
+        let c = tiny_config();
+        s.current_tab = ViewId::Bulletins;
+        // Enter search mode.
+        update(&mut s, key(KeyCode::Char('/'), KeyModifiers::NONE), &c);
+        assert!(
+            s.bulletins.text_input.is_some(),
+            "must be in text-input mode"
+        );
+        // Copy a string to clipboard; skip test if clipboard is unavailable (CI).
+        if s.copy_to_clipboard("hello".into()).is_err() {
+            return;
+        }
+        // Verify the round-trip actually works on this system before asserting.
+        // On some headless environments the write may not stick; skip if so.
+        match s.get_from_clipboard() {
+            Ok(ref v) if v == "hello" => {}
+            _ => return,
+        }
+        // Press 'v' to paste.
+        update(&mut s, key(KeyCode::Char('v'), KeyModifiers::NONE), &c);
+        assert_eq!(s.bulletins.text_input_value(), Some("hello"));
+    }
+
+    #[test]
+    fn cut_cancels_text_input_mode() {
+        // Verifies the structural behaviour of 'x' (cancel text-input) without
+        // relying on clipboard availability.  A separate integration scenario
+        // would cover the copy-to-clipboard half.
+        let mut s = fresh_state();
+        let c = tiny_config();
+        s.current_tab = ViewId::Bulletins;
+        // Enter search mode and type a query.
+        update(&mut s, key(KeyCode::Char('/'), KeyModifiers::NONE), &c);
+        update(&mut s, key(KeyCode::Char('a'), KeyModifiers::NONE), &c);
+        update(&mut s, key(KeyCode::Char('b'), KeyModifiers::NONE), &c);
+        assert_eq!(s.bulletins.text_input_value(), Some("ab"));
+        // Press 'x' to cut.
+        update(&mut s, key(KeyCode::Char('x'), KeyModifiers::NONE), &c);
+        // text_input mode is cancelled (cut calls cancel_text_input).
+        assert!(
+            s.bulletins.text_input.is_none(),
+            "text_input should be cancelled after cut"
+        );
     }
 }

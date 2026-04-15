@@ -988,6 +988,16 @@ pub fn handle_entry_clear(state: &mut TracerState) {
     }
 }
 
+/// Returns the current UUID input field value, or an empty string when not
+/// in Entry mode.
+pub fn entry_value(state: &TracerState) -> &str {
+    if let TracerMode::Entry(EntryState { input }) = &state.mode {
+        input.as_str()
+    } else {
+        ""
+    }
+}
+
 /// Validates the current input as a UUID.
 ///
 /// Returns `Some(uuid_string)` on success (normalised to lowercase hyphenated

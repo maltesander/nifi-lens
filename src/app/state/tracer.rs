@@ -545,6 +545,39 @@ impl ViewKeyHandler for TracerHandler {
         // Entry mode: character keys go into the UUID input. Ctrl modifiers
         // fall through to global handlers.
         match (key.code, key.modifiers) {
+            (KeyCode::Char('v'), KeyModifiers::NONE) => {
+                match state.get_from_clipboard() {
+                    Ok(text) => {
+                        for ch in text.chars() {
+                            ts::handle_entry_char(&mut state.tracer, ch);
+                        }
+                    }
+                    Err(err) => {
+                        state.status.banner = Some(crate::app::state::Banner {
+                            severity: crate::app::state::BannerSeverity::Warning,
+                            message: format!("clipboard paste: {err}"),
+                            detail: None,
+                        });
+                    }
+                }
+                Some(UpdateResult {
+                    redraw: true,
+                    intent: None,
+                    tracer_followup: None,
+                })
+            }
+            (KeyCode::Char('x'), KeyModifiers::NONE) => {
+                let text = ts::entry_value(&state.tracer).to_owned();
+                if !text.is_empty() {
+                    let _ = state.copy_to_clipboard(text);
+                }
+                ts::handle_entry_clear(&mut state.tracer);
+                Some(UpdateResult {
+                    redraw: true,
+                    intent: None,
+                    tracer_followup: None,
+                })
+            }
             (KeyCode::Char(ch), KeyModifiers::NONE) | (KeyCode::Char(ch), KeyModifiers::SHIFT) => {
                 ts::handle_entry_char(&mut state.tracer, ch);
                 Some(UpdateResult {
