@@ -71,11 +71,13 @@ impl ViewKeyHandler for BulletinsHandler {
             FocusAction::Descend => return None,
             // Ascend: no-op at root level.
             FocusAction::Ascend => return None,
-            // Left / Right / PageUp / PageDown not bound for Bulletins.
+            // Left / Right / PageUp / PageDown / NextPane / PrevPane not bound for Bulletins.
             FocusAction::Left
             | FocusAction::Right
             | FocusAction::PageUp
-            | FocusAction::PageDown => return None,
+            | FocusAction::PageDown
+            | FocusAction::NextPane
+            | FocusAction::PrevPane => return None,
         }
         Some(UpdateResult {
             redraw: true,

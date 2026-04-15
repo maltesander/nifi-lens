@@ -466,6 +466,7 @@ impl ViewKeyHandler for TracerHandler {
                                     tracer_followup: None,
                                 })
                             }
+                            FocusAction::NextPane | FocusAction::PrevPane => None,
                         }
                     }
                 }

@@ -15,6 +15,8 @@ pub enum FocusAction {
     Last,
     Descend,
     Ascend,
+    NextPane,
+    PrevPane,
 }
 
 impl Verb for FocusAction {
@@ -30,6 +32,8 @@ impl Verb for FocusAction {
             Self::Last => Chord::simple(KeyCode::End),
             Self::Descend => Chord::simple(KeyCode::Enter),
             Self::Ascend => Chord::simple(KeyCode::Esc),
+            Self::NextPane => Chord::simple(KeyCode::Tab),
+            Self::PrevPane => Chord::simple(KeyCode::BackTab),
         }
     }
 
@@ -45,6 +49,8 @@ impl Verb for FocusAction {
             Self::Last => "jump to last",
             Self::Descend => "drill / activate / submit",
             Self::Ascend => "leave focused pane / cancel",
+            Self::NextPane => "focus next pane",
+            Self::PrevPane => "focus previous pane",
         }
     }
 
@@ -56,6 +62,7 @@ impl Verb for FocusAction {
             Self::First | Self::Last => "jump",
             Self::Descend => "drill",
             Self::Ascend => "back",
+            Self::NextPane | Self::PrevPane => "pane",
         }
     }
 
@@ -68,6 +75,7 @@ impl Verb for FocusAction {
             Self::Descend | Self::Ascend => 100,
             Self::Up | Self::Down => 90,
             Self::Left | Self::Right => 70,
+            Self::NextPane | Self::PrevPane => 60,
             _ => 40,
         }
     }
@@ -84,6 +92,8 @@ impl Verb for FocusAction {
             Self::Last,
             Self::Descend,
             Self::Ascend,
+            Self::NextPane,
+            Self::PrevPane,
         ]
     }
 }
@@ -124,22 +134,16 @@ impl Verb for HistoryAction {
 impl Verb for TabAction {
     fn chord(self) -> Chord {
         match self {
-            Self::Next => Chord::simple(KeyCode::Tab),
-            Self::Prev => Chord::simple(KeyCode::BackTab),
             Self::Jump(n) => Chord::simple(KeyCode::F(n)),
         }
     }
     fn label(self) -> &'static str {
         match self {
-            Self::Next => "next tab",
-            Self::Prev => "previous tab",
             Self::Jump(_) => "jump to tab",
         }
     }
     fn hint(self) -> &'static str {
         match self {
-            Self::Next => "next",
-            Self::Prev => "prev",
             Self::Jump(_) => "tab",
         }
     }
@@ -148,8 +152,6 @@ impl Verb for TabAction {
     }
     fn all() -> &'static [Self] {
         &[
-            Self::Next,
-            Self::Prev,
             Self::Jump(1),
             Self::Jump(2),
             Self::Jump(3),
@@ -241,8 +243,6 @@ pub enum HistoryAction {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum TabAction {
-    Next,
-    Prev,
     Jump(u8),
 }
 
@@ -282,6 +282,8 @@ mod tests {
             FocusAction::Last,
             FocusAction::Descend,
             FocusAction::Ascend,
+            FocusAction::NextPane,
+            FocusAction::PrevPane,
         ];
         assert_eq!(FocusAction::all(), &expected);
     }
@@ -301,6 +303,11 @@ mod tests {
         assert_eq!(FocusAction::Last.chord(), Chord::simple(KeyCode::End));
         assert_eq!(FocusAction::Descend.chord(), Chord::simple(KeyCode::Enter));
         assert_eq!(FocusAction::Ascend.chord(), Chord::simple(KeyCode::Esc));
+        assert_eq!(FocusAction::NextPane.chord(), Chord::simple(KeyCode::Tab));
+        assert_eq!(
+            FocusAction::PrevPane.chord(),
+            Chord::simple(KeyCode::BackTab)
+        );
     }
 
     #[test]
@@ -317,6 +324,8 @@ mod tests {
         assert_eq!(FocusAction::PageDown.priority(), 40);
         assert_eq!(FocusAction::First.priority(), 40);
         assert_eq!(FocusAction::Last.priority(), 40);
+        assert_eq!(FocusAction::NextPane.priority(), 60);
+        assert_eq!(FocusAction::PrevPane.priority(), 60);
     }
 
     #[test]
@@ -327,20 +336,16 @@ mod tests {
 
     #[test]
     fn tab_chords() {
-        assert_eq!(TabAction::Next.chord(), Chord::simple(KeyCode::Tab));
-        assert_eq!(TabAction::Prev.chord(), Chord::simple(KeyCode::BackTab));
         assert_eq!(TabAction::Jump(1).chord(), Chord::simple(KeyCode::F(1)));
         assert_eq!(TabAction::Jump(5).chord(), Chord::simple(KeyCode::F(5)));
     }
 
     #[test]
-    fn tab_all_is_next_prev_jumps_1_through_5() {
+    fn tab_all_is_jumps_1_through_5() {
         let all = TabAction::all();
-        assert_eq!(all[0], TabAction::Next);
-        assert_eq!(all[1], TabAction::Prev);
-        assert_eq!(all[2], TabAction::Jump(1));
-        assert_eq!(all[6], TabAction::Jump(5));
-        assert_eq!(all.len(), 7);
+        assert_eq!(all[0], TabAction::Jump(1));
+        assert_eq!(all[4], TabAction::Jump(5));
+        assert_eq!(all.len(), 5);
     }
 
     #[test]
@@ -362,5 +367,33 @@ mod tests {
         assert_eq!(GoTarget::Browser.chord(), Chord::go(KeyCode::Char('b')));
         assert_eq!(GoTarget::Events.chord(), Chord::go(KeyCode::Char('e')));
         assert_eq!(GoTarget::Tracer.chord(), Chord::go(KeyCode::Char('t')));
+    }
+
+    #[test]
+    fn focus_next_pane_is_tab() {
+        assert_eq!(FocusAction::NextPane.chord(), Chord::simple(KeyCode::Tab));
+    }
+
+    #[test]
+    fn focus_prev_pane_is_backtab() {
+        assert_eq!(
+            FocusAction::PrevPane.chord(),
+            Chord::simple(KeyCode::BackTab)
+        );
+    }
+
+    #[test]
+    fn focus_pane_actions_have_priority_60() {
+        assert_eq!(FocusAction::NextPane.priority(), 60);
+        assert_eq!(FocusAction::PrevPane.priority(), 60);
+    }
+
+    #[test]
+    fn tab_action_only_has_jump_variants() {
+        // TabAction::Next and TabAction::Prev must no longer exist.
+        // All entries in all() must be Jump variants.
+        for &v in TabAction::all() {
+            assert!(matches!(v, TabAction::Jump(_)));
+        }
     }
 }

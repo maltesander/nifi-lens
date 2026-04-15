@@ -210,7 +210,9 @@ impl ViewKeyHandler for BrowserHandler {
                 FocusAction::PageUp
                 | FocusAction::PageDown
                 | FocusAction::First
-                | FocusAction::Last => None,
+                | FocusAction::Last
+                | FocusAction::NextPane
+                | FocusAction::PrevPane => None,
             };
         }
 
@@ -335,6 +337,7 @@ impl ViewKeyHandler for BrowserHandler {
                     tracer_followup: None,
                 })
             }
+            FocusAction::NextPane | FocusAction::PrevPane => None,
         }
     }
 

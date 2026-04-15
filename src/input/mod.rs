@@ -503,11 +503,11 @@ mod keymap_tests {
     }
 
     #[test]
-    fn tab_is_tab_next() {
+    fn tab_is_focus_next_pane() {
         let mut km = KeyMap::default();
         assert_eq!(
             km.translate(press(KeyCode::Tab), ViewId::Overview),
-            InputEvent::Tab(TabAction::Next)
+            InputEvent::Focus(FocusAction::NextPane)
         );
     }
 

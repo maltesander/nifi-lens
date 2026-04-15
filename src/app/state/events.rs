@@ -146,9 +146,12 @@ impl ViewKeyHandler for EventsHandler {
                 // Descend on a row: no deeper structure — return None.
                 // Rule 1a applies: default_cross_link returns None, so nothing happens.
                 FocusAction::Descend => None,
-                FocusAction::Left | FocusAction::Right | FocusAction::First | FocusAction::Last => {
-                    None
-                }
+                FocusAction::Left
+                | FocusAction::Right
+                | FocusAction::First
+                | FocusAction::Last
+                | FocusAction::NextPane
+                | FocusAction::PrevPane => None,
             };
         }
 
@@ -187,7 +190,9 @@ impl ViewKeyHandler for EventsHandler {
             | FocusAction::PageUp
             | FocusAction::PageDown
             | FocusAction::First
-            | FocusAction::Last => None,
+            | FocusAction::Last
+            | FocusAction::NextPane
+            | FocusAction::PrevPane => None,
         }
     }
 

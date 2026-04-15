@@ -924,28 +924,6 @@ fn handle_key(state: &mut AppState, key: KeyEvent, config: &Config) -> UpdateRes
                 tracer_followup: None,
             };
         }
-        InputEvent::Tab(TabAction::Next) => {
-            if state.modal.is_some() || view_text_input_active(state) {
-                return UpdateResult::default();
-            }
-            state.current_tab = state.current_tab.next();
-            return UpdateResult {
-                redraw: true,
-                intent: None,
-                tracer_followup: None,
-            };
-        }
-        InputEvent::Tab(TabAction::Prev) => {
-            if state.modal.is_some() || view_text_input_active(state) {
-                return UpdateResult::default();
-            }
-            state.current_tab = state.current_tab.prev();
-            return UpdateResult {
-                redraw: true,
-                intent: None,
-                tracer_followup: None,
-            };
-        }
         InputEvent::Tab(TabAction::Jump(n)) => {
             if state.modal.is_some() || view_text_input_active(state) {
                 return UpdateResult::default();
@@ -1827,27 +1805,22 @@ mod tests {
     }
 
     #[test]
-    fn tab_cycles_forward() {
+    fn tab_no_longer_cycles_tabs() {
+        // Tab is now FocusAction::NextPane (pane cycling within a view),
+        // not a tab-switch action. Pressing Tab must not change the active tab.
         let mut s = fresh_state();
         let c = tiny_config();
-        update(&mut s, key(KeyCode::Tab, KeyModifiers::NONE), &c);
-        assert_eq!(s.current_tab, ViewId::Bulletins);
-        update(&mut s, key(KeyCode::Tab, KeyModifiers::NONE), &c);
-        assert_eq!(s.current_tab, ViewId::Browser);
-        update(&mut s, key(KeyCode::Tab, KeyModifiers::NONE), &c);
-        assert_eq!(s.current_tab, ViewId::Events);
-        update(&mut s, key(KeyCode::Tab, KeyModifiers::NONE), &c);
-        assert_eq!(s.current_tab, ViewId::Tracer);
         update(&mut s, key(KeyCode::Tab, KeyModifiers::NONE), &c);
         assert_eq!(s.current_tab, ViewId::Overview);
     }
 
     #[test]
-    fn back_tab_cycles_backward() {
+    fn back_tab_no_longer_cycles_tabs() {
+        // BackTab is now FocusAction::PrevPane. It must not change the active tab.
         let mut s = fresh_state();
         let c = tiny_config();
         update(&mut s, key(KeyCode::BackTab, KeyModifiers::NONE), &c);
-        assert_eq!(s.current_tab, ViewId::Tracer);
+        assert_eq!(s.current_tab, ViewId::Overview);
     }
 
     #[test]
