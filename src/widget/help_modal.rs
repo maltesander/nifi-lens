@@ -47,7 +47,7 @@ pub fn general_sections() -> Vec<HelpSection> {
                 ),
                 (
                     pair(FocusAction::First, FocusAction::Last),
-                    "jump first / last",
+                    "goto first / last",
                 ),
                 (FocusAction::Descend.chord().display(), "drill / activate"),
                 (FocusAction::Ascend.chord().display(), "leave pane / cancel"),
@@ -66,7 +66,7 @@ pub fn general_sections() -> Vec<HelpSection> {
         },
         HelpSection {
             title: "Tabs",
-            rows: vec![("F1..F5".to_string(), "jump to tab 1..5")],
+            rows: vec![("F1..F5".to_string(), "goto tab 1..5")],
         },
         HelpSection {
             title: "App",
@@ -85,7 +85,7 @@ pub fn general_sections() -> Vec<HelpSection> {
         },
         HelpSection {
             title: "Cross-tab",
-            rows: vec![(AppAction::Jump.chord().display(), "jump to related tab")],
+            rows: vec![(AppAction::Goto.chord().display(), "goto related tab")],
         },
     ]
 }

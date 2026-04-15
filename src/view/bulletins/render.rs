@@ -5,7 +5,7 @@
 //! ```text
 //! ┌─ Bulletins ──────────────────── last 3s ago ┐
 //! │  [E] [W] [I]  type: All  /foo_     +12 new  │
-//! │  — press e/w/i/T/ /  c to clear — p pause — │
+//! │  — 1/2/3 severity · T type · / text · G group · M mute · c copy · P pause · R clear — │
 //! ├─────────────────────────────────────────────┤
 //! │ HH:MM:SS  SEV   Source           group  msg │
 //! │ ...                                          │
@@ -151,7 +151,7 @@ fn render_filter_bar(frame: &mut Frame, area: Rect, state: &BulletinsState) {
         let group_label = state.group_mode.label();
         Line::from(Span::styled(
             format!(
-                "— 1/2/3 severity · T type · / text · Y group: {group_label} · m mute · c clear · p pause —"
+                "— 1/2/3 severity · T type · / text · G group: {group_label} · M mute · c copy · P pause · R clear —"
             ),
             theme::muted(),
         ))
@@ -384,7 +384,7 @@ fn render_detail(
 
     // Row N+1: action hints.
     lines.push(Line::from(Span::styled(
-        "Enter jump to Browser · ge events · m mute · c copy message · C clear filters".to_string(),
+        "Enter Browser · g goto · M mute · c copy message · R clear filters".to_string(),
         theme::muted(),
     )));
 

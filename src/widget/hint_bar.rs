@@ -274,7 +274,7 @@ mod tests {
             },
             HintSpan {
                 key: "g",
-                action: "jump to browser",
+                action: "goto browser",
                 enabled: true,
             },
         ];

@@ -20,7 +20,7 @@ pub struct HistoryEntry {
     pub anchor: Option<SelectionAnchor>,
 }
 
-/// Browser-style back/forward navigation history for cross-link jumps.
+/// Browser-style back/forward navigation history for cross-link gotos.
 #[derive(Debug, Default)]
 pub struct TabHistory {
     back: Vec<HistoryEntry>,

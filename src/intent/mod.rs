@@ -24,7 +24,7 @@ pub enum Intent {
         event_id: i64,
         side: ContentSide,
     },
-    JumpTo(CrossLink),
+    Goto(CrossLink),
 
     // Phase 4 intents.
     CancelLineageQuery,
@@ -73,13 +73,13 @@ pub enum CrossLink {
     /// landing with a component-filtered query.
     ///
     /// Phase 6 retargets Bulletins/Browser `t` to
-    /// [`CrossLink::JumpToEvents`] instead. This variant is retained
+    /// [`CrossLink::GotoEvents`] instead. This variant is retained
     /// for backwards compatibility and is still wired through the
     /// dispatcher; future phases may prune it.
     TraceComponent { component_id: String },
     /// From Bulletins/Browser `t` (Phase 6+): open Events pre-filled
     /// with a component-sourced query and a 15-minute time window.
-    JumpToEvents { component_id: String },
+    GotoEvents { component_id: String },
     /// From Events result row `t`: open Tracer and auto-run a lineage
     /// query on the selected event's flowfile uuid.
     TraceByUuid { uuid: String },
@@ -94,10 +94,10 @@ impl Intent {
             Self::OpenProcessGroup(_) => "OpenProcessGroup",
             Self::TraceFlowfile(_) => "TraceFlowfile",
             Self::FetchEventContent { .. } => "FetchEventContent",
-            Self::JumpTo(CrossLink::OpenInBrowser { .. }) => "jump to Browser",
-            Self::JumpTo(CrossLink::TraceComponent { .. }) => "trace component",
-            Self::JumpTo(CrossLink::JumpToEvents { .. }) => "jump to Events",
-            Self::JumpTo(CrossLink::TraceByUuid { .. }) => "trace by uuid",
+            Self::Goto(CrossLink::OpenInBrowser { .. }) => "goto Browser",
+            Self::Goto(CrossLink::TraceComponent { .. }) => "trace component",
+            Self::Goto(CrossLink::GotoEvents { .. }) => "goto Events",
+            Self::Goto(CrossLink::TraceByUuid { .. }) => "trace by uuid",
             Self::CancelLineageQuery => "CancelLineageQuery",
             Self::DeleteLineageQuery { .. } => "DeleteLineageQuery",
             Self::LoadEventDetail { .. } => "LoadEventDetail",
@@ -144,7 +144,7 @@ impl IntentDispatcher {
         match intent {
             Intent::Quit => Some(Ok(IntentOutcome::Quitting)),
             Intent::RefreshView(view) => Some(Ok(IntentOutcome::ViewRefreshed { view: *view })),
-            Intent::JumpTo(CrossLink::OpenInBrowser {
+            Intent::Goto(CrossLink::OpenInBrowser {
                 component_id,
                 group_id,
             }) => Some(Ok(IntentOutcome::OpenInBrowserTarget {
@@ -153,14 +153,14 @@ impl IntentDispatcher {
             })),
             // TraceComponent is dispatched in `dispatch()` to spawn the
             // latest-events worker alongside the tab switch.
-            Intent::JumpTo(CrossLink::TraceComponent { .. }) => None,
-            Intent::JumpTo(CrossLink::JumpToEvents { component_id }) => {
+            Intent::Goto(CrossLink::TraceComponent { .. }) => None,
+            Intent::Goto(CrossLink::GotoEvents { component_id }) => {
                 Some(Ok(IntentOutcome::EventsLandingOn {
                     component_id: component_id.clone(),
                 }))
             }
             // TraceByUuid spawns the lineage worker; not pure.
-            Intent::JumpTo(CrossLink::TraceByUuid { .. }) => None,
+            Intent::Goto(CrossLink::TraceByUuid { .. }) => None,
             _ => None,
         }
     }
@@ -176,7 +176,7 @@ impl IntentDispatcher {
             Intent::SwitchContext(name) => self.switch_context(name).await,
 
             // --- Phase 4 tracer intents ---
-            Intent::JumpTo(CrossLink::TraceComponent { component_id }) => {
+            Intent::Goto(CrossLink::TraceComponent { component_id }) => {
                 crate::view::tracer::worker::spawn_latest_events(
                     self.client.clone(),
                     self.tx.clone(),
@@ -184,7 +184,7 @@ impl IntentDispatcher {
                 );
                 Ok(IntentOutcome::TracerLandingOn { component_id })
             }
-            Intent::JumpTo(CrossLink::TraceByUuid { uuid }) => {
+            Intent::Goto(CrossLink::TraceByUuid { uuid }) => {
                 let handle = crate::view::tracer::worker::spawn_lineage(
                     self.client.clone(),
                     self.tx.clone(),
@@ -338,7 +338,7 @@ mod tests {
 
     #[test]
     fn cross_link_open_in_browser_returns_target_outcome() {
-        let outcome = IntentDispatcher::handle_pure(&Intent::JumpTo(CrossLink::OpenInBrowser {
+        let outcome = IntentDispatcher::handle_pure(&Intent::Goto(CrossLink::OpenInBrowser {
             component_id: "proc-1".into(),
             group_id: "root".into(),
         }))
@@ -360,7 +360,7 @@ mod tests {
     fn cross_link_trace_component_not_handled_by_handle_pure() {
         // TraceComponent is dispatched in `dispatch()` (not `handle_pure`)
         // because it needs to spawn the latest-events worker.
-        let result = IntentDispatcher::handle_pure(&Intent::JumpTo(CrossLink::TraceComponent {
+        let result = IntentDispatcher::handle_pure(&Intent::Goto(CrossLink::TraceComponent {
             component_id: "proc-1".into(),
         }));
         assert!(
@@ -389,15 +389,15 @@ mod tests {
             "FetchEventContent"
         );
         assert_eq!(
-            Intent::JumpTo(CrossLink::OpenInBrowser {
+            Intent::Goto(CrossLink::OpenInBrowser {
                 component_id: "x".into(),
                 group_id: "root".into(),
             })
             .name(),
-            "jump to Browser"
+            "goto Browser"
         );
         assert_eq!(
-            Intent::JumpTo(CrossLink::TraceComponent {
+            Intent::Goto(CrossLink::TraceComponent {
                 component_id: "x".into(),
             })
             .name(),
@@ -440,8 +440,8 @@ mod tests {
     }
 
     #[test]
-    fn handle_pure_returns_events_landing_on_for_jump_to_events() {
-        let outcome = IntentDispatcher::handle_pure(&Intent::JumpTo(CrossLink::JumpToEvents {
+    fn handle_pure_returns_events_landing_on_for_goto_events() {
+        let outcome = IntentDispatcher::handle_pure(&Intent::Goto(CrossLink::GotoEvents {
             component_id: "proc-42".into(),
         }))
         .expect("arm is pure")
@@ -457,7 +457,7 @@ mod tests {
     #[test]
     fn handle_pure_returns_none_for_trace_by_uuid() {
         // TraceByUuid requires the worker to spawn, so it's not pure.
-        let outcome = IntentDispatcher::handle_pure(&Intent::JumpTo(CrossLink::TraceByUuid {
+        let outcome = IntentDispatcher::handle_pure(&Intent::Goto(CrossLink::TraceByUuid {
             uuid: "abc-123".into(),
         }));
         assert!(outcome.is_none(), "TraceByUuid is not pure; must dispatch");
@@ -483,14 +483,14 @@ mod tests {
             .is_write()
         );
         assert!(
-            !Intent::JumpTo(CrossLink::OpenInBrowser {
+            !Intent::Goto(CrossLink::OpenInBrowser {
                 component_id: "x".into(),
                 group_id: "root".into(),
             })
             .is_write()
         );
         assert!(
-            !Intent::JumpTo(CrossLink::TraceComponent {
+            !Intent::Goto(CrossLink::TraceComponent {
                 component_id: "x".into(),
             })
             .is_write()

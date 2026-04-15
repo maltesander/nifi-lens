@@ -99,7 +99,7 @@ pub async fn run(
                 other => {
                     let intent = match other {
                         PendingIntent::SwitchContext(name) => Some(Intent::SwitchContext(name)),
-                        PendingIntent::JumpTo(link) => Some(Intent::JumpTo(link)),
+                        PendingIntent::Goto(link) => Some(Intent::Goto(link)),
                         PendingIntent::Dispatch(intent) => Some(intent),
                         PendingIntent::RunProvenanceQuery { query } => {
                             Some(Intent::RunProvenanceQuery { query })

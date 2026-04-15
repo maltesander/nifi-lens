@@ -3,8 +3,8 @@ source: src/view/events/render.rs
 expression: render_to_string(&state)
 ---
 "┌ Filters ─────────────────────────────────────────────────────────────────────────────────────────┐"
-"│t time last 15m   T type (any)   s source (any)   u file uuid (any)   a attr (any)                │"
-"│status ● done   took 100ms   results 1 / cap 500   — t/T/s/u/a edit · Enter run · n new · r reset │"
+"│D time last 15m   T type (any)   S source (any)   U uuid (any)   A attr (any)                     │"
+"│status ● done   took 100ms   results 1 / cap 500   — D/T/S/U/A edit · Enter run · N new · R reset │"
 "└──────────────────────────────────────────────────────────────────────────────────────────────────┘"
 "┌ Events ──────────────────────────────────────────────────────────────────────── last __ ago ┐"
 "│time       type                   component                uuid           details                 │"
@@ -22,7 +22,7 @@ expression: render_to_string(&state)
 "│relationship   failure                                                                            │"
 "│component  ControlRate   group  noisy-pipeline                                                    │"
 "│                                                                                                  │"
-"│g t trace lineage · g b open in browser · Esc back · c copy uuid                                  │"
+"│g goto menu (Browser / Tracer) · Esc back · c copy uuid                                           │"
 "│                                                                                                  │"
 "│                                                                                                  │"
 "└──────────────────────────────────────────────────────────────────────────────────────────────────┘"

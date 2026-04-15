@@ -64,8 +64,8 @@ impl ViewKeyHandler for BulletinsHandler {
         match action {
             FocusAction::Up => state.bulletins.move_selection_up(),
             FocusAction::Down => state.bulletins.move_selection_down(),
-            FocusAction::First => state.bulletins.jump_to_oldest(),
-            FocusAction::Last => state.bulletins.jump_to_newest(),
+            FocusAction::First => state.bulletins.goto_oldest(),
+            FocusAction::Last => state.bulletins.goto_newest(),
             // Descend: return None so the central dispatcher applies Rule 1a
             // (Enter-fallback to default_cross_link → Browser).
             FocusAction::Descend => return None,
@@ -323,7 +323,7 @@ mod tests {
     }
 
     #[test]
-    fn on_bulletins_tab_enter_emits_jump_to_browser_intent() {
+    fn on_bulletins_tab_enter_emits_goto_browser_intent() {
         let mut s = fresh_state();
         let c = tiny_config();
         s.current_tab = ViewId::Bulletins;
@@ -345,7 +345,7 @@ mod tests {
         update(&mut s, AppEvent::Data(ViewPayload::Bulletins(payload)), &c);
         let r = update(&mut s, key(KeyCode::Enter, KeyModifiers::NONE), &c);
         match r.intent {
-            Some(PendingIntent::JumpTo(crate::intent::CrossLink::OpenInBrowser {
+            Some(PendingIntent::Goto(crate::intent::CrossLink::OpenInBrowser {
                 component_id,
                 group_id,
             })) => {
@@ -455,15 +455,15 @@ mod tests {
     }
 
     #[test]
-    fn bare_g_produces_app_jump_not_group_cycle() {
-        // After the keybind redesign, `g` maps to AppAction::Jump
+    fn bare_g_produces_app_goto_not_group_cycle() {
+        // After the keybind redesign, `g` maps to AppAction::Goto
         // and no longer cycles group-by mode (which moved to Y).
         let mut s = fresh_state();
         let c = tiny_config();
         s.current_tab = ViewId::Bulletins;
         let before_mode = s.bulletins.group_mode;
         update(&mut s, key(KeyCode::Char('g'), KeyModifiers::NONE), &c);
-        // Group mode MUST NOT have changed — `g` now maps to AppAction::Jump.
+        // Group mode MUST NOT have changed — `g` now maps to AppAction::Goto.
         assert_eq!(
             s.bulletins.group_mode, before_mode,
             "`g` must not cycle group mode after keybind redesign"
@@ -471,7 +471,7 @@ mod tests {
     }
 
     #[test]
-    fn on_bulletins_tab_home_still_jumps_oldest() {
+    fn on_bulletins_tab_home_still_gotos_oldest() {
         // Regression guard: Home key still works as an alternative.
         let mut s = fresh_state();
         let c = tiny_config();

@@ -1,7 +1,7 @@
-//! Jump-menu modal — context-sensitive cross-tab jump target picker.
+//! Goto-menu modal — context-sensitive cross-tab goto target picker.
 //!
-//! Opened by `AppAction::Jump` when more than one cross-link target
-//! is available for the current selection. Auto-jumps without showing
+//! Opened by `AppAction::Goto` when more than one cross-link target
+//! is available for the current selection. Auto-gotos without showing
 //! this modal when only one target exists.
 
 use ratatui::Frame;
@@ -13,12 +13,12 @@ use crate::input::GoTarget;
 use crate::theme;
 
 #[derive(Debug, Clone)]
-pub struct JumpMenuState {
+pub struct GotoMenuState {
     pub targets: Vec<GoTarget>,
     pub selected: usize,
 }
 
-impl JumpMenuState {
+impl GotoMenuState {
     pub fn new(targets: Vec<GoTarget>) -> Self {
         Self {
             targets,
@@ -51,8 +51,8 @@ fn target_label(t: GoTarget) -> &'static str {
     }
 }
 
-/// Render the jump menu as a small centered overlay.
-pub fn render(frame: &mut Frame, area: Rect, state: &JumpMenuState) {
+/// Render the goto menu as a small centered overlay.
+pub fn render(frame: &mut Frame, area: Rect, state: &GotoMenuState) {
     let width: u16 = 44;
     let height: u16 = state.targets.len() as u16 + 2; // border rows
 
@@ -70,7 +70,7 @@ pub fn render(frame: &mut Frame, area: Rect, state: &JumpMenuState) {
     let block = Block::bordered()
         .border_type(BorderType::Rounded)
         .border_style(theme::accent())
-        .title(" Jump to ");
+        .title(" Go to ");
 
     let inner = block.inner(popup);
     frame.render_widget(block, popup);
@@ -99,7 +99,7 @@ mod tests {
 
     #[test]
     fn move_down_clamps_at_last() {
-        let mut s = JumpMenuState::new(vec![GoTarget::Browser, GoTarget::Events]);
+        let mut s = GotoMenuState::new(vec![GoTarget::Browser, GoTarget::Events]);
         s.move_down();
         assert_eq!(s.selected, 1);
         s.move_down();
@@ -108,14 +108,14 @@ mod tests {
 
     #[test]
     fn move_up_clamps_at_zero() {
-        let mut s = JumpMenuState::new(vec![GoTarget::Browser, GoTarget::Tracer]);
+        let mut s = GotoMenuState::new(vec![GoTarget::Browser, GoTarget::Tracer]);
         s.move_up();
         assert_eq!(s.selected, 0, "should not underflow");
     }
 
     #[test]
     fn selected_target_returns_correct_variant() {
-        let s = JumpMenuState::new(vec![GoTarget::Events, GoTarget::Browser]);
+        let s = GotoMenuState::new(vec![GoTarget::Events, GoTarget::Browser]);
         assert_eq!(s.selected_target(), Some(GoTarget::Events));
     }
 }

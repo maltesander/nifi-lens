@@ -120,7 +120,7 @@ impl ViewKeyHandler for EventsHandler {
                     })
                 }
                 FocusAction::PageUp => {
-                    // Page up through results: jump back 10 rows.
+                    // Page up through results: go back 10 rows.
                     for _ in 0..10 {
                         if state.events.selected_row == Some(0) {
                             break;
@@ -134,7 +134,7 @@ impl ViewKeyHandler for EventsHandler {
                     })
                 }
                 FocusAction::PageDown => {
-                    // Page down through results: jump forward 10 rows.
+                    // Page down through results: go forward 10 rows.
                     for _ in 0..10 {
                         let max = state.events.events.len().saturating_sub(1);
                         if state.events.selected_row == Some(max) {
@@ -206,7 +206,7 @@ impl ViewKeyHandler for EventsHandler {
     }
 
     /// Events always has a local descent target (at minimum: submit a query from
-    /// the filter bar). Return `None` so Enter never triggers a cross-link jump.
+    /// the filter bar). Return `None` so Enter never triggers a cross-link goto.
     fn default_cross_link(_state: &AppState) -> Option<GoTarget> {
         None
     }
@@ -465,7 +465,7 @@ mod tests {
     }
 
     #[test]
-    fn g_opens_jump_menu_then_down_enter_emits_trace_by_uuid_cross_link() {
+    fn g_opens_goto_menu_then_down_enter_emits_trace_by_uuid_cross_link() {
         use crate::app::state::Modal;
         use crate::intent::CrossLink;
         let mut s = fresh_state();
@@ -501,16 +501,16 @@ mod tests {
             &c,
         );
         s.events.enter_row_nav();
-        // `g` opens the jump menu (Browser + Tracer are both available).
+        // `g` opens the goto menu (Browser + Tracer are both available).
         let r_g = update(&mut s, key(KeyCode::Char('g'), KeyModifiers::NONE), &c);
         assert!(r_g.intent.is_none());
-        assert!(matches!(s.modal, Some(Modal::JumpMenu(_))));
+        assert!(matches!(s.modal, Some(Modal::GotoMenu(_))));
         // Down selects index 1 = Tracer (Browser is 0, Tracer is 1).
         update(&mut s, key(KeyCode::Down, KeyModifiers::NONE), &c);
         // Enter confirms the Tracer target.
         let r = update(&mut s, key(KeyCode::Enter, KeyModifiers::NONE), &c);
         match r.intent {
-            Some(crate::app::state::PendingIntent::JumpTo(CrossLink::TraceByUuid { uuid })) => {
+            Some(crate::app::state::PendingIntent::Goto(CrossLink::TraceByUuid { uuid })) => {
                 assert_eq!(uuid, "ffuuid-42");
             }
             other => panic!("expected TraceByUuid, got {other:?}"),
@@ -612,7 +612,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn jump_menu_tracer_then_outcome_switches_to_tracer_tab() {
+    async fn goto_menu_tracer_then_outcome_switches_to_tracer_tab() {
         use crate::app::state::Modal;
         use crate::event::{IntentOutcome, ViewPayload};
         use crate::intent::CrossLink;
@@ -650,14 +650,14 @@ mod tests {
         );
         s.events.enter_row_nav();
 
-        // `g` opens the jump menu; Down selects Tracer (index 1); Enter confirms.
+        // `g` opens the goto menu; Down selects Tracer (index 1); Enter confirms.
         update(&mut s, key(KeyCode::Char('g'), KeyModifiers::NONE), &c);
-        assert!(matches!(s.modal, Some(Modal::JumpMenu(_))));
+        assert!(matches!(s.modal, Some(Modal::GotoMenu(_))));
         update(&mut s, key(KeyCode::Down, KeyModifiers::NONE), &c);
         let r = update(&mut s, key(KeyCode::Enter, KeyModifiers::NONE), &c);
         assert!(matches!(
             r.intent,
-            Some(crate::app::state::PendingIntent::JumpTo(
+            Some(crate::app::state::PendingIntent::Goto(
                 CrossLink::TraceByUuid { .. }
             ))
         ));
@@ -674,7 +674,7 @@ mod tests {
     }
 
     #[test]
-    fn g_jump_menu_enter_emits_open_in_browser_cross_link() {
+    fn g_goto_menu_enter_emits_open_in_browser_cross_link() {
         use crate::app::state::Modal;
         use crate::intent::CrossLink;
         let mut s = fresh_state();
@@ -710,12 +710,12 @@ mod tests {
             &c,
         );
         s.events.enter_row_nav();
-        // `g` opens the jump menu; Enter selects index 0 = Browser.
+        // `g` opens the goto menu; Enter selects index 0 = Browser.
         update(&mut s, key(KeyCode::Char('g'), KeyModifiers::NONE), &c);
-        assert!(matches!(s.modal, Some(Modal::JumpMenu(_))));
+        assert!(matches!(s.modal, Some(Modal::GotoMenu(_))));
         let r = update(&mut s, key(KeyCode::Enter, KeyModifiers::NONE), &c);
         match r.intent {
-            Some(crate::app::state::PendingIntent::JumpTo(CrossLink::OpenInBrowser {
+            Some(crate::app::state::PendingIntent::Goto(CrossLink::OpenInBrowser {
                 component_id,
                 group_id,
             })) => {

@@ -177,13 +177,13 @@ impl BrowserState {
         self.reset_detail_focus();
     }
 
-    pub fn jump_home(&mut self) {
-        ListNavigation::jump_home(self);
+    pub fn goto_first(&mut self) {
+        ListNavigation::goto_first(self);
         self.reset_detail_focus();
     }
 
-    pub fn jump_end(&mut self) {
-        ListNavigation::jump_end(self);
+    pub fn goto_last(&mut self) {
+        ListNavigation::goto_last(self);
         self.reset_detail_focus();
     }
 
@@ -1228,12 +1228,12 @@ mod tests {
     }
 
     #[test]
-    fn home_and_end_jump_to_first_and_last_visible() {
+    fn home_and_end_goto_first_and_last_visible() {
         let mut s = BrowserState::new();
         apply_tree_snapshot(&mut s, demo_snap());
-        s.jump_end();
+        s.goto_last();
         assert_eq!(s.selected, s.visible.len() - 1);
-        s.jump_home();
+        s.goto_first();
         assert_eq!(s.selected, 0);
     }
 

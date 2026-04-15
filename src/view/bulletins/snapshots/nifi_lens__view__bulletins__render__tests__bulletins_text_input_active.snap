@@ -28,7 +28,7 @@ expression: render_to_string(&state)
 "│ERROR   IOException: timeout                                                                                          │"
 "│                                                                                                                      │"
 "│id  src-1   pg  root                                                                                                  │"
-"│Enter jump to Browser · ge events · m mute · c copy message · C clear filters                                         │"
+"│Enter Browser · g goto · M mute · c copy message · R clear filters                                                    │"
 "│                                                                                                                      │"
 "│                                                                                                                      │"
 "└──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┘"

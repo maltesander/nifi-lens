@@ -184,7 +184,7 @@ impl AppState {
     }
 
     /// Returns the set of `GoTarget`s meaningful for the current tab + selection.
-    /// Used by `AppAction::Jump`'s enabled predicate.
+    /// Used by `AppAction::Goto`'s enabled predicate.
     pub fn selection_cross_links(&self) -> Vec<crate::input::GoTarget> {
         use crate::input::GoTarget;
         let mut out = Vec::new();
@@ -307,9 +307,9 @@ pub enum Modal {
     SaveEventContent(crate::widget::save_modal::SaveEventContentState),
     /// Per-node detail popup opened from the Overview Nodes panel.
     NodeDetail(Box<crate::client::health::NodeHealthRow>),
-    /// Cross-tab jump menu — shown when `AppAction::Jump` resolves to multiple targets.
+    /// Cross-tab goto menu — shown when `AppAction::Goto` resolves to multiple targets.
     /// Full render logic is added in Task 11; this variant is a stub so Task 10 compiles.
-    JumpMenu(crate::widget::jump_menu::JumpMenuState),
+    GotoMenu(crate::widget::goto_menu::GotoMenuState),
 }
 
 #[derive(Debug)]
@@ -405,7 +405,7 @@ pub struct UpdateResult {
 #[derive(Debug)]
 pub enum PendingIntent {
     SwitchContext(String),
-    JumpTo(CrossLink),
+    Goto(CrossLink),
     Dispatch(crate::intent::Intent),
     SaveEventContent(PendingSave),
     RunProvenanceQuery {
@@ -518,9 +518,9 @@ pub fn collect_hints(state: &AppState) -> Vec<crate::widget::hint_bar::HintSpan>
         }
     }
 
-    // Cross-tab jump — show when the current selection has at least one
+    // Cross-tab goto — show when the current selection has at least one
     // actionable destination so the bar doesn't advertise a dead combo.
-    push_verb(&mut out, AppAction::Jump, &ctx);
+    push_verb(&mut out, AppAction::Goto, &ctx);
 
     // Trailing `?` pointer so users always know where to find the
     // full reference. Everything else (navigation, history, tab
@@ -611,8 +611,8 @@ fn modal_hints(modal: &Modal) -> Vec<crate::widget::hint_bar::HintSpan> {
             action: "close",
             enabled: true,
         }],
-        // Task 11 adds full hint spans for the jump menu.
-        Modal::JumpMenu(_) => vec![
+        // Task 11 adds full hint spans for the goto menu.
+        Modal::GotoMenu(_) => vec![
             HintSpan {
                 key: "\u{2191}/\u{2193}",
                 action: "nav",
@@ -620,7 +620,7 @@ fn modal_hints(modal: &Modal) -> Vec<crate::widget::hint_bar::HintSpan> {
             },
             HintSpan {
                 key: "Enter",
-                action: "jump",
+                action: "goto",
                 enabled: true,
             },
             HintSpan {
@@ -938,7 +938,7 @@ fn handle_key(state: &mut AppState, key: KeyEvent, config: &Config) -> UpdateRes
                 tracer_followup: None,
             };
         }
-        InputEvent::Tab(TabAction::Jump(n)) => {
+        InputEvent::Tab(TabAction::Goto(n)) => {
             if state.modal.is_some() || view_text_input_active(state) {
                 return UpdateResult::default();
             }
@@ -1018,28 +1018,28 @@ fn handle_key(state: &mut AppState, key: KeyEvent, config: &Config) -> UpdateRes
                 tracer_followup: None,
             };
         }
-        InputEvent::App(AppAction::Jump) => {
+        InputEvent::App(AppAction::Goto) => {
             let targets = state.selection_cross_links();
             match targets.len() {
                 0 => {
-                    // Nothing to jump to — no-op.
+                    // Nothing to goto — no-op.
                     return UpdateResult::default();
                 }
                 1 => {
-                    // Single target: auto-jump without showing a menu.
+                    // Single target: auto-goto without showing a menu.
                     if let Some(link) = build_go_crosslink(state, targets[0]) {
                         return UpdateResult {
                             redraw: true,
-                            intent: Some(PendingIntent::JumpTo(link)),
+                            intent: Some(PendingIntent::Goto(link)),
                             tracer_followup: None,
                         };
                     }
                     return UpdateResult::default();
                 }
                 _ => {
-                    // Multiple targets: open jump menu modal.
-                    state.modal = Some(Modal::JumpMenu(
-                        crate::widget::jump_menu::JumpMenuState::new(targets),
+                    // Multiple targets: open goto menu modal.
+                    state.modal = Some(Modal::GotoMenu(
+                        crate::widget::goto_menu::GotoMenuState::new(targets),
                     ));
                     return UpdateResult {
                         redraw: true,
@@ -1109,7 +1109,7 @@ fn handle_key(state: &mut AppState, key: KeyEvent, config: &Config) -> UpdateRes
                     {
                         return UpdateResult {
                             redraw: true,
-                            intent: Some(PendingIntent::JumpTo(cross)),
+                            intent: Some(PendingIntent::Goto(cross)),
                             tracer_followup: None,
                         };
                     }
@@ -1269,7 +1269,7 @@ fn handle_key(state: &mut AppState, key: KeyEvent, config: &Config) -> UpdateRes
                         if let Some(link) = link {
                             return UpdateResult {
                                 redraw: true,
-                                intent: Some(PendingIntent::JumpTo(link)),
+                                intent: Some(PendingIntent::Goto(link)),
                                 tracer_followup: None,
                             };
                         }
@@ -1382,7 +1382,7 @@ fn handle_key(state: &mut AppState, key: KeyEvent, config: &Config) -> UpdateRes
                 }
                 return UpdateResult::default();
             }
-            Modal::JumpMenu(jm) => match key.code {
+            Modal::GotoMenu(jm) => match key.code {
                 KeyCode::Esc => {
                     state.modal = None;
                     return UpdateResult {
@@ -1413,7 +1413,7 @@ fn handle_key(state: &mut AppState, key: KeyEvent, config: &Config) -> UpdateRes
                     if let Some(link) = maybe_target.and_then(|t| build_go_crosslink(state, t)) {
                         return UpdateResult {
                             redraw: true,
-                            intent: Some(PendingIntent::JumpTo(link)),
+                            intent: Some(PendingIntent::Goto(link)),
                             tracer_followup: None,
                         };
                     }
@@ -1466,14 +1466,14 @@ fn build_go_crosslink(state: &AppState, target: crate::input::GoTarget) -> Optio
         (ViewId::Bulletins, GoTarget::Events) => {
             let idx = state.bulletins.selected_ring_index()?;
             let b = state.bulletins.ring.get(idx)?;
-            Some(CrossLink::JumpToEvents {
+            Some(CrossLink::GotoEvents {
                 component_id: b.source_id.clone(),
             })
         }
         (ViewId::Browser, GoTarget::Events) => {
             let arena_idx = *state.browser.visible.get(state.browser.selected)?;
             let node = state.browser.nodes.get(arena_idx)?;
-            Some(CrossLink::JumpToEvents {
+            Some(CrossLink::GotoEvents {
                 component_id: node.id.clone(),
             })
         }
@@ -1499,7 +1499,7 @@ fn build_go_crosslink(state: &AppState, target: crate::input::GoTarget) -> Optio
         }
         (ViewId::Tracer, GoTarget::Events) => {
             let component_id = state.tracer.selected_component_id()?;
-            Some(CrossLink::JumpToEvents { component_id })
+            Some(CrossLink::GotoEvents { component_id })
         }
         (ViewId::Overview, GoTarget::Browser) => match state.overview.focus {
             OverviewFocus::Noisy => {
@@ -1526,7 +1526,7 @@ fn build_go_crosslink(state: &AppState, target: crate::input::GoTarget) -> Optio
         (ViewId::Overview, GoTarget::Events) => {
             if state.overview.focus == OverviewFocus::Noisy {
                 let n = state.overview.noisy.get(state.overview.noisy_selected)?;
-                Some(CrossLink::JumpToEvents {
+                Some(CrossLink::GotoEvents {
                     component_id: n.source_id.clone(),
                 })
             } else {
@@ -1898,7 +1898,7 @@ mod tests {
     }
 
     #[test]
-    fn function_keys_jump_to_tabs() {
+    fn function_keys_goto_tabs() {
         let mut s = fresh_state();
         let c = tiny_config();
         update(&mut s, key(KeyCode::F(3), KeyModifiers::NONE), &c);
@@ -2553,7 +2553,7 @@ mod tests {
     }
 
     #[test]
-    fn g_from_bulletins_opens_jump_menu_then_enter_jumps_to_browser() {
+    fn g_from_bulletins_opens_goto_menu_then_enter_gotos_to_browser() {
         use crossterm::event::{KeyEvent, KeyModifiers};
 
         let mut s = fresh_state();
@@ -2561,8 +2561,8 @@ mod tests {
         s.current_tab = ViewId::Bulletins;
         seed_one_bulletin(&mut s);
 
-        // Press `g` — maps to AppAction::Jump; with Browser + Events cross-links
-        // available, a JumpMenu modal opens (no intent emitted yet).
+        // Press `g` — maps to AppAction::Goto; with Browser + Events cross-links
+        // available, a GotoMenu modal opens (no intent emitted yet).
         let r1 = update(
             &mut s,
             AppEvent::Input(Event::Key(KeyEvent::new(
@@ -2572,7 +2572,7 @@ mod tests {
             &c,
         );
         assert!(r1.intent.is_none());
-        assert!(matches!(s.modal, Some(Modal::JumpMenu(_))));
+        assert!(matches!(s.modal, Some(Modal::GotoMenu(_))));
 
         // Press Enter — selects index 0 = Browser (the first cross-link).
         let r2 = update(
@@ -2585,7 +2585,7 @@ mod tests {
         );
         assert!(matches!(
             r2.intent,
-            Some(PendingIntent::JumpTo(CrossLink::OpenInBrowser { .. }))
+            Some(PendingIntent::Goto(CrossLink::OpenInBrowser { .. }))
         ));
     }
 
@@ -2694,7 +2694,7 @@ mod tests {
     }
 
     #[test]
-    fn overview_noisy_g_e_builds_jump_to_events() {
+    fn overview_noisy_g_e_builds_goto_events() {
         use crate::view::overview::state::{NoisyComponent, OverviewFocus, Severity as OvSev};
         let mut s = fresh_state();
         s.current_tab = ViewId::Overview;
@@ -2709,7 +2709,7 @@ mod tests {
         s.overview.noisy_selected = 0;
         let link = build_go_crosslink(&s, crate::input::GoTarget::Events);
         assert!(
-            matches!(&link, Some(CrossLink::JumpToEvents { component_id })
+            matches!(&link, Some(CrossLink::GotoEvents { component_id })
                 if component_id == "proc-2"),
             "got {link:?}"
         );
@@ -2762,7 +2762,7 @@ mod tests {
     }
 
     #[test]
-    fn g_auto_jumps_directly_when_single_cross_link() {
+    fn g_auto_gotos_directly_when_single_cross_link() {
         // Overview + Queues focus: only GoTarget::Browser is available (Events
         // returns None for Queues focus), so selection_cross_links() → [Browser].
         // The single-target arm must fire a JumpTo intent without opening a modal.
@@ -2805,14 +2805,14 @@ mod tests {
         assert!(
             matches!(
                 r.intent,
-                Some(PendingIntent::JumpTo(CrossLink::OpenInBrowser { .. }))
+                Some(PendingIntent::Goto(CrossLink::OpenInBrowser { .. }))
             ),
-            "single cross-link must auto-jump without a modal; got intent={:?}",
+            "single cross-link must auto-goto without a modal; got intent={:?}",
             r.intent
         );
         assert!(
             s.modal.is_none(),
-            "no modal should open for single-target auto-jump"
+            "no modal should open for single-target auto-goto"
         );
     }
 }

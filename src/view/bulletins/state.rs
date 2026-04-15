@@ -518,12 +518,12 @@ impl BulletinsState {
             self.new_since_pause = 0;
         }
     }
-    pub fn jump_to_oldest(&mut self) {
-        ListNavigation::jump_home(self);
+    pub fn goto_oldest(&mut self) {
+        ListNavigation::goto_first(self);
         self.auto_scroll = false;
     }
-    pub fn jump_to_newest(&mut self) {
-        ListNavigation::jump_end(self);
+    pub fn goto_newest(&mut self) {
+        ListNavigation::goto_last(self);
         self.auto_scroll = true;
         self.new_since_pause = 0;
     }
@@ -1060,14 +1060,14 @@ mod tests {
         s.auto_scroll = false;
         s.new_since_pause = 7;
         s.selected = 0;
-        s.jump_to_newest();
+        s.goto_newest();
         assert!(s.auto_scroll);
         assert_eq!(s.new_since_pause, 0);
         assert_eq!(s.selected, 1);
     }
 
     #[test]
-    fn p_toggles_auto_scroll_without_jumping() {
+    fn p_toggles_auto_scroll_without_goto() {
         let mut s = BulletinsState::with_capacity(100);
         apply_payload(&mut s, payload(vec![b(1, "INFO"), b(2, "INFO")]));
         s.selected = 0;

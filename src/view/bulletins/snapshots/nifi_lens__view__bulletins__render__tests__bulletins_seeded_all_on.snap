@@ -4,7 +4,7 @@ expression: render_to_string(&state)
 ---
 "┌ Filters ─────────────────────────────────────────────────────────────────────────────────────────────────────────────┐"
 "│[E 2] [W 1] [I 2]   type: All   text: (none)                                                                          │"
-"│— 1/2/3 severity · T type · / text · Y group: source+msg · m mute · c clear · p pause —                               │"
+"│— 1/2/3 severity · T type · / text · G group: source+msg · M mute · c copy · P pause · R clear —                      │"
 "└──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┘"
 "┌ Bulletins ────────────────────────────────────────────────────────────────────────────────────────────── last <DUR> ago ┐"
 "│time            sev   #    source               pg path                  message                                      │"
@@ -28,7 +28,7 @@ expression: render_to_string(&state)
 "│ERROR   connection refused: database unreachable                                                                      │"
 "│                                                                                                                      │"
 "│id  src-5   pg  root                                                                                                  │"
-"│Enter jump to Browser · ge events · m mute · c copy message · C clear filters                                         │"
+"│Enter Browser · g goto · M mute · c copy message · R clear filters                                                    │"
 "│                                                                                                                      │"
 "│                                                                                                                      │"
 "└──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┘"

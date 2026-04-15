@@ -2003,7 +2003,7 @@ mod tests {
     }
 
     #[test]
-    fn lineage_content_scroll_home_end_jump_to_bounds() {
+    fn lineage_content_scroll_home_end_goto_bounds() {
         let mut state = TracerState::new();
         seed_lineage(&mut state, &[1]);
         load_detail_with_attrs(&mut state, vec![]);

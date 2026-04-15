@@ -1,11 +1,10 @@
 ---
 source: src/view/events/render.rs
-assertion_line: 482
 expression: render_to_string(&state)
 ---
 "┌ Filters ─────────────────────────────────────────────────────────────────────────────────────────┐"
-"│t time last 15m   T type (any)   s source (any)   u file uuid (any)   a attr (any)                │"
-"│status ● failed   results 0 / cap 500   — t/T/s/u/a edit · Enter run · n new · r reset · L raise c│"
+"│D time last 15m   T type (any)   S source (any)   U uuid (any)   A attr (any)                     │"
+"│status ● failed   results 0 / cap 500   — D/T/S/U/A edit · Enter run · N new · R reset · L raise c│"
 "└──────────────────────────────────────────────────────────────────────────────────────────────────┘"
 "┌ Events ────────────────────────────────────────────────────────────────────────────────────────  ┐"
 "│                                                                                                  │"

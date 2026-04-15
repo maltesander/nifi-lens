@@ -267,7 +267,7 @@ impl ViewKeyHandler for BrowserHandler {
                 })
             }
             FocusAction::First => {
-                state.browser.jump_home();
+                state.browser.goto_first();
                 state.browser.emit_detail_request_for_current_selection();
                 Some(UpdateResult {
                     redraw: true,
@@ -276,7 +276,7 @@ impl ViewKeyHandler for BrowserHandler {
                 })
             }
             FocusAction::Last => {
-                state.browser.jump_end();
+                state.browser.goto_last();
                 state.browser.emit_detail_request_for_current_selection();
                 Some(UpdateResult {
                     redraw: true,
@@ -296,7 +296,7 @@ impl ViewKeyHandler for BrowserHandler {
                 })
             }
             FocusAction::Left => {
-                // Collapse the current node or jump to its parent.
+                // Collapse the current node or goto its parent.
                 state.browser.backspace_selection();
                 state.browser.emit_detail_request_for_current_selection();
                 Some(UpdateResult {
@@ -340,7 +340,7 @@ impl ViewKeyHandler for BrowserHandler {
             }
             FocusAction::Ascend => {
                 // In tree focus: Ascend collapses the current node if expanded,
-                // or jumps to the parent. Delegates to backspace_selection().
+                // or gotos to the parent. Delegates to backspace_selection().
                 state.browser.backspace_selection();
                 state.browser.emit_detail_request_for_current_selection();
                 Some(UpdateResult {
@@ -644,7 +644,7 @@ mod tests {
         update(&mut s, key(KeyCode::Char('p'), KeyModifiers::NONE), &c);
         let r = update(&mut s, key(KeyCode::Enter, KeyModifiers::NONE), &c);
         match r.intent {
-            Some(PendingIntent::JumpTo(CrossLink::OpenInBrowser { component_id, .. })) => {
+            Some(PendingIntent::Goto(CrossLink::OpenInBrowser { component_id, .. })) => {
                 assert_eq!(component_id, "target");
             }
             other => panic!("expected JumpTo(OpenInBrowser), got {other:?}"),
@@ -653,7 +653,7 @@ mod tests {
     }
 
     #[test]
-    fn fuzzy_find_modal_esc_closes_without_jumping() {
+    fn fuzzy_find_modal_esc_closes_without_goto() {
         let mut s = fresh_state();
         let c = tiny_config();
         s.flow_index = Some(FlowIndex {
@@ -741,15 +741,15 @@ mod tests {
     }
 
     #[test]
-    fn t_is_no_longer_a_jump_to_events_shortcut() {
-        // `t` used to emit JumpToEvents; that shortcut is retired.
-        // Users now navigate via `g` which opens the AppAction::Jump modal.
+    fn t_is_no_longer_a_goto_events_shortcut() {
+        // `t` used to emit GotoEvents; that shortcut is retired.
+        // Users now navigate via `g` which opens the AppAction::Goto modal.
         let (mut s, c) = seeded_browser_state();
         s.browser.selected = 1; // "gen" processor
         let r = update(&mut s, key(KeyCode::Char('t'), KeyModifiers::NONE), &c);
         assert!(
             r.intent.is_none(),
-            "t must no longer emit JumpToEvents; got {r:?}"
+            "t must no longer emit GotoEvents; got {r:?}"
         );
     }
 
@@ -1246,7 +1246,7 @@ mod tests {
     #[test]
     fn t_is_noop_in_focused_recent_bulletins() {
         // `t` is retired; it is now a no-op in both tree and detail focus.
-        // Users use `g e` (GoTarget::Events) for cross-tab jumps instead.
+        // Users use `g e` (GoTarget::Events) for cross-tab gotos instead.
         let (mut s, c) = fresh_browser_on_processor_with_bulletins();
         // Enter detail focus on Properties (section 0), then cycle to
         // RecentBulletins (section 1) via Right.
@@ -1361,7 +1361,7 @@ mod tests {
         });
 
         let r = update(&mut s, key(KeyCode::Char('t'), KeyModifiers::NONE), &c);
-        // `t` is now a no-op; cross-tab jump is via `g e`.
+        // `t` is now a no-op; cross-tab goto is via `g e`.
         assert!(r.intent.is_none(), "t must be a no-op; got {r:?}");
     }
 

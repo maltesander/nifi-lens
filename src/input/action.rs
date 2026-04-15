@@ -45,8 +45,8 @@ impl Verb for FocusAction {
             Self::Right => "move right / expand tree node",
             Self::PageUp => "page up",
             Self::PageDown => "page down",
-            Self::First => "jump to first",
-            Self::Last => "jump to last",
+            Self::First => "goto first",
+            Self::Last => "goto last",
             Self::Descend => "drill / activate / submit",
             Self::Ascend => "leave focused pane / cancel",
             Self::NextPane => "focus next pane",
@@ -59,7 +59,7 @@ impl Verb for FocusAction {
             Self::Up | Self::Down => "nav",
             Self::Left | Self::Right => "side",
             Self::PageUp | Self::PageDown => "page",
-            Self::First | Self::Last => "jump",
+            Self::First | Self::Last => "goto",
             Self::Descend => "drill",
             Self::Ascend => "back",
             Self::NextPane | Self::PrevPane => "pane",
@@ -134,17 +134,17 @@ impl Verb for HistoryAction {
 impl Verb for TabAction {
     fn chord(self) -> Chord {
         match self {
-            Self::Jump(n) => Chord::simple(KeyCode::F(n)),
+            Self::Goto(n) => Chord::simple(KeyCode::F(n)),
         }
     }
     fn label(self) -> &'static str {
         match self {
-            Self::Jump(_) => "jump to tab",
+            Self::Goto(_) => "goto tab",
         }
     }
     fn hint(self) -> &'static str {
         match self {
-            Self::Jump(_) => "tab",
+            Self::Goto(_) => "tab",
         }
     }
     fn priority(self) -> u8 {
@@ -152,11 +152,11 @@ impl Verb for TabAction {
     }
     fn all() -> &'static [Self] {
         &[
-            Self::Jump(1),
-            Self::Jump(2),
-            Self::Jump(3),
-            Self::Jump(4),
-            Self::Jump(5),
+            Self::Goto(1),
+            Self::Goto(2),
+            Self::Goto(3),
+            Self::Goto(4),
+            Self::Goto(5),
         ]
     }
 }
@@ -168,7 +168,7 @@ impl Verb for AppAction {
             Self::Help => Chord::simple(KeyCode::Char('?')),
             Self::ContextSwitcher => Chord::shift(KeyCode::Char('K')),
             Self::FuzzyFind => Chord::shift(KeyCode::Char('F')),
-            Self::Jump => Chord::simple(KeyCode::Char('g')),
+            Self::Goto => Chord::simple(KeyCode::Char('g')),
             Self::Paste => Chord::simple(KeyCode::Char('v')),
             Self::Cut => Chord::simple(KeyCode::Char('x')),
         }
@@ -179,7 +179,7 @@ impl Verb for AppAction {
             Self::Help => "help",
             Self::ContextSwitcher => "switch cluster context",
             Self::FuzzyFind => "fuzzy find component",
-            Self::Jump => "jump to related tab",
+            Self::Goto => "goto related tab",
             Self::Paste => "paste from clipboard",
             Self::Cut => "cut to clipboard",
         }
@@ -190,14 +190,14 @@ impl Verb for AppAction {
             Self::Help => "help",
             Self::ContextSwitcher => "ctx",
             Self::FuzzyFind => "find",
-            Self::Jump => "jump",
+            Self::Goto => "goto",
             Self::Paste => "paste",
             Self::Cut => "cut",
         }
     }
     fn enabled(self, ctx: &HintContext<'_>) -> bool {
         match self {
-            Self::Jump => !ctx.state.selection_cross_links().is_empty(),
+            Self::Goto => !ctx.state.selection_cross_links().is_empty(),
             Self::Paste | Self::Cut => ctx.state.text_input_is_active(),
             _ => true,
         }
@@ -205,7 +205,7 @@ impl Verb for AppAction {
     fn priority(self) -> u8 {
         match self {
             Self::Help => 80,
-            Self::Jump => 60,
+            Self::Goto => 60,
             Self::Paste | Self::Cut => 50,
             _ => 30,
         }
@@ -216,7 +216,7 @@ impl Verb for AppAction {
             Self::Help,
             Self::ContextSwitcher,
             Self::FuzzyFind,
-            Self::Jump,
+            Self::Goto,
             Self::Paste,
             Self::Cut,
         ]
@@ -231,7 +231,7 @@ pub enum HistoryAction {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum TabAction {
-    Jump(u8),
+    Goto(u8),
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -240,7 +240,7 @@ pub enum AppAction {
     Help,
     ContextSwitcher,
     FuzzyFind,
-    Jump,
+    Goto,
     Paste,
     Cut,
 }
@@ -327,15 +327,15 @@ mod tests {
 
     #[test]
     fn tab_chords() {
-        assert_eq!(TabAction::Jump(1).chord(), Chord::simple(KeyCode::F(1)));
-        assert_eq!(TabAction::Jump(5).chord(), Chord::simple(KeyCode::F(5)));
+        assert_eq!(TabAction::Goto(1).chord(), Chord::simple(KeyCode::F(1)));
+        assert_eq!(TabAction::Goto(5).chord(), Chord::simple(KeyCode::F(5)));
     }
 
     #[test]
-    fn tab_all_is_jumps_1_through_5() {
+    fn tab_all_is_gotos_1_through_5() {
         let all = TabAction::all();
-        assert_eq!(all[0], TabAction::Jump(1));
-        assert_eq!(all[4], TabAction::Jump(5));
+        assert_eq!(all[0], TabAction::Goto(1));
+        assert_eq!(all[4], TabAction::Goto(5));
         assert_eq!(all.len(), 5);
     }
 
@@ -351,7 +351,7 @@ mod tests {
             AppAction::FuzzyFind.chord(),
             Chord::shift(KeyCode::Char('F'))
         );
-        assert_eq!(AppAction::Jump.chord(), Chord::simple(KeyCode::Char('g')));
+        assert_eq!(AppAction::Goto.chord(), Chord::simple(KeyCode::Char('g')));
         assert_eq!(AppAction::Paste.chord(), Chord::simple(KeyCode::Char('v')));
         assert_eq!(AppAction::Cut.chord(), Chord::simple(KeyCode::Char('x')));
     }
@@ -364,7 +364,7 @@ mod tests {
         assert!(all.contains(&AppAction::Help));
         assert!(all.contains(&AppAction::ContextSwitcher));
         assert!(all.contains(&AppAction::FuzzyFind));
-        assert!(all.contains(&AppAction::Jump));
+        assert!(all.contains(&AppAction::Goto));
         assert!(all.contains(&AppAction::Paste));
         assert!(all.contains(&AppAction::Cut));
     }
@@ -378,8 +378,8 @@ mod tests {
     }
 
     #[test]
-    fn jump_chord_is_bare_g() {
-        assert_eq!(AppAction::Jump.chord(), Chord::simple(KeyCode::Char('g')));
+    fn goto_chord_is_bare_g() {
+        assert_eq!(AppAction::Goto.chord(), Chord::simple(KeyCode::Char('g')));
     }
 
     #[test]

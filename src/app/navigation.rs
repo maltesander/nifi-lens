@@ -91,7 +91,7 @@ pub(crate) trait ListNavigation {
     }
 
     /// Jump to the first item.
-    fn jump_home(&mut self) {
+    fn goto_first(&mut self) {
         if self.list_len() == 0 {
             return;
         }
@@ -99,7 +99,7 @@ pub(crate) trait ListNavigation {
     }
 
     /// Jump to the last item.
-    fn jump_end(&mut self) {
+    fn goto_last(&mut self) {
         let len = self.list_len();
         if len == 0 {
             return;
@@ -180,16 +180,16 @@ mod tests {
     }
 
     #[test]
-    fn empty_list_jump_home_is_noop() {
+    fn empty_list_goto_first_is_noop() {
         let mut list = TestList::new(0, false);
-        list.jump_home();
+        list.goto_first();
         assert_eq!(list.selected(), None);
     }
 
     #[test]
-    fn empty_list_jump_end_is_noop() {
+    fn empty_list_goto_last_is_noop() {
         let mut list = TestList::new(0, false);
-        list.jump_end();
+        list.goto_last();
         assert_eq!(list.selected(), None);
     }
 
@@ -294,18 +294,18 @@ mod tests {
     // ── Jump home / end ────────────────────────────────────────────
 
     #[test]
-    fn jump_home() {
+    fn goto_first() {
         let mut list = TestList::new(10, false);
         list.set_selected(Some(7));
-        list.jump_home();
+        list.goto_first();
         assert_eq!(list.selected(), Some(0));
     }
 
     #[test]
-    fn jump_end() {
+    fn goto_last() {
         let mut list = TestList::new(10, false);
         list.set_selected(Some(2));
-        list.jump_end();
+        list.goto_last();
         assert_eq!(list.selected(), Some(9));
     }
 

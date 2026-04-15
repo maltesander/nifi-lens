@@ -49,8 +49,8 @@ pub fn render(frame: &mut Frame, state: &AppState) {
             Modal::NodeDetail(row) => {
                 crate::view::overview::render::render_node_detail_modal(frame, frame.area(), row);
             }
-            Modal::JumpMenu(jm) => {
-                crate::widget::jump_menu::render(frame, frame.area(), jm);
+            Modal::GotoMenu(jm) => {
+                crate::widget::goto_menu::render(frame, frame.area(), jm);
             }
         }
     }

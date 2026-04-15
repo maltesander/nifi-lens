@@ -3,8 +3,8 @@ source: src/view/events/render.rs
 expression: render_to_string(&state)
 ---
 "┌ Filters ─────────────────────────────────────────────────────────────────────────────────────────┐"
-"│t time last 15m   T type (any)   s source (any)   u file uuid (any)   a attr (any)                │"
-"│status ● running 45%   results 0 / cap 500   — t/T/s/u/a edit · Enter run · n new · r reset · L ra│"
+"│D time last 15m   T type (any)   S source (any)   U uuid (any)   A attr (any)                     │"
+"│status ● running 45%   results 0 / cap 500   — D/T/S/U/A edit · Enter run · N new · R reset · L ra│"
 "└──────────────────────────────────────────────────────────────────────────────────────────────────┘"
 "┌ Events ────────────────────────────────────────────────────────────────────────────────────────  ┐"
 "│                                                                                                  │"

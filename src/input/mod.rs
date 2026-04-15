@@ -181,7 +181,7 @@ pub trait Verb: Copy + 'static {
     ///
     /// The `'static` slice means `Verb` is only suitable for
     /// unit-like enums or those with a small fixed set of
-    /// parameterised variants (e.g. `TabAction::Jump(1..=5)`
+    /// parameterised variants (e.g. `TabAction::Goto(1..=5)`
     /// — each concrete `Jump(n)` is listed explicitly). Truly
     /// parametric actions (e.g. a future `GotoPg(Uuid)`) cannot
     /// implement `Verb` and must route through a different
@@ -455,11 +455,11 @@ mod keymap_tests {
     }
 
     #[test]
-    fn f3_is_tab_jump_3() {
+    fn f3_is_tab_goto_3() {
         let mut km = KeyMap::default();
         assert_eq!(
             km.translate(press(KeyCode::F(3)), ViewId::Overview),
-            InputEvent::Tab(TabAction::Jump(3))
+            InputEvent::Tab(TabAction::Goto(3))
         );
     }
 
@@ -485,11 +485,11 @@ mod keymap_tests {
     }
 
     #[test]
-    fn bare_g_produces_app_jump() {
+    fn bare_g_produces_app_goto() {
         let mut km = KeyMap::default();
         assert_eq!(
             km.translate(press(KeyCode::Char('g')), ViewId::Overview),
-            InputEvent::App(AppAction::Jump)
+            InputEvent::App(AppAction::Goto)
         );
     }
 

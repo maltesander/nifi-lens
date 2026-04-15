@@ -98,7 +98,7 @@ pub enum IntentOutcome {
         intent_name: &'static str,
         phase: u8,
     },
-    /// Phase 3: the user asked to jump to a component in Browser.
+    /// Phase 3: the user asked to goto a component in Browser.
     /// The reducer switches tabs, expands ancestors, and sets selection.
     OpenInBrowserTarget {
         component_id: String,

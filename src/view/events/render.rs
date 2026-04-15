@@ -98,7 +98,7 @@ fn render_filter_bar(frame: &mut Frame, area: Rect, state: &EventsState) {
     // Row 0: filter chips.
     let row0 = Line::from(vec![
         Span::styled(
-            field_chip("t time", FilterField::Time, state),
+            field_chip("D time", FilterField::Time, state),
             theme::accent(),
         ),
         Span::raw("   "),
@@ -108,17 +108,17 @@ fn render_filter_bar(frame: &mut Frame, area: Rect, state: &EventsState) {
         ),
         Span::raw("   "),
         Span::styled(
-            field_chip("s source", FilterField::Source, state),
+            field_chip("S source", FilterField::Source, state),
             theme::accent(),
         ),
         Span::raw("   "),
         Span::styled(
-            field_chip("u file uuid", FilterField::Uuid, state),
+            field_chip("U uuid", FilterField::Uuid, state),
             theme::accent(),
         ),
         Span::raw("   "),
         Span::styled(
-            field_chip("a attr", FilterField::Attr, state),
+            field_chip("A attr", FilterField::Attr, state),
             theme::accent(),
         ),
     ]);
@@ -160,7 +160,7 @@ fn render_filter_bar(frame: &mut Frame, area: Rect, state: &EventsState) {
         )
     } else {
         Span::styled(
-            "\u{2014} t/T/s/u/a edit \u{00b7} Enter run \u{00b7} n new \u{00b7} r reset \u{00b7} L raise cap \u{2014}"
+            "\u{2014} D/T/S/U/A edit \u{00b7} Enter run \u{00b7} N new \u{00b7} R reset \u{00b7} L raise cap \u{2014}"
                 .to_string(),
             theme::muted(),
         )
@@ -366,8 +366,7 @@ fn render_empty_state(frame: &mut Frame, area: Rect) {
         ))
         .alignment(Alignment::Center),
         Line::from(Span::styled(
-            "  u=8f2c\u{2026}                      \u{2192} jump straight to Tracer instead"
-                .to_string(),
+            "  u=8f2c\u{2026}                      \u{2192} goto Tracer instead".to_string(),
             theme::muted(),
         ))
         .alignment(Alignment::Center),
@@ -420,8 +419,7 @@ fn render_detail_pane(frame: &mut Frame, area: Rect, state: &EventsState) {
         Span::raw(e.group_id.clone()),
     ]);
     let hints_line = Line::from(Span::styled(
-        "g t trace lineage \u{00b7} g b open in browser \u{00b7} Esc back \u{00b7} c copy uuid"
-            .to_string(),
+        "g goto menu (Browser / Tracer) \u{00b7} Esc back \u{00b7} c copy uuid".to_string(),
         theme::muted(),
     ));
 
