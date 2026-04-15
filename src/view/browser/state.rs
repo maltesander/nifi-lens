@@ -49,10 +49,12 @@ pub struct ChildPgSummary {
 /// Named detail sub-sections that can hold keyboard focus.
 ///
 /// This is a closed set — adding a new variant requires updating
-/// `DetailSections::for_node` and the render leaves that draw it.
+/// `DetailSections::for_node`, `DetailSections::for_node_detail`, and
+/// the render leaves that draw it.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum DetailSection {
     Properties,
+    ValidationErrors,
     RecentBulletins,
     ControllerServices,
     ChildGroups,
@@ -66,6 +68,8 @@ pub enum DetailSection {
 pub struct DetailSections(pub &'static [DetailSection]);
 
 impl DetailSections {
+    /// Base section list — does not include `ValidationErrors`.
+    /// Use `for_node_detail` when the presence of validation errors is known.
     pub fn for_node(kind: crate::client::NodeKind) -> Self {
         use crate::client::NodeKind as NK;
         match kind {
@@ -79,6 +83,25 @@ impl DetailSections {
                 DetailSection::RecentBulletins,
             ]),
             _ => DetailSections(&[]),
+        }
+    }
+
+    /// Section list that conditionally includes `ValidationErrors` between
+    /// `Properties` and `RecentBulletins` when `has_validation` is true.
+    /// Use this for focus cycling so the section is only reachable when
+    /// errors are present.
+    pub fn for_node_detail(kind: crate::client::NodeKind, has_validation: bool) -> Self {
+        use crate::client::NodeKind as NK;
+        match (kind, has_validation) {
+            (NK::Processor, true) => DetailSections(&[
+                DetailSection::Properties,
+                DetailSection::ValidationErrors,
+                DetailSection::RecentBulletins,
+            ]),
+            (NK::ControllerService, true) => {
+                DetailSections(&[DetailSection::Properties, DetailSection::ValidationErrors])
+            }
+            _ => Self::for_node(kind),
         }
     }
 
@@ -404,6 +427,12 @@ impl BrowserState {
         match (section, detail) {
             (DetailSection::Properties, NodeDetail::Processor(p)) => p.properties.len(),
             (DetailSection::Properties, NodeDetail::ControllerService(cs)) => cs.properties.len(),
+            (DetailSection::ValidationErrors, NodeDetail::Processor(p)) => {
+                p.validation_errors.len()
+            }
+            (DetailSection::ValidationErrors, NodeDetail::ControllerService(cs)) => {
+                cs.validation_errors.len()
+            }
             (DetailSection::RecentBulletins, NodeDetail::Processor(_)) => {
                 let source_id = &self.nodes[arena_idx].id;
                 bulletins
@@ -441,7 +470,12 @@ impl BrowserState {
         let arena_idx = *self.visible.get(self.selected)?;
         let detail = self.details.get(&arena_idx)?;
         let kind = self.nodes[arena_idx].kind;
-        let sections = DetailSections::for_node(kind);
+        let has_validation = match detail {
+            NodeDetail::Processor(p) => !p.validation_errors.is_empty(),
+            NodeDetail::ControllerService(cs) => !cs.validation_errors.is_empty(),
+            _ => false,
+        };
+        let sections = DetailSections::for_node_detail(kind, has_validation);
         let section = *sections.0.get(*idx)?;
         let row = rows[*idx];
         match (section, detail) {
@@ -450,6 +484,12 @@ impl BrowserState {
             }
             (DetailSection::Properties, NodeDetail::ControllerService(cs)) => {
                 cs.properties.get(row).map(|(_k, v)| v.clone())
+            }
+            (DetailSection::ValidationErrors, NodeDetail::Processor(p)) => {
+                p.validation_errors.get(row).cloned()
+            }
+            (DetailSection::ValidationErrors, NodeDetail::ControllerService(cs)) => {
+                cs.validation_errors.get(row).cloned()
             }
             (DetailSection::RecentBulletins, NodeDetail::Processor(_)) => {
                 let source_id = &self.nodes[arena_idx].id;

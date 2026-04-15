@@ -11,6 +11,10 @@
 //! ││ KEY              VALUE          │     │
 //! ││ ...scrollable Table...          │     │
 //! │└─────────────────────────────────┘     │
+//! │┌ Validation errors  N ───────────┐     │  ← optional, shown when errors present
+//! ││ error message 1                 │     │
+//! ││ ...                             │     │
+//! │└─────────────────────────────────┘     │
 //! │┌ Recent bulletins  N ────────────┐     │  ← focusable
 //! ││ ...scrollable Table...          │     │
 //! │└─────────────────────────────────┘     │
@@ -116,10 +120,8 @@ fn render_identity_panel(frame: &mut Frame, area: Rect, d: &ProcessorDetail) {
     frame.render_widget(Paragraph::new(lines), inner);
 }
 
-/// Renders the Properties sub-panel and, when the processor has
-/// validation errors, a single-line summary below it. The middle "fill"
-/// row is split here so the validation line lives between Properties
-/// and Recent bulletins without needing a fifth row in the outer layout.
+/// Renders the Properties sub-panel and, when the processor has validation
+/// errors, a bordered panel listing them below Properties.
 fn render_properties_and_validation(
     frame: &mut Frame,
     area: Rect,
@@ -127,8 +129,17 @@ fn render_properties_and_validation(
     detail_focus: &DetailFocus,
 ) {
     let has_validation = !d.validation_errors.is_empty();
+    let sections = DetailSections::for_node_detail(NodeKind::Processor, has_validation);
+    let val_idx = sections
+        .0
+        .iter()
+        .position(|s| *s == DetailSection::ValidationErrors);
+    let is_val_focused = val_idx
+        .is_some_and(|i| matches!(detail_focus, DetailFocus::Section { idx, .. } if *idx == i));
+
     let constraints: Vec<Constraint> = if has_validation {
-        vec![Constraint::Fill(1), Constraint::Length(1)]
+        let panel_height = (d.validation_errors.len().min(5) + 2) as u16;
+        vec![Constraint::Fill(1), Constraint::Length(panel_height)]
     } else {
         vec![Constraint::Fill(1)]
     };
@@ -139,27 +150,31 @@ fn render_properties_and_validation(
 
     render_properties_panel(frame, chunks[0], d, detail_focus);
     if has_validation {
-        render_validation_line(frame, chunks[1], d);
+        render_validation_errors_panel(frame, chunks[1], d, is_val_focused);
     }
 }
 
-fn render_validation_line(frame: &mut Frame, area: Rect, d: &ProcessorDetail) {
+fn render_validation_errors_panel(
+    frame: &mut Frame,
+    area: Rect,
+    d: &ProcessorDetail,
+    is_focused: bool,
+) {
     let count = d.validation_errors.len();
-    let line = if count == 0 {
-        Line::from(Span::styled("validation errors: none", theme::muted()))
-    } else {
-        let first = d
-            .validation_errors
-            .first()
-            .map(String::as_str)
-            .unwrap_or("");
-        let width = area.width.saturating_sub(24) as usize;
-        Line::from(vec![
-            Span::styled(format!("validation errors: {count} "), theme::error()),
-            Span::styled(truncate(first, width), theme::error()),
-        ])
-    };
-    frame.render_widget(Paragraph::new(line), area);
+    let panel = Panel::new(" Validation errors ")
+        .right(Line::from(format!(" {count} ")))
+        .focused(is_focused)
+        .into_block();
+    let inner = panel.inner(area);
+    frame.render_widget(panel, area);
+
+    let width = inner.width.saturating_sub(1) as usize;
+    let lines: Vec<Line> = d
+        .validation_errors
+        .iter()
+        .map(|e| Line::from(Span::styled(truncate(e, width), theme::error())))
+        .collect();
+    frame.render_widget(Paragraph::new(lines), inner);
 }
 
 fn render_properties_panel(
@@ -168,7 +183,8 @@ fn render_properties_panel(
     d: &ProcessorDetail,
     detail_focus: &DetailFocus,
 ) {
-    let sections = DetailSections::for_node(NodeKind::Processor);
+    let sections =
+        DetailSections::for_node_detail(NodeKind::Processor, !d.validation_errors.is_empty());
     let props_idx = sections
         .0
         .iter()
@@ -216,7 +232,8 @@ fn render_recent_bulletins_panel(
     bulletins: &VecDeque<BulletinSnapshot>,
     detail_focus: &DetailFocus,
 ) {
-    let sections = DetailSections::for_node(NodeKind::Processor);
+    let sections =
+        DetailSections::for_node_detail(NodeKind::Processor, !d.validation_errors.is_empty());
     let bul_idx = sections
         .0
         .iter()

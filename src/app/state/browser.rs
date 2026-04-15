@@ -107,7 +107,12 @@ impl ViewKeyHandler for BrowserHandler {
                 return Some(UpdateResult::default());
             };
             let kind = state.browser.nodes[arena_idx].kind;
-            let sections = DetailSections::for_node(kind);
+            let has_validation = match state.browser.details.get(&arena_idx) {
+                Some(NodeDetail::Processor(p)) => !p.validation_errors.is_empty(),
+                Some(NodeDetail::ControllerService(cs)) => !cs.validation_errors.is_empty(),
+                _ => false,
+            };
+            let sections = DetailSections::for_node_detail(kind, has_validation);
             return match action {
                 FocusAction::Ascend => {
                     // Return to tree focus.
