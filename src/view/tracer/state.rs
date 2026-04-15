@@ -1767,10 +1767,10 @@ mod tests {
             AttributeClass::of(&triple("k", Some("v"), Some("v"))),
             AttributeClass::Unchanged
         );
-        // Modified is grouped under Unchanged ("both sides present").
+        // Modified (both sides present, values differ) → Updated.
         assert_eq!(
             AttributeClass::of(&triple("k", Some("old"), Some("new"))),
-            AttributeClass::Unchanged
+            AttributeClass::Updated
         );
     }
 
