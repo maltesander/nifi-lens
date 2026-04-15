@@ -264,6 +264,26 @@ impl AppState {
         handle.0.set_text(text).map_err(|e| e.to_string())
     }
 
+    /// Read a string from the system clipboard.
+    ///
+    /// Uses the same persistent `arboard` handle as `copy_to_clipboard`,
+    /// lazily initializing it on first use.
+    pub fn get_from_clipboard(&mut self) -> Result<String, String> {
+        if self.clipboard.is_none() {
+            match arboard::Clipboard::new() {
+                Ok(cb) => {
+                    self.clipboard = Some(ClipboardHandle(cb));
+                }
+                Err(err) => return Err(err.to_string()),
+            }
+        }
+        let handle = self
+            .clipboard
+            .as_mut()
+            .ok_or_else(|| "clipboard handle unavailable".to_string())?;
+        handle.0.get_text().map_err(|e| e.to_string())
+    }
+
     /// Returns true when the currently active view has a text-input field open.
     /// Used by `AppAction::Paste/Cut` enabled predicates.
     pub fn text_input_is_active(&self) -> bool {
@@ -287,6 +307,9 @@ pub enum Modal {
     SaveEventContent(crate::widget::save_modal::SaveEventContentState),
     /// Per-node detail popup opened from the Overview Nodes panel.
     NodeDetail(Box<crate::client::health::NodeHealthRow>),
+    /// Cross-tab jump menu — shown when `AppAction::Jump` resolves to multiple targets.
+    /// Full render logic is added in Task 11; this variant is a stub so Task 10 compiles.
+    JumpMenu(crate::widget::jump_menu::JumpMenuState),
 }
 
 #[derive(Debug)]
@@ -588,6 +611,24 @@ fn modal_hints(modal: &Modal) -> Vec<crate::widget::hint_bar::HintSpan> {
             action: "close",
             enabled: true,
         }],
+        // Task 11 adds full hint spans for the jump menu.
+        Modal::JumpMenu(_) => vec![
+            HintSpan {
+                key: "\u{2191}/\u{2193}",
+                action: "nav",
+                enabled: true,
+            },
+            HintSpan {
+                key: "Enter",
+                action: "jump",
+                enabled: true,
+            },
+            HintSpan {
+                key: "Esc",
+                action: "cancel",
+                enabled: true,
+            },
+        ],
     }
 }
 
@@ -978,8 +1019,35 @@ fn handle_key(state: &mut AppState, key: KeyEvent, config: &Config) -> UpdateRes
             };
         }
         InputEvent::App(AppAction::Jump) => {
-            // Properly wired in Task 10
-            return UpdateResult::default();
+            let targets = state.selection_cross_links();
+            match targets.len() {
+                0 => {
+                    // Nothing to jump to — no-op.
+                    return UpdateResult::default();
+                }
+                1 => {
+                    // Single target: auto-jump without showing a menu.
+                    if let Some(link) = build_go_crosslink(state, targets[0]) {
+                        return UpdateResult {
+                            redraw: true,
+                            intent: Some(PendingIntent::JumpTo(link)),
+                            tracer_followup: None,
+                        };
+                    }
+                    return UpdateResult::default();
+                }
+                _ => {
+                    // Multiple targets: open jump menu modal.
+                    state.modal = Some(Modal::JumpMenu(
+                        crate::widget::jump_menu::JumpMenuState::new(targets),
+                    ));
+                    return UpdateResult {
+                        redraw: true,
+                        intent: None,
+                        tracer_followup: None,
+                    };
+                }
+            }
         }
         InputEvent::App(AppAction::Paste) | InputEvent::App(AppAction::Cut) => {
             // Properly wired in Task 12 via text-input bypass
@@ -1314,6 +1382,49 @@ fn handle_key(state: &mut AppState, key: KeyEvent, config: &Config) -> UpdateRes
                 }
                 return UpdateResult::default();
             }
+            Modal::JumpMenu(jm) => match key.code {
+                KeyCode::Esc => {
+                    state.modal = None;
+                    return UpdateResult {
+                        redraw: true,
+                        intent: None,
+                        tracer_followup: None,
+                    };
+                }
+                KeyCode::Up => {
+                    jm.move_up();
+                    return UpdateResult {
+                        redraw: true,
+                        intent: None,
+                        tracer_followup: None,
+                    };
+                }
+                KeyCode::Down => {
+                    jm.move_down();
+                    return UpdateResult {
+                        redraw: true,
+                        intent: None,
+                        tracer_followup: None,
+                    };
+                }
+                KeyCode::Enter => {
+                    let maybe_target = jm.selected_target();
+                    state.modal = None;
+                    if let Some(link) = maybe_target.and_then(|t| build_go_crosslink(state, t)) {
+                        return UpdateResult {
+                            redraw: true,
+                            intent: Some(PendingIntent::JumpTo(link)),
+                            tracer_followup: None,
+                        };
+                    }
+                    return UpdateResult {
+                        redraw: true,
+                        intent: None,
+                        tracer_followup: None,
+                    };
+                }
+                _ => return UpdateResult::default(),
+            },
         }
     }
 
@@ -2442,8 +2553,7 @@ mod tests {
     }
 
     #[test]
-    #[ignore = "g+b two-key flow removed in Task 3; re-wire via AppAction::Jump in Task 10"]
-    fn go_b_from_bulletins_jumps_to_browser() {
+    fn g_from_bulletins_opens_jump_menu_then_enter_jumps_to_browser() {
         use crossterm::event::{KeyEvent, KeyModifiers};
 
         let mut s = fresh_state();
@@ -2451,8 +2561,8 @@ mod tests {
         s.current_tab = ViewId::Bulletins;
         seed_one_bulletin(&mut s);
 
-        // First press `g` — maps to AppAction::Jump; no redraw required for the
-        // leader keystroke itself (Bulletins is ported, legacy g is gone).
+        // Press `g` — maps to AppAction::Jump; with Browser + Events cross-links
+        // available, a JumpMenu modal opens (no intent emitted yet).
         let r1 = update(
             &mut s,
             AppEvent::Input(Event::Key(KeyEvent::new(
@@ -2462,12 +2572,13 @@ mod tests {
             &c,
         );
         assert!(r1.intent.is_none());
+        assert!(matches!(s.modal, Some(Modal::JumpMenu(_))));
 
-        // Then press `b`.
+        // Press Enter — selects index 0 = Browser (the first cross-link).
         let r2 = update(
             &mut s,
             AppEvent::Input(Event::Key(KeyEvent::new(
-                KeyCode::Char('b'),
+                KeyCode::Enter,
                 KeyModifiers::NONE,
             ))),
             &c,
@@ -2637,5 +2748,16 @@ mod tests {
         s.current_tab = ViewId::Overview;
         s.overview.focus = OverviewFocus::None;
         assert!(build_go_crosslink(&s, crate::input::GoTarget::Browser).is_none());
+    }
+
+    #[test]
+    fn g_auto_jumps_when_single_cross_link() {
+        let mut s = fresh_state();
+        let c = tiny_config();
+        s.current_tab = ViewId::Bulletins;
+        // With no bulletin selected, cross-links are empty → no-op.
+        let r = update(&mut s, key(KeyCode::Char('g'), KeyModifiers::NONE), &c);
+        assert!(r.intent.is_none());
+        assert!(s.modal.is_none(), "no modal when no cross-links");
     }
 }

@@ -436,8 +436,8 @@ mod tests {
     }
 
     #[test]
-    #[ignore = "g+t two-key flow removed in Task 3; re-wire via AppAction::Jump in Task 10"]
-    fn row_gt_chord_emits_trace_by_uuid_cross_link() {
+    fn g_opens_jump_menu_then_down_enter_emits_trace_by_uuid_cross_link() {
+        use crate::app::state::Modal;
         use crate::intent::CrossLink;
         let mut s = fresh_state();
         let c = tiny_config();
@@ -472,9 +472,14 @@ mod tests {
             &c,
         );
         s.events.enter_row_nav();
-        // `g t` is the chord for trace-by-uuid (go-leader + Tracer).
-        update(&mut s, key(KeyCode::Char('g'), KeyModifiers::NONE), &c);
-        let r = update(&mut s, key(KeyCode::Char('t'), KeyModifiers::NONE), &c);
+        // `g` opens the jump menu (Browser + Tracer are both available).
+        let r_g = update(&mut s, key(KeyCode::Char('g'), KeyModifiers::NONE), &c);
+        assert!(r_g.intent.is_none());
+        assert!(matches!(s.modal, Some(Modal::JumpMenu(_))));
+        // Down selects index 1 = Tracer (Browser is 0, Tracer is 1).
+        update(&mut s, key(KeyCode::Down, KeyModifiers::NONE), &c);
+        // Enter confirms the Tracer target.
+        let r = update(&mut s, key(KeyCode::Enter, KeyModifiers::NONE), &c);
         match r.intent {
             Some(crate::app::state::PendingIntent::JumpTo(CrossLink::TraceByUuid { uuid })) => {
                 assert_eq!(uuid, "ffuuid-42");
@@ -578,8 +583,8 @@ mod tests {
     }
 
     #[tokio::test]
-    #[ignore = "g+t two-key flow removed in Task 3; re-wire via AppAction::Jump in Task 10"]
-    async fn tracer_lineage_started_outcome_switches_to_tracer_tab() {
+    async fn jump_menu_tracer_then_outcome_switches_to_tracer_tab() {
+        use crate::app::state::Modal;
         use crate::event::{IntentOutcome, ViewPayload};
         use crate::intent::CrossLink;
         let mut s = fresh_state();
@@ -616,9 +621,11 @@ mod tests {
         );
         s.events.enter_row_nav();
 
-        // Use `g t` (go-leader + Tracer) to emit the TraceByUuid cross-link.
+        // `g` opens the jump menu; Down selects Tracer (index 1); Enter confirms.
         update(&mut s, key(KeyCode::Char('g'), KeyModifiers::NONE), &c);
-        let r = update(&mut s, key(KeyCode::Char('t'), KeyModifiers::NONE), &c);
+        assert!(matches!(s.modal, Some(Modal::JumpMenu(_))));
+        update(&mut s, key(KeyCode::Down, KeyModifiers::NONE), &c);
+        let r = update(&mut s, key(KeyCode::Enter, KeyModifiers::NONE), &c);
         assert!(matches!(
             r.intent,
             Some(crate::app::state::PendingIntent::JumpTo(
@@ -638,8 +645,8 @@ mod tests {
     }
 
     #[test]
-    #[ignore = "g+b two-key flow removed in Task 3; re-wire via AppAction::Jump in Task 10"]
-    fn row_gb_chord_emits_open_in_browser_cross_link() {
+    fn g_jump_menu_enter_emits_open_in_browser_cross_link() {
+        use crate::app::state::Modal;
         use crate::intent::CrossLink;
         let mut s = fresh_state();
         let c = tiny_config();
@@ -674,9 +681,10 @@ mod tests {
             &c,
         );
         s.events.enter_row_nav();
-        // `g` is now the go-leader; `g b` is the chord for go-to-browser.
+        // `g` opens the jump menu; Enter selects index 0 = Browser.
         update(&mut s, key(KeyCode::Char('g'), KeyModifiers::NONE), &c);
-        let r = update(&mut s, key(KeyCode::Char('b'), KeyModifiers::NONE), &c);
+        assert!(matches!(s.modal, Some(Modal::JumpMenu(_))));
+        let r = update(&mut s, key(KeyCode::Enter, KeyModifiers::NONE), &c);
         match r.intent {
             Some(crate::app::state::PendingIntent::JumpTo(CrossLink::OpenInBrowser {
                 component_id,

@@ -5,6 +5,7 @@ pub mod fuzzy_find;
 pub mod gauge;
 pub mod help_modal;
 pub mod hint_bar;
+pub mod jump_menu;
 pub mod panel;
 pub mod run_icon;
 pub mod save_modal;
