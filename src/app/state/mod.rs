@@ -2751,7 +2751,7 @@ mod tests {
     }
 
     #[test]
-    fn g_auto_jumps_when_single_cross_link() {
+    fn g_from_bulletins_no_selection_is_noop() {
         let mut s = fresh_state();
         let c = tiny_config();
         s.current_tab = ViewId::Bulletins;
@@ -2759,5 +2759,60 @@ mod tests {
         let r = update(&mut s, key(KeyCode::Char('g'), KeyModifiers::NONE), &c);
         assert!(r.intent.is_none());
         assert!(s.modal.is_none(), "no modal when no cross-links");
+    }
+
+    #[test]
+    fn g_auto_jumps_directly_when_single_cross_link() {
+        // Overview + Queues focus: only GoTarget::Browser is available (Events
+        // returns None for Queues focus), so selection_cross_links() → [Browser].
+        // The single-target arm must fire a JumpTo intent without opening a modal.
+        use crate::view::overview::state::{OverviewFocus, UnhealthyQueue};
+        use crossterm::event::{KeyEvent, KeyModifiers};
+
+        let mut s = fresh_state();
+        let c = tiny_config();
+        s.current_tab = ViewId::Overview;
+        s.overview.focus = OverviewFocus::Queues;
+        s.overview.unhealthy = vec![UnhealthyQueue {
+            id: "conn-1".into(),
+            group_id: "grp-3".into(),
+            name: "q1".into(),
+            source_name: "A".into(),
+            destination_name: "B".into(),
+            fill_percent: 80,
+            flow_files_queued: 800,
+            bytes_queued: 0,
+            queued_display: "800".into(),
+        }];
+        s.overview.queues_selected = 0;
+
+        // Verify precondition: exactly one cross-link available.
+        assert_eq!(
+            s.selection_cross_links(),
+            vec![crate::input::GoTarget::Browser],
+            "expected exactly [Browser] for Overview+Queues"
+        );
+
+        let r = update(
+            &mut s,
+            AppEvent::Input(Event::Key(KeyEvent::new(
+                KeyCode::Char('g'),
+                KeyModifiers::NONE,
+            ))),
+            &c,
+        );
+
+        assert!(
+            matches!(
+                r.intent,
+                Some(PendingIntent::JumpTo(CrossLink::OpenInBrowser { .. }))
+            ),
+            "single cross-link must auto-jump without a modal; got intent={:?}",
+            r.intent
+        );
+        assert!(
+            s.modal.is_none(),
+            "no modal should open for single-target auto-jump"
+        );
     }
 }
