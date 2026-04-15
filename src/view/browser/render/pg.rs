@@ -327,6 +327,7 @@ fn short_time(iso: &str, human: &str) -> String {
 #[cfg(test)]
 mod snapshots {
     use super::*;
+    use crate::view::browser::state::MAX_DETAIL_SECTIONS;
     use insta::assert_snapshot;
     use ratatui::Terminal;
     use ratatui::backend::TestBackend;
@@ -381,6 +382,7 @@ mod snapshots {
         let focus = DetailFocus::Section {
             idx: 0, // ControllerServices
             rows: [1, 0, 0, 0],
+            x_offsets: [0; MAX_DETAIL_SECTIONS],
         };
         let mut terminal = Terminal::new(TestBackend::new(100, 28)).unwrap();
         terminal
@@ -400,6 +402,7 @@ mod snapshots {
         let focus = DetailFocus::Section {
             idx: 1, // ChildGroups
             rows: [0, 0, 0, 0],
+            x_offsets: [0; MAX_DETAIL_SECTIONS],
         };
         let mut terminal = Terminal::new(TestBackend::new(100, 28)).unwrap();
         terminal
@@ -430,6 +433,7 @@ mod snapshots {
         let focus = DetailFocus::Section {
             idx: 2, // RecentBulletins
             rows: [0, 0, 0, 0],
+            x_offsets: [0; MAX_DETAIL_SECTIONS],
         };
         let mut terminal = Terminal::new(TestBackend::new(100, 28)).unwrap();
         terminal

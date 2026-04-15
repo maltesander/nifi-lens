@@ -321,6 +321,7 @@ fn truncate(s: &str, max: usize) -> String {
 mod snapshots {
     use super::*;
     use crate::client::BulletinSnapshot;
+    use crate::view::browser::state::MAX_DETAIL_SECTIONS;
     use insta::assert_snapshot;
     use ratatui::Terminal;
     use ratatui::backend::TestBackend;
@@ -383,6 +384,7 @@ mod snapshots {
         let focus = DetailFocus::Section {
             idx: 0,
             rows: [1, 0, 0, 0],
+            x_offsets: [0; MAX_DETAIL_SECTIONS],
         };
         let out = render_snapshot(&focus);
         assert_snapshot!("processor_detail_properties_focused", out);
@@ -393,6 +395,7 @@ mod snapshots {
         let focus = DetailFocus::Section {
             idx: 1,
             rows: [0, 0, 0, 0],
+            x_offsets: [0; MAX_DETAIL_SECTIONS],
         };
         let out = render_snapshot(&focus);
         assert_snapshot!("processor_detail_recent_bulletins_focused", out);

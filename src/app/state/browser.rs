@@ -102,7 +102,12 @@ impl ViewKeyHandler for BrowserHandler {
 
     fn handle_focus(state: &mut AppState, action: FocusAction) -> Option<UpdateResult> {
         // Branch on whether we're in detail-section focus or tree focus.
-        if let DetailFocus::Section { idx, rows } = state.browser.detail_focus.clone() {
+        if let DetailFocus::Section {
+            idx,
+            rows,
+            x_offsets,
+        } = state.browser.detail_focus.clone()
+        {
             let Some(&arena_idx) = state.browser.visible.get(state.browser.selected) else {
                 return Some(UpdateResult::default());
             };
@@ -139,6 +144,7 @@ impl ViewKeyHandler for BrowserHandler {
                     state.browser.detail_focus = DetailFocus::Section {
                         idx,
                         rows: new_rows,
+                        x_offsets,
                     };
                     Some(UpdateResult {
                         redraw: true,
@@ -160,6 +166,7 @@ impl ViewKeyHandler for BrowserHandler {
                     state.browser.detail_focus = DetailFocus::Section {
                         idx,
                         rows: new_rows,
+                        x_offsets,
                     };
                     Some(UpdateResult {
                         redraw: true,
@@ -202,7 +209,11 @@ impl ViewKeyHandler for BrowserHandler {
                     if new_idx >= section_count {
                         state.browser.detail_focus = DetailFocus::Tree;
                     } else {
-                        state.browser.detail_focus = DetailFocus::Section { idx: new_idx, rows };
+                        state.browser.detail_focus = DetailFocus::Section {
+                            idx: new_idx,
+                            rows,
+                            x_offsets,
+                        };
                     }
                     Some(UpdateResult {
                         redraw: true,
@@ -218,7 +229,11 @@ impl ViewKeyHandler for BrowserHandler {
                     if idx == 0 {
                         state.browser.detail_focus = DetailFocus::Tree;
                     } else {
-                        state.browser.detail_focus = DetailFocus::Section { idx: idx - 1, rows };
+                        state.browser.detail_focus = DetailFocus::Section {
+                            idx: idx - 1,
+                            rows,
+                            x_offsets,
+                        };
                     }
                     Some(UpdateResult {
                         redraw: true,
@@ -333,6 +348,7 @@ impl ViewKeyHandler for BrowserHandler {
                     state.browser.detail_focus = DetailFocus::Section {
                         idx: 0,
                         rows: [0; MAX_DETAIL_SECTIONS],
+                        x_offsets: [0; MAX_DETAIL_SECTIONS],
                     };
                     Some(UpdateResult {
                         redraw: true,
@@ -367,6 +383,7 @@ impl ViewKeyHandler for BrowserHandler {
                 state.browser.detail_focus = DetailFocus::Section {
                     idx: 0,
                     rows: [0; MAX_DETAIL_SECTIONS],
+                    x_offsets: [0; MAX_DETAIL_SECTIONS],
                 };
                 Some(UpdateResult {
                     redraw: true,
@@ -387,6 +404,7 @@ impl ViewKeyHandler for BrowserHandler {
                 state.browser.detail_focus = DetailFocus::Section {
                     idx: sections.len() - 1,
                     rows: [0; MAX_DETAIL_SECTIONS],
+                    x_offsets: [0; MAX_DETAIL_SECTIONS],
                 };
                 Some(UpdateResult {
                     redraw: true,
@@ -423,7 +441,9 @@ mod tests {
     use crate::config::Config;
     use crate::event::{AppEvent, BrowserPayload, ViewPayload};
     use crate::intent::CrossLink;
-    use crate::view::browser::state::{FlowIndex, FlowIndexEntry, PropertiesModalState};
+    use crate::view::browser::state::{
+        FlowIndex, FlowIndexEntry, MAX_DETAIL_SECTIONS, PropertiesModalState,
+    };
     use crossterm::event::{KeyCode, KeyModifiers};
     use std::time::SystemTime;
 
@@ -1121,7 +1141,7 @@ mod tests {
 
         update(&mut s, key(KeyCode::Down, KeyModifiers::NONE), &c);
         match &s.browser.detail_focus {
-            crate::view::browser::state::DetailFocus::Section { idx, rows } => {
+            crate::view::browser::state::DetailFocus::Section { idx, rows, .. } => {
                 assert_eq!(*idx, 0);
                 assert_eq!(rows[0], 1);
             }
@@ -1339,6 +1359,7 @@ mod tests {
         s.browser.detail_focus = DetailFocus::Section {
             idx: 2,
             rows: [0, 0, 0, 0],
+            x_offsets: [0; MAX_DETAIL_SECTIONS],
         };
 
         // Ring: newest at the back. Newest-first iteration → row 0 = p2.
@@ -1439,6 +1460,7 @@ mod tests {
         s.browser.detail_focus = DetailFocus::Section {
             idx: 1,
             rows: [0, 0, 0, 0],
+            x_offsets: [0; MAX_DETAIL_SECTIONS],
         };
 
         let r = update(&mut s, key(KeyCode::Enter, KeyModifiers::NONE), &c);
@@ -1712,6 +1734,7 @@ mod tests {
         s.browser.detail_focus = DetailFocus::Section {
             idx: 0,
             rows: [0; MAX_DETAIL_SECTIONS],
+            x_offsets: [0; MAX_DETAIL_SECTIONS],
         };
         let r = BrowserHandler::handle_focus(&mut s, FocusAction::NextPane);
         assert!(r.is_some(), "NextPane in Section focus should return Some");
@@ -1737,6 +1760,7 @@ mod tests {
         s.browser.detail_focus = DetailFocus::Section {
             idx: last_idx,
             rows: [0; MAX_DETAIL_SECTIONS],
+            x_offsets: [0; MAX_DETAIL_SECTIONS],
         };
         let r = BrowserHandler::handle_focus(&mut s, FocusAction::NextPane);
         assert!(r.is_some(), "NextPane from last section should return Some");
@@ -1755,6 +1779,7 @@ mod tests {
         s.browser.detail_focus = DetailFocus::Section {
             idx: 0,
             rows: [0; MAX_DETAIL_SECTIONS],
+            x_offsets: [0; MAX_DETAIL_SECTIONS],
         };
         let r = BrowserHandler::handle_focus(&mut s, FocusAction::PrevPane);
         assert!(r.is_some(), "PrevPane from Section{{0}} should return Some");
@@ -1773,6 +1798,7 @@ mod tests {
         s.browser.detail_focus = DetailFocus::Section {
             idx: 1,
             rows: [0; MAX_DETAIL_SECTIONS],
+            x_offsets: [0; MAX_DETAIL_SECTIONS],
         };
         let r = BrowserHandler::handle_focus(&mut s, FocusAction::PrevPane);
         assert!(r.is_some(), "PrevPane from Section{{1}} should return Some");
@@ -1795,6 +1821,7 @@ mod tests {
         s.browser.detail_focus = DetailFocus::Section {
             idx: 0,
             rows: [0; MAX_DETAIL_SECTIONS],
+            x_offsets: [0; MAX_DETAIL_SECTIONS],
         };
         assert!(
             BrowserHandler::handle_focus(&mut s, FocusAction::Left).is_none(),
