@@ -151,12 +151,18 @@ impl ViewKeyHandler for EventsHandler {
                 // Descend on a row: no deeper structure — return None.
                 // Rule 1a applies: default_cross_link returns None, so nothing happens.
                 FocusAction::Descend => None,
-                FocusAction::Left
-                | FocusAction::Right
-                | FocusAction::First
-                | FocusAction::Last
-                | FocusAction::NextPane
-                | FocusAction::PrevPane => None,
+                // Tab/Shift+Tab from row list returns to filter bar.
+                FocusAction::NextPane | FocusAction::PrevPane => {
+                    state.events.leave_row_nav();
+                    Some(UpdateResult {
+                        redraw: true,
+                        intent: None,
+                        tracer_followup: None,
+                    })
+                }
+                FocusAction::Left | FocusAction::Right | FocusAction::First | FocusAction::Last => {
+                    None
+                }
             };
         }
 
@@ -171,18 +177,7 @@ impl ViewKeyHandler for EventsHandler {
                     tracer_followup: None,
                 })
             }
-            FocusAction::Left | FocusAction::Right => {
-                // Cycle filter fields. Left/Right move through Time→Types→Source→Uuid→Attr.
-                // We don't enter edit mode here — just move focus for visual cue.
-                // For now this is a no-op at the state level (filter fields don't have
-                // a "focused but not editing" state yet). Return redraw so future UI
-                // can pick up a field-focus state if added.
-                Some(UpdateResult {
-                    redraw: true,
-                    intent: None,
-                    tracer_followup: None,
-                })
-            }
+            FocusAction::Left | FocusAction::Right => None,
             FocusAction::Descend => {
                 // Enter → submit query.
                 submit_query(state)
@@ -191,13 +186,22 @@ impl ViewKeyHandler for EventsHandler {
                 // Esc at filter bar: no-op.
                 None
             }
+            // Tab from filter bar enters row-nav (selects first row).
+            FocusAction::NextPane => {
+                state.events.enter_row_nav();
+                Some(UpdateResult {
+                    redraw: true,
+                    intent: None,
+                    tracer_followup: None,
+                })
+            }
+            // Shift+Tab at filter bar: already at top pane, nothing to do.
+            FocusAction::PrevPane => None,
             FocusAction::Up
             | FocusAction::PageUp
             | FocusAction::PageDown
             | FocusAction::First
-            | FocusAction::Last
-            | FocusAction::NextPane
-            | FocusAction::PrevPane => None,
+            | FocusAction::Last => None,
         }
     }
 
@@ -744,5 +748,39 @@ mod tests {
     fn no_enter_fallback_for_events() {
         let s = fresh_state();
         assert!(super::EventsHandler::default_cross_link(&s).is_none());
+    }
+
+    #[test]
+    fn next_pane_from_filter_bar_enters_row_nav() {
+        use crate::input::FocusAction;
+        let mut s = fresh_state();
+        s.current_tab = ViewId::Events;
+        seed_events_with_results(&mut s, 3);
+        assert!(s.events.selected_row.is_none());
+        let r = super::EventsHandler::handle_focus(&mut s, FocusAction::NextPane);
+        assert!(r.unwrap().redraw);
+        assert!(s.events.selected_row.is_some());
+    }
+
+    #[test]
+    fn next_pane_from_event_list_returns_to_filter_bar() {
+        use crate::input::FocusAction;
+        let mut s = fresh_state();
+        s.current_tab = ViewId::Events;
+        seed_events_with_results(&mut s, 3);
+        s.events.enter_row_nav();
+        assert!(s.events.selected_row.is_some());
+        super::EventsHandler::handle_focus(&mut s, FocusAction::NextPane);
+        assert!(s.events.selected_row.is_none());
+    }
+
+    #[test]
+    fn left_right_unmapped_in_filter_bar_mode() {
+        use crate::input::FocusAction;
+        let mut s = fresh_state();
+        s.current_tab = ViewId::Events;
+        assert!(s.events.selected_row.is_none());
+        assert!(super::EventsHandler::handle_focus(&mut s, FocusAction::Left).is_none());
+        assert!(super::EventsHandler::handle_focus(&mut s, FocusAction::Right).is_none());
     }
 }
