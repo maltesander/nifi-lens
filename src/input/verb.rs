@@ -62,11 +62,11 @@ impl Verb for BulletinsVerb {
             Self::ToggleSeverity(Severity::Warning) => Chord::simple(KeyCode::Char('2')),
             Self::ToggleSeverity(Severity::Info) => Chord::simple(KeyCode::Char('3')),
             Self::CycleTypeFilter => Chord::shift(KeyCode::Char('T')),
-            Self::CycleGroupBy => Chord::shift(KeyCode::Char('Y')),
-            Self::TogglePause => Chord::simple(KeyCode::Char('p')),
-            Self::MuteSource => Chord::simple(KeyCode::Char('m')),
+            Self::CycleGroupBy => Chord::shift(KeyCode::Char('G')),
+            Self::TogglePause => Chord::shift(KeyCode::Char('P')),
+            Self::MuteSource => Chord::shift(KeyCode::Char('M')),
             Self::CopyMessage => Chord::simple(KeyCode::Char('c')),
-            Self::ClearFilters => Chord::shift(KeyCode::Char('C')),
+            Self::ClearFilters => Chord::shift(KeyCode::Char('R')),
             Self::OpenSearch => Chord::simple(KeyCode::Char('/')),
             Self::Refresh => Chord::simple(KeyCode::Char('r')),
         }
@@ -297,10 +297,34 @@ mod tests {
     }
 
     #[test]
-    fn bulletins_group_by_moved_off_g() {
+    fn bulletins_group_by_is_shift_g() {
         assert_eq!(
             BulletinsVerb::CycleGroupBy.chord(),
-            Chord::shift(KeyCode::Char('Y'))
+            Chord::shift(KeyCode::Char('G'))
+        );
+    }
+
+    #[test]
+    fn bulletins_pause_is_shift_p() {
+        assert_eq!(
+            BulletinsVerb::TogglePause.chord(),
+            Chord::shift(KeyCode::Char('P'))
+        );
+    }
+
+    #[test]
+    fn bulletins_mute_is_shift_m() {
+        assert_eq!(
+            BulletinsVerb::MuteSource.chord(),
+            Chord::shift(KeyCode::Char('M'))
+        );
+    }
+
+    #[test]
+    fn bulletins_clear_is_shift_r() {
+        assert_eq!(
+            BulletinsVerb::ClearFilters.chord(),
+            Chord::shift(KeyCode::Char('R'))
         );
     }
 

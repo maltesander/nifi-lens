@@ -363,23 +363,23 @@ mod tests {
     }
 
     #[test]
-    fn on_bulletins_tab_shift_y_cycles_group_mode() {
-        // After the keybind redesign, cycle-group-by is on Y (Shift+y), not g.
+    fn on_bulletins_tab_shift_g_cycles_group_mode() {
+        // After the keybind redesign, cycle-group-by is on G (Shift+g).
         use crate::view::bulletins::state::GroupMode;
         let mut s = fresh_state();
         let c = tiny_config();
         s.current_tab = ViewId::Bulletins;
         assert_eq!(s.bulletins.group_mode, GroupMode::SourceAndMessage);
-        update(&mut s, key(KeyCode::Char('Y'), KeyModifiers::SHIFT), &c);
+        update(&mut s, key(KeyCode::Char('G'), KeyModifiers::SHIFT), &c);
         assert_eq!(s.bulletins.group_mode, GroupMode::Source);
-        update(&mut s, key(KeyCode::Char('Y'), KeyModifiers::SHIFT), &c);
+        update(&mut s, key(KeyCode::Char('G'), KeyModifiers::SHIFT), &c);
         assert_eq!(s.bulletins.group_mode, GroupMode::Off);
-        update(&mut s, key(KeyCode::Char('Y'), KeyModifiers::SHIFT), &c);
+        update(&mut s, key(KeyCode::Char('G'), KeyModifiers::SHIFT), &c);
         assert_eq!(s.bulletins.group_mode, GroupMode::SourceAndMessage);
     }
 
     #[test]
-    fn on_bulletins_tab_m_mutes_selected_source() {
+    fn on_bulletins_tab_shift_m_mutes_selected_source() {
         let mut s = fresh_state();
         let c = tiny_config();
         s.current_tab = ViewId::Bulletins;
@@ -399,7 +399,7 @@ mod tests {
         };
         update(&mut s, AppEvent::Data(ViewPayload::Bulletins(payload)), &c);
         assert!(s.bulletins.mutes.is_empty());
-        update(&mut s, key(KeyCode::Char('m'), KeyModifiers::NONE), &c);
+        update(&mut s, key(KeyCode::Char('M'), KeyModifiers::SHIFT), &c);
         assert!(s.bulletins.mutes.contains("src-muted"));
     }
 
@@ -473,8 +473,8 @@ mod tests {
     }
 
     #[test]
-    fn bulletins_hints_show_group_by_hint_for_shift_y() {
-        // After the keybind redesign, group-by is on Shift+Y; collect_hints
+    fn bulletins_hints_show_group_by_hint_for_shift_g() {
+        // After the keybind redesign, group-by is on Shift+G; collect_hints
         // derives the hint from BulletinsVerb::CycleGroupBy::hint() == "group".
         use crate::app::state::collect_hints;
         let mut s = fresh_state();
@@ -483,18 +483,22 @@ mod tests {
         assert!(
             spans
                 .iter()
-                .any(|h| h.key == "Shift+Y" && h.action == "group"),
-            "Shift+Y hint should show `group`; got {spans:?}"
+                .any(|h| h.key == "Shift+G" && h.action == "group"),
+            "Shift+G hint should show `group`; got {spans:?}"
         );
     }
 
     #[test]
-    fn bulletins_hints_include_m_mute() {
+    fn bulletins_hints_include_shift_m_mute() {
         use crate::app::state::collect_hints;
         let mut s = fresh_state();
         s.current_tab = ViewId::Bulletins;
         let spans = collect_hints(&s);
-        assert!(spans.iter().any(|h| h.key == "m" && h.action == "mute"));
+        assert!(
+            spans
+                .iter()
+                .any(|h| h.key == "Shift+M" && h.action == "mute")
+        );
     }
 
     #[test]
