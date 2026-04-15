@@ -183,18 +183,8 @@ impl AppState {
         }
     }
 
-    /// Copy `text` to the system clipboard, using a persistent
-    /// `arboard` handle held in `self.clipboard`. Lazily initializes
-    /// the handle on first use. Returns `Ok(())` on success or
-    /// `Err(String)` describing the clipboard failure (which the
-    /// caller should surface as a Warning banner).
-    ///
-    /// Holding a single long-lived handle keeps arboard's X11
-    /// `strong_count` at `MIN_OWNERS` forever, so the teardown branch
-    /// in its `Drop` impl (which writes to stderr and corrupts the
-    /// ratatui alt-screen grid) never runs until the TUI exits.
-    /// Returns the set of `GoTarget`s that are meaningful for the
-    /// current tab + selection. The oracle for `GoTarget::enabled`.
+    /// Returns the set of [`GoTarget`]s meaningful for the current tab + selection.
+    /// Used by [`AppAction::Jump`]'s enabled predicate.
     pub fn selection_cross_links(&self) -> Vec<crate::input::GoTarget> {
         use crate::input::GoTarget;
         let mut out = Vec::new();
@@ -248,6 +238,16 @@ impl AppState {
         }
     }
 
+    /// Copy `text` to the system clipboard, using a persistent
+    /// `arboard` handle held in `self.clipboard`. Lazily initializes
+    /// the handle on first use. Returns `Ok(())` on success or
+    /// `Err(String)` describing the clipboard failure (which the
+    /// caller should surface as a Warning banner).
+    ///
+    /// Holding a single long-lived handle keeps arboard's X11
+    /// `strong_count` at `MIN_OWNERS` forever, so the teardown branch
+    /// in its `Drop` impl (which writes to stderr and corrupts the
+    /// ratatui alt-screen grid) never runs until the TUI exits.
     pub fn copy_to_clipboard(&mut self, text: String) -> Result<(), String> {
         if self.clipboard.is_none() {
             match arboard::Clipboard::new() {
@@ -848,15 +848,12 @@ fn handle_key(state: &mut AppState, key: KeyEvent, config: &Config) -> UpdateRes
         }
     }
 
-    // Translate FIRST so the keymap state transitions on every keystroke.
-    // This is important for the `g <letter>` combo: even if a per-view
-    // handler consumes the next keystroke, translate() still runs and
-    // resets PendingGo, preventing the latching bug.
+    // translate() runs before view dispatch so the InputEvent is ready.
     let input_event = state.keymap.translate(key, state.current_tab);
 
-    // Central dispatch for typed InputEvent variants. History / Tab / App /
-    // Go are handled here and return early. Focus / View dispatch to per-view
-    // handlers. Pending / Unmapped fall through to the modal block then drop.
+    // Central dispatch for typed InputEvent variants. History / Tab / App
+    // are handled here and return early. Focus / View dispatch to per-view
+    // handlers. Unmapped falls through to the modal block then drops.
     match input_event {
         InputEvent::Unmapped => {
             // Key has no typed mapping — fall through to the modal block.
@@ -2454,7 +2451,7 @@ mod tests {
         s.current_tab = ViewId::Bulletins;
         seed_one_bulletin(&mut s);
 
-        // First press `g` — enters PendingGo; no redraw required for the
+        // First press `g` — maps to AppAction::Jump; no redraw required for the
         // leader keystroke itself (Bulletins is ported, legacy g is gone).
         let r1 = update(
             &mut s,

@@ -416,15 +416,15 @@ mod tests {
     }
 
     #[test]
-    fn on_bulletins_tab_lowercase_g_is_now_go_leader() {
-        // After the keybind redesign, `g` enters PendingGo (leader for go-chords)
+    fn bare_g_produces_app_jump_not_group_cycle() {
+        // After the keybind redesign, `g` maps to AppAction::Jump
         // and no longer cycles group-by mode (which moved to Y).
         let mut s = fresh_state();
         let c = tiny_config();
         s.current_tab = ViewId::Bulletins;
         let before_mode = s.bulletins.group_mode;
         update(&mut s, key(KeyCode::Char('g'), KeyModifiers::NONE), &c);
-        // Group mode MUST NOT have changed — `g` is now the go-leader.
+        // Group mode MUST NOT have changed — `g` now maps to AppAction::Jump.
         assert_eq!(
             s.bulletins.group_mode, before_mode,
             "`g` must not cycle group mode after keybind redesign"

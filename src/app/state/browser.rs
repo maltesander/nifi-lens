@@ -692,7 +692,7 @@ mod tests {
     #[test]
     fn t_is_no_longer_a_jump_to_events_shortcut() {
         // `t` used to emit JumpToEvents; that shortcut is retired.
-        // Users now navigate via `g e` (GoTarget::Events chord).
+        // Users now navigate via `g` which opens the AppAction::Jump modal.
         let (mut s, c) = seeded_browser_state();
         s.browser.selected = 1; // "gen" processor
         let r = update(&mut s, key(KeyCode::Char('t'), KeyModifiers::NONE), &c);
