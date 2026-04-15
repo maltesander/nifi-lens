@@ -404,44 +404,13 @@ pub struct PendingSave {
 
 /// Collect the hint spans for the current state, respecting modal priority.
 pub fn collect_hints(state: &AppState) -> Vec<crate::widget::hint_bar::HintSpan> {
-    use crate::input::{
-        BrowserVerb, BulletinsVerb, EventsVerb, GoTarget, KeyMapState, TracerVerb, Verb,
-    };
+    use crate::input::{AppAction, BrowserVerb, BulletinsVerb, EventsVerb, TracerVerb, Verb};
     use crate::widget::hint_bar::HintSpan;
 
     // Modal-priority hints remain hand-written because they're short
     // and context-specific.
     if let Some(ref modal) = state.modal {
         return modal_hints(modal);
-    }
-
-    // Pending-Go chord: show the go-menu only, replacing everything else.
-    if state.keymap.pending_state() == KeyMapState::PendingGo {
-        let ctx = crate::input::HintContext::new(state);
-        let mut spans: Vec<HintSpan> = Vec::new();
-        spans.push(HintSpan {
-            key: "Go to:",
-            action: "",
-            enabled: true,
-        });
-        for &t in GoTarget::all() {
-            let follower: &'static str = match t {
-                GoTarget::Browser => "b",
-                GoTarget::Events => "e",
-                GoTarget::Tracer => "t",
-            };
-            spans.push(HintSpan {
-                key: follower,
-                action: t.hint(),
-                enabled: t.enabled(&ctx),
-            });
-        }
-        spans.push(HintSpan {
-            key: "Esc",
-            action: "cancel",
-            enabled: true,
-        });
-        return spans;
     }
 
     // Text-input-focused views show their own edit-mode hint strip.
@@ -526,14 +495,9 @@ pub fn collect_hints(state: &AppState) -> Vec<crate::widget::hint_bar::HintSpan>
         }
     }
 
-    // Cross-tab jumps — filtered to destinations that are actionable
-    // for the current selection, so the bar doesn't advertise dead
-    // combos. When nothing's selected the whole group disappears.
-    for &g in GoTarget::all() {
-        if g.enabled(&ctx) {
-            push_verb(&mut out, g, &ctx);
-        }
-    }
+    // Cross-tab jump — show when the current selection has at least one
+    // actionable destination so the bar doesn't advertise a dead combo.
+    push_verb(&mut out, AppAction::Jump, &ctx);
 
     // Trailing `?` pointer so users always know where to find the
     // full reference. Everything else (navigation, history, tab
@@ -1023,24 +987,6 @@ fn handle_key(state: &mut AppState, key: KeyEvent, config: &Config) -> UpdateRes
         InputEvent::App(AppAction::Paste) | InputEvent::App(AppAction::Cut) => {
             // Properly wired in Task 12 via text-input bypass
             return UpdateResult::default();
-        }
-        InputEvent::Go(target) => {
-            if state.modal.is_some() {
-                return UpdateResult::default();
-            }
-            if let Some(link) = build_go_crosslink(state, target) {
-                return UpdateResult {
-                    redraw: true,
-                    intent: Some(PendingIntent::JumpTo(link)),
-                    tracer_followup: None,
-                };
-            }
-            return UpdateResult::default();
-        }
-        InputEvent::Pending => {
-            // Leader-combo in flight (e.g. `g` pressed). Fall through to the
-            // modal block. The keymap state has already transitioned to
-            // PendingGo via translate() above.
         }
         InputEvent::Focus(action) => {
             // Special-case the error banner as the outermost focus target:
@@ -2499,6 +2445,7 @@ mod tests {
     }
 
     #[test]
+    #[ignore = "g+b two-key flow removed in Task 3; re-wire via AppAction::Jump in Task 10"]
     fn go_b_from_bulletins_jumps_to_browser() {
         use crossterm::event::{KeyEvent, KeyModifiers};
 

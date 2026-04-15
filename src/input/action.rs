@@ -223,39 +223,6 @@ impl Verb for AppAction {
     }
 }
 
-impl Verb for GoTarget {
-    fn chord(self) -> Chord {
-        match self {
-            Self::Browser => Chord::go(KeyCode::Char('b')),
-            Self::Events => Chord::go(KeyCode::Char('e')),
-            Self::Tracer => Chord::go(KeyCode::Char('t')),
-        }
-    }
-    fn label(self) -> &'static str {
-        match self {
-            Self::Browser => "show selection in Browser",
-            Self::Events => "show events for selection",
-            Self::Tracer => "trace selection",
-        }
-    }
-    fn hint(self) -> &'static str {
-        match self {
-            Self::Browser => "browser",
-            Self::Events => "events",
-            Self::Tracer => "tracer",
-        }
-    }
-    fn enabled(self, ctx: &HintContext<'_>) -> bool {
-        ctx.state.selection_cross_links().contains(&self)
-    }
-    fn priority(self) -> u8 {
-        60
-    }
-    fn all() -> &'static [Self] {
-        &[Self::Browser, Self::Events, Self::Tracer]
-    }
-}
-
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum HistoryAction {
     Back,
@@ -400,13 +367,6 @@ mod tests {
         assert!(all.contains(&AppAction::Jump));
         assert!(all.contains(&AppAction::Paste));
         assert!(all.contains(&AppAction::Cut));
-    }
-
-    #[test]
-    fn go_target_chords_use_g_leader() {
-        assert_eq!(GoTarget::Browser.chord(), Chord::go(KeyCode::Char('b')));
-        assert_eq!(GoTarget::Events.chord(), Chord::go(KeyCode::Char('e')));
-        assert_eq!(GoTarget::Tracer.chord(), Chord::go(KeyCode::Char('t')));
     }
 
     #[test]

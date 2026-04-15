@@ -427,6 +427,7 @@ mod tests {
     }
 
     #[test]
+    #[ignore = "g+t two-key flow removed in Task 3; re-wire via AppAction::Jump in Task 10"]
     fn row_gt_chord_emits_trace_by_uuid_cross_link() {
         use crate::intent::CrossLink;
         let mut s = fresh_state();
@@ -568,6 +569,7 @@ mod tests {
     }
 
     #[tokio::test]
+    #[ignore = "g+t two-key flow removed in Task 3; re-wire via AppAction::Jump in Task 10"]
     async fn tracer_lineage_started_outcome_switches_to_tracer_tab() {
         use crate::event::{IntentOutcome, ViewPayload};
         use crate::intent::CrossLink;
@@ -627,6 +629,7 @@ mod tests {
     }
 
     #[test]
+    #[ignore = "g+b two-key flow removed in Task 3; re-wire via AppAction::Jump in Task 10"]
     fn row_gb_chord_emits_open_in_browser_cross_link() {
         use crate::intent::CrossLink;
         let mut s = fresh_state();

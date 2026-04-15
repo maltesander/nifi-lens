@@ -19,8 +19,7 @@ use ratatui::widgets::{Block, Borders, Clear, Paragraph, Wrap};
 
 use crate::app::state::ViewId;
 use crate::input::{
-    AppAction, BrowserVerb, BulletinsVerb, EventsVerb, FocusAction, GoTarget, HistoryAction,
-    TracerVerb, Verb,
+    AppAction, BrowserVerb, BulletinsVerb, EventsVerb, FocusAction, HistoryAction, TracerVerb, Verb,
 };
 use crate::theme;
 
@@ -84,12 +83,8 @@ pub fn general_sections() -> Vec<HelpSection> {
             ],
         },
         HelpSection {
-            title: "Cross-tab (g leader)",
-            rows: vec![
-                (GoTarget::Browser.chord().display(), "show in Browser"),
-                (GoTarget::Events.chord().display(), "show events"),
-                (GoTarget::Tracer.chord().display(), "trace"),
-            ],
+            title: "Cross-tab",
+            rows: vec![(AppAction::Jump.chord().display(), "jump to related tab")],
         },
     ]
 }
@@ -225,13 +220,7 @@ mod tests {
         let titles: Vec<_> = s.iter().map(|s| s.title).collect();
         assert_eq!(
             titles,
-            vec![
-                "Navigation",
-                "History",
-                "Tabs",
-                "App",
-                "Cross-tab (g leader)"
-            ]
+            vec!["Navigation", "History", "Tabs", "App", "Cross-tab"]
         );
     }
 

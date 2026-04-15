@@ -1,9 +1,9 @@
 //! Typed input layer.
 //!
 //! Converts raw `crossterm::KeyEvent`s into `InputEvent` values by way of
-//! a `KeyMap` state machine. Each `InputEvent` variant carries a typed
-//! enum (`FocusAction`, `HistoryAction`, `TabAction`, `AppAction`,
-//! `GoTarget`, or `ViewVerb`) that the reducer dispatches.
+//! a `KeyMap`. Each `InputEvent` variant carries a typed enum
+//! (`FocusAction`, `HistoryAction`, `TabAction`, `AppAction`, or
+//! `ViewVerb`) that the reducer dispatches.
 //!
 //! Every enum implements [`Verb`], which is the single source of truth
 //! for the chord that triggers it, the human label shown in the help
@@ -60,15 +60,6 @@ impl Chord {
             key,
             mods: KeyModifiers::CONTROL,
             leader: None,
-        }
-    }
-
-    /// Build a `g <follower>` two-key chord.
-    pub const fn go(follower: KeyCode) -> Self {
-        Self {
-            key: follower,
-            mods: KeyModifiers::NONE,
-            leader: Some(KeyCode::Char('g')),
         }
     }
 
@@ -208,13 +199,8 @@ pub enum InputEvent {
     History(HistoryAction),
     Tab(TabAction),
     App(AppAction),
-    Go(GoTarget),
     View(ViewVerb),
-    /// Sent while the keymap is awaiting a two-key follow-up. The
-    /// dispatcher treats this as "consumed, redraw only" — no handler.
-    Pending,
-    /// Key was recognized but doesn't map to anything (e.g. `j`, `[`).
-    /// Dispatcher drops it silently.
+    /// Key was recognized but doesn't map to anything.
     Unmapped,
 }
 
@@ -222,50 +208,16 @@ pub enum InputEvent {
 // KeyMap — translates KeyEvent → InputEvent
 // ---------------------------------------------------------------------------
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
-pub enum KeyMapState {
-    #[default]
-    Idle,
-    PendingGo,
-}
-
 #[derive(Debug, Default)]
-pub struct KeyMap {
-    state: KeyMapState,
-}
+pub struct KeyMap {}
 
 impl KeyMap {
-    pub fn pending_state(&self) -> KeyMapState {
-        self.state
-    }
-
     pub fn translate(
         &mut self,
         key: crossterm::event::KeyEvent,
         active_view: crate::app::state::ViewId,
     ) -> InputEvent {
         use crossterm::event::{KeyCode, KeyModifiers};
-
-        // Handle `PendingGo` follow-ups first.
-        if self.state == KeyMapState::PendingGo {
-            self.state = KeyMapState::Idle;
-            if matches!(key.code, KeyCode::Esc) {
-                return InputEvent::Pending;
-            }
-            for &target in GoTarget::all() {
-                if chord_matches_follower(target.chord(), key) {
-                    return InputEvent::Go(target);
-                }
-            }
-            return InputEvent::Pending;
-        }
-
-        // Go leader: bare `g` with no modifiers.
-        // TODO(Task 3): remove this intercept — g becomes AppAction::Jump
-        if matches!(key.code, KeyCode::Char('g')) && matches!(key.modifiers, KeyModifiers::NONE) {
-            self.state = KeyMapState::PendingGo;
-            return InputEvent::Pending;
-        }
 
         // Reverse-lookup across framework enums (order matters: Focus
         // is highest priority so Esc/Enter always win).
@@ -330,9 +282,7 @@ impl KeyMap {
                     }
                 }
             }
-            ViewId::Overview => {
-                // Overview has no view-local verbs.
-            }
+            ViewId::Overview => {}
         }
 
         InputEvent::Unmapped
@@ -343,8 +293,8 @@ impl KeyMap {
     /// shortcut.
     pub fn reverse_table(&self) -> Vec<(String, String)> {
         use crate::input::{
-            AppAction, BrowserVerb, BulletinsVerb, EventsVerb, FocusAction, GoTarget,
-            HistoryAction, TabAction, TracerVerb, Verb,
+            AppAction, BrowserVerb, BulletinsVerb, EventsVerb, FocusAction, HistoryAction,
+            TabAction, TracerVerb, Verb,
         };
         let mut out: Vec<(String, String)> = Vec::new();
         for &v in FocusAction::all() {
@@ -358,9 +308,6 @@ impl KeyMap {
         }
         for &v in AppAction::all() {
             out.push((v.chord().display(), format!("AppAction::{v:?}")));
-        }
-        for &v in GoTarget::all() {
-            out.push((v.chord().display(), format!("GoTarget::{v:?}")));
         }
         for &v in BulletinsVerb::all() {
             out.push((v.chord().display(), format!("BulletinsVerb::{v:?}")));
@@ -380,16 +327,7 @@ impl KeyMap {
 
 fn chord_matches(chord: Chord, key: crossterm::event::KeyEvent) -> bool {
     if chord.leader.is_some() {
-        return false; // leader combos handled via PendingGo branch
-    }
-    chord.key == key.code && chord.mods == key.modifiers
-}
-
-/// Match a two-key leader chord against the follow-up key only (the
-/// leader has already been consumed and put us in `PendingGo`).
-fn chord_matches_follower(chord: Chord, key: crossterm::event::KeyEvent) -> bool {
-    if chord.leader.is_none() {
-        return false;
+        return false; // leader combos are not dispatched directly
     }
     chord.key == key.code && chord.mods == key.modifiers
 }
@@ -435,11 +373,6 @@ mod tests {
     }
 
     #[test]
-    fn chord_display_go_leader_combo() {
-        assert_eq!(Chord::go(KeyCode::Char('b')).display(), "g b");
-    }
-
-    #[test]
     fn chord_display_enter_and_esc() {
         assert_eq!(Chord::simple(KeyCode::Enter).display(), "Enter");
         assert_eq!(Chord::simple(KeyCode::Esc).display(), "Esc");
@@ -450,7 +383,7 @@ mod tests {
 mod keymap_tests {
     use super::*;
     use crate::app::state::ViewId;
-    use crate::input::{AppAction, FocusAction, GoTarget, HistoryAction, TabAction};
+    use crate::input::{AppAction, FocusAction, HistoryAction, TabAction};
     use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 
     fn press(code: KeyCode) -> KeyEvent {
@@ -552,43 +485,6 @@ mod keymap_tests {
     }
 
     #[test]
-    fn go_leader_enters_pending_state_then_maps() {
-        let mut km = KeyMap::default();
-        // First `g` — no event dispatched.
-        assert_eq!(
-            km.translate(press(KeyCode::Char('g')), ViewId::Overview),
-            InputEvent::Pending
-        );
-        assert_eq!(km.pending_state(), KeyMapState::PendingGo);
-        // Follow-up `b` — Go(Browser). GoTarget iteration is not gated by view.
-        assert_eq!(
-            km.translate(press(KeyCode::Char('b')), ViewId::Overview),
-            InputEvent::Go(GoTarget::Browser)
-        );
-        assert_eq!(km.pending_state(), KeyMapState::Idle);
-    }
-
-    #[test]
-    fn go_leader_cancelled_by_esc() {
-        let mut km = KeyMap::default();
-        assert_eq!(
-            km.translate(press(KeyCode::Char('g')), ViewId::Overview),
-            InputEvent::Pending
-        );
-        assert_eq!(
-            km.translate(press(KeyCode::Esc), ViewId::Overview),
-            InputEvent::Pending // Esc in PendingGo cancels silently
-        );
-        assert_eq!(km.pending_state(), KeyMapState::Idle);
-        // Now Esc works normally.
-        assert_eq!(
-            km.translate(press(KeyCode::Esc), ViewId::Overview),
-            InputEvent::Focus(FocusAction::Ascend)
-        );
-    }
-
-    #[test]
-    #[ignore = "passes only after Task 3 removes the PendingGo intercept"]
     fn bare_g_produces_app_jump() {
         let mut km = KeyMap::default();
         assert_eq!(
@@ -607,30 +503,6 @@ mod keymap_tests {
         assert_eq!(
             km.translate(press(KeyCode::Char('k')), ViewId::Overview),
             InputEvent::Unmapped
-        );
-    }
-
-    #[test]
-    fn go_leader_with_unmapped_follower_returns_to_idle() {
-        // `g z` is an unbound combo. The state machine must return to
-        // Idle (not get stuck in PendingGo) and subsequent keystrokes
-        // must dispatch normally.
-        let mut km = KeyMap::default();
-        assert_eq!(
-            km.translate(press(KeyCode::Char('g')), ViewId::Overview),
-            InputEvent::Pending
-        );
-        assert_eq!(km.pending_state(), KeyMapState::PendingGo);
-        assert_eq!(
-            km.translate(press(KeyCode::Char('z')), ViewId::Overview),
-            InputEvent::Pending
-        );
-        assert_eq!(km.pending_state(), KeyMapState::Idle);
-        // Next keystroke is a normal Focus::Descend, proving the state
-        // machine fully recovered.
-        assert_eq!(
-            km.translate(press(KeyCode::Enter), ViewId::Overview),
-            InputEvent::Focus(FocusAction::Descend)
         );
     }
 
@@ -690,8 +562,8 @@ mod keymap_tests {
     #[test]
     fn bracket_keys_are_never_bound() {
         use crate::input::{
-            AppAction, BrowserVerb, BulletinsVerb, EventsVerb, FocusAction, GoTarget,
-            HistoryAction, TabAction, TracerVerb, Verb,
+            AppAction, BrowserVerb, BulletinsVerb, EventsVerb, FocusAction, HistoryAction,
+            TabAction, TracerVerb, Verb,
         };
         use crossterm::event::KeyCode;
         let chords: Vec<Chord> = FocusAction::all()
@@ -700,7 +572,7 @@ mod keymap_tests {
             .chain(HistoryAction::all().iter().map(|v| v.chord()))
             .chain(TabAction::all().iter().map(|v| v.chord()))
             .chain(AppAction::all().iter().map(|v| v.chord()))
-            .chain(GoTarget::all().iter().map(|v| v.chord()))
+            // GoTarget removed — no longer implements Verb
             .chain(BulletinsVerb::all().iter().map(|v| v.chord()))
             .chain(BrowserVerb::all().iter().map(|v| v.chord()))
             .chain(EventsVerb::all().iter().map(|v| v.chord()))
@@ -735,7 +607,7 @@ mod keymap_tests {
         check::<crate::input::HistoryAction>("HistoryAction");
         check::<crate::input::TabAction>("TabAction");
         check::<crate::input::AppAction>("AppAction");
-        check::<crate::input::GoTarget>("GoTarget");
+        // GoTarget removed — no longer implements Verb
         check::<crate::input::BulletinsVerb>("BulletinsVerb");
         check::<crate::input::BrowserVerb>("BrowserVerb");
         check::<crate::input::EventsVerb>("EventsVerb");
