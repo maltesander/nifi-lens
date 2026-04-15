@@ -329,6 +329,44 @@ impl ViewKeyHandler for TracerHandler {
                                 tracer_followup: None,
                             })
                         }
+                        FocusAction::NextPane => {
+                            // Same as Descend: enter the detail pane, defaulting
+                            // to the Attributes tab.
+                            if let Some(event_id) = ts::lineage_selected_event_id(&state.tracer) {
+                                let already_loaded = matches!(
+                                    &state.tracer.mode,
+                                    TracerMode::Lineage(v)
+                                        if matches!(
+                                            &v.event_detail,
+                                            EventDetail::Loaded { event, .. }
+                                                if event.summary.event_id == event_id
+                                        )
+                                );
+                                let intent = if already_loaded {
+                                    None
+                                } else {
+                                    ts::lineage_mark_detail_loading(&mut state.tracer);
+                                    Some(PendingIntent::Dispatch(Intent::LoadEventDetail {
+                                        event_id,
+                                    }))
+                                };
+                                if let TracerMode::Lineage(ref mut v) = state.tracer.mode {
+                                    v.active_detail_tab = DetailTab::Attributes;
+                                    v.focus = LineageFocus::Attributes { row: 0 };
+                                }
+                                Some(UpdateResult {
+                                    redraw: true,
+                                    intent,
+                                    tracer_followup: None,
+                                })
+                            } else {
+                                Some(UpdateResult::default())
+                            }
+                        }
+                        FocusAction::PrevPane => {
+                            // Timeline is the first pane — PrevPane is a no-op.
+                            Some(UpdateResult::default())
+                        }
                         _ => None,
                     },
                     LineageFocus::Attributes { .. } | LineageFocus::Content { .. } => {
@@ -466,7 +504,26 @@ impl ViewKeyHandler for TracerHandler {
                                     tracer_followup: None,
                                 })
                             }
-                            FocusAction::NextPane | FocusAction::PrevPane => None,
+                            FocusAction::NextPane => {
+                                // Cycle tab right — same as Right.
+                                ts::lineage_cycle_detail_tab_right(&mut state.tracer);
+                                let intent =
+                                    dispatch_content_fetch_for_active_tab(&mut state.tracer);
+                                Some(UpdateResult {
+                                    redraw: true,
+                                    intent,
+                                    tracer_followup: None,
+                                })
+                            }
+                            FocusAction::PrevPane => {
+                                // Exit to Timeline — same as Ascend.
+                                ts::lineage_focus_timeline(&mut state.tracer);
+                                Some(UpdateResult {
+                                    redraw: true,
+                                    intent: None,
+                                    tracer_followup: None,
+                                })
+                            }
                         }
                     }
                 }
@@ -1155,6 +1212,172 @@ mod tests {
         assert!(
             r.intent.is_none(),
             "no fetch should dispatch when side is already Shown"
+        );
+    }
+
+    #[test]
+    fn next_pane_in_timeline_enters_attributes() {
+        use crate::input::FocusAction;
+        let mut s = fresh_state();
+        s.current_tab = ViewId::Tracer;
+        seed_tracer_with_loaded_detail(&mut s);
+        if let TracerMode::Lineage(ref mut v) = s.tracer.mode {
+            v.focus = ts::LineageFocus::Timeline;
+        }
+
+        let r = super::TracerHandler::handle_focus(&mut s, FocusAction::NextPane)
+            .expect("NextPane on Timeline must be consumed");
+        assert!(r.redraw);
+
+        let TracerMode::Lineage(ref v) = s.tracer.mode else {
+            panic!("expected Lineage");
+        };
+        assert!(
+            matches!(v.focus, ts::LineageFocus::Attributes { .. }),
+            "NextPane from Timeline must move focus to Attributes, got {:?}",
+            v.focus
+        );
+        assert_eq!(v.active_detail_tab, ts::DetailTab::Attributes);
+    }
+
+    #[test]
+    fn prev_pane_in_timeline_is_noop() {
+        use crate::input::FocusAction;
+        let mut s = fresh_state();
+        s.current_tab = ViewId::Tracer;
+        seed_tracer_with_loaded_detail(&mut s);
+        if let TracerMode::Lineage(ref mut v) = s.tracer.mode {
+            v.focus = ts::LineageFocus::Timeline;
+        }
+
+        let _r = super::TracerHandler::handle_focus(&mut s, FocusAction::PrevPane)
+            .expect("PrevPane on Timeline must be consumed (no-op)");
+
+        // Focus must remain on Timeline.
+        let TracerMode::Lineage(ref v) = s.tracer.mode else {
+            panic!("expected Lineage");
+        };
+        assert!(
+            matches!(v.focus, ts::LineageFocus::Timeline),
+            "PrevPane from Timeline must not change focus, got {:?}",
+            v.focus
+        );
+    }
+
+    #[test]
+    fn next_pane_in_attributes_cycles_tab_right() {
+        use crate::input::FocusAction;
+        let mut s = fresh_state();
+        s.current_tab = ViewId::Tracer;
+        seed_tracer_with_loaded_detail(&mut s);
+        if let TracerMode::Lineage(ref mut v) = s.tracer.mode {
+            v.active_detail_tab = ts::DetailTab::Attributes;
+            v.focus = ts::LineageFocus::Attributes { row: 0 };
+            if let EventDetail::Loaded {
+                ref mut content, ..
+            } = v.event_detail
+            {
+                *content = ContentPane::Collapsed;
+            }
+        }
+
+        let r = super::TracerHandler::handle_focus(&mut s, FocusAction::NextPane)
+            .expect("NextPane in Attributes must be consumed");
+        assert!(r.redraw);
+
+        let TracerMode::Lineage(ref v) = s.tracer.mode else {
+            panic!("expected Lineage");
+        };
+        assert_eq!(
+            v.active_detail_tab,
+            ts::DetailTab::Input,
+            "NextPane from Attributes must cycle to Input tab"
+        );
+    }
+
+    #[test]
+    fn prev_pane_in_attributes_returns_to_timeline() {
+        use crate::input::FocusAction;
+        let mut s = fresh_state();
+        s.current_tab = ViewId::Tracer;
+        seed_tracer_with_loaded_detail(&mut s);
+        if let TracerMode::Lineage(ref mut v) = s.tracer.mode {
+            v.active_detail_tab = ts::DetailTab::Attributes;
+            v.focus = ts::LineageFocus::Attributes { row: 0 };
+        }
+
+        let r = super::TracerHandler::handle_focus(&mut s, FocusAction::PrevPane)
+            .expect("PrevPane in Attributes must be consumed");
+        assert!(r.redraw);
+
+        let TracerMode::Lineage(ref v) = s.tracer.mode else {
+            panic!("expected Lineage");
+        };
+        assert!(
+            matches!(v.focus, ts::LineageFocus::Timeline),
+            "PrevPane from Attributes must return focus to Timeline, got {:?}",
+            v.focus
+        );
+    }
+
+    #[test]
+    fn prev_pane_in_content_returns_to_timeline() {
+        use crate::input::FocusAction;
+        let mut s = fresh_state();
+        s.current_tab = ViewId::Tracer;
+        seed_tracer_with_loaded_detail(&mut s);
+        if let TracerMode::Lineage(ref mut v) = s.tracer.mode {
+            v.active_detail_tab = ts::DetailTab::Input;
+            v.focus = ts::LineageFocus::Content { scroll: 0 };
+        }
+
+        let r = super::TracerHandler::handle_focus(&mut s, FocusAction::PrevPane)
+            .expect("PrevPane in Content must be consumed");
+        assert!(r.redraw);
+
+        let TracerMode::Lineage(ref v) = s.tracer.mode else {
+            panic!("expected Lineage");
+        };
+        assert!(
+            matches!(v.focus, ts::LineageFocus::Timeline),
+            "PrevPane from Content must return focus to Timeline, got {:?}",
+            v.focus
+        );
+    }
+
+    #[test]
+    fn left_right_in_detail_still_cycle_subtab() {
+        // Left/Right must still cycle sub-tabs in the Attributes/Content focus,
+        // unchanged by the NextPane/PrevPane additions.
+        use crate::input::FocusAction;
+        let mut s = fresh_state();
+        s.current_tab = ViewId::Tracer;
+        seed_tracer_with_loaded_detail(&mut s);
+        if let TracerMode::Lineage(ref mut v) = s.tracer.mode {
+            v.active_detail_tab = ts::DetailTab::Attributes;
+            v.focus = ts::LineageFocus::Attributes { row: 0 };
+        }
+
+        // Right should cycle to Input.
+        super::TracerHandler::handle_focus(&mut s, FocusAction::Right);
+        let TracerMode::Lineage(ref v) = s.tracer.mode else {
+            panic!("expected Lineage");
+        };
+        assert_eq!(
+            v.active_detail_tab,
+            ts::DetailTab::Input,
+            "Right cycles to Input"
+        );
+
+        // Left should cycle back to Attributes.
+        super::TracerHandler::handle_focus(&mut s, FocusAction::Left);
+        let TracerMode::Lineage(ref v) = s.tracer.mode else {
+            panic!("expected Lineage");
+        };
+        assert_eq!(
+            v.active_detail_tab,
+            ts::DetailTab::Attributes,
+            "Left cycles back to Attributes"
         );
     }
 }
