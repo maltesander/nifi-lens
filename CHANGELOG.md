@@ -9,15 +9,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Browser: horizontal scroll in detail panes.** When a detail
+  sub-panel is focused (`Tab`/`Shift+Tab`), `←`/`→` now scroll the
+  content column one character at a time. Applies to Properties (VALUE
+  column), Validation errors, Recent bulletins (message column),
+  Controller services (type column), and Child groups (name column).
+  Each section remembers its own horizontal offset independently.
 - **Browser: validation errors in bordered panel.** Processors and
   controller services that have active validation errors now display them
   in a focusable bordered panel instead of inline text, making the list
   navigable and visually distinct.
-
-### Changed
-
-- **Tracer detail pane is taller.** `DETAIL_HEIGHT` increased from 14 to
-  18 rows, giving more room to the attribute table and content body.
 
 ### Fixed
 
