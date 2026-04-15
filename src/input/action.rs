@@ -41,8 +41,8 @@ impl Verb for FocusAction {
         match self {
             Self::Up => "move selection up",
             Self::Down => "move selection down",
-            Self::Left => "move left / cycle tab left",
-            Self::Right => "move right / cycle tab right",
+            Self::Left => "move left / collapse tree node",
+            Self::Right => "move right / expand tree node",
             Self::PageUp => "page up",
             Self::PageDown => "page down",
             Self::First => "jump to first",

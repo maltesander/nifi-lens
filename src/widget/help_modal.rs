@@ -51,6 +51,10 @@ pub fn general_sections() -> Vec<HelpSection> {
                 ),
                 (FocusAction::Descend.chord().display(), "drill / activate"),
                 (FocusAction::Ascend.chord().display(), "leave pane / cancel"),
+                (
+                    pair(FocusAction::NextPane, FocusAction::PrevPane),
+                    "focus next / prev pane",
+                ),
             ],
         },
         HelpSection {
@@ -62,10 +66,7 @@ pub fn general_sections() -> Vec<HelpSection> {
         },
         HelpSection {
             title: "Tabs",
-            rows: vec![
-                ("Tab / Shift+Tab".to_string(), "cycle tabs"),
-                ("F1..F5".to_string(), "jump to tab 1..5"),
-            ],
+            rows: vec![("F1..F5".to_string(), "jump to tab 1..5")],
         },
         HelpSection {
             title: "App",
@@ -229,8 +230,8 @@ mod tests {
         let s = &general_sections()[0];
         assert_eq!(s.title, "Navigation");
         // Up/Down paired, Left/Right paired, PgUp/PgDn paired,
-        // First/Last paired, plus Descend and Ascend = 6 rows.
-        assert_eq!(s.rows.len(), 6);
+        // First/Last paired, Descend, Ascend, NextPane/PrevPane paired = 7 rows.
+        assert_eq!(s.rows.len(), 7);
         assert!(s.rows[0].0.contains('/'));
         assert!(s.rows[1].0.contains('/'));
     }

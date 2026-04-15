@@ -117,15 +117,13 @@ in v0.1 and the dispatcher refuses to execute them without an
 
 ### Input layer
 
-All keyboard input flows through `src/input/`. A `KeyMap` state
-machine (`Idle` ↔ `PendingGo`) translates `crossterm::KeyEvent` into
-`InputEvent` values carrying typed action enums:
+All keyboard input flows through `src/input/`. A `KeyMap` translates
+`crossterm::KeyEvent` into `InputEvent` values carrying typed action enums:
 
 - `FocusAction` (Up/Down/Left/Right/PgUp/PgDn/First/Last/Descend/Ascend/NextPane/PrevPane — Tab/BackTab)
 - `HistoryAction` (Back/Forward — `Shift+←`/`Shift+→`)
 - `TabAction` (Jump(n) — F1–F5)
-- `AppAction` (Quit/Help/ContextSwitcher/FuzzyFind/Jump/Paste/Cut)
-- `GoTarget` (Browser/Events/Tracer — reached via the two-key `g <letter>` combo)
+- `AppAction` (Quit/Help/ContextSwitcher/FuzzyFind/Jump/Paste/Cut — `g`/`v`/`x` for Jump/Paste/Cut)
 - `ViewVerb` — wraps per-view enums (`BulletinsVerb`, `BrowserVerb`, `EventsVerb`, `TracerVerb`)
 
 Every enum implements the `Verb` trait, which is the **single source of
@@ -170,8 +168,8 @@ Rows in the list are additionally deduplicated by
 `ComponentName[id=<uuid>]` prefix and normalizes dynamic `[...]` regions
 before hashing, so repeating errors from the same component collapse
 into a single row with an `×N` count column. Grouping mode is cycled by
-the `Y` key (`source+msg` / `source` / `off`). `g` is reserved as the
-global go-leader for cross-tab jumps (`g b` / `g e` / `g t`).
+the `Y` key (`source+msg` / `source` / `off`). `g` triggers
+`AppAction::Jump` — a context-sensitive cross-tab jump menu.
 
 ### Visual language
 
