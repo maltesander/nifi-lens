@@ -261,6 +261,7 @@ impl KeyMap {
         }
 
         // Go leader: bare `g` with no modifiers.
+        // TODO(Task 3): remove this intercept — g becomes AppAction::Jump
         if matches!(key.code, KeyCode::Char('g')) && matches!(key.modifiers, KeyModifiers::NONE) {
             self.state = KeyMapState::PendingGo;
             return InputEvent::Pending;
@@ -583,6 +584,16 @@ mod keymap_tests {
         assert_eq!(
             km.translate(press(KeyCode::Esc), ViewId::Overview),
             InputEvent::Focus(FocusAction::Ascend)
+        );
+    }
+
+    #[test]
+    #[ignore = "passes only after Task 3 removes the PendingGo intercept"]
+    fn bare_g_produces_app_jump() {
+        let mut km = KeyMap::default();
+        assert_eq!(
+            km.translate(press(KeyCode::Char('g')), ViewId::Overview),
+            InputEvent::App(AppAction::Jump)
         );
     }
 

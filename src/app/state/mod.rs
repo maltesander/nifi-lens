@@ -268,13 +268,11 @@ impl AppState {
     /// Used by `AppAction::Paste/Cut` enabled predicates.
     pub fn text_input_is_active(&self) -> bool {
         match self.current_tab {
-            ViewId::Bulletins => self.bulletins.text_input.is_some(),
-            ViewId::Events => self.events.filter_edit.is_some(),
-            ViewId::Tracer => matches!(
-                self.tracer.mode,
-                crate::view::tracer::state::TracerMode::Entry(_)
-            ),
-            _ => false,
+            ViewId::Overview => overview::OverviewHandler::is_text_input_focused(self),
+            ViewId::Bulletins => bulletins::BulletinsHandler::is_text_input_focused(self),
+            ViewId::Browser => browser::BrowserHandler::is_text_input_focused(self),
+            ViewId::Events => events::EventsHandler::is_text_input_focused(self),
+            ViewId::Tracer => tracer::TracerHandler::is_text_input_focused(self),
         }
     }
 }
