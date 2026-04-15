@@ -112,6 +112,16 @@ fn render_controller_services_panel(
         DetailFocus::Section { idx, .. } if *idx == my_idx
     );
 
+    let x_offset = if is_focused {
+        if let DetailFocus::Section { x_offsets, .. } = detail_focus {
+            x_offsets[my_idx]
+        } else {
+            0
+        }
+    } else {
+        0
+    };
+
     let total = d.controller_services.len();
     let panel = Panel::new(" Controller services ")
         .right(Line::from(format!(" {total} ")))
@@ -134,7 +144,7 @@ fn render_controller_services_panel(
             Row::new(vec![
                 Cell::from(cs.state.clone()).style(cs_state_style(&cs.state)),
                 Cell::from(cs.name.clone()),
-                Cell::from(cs.type_short.clone()),
+                Cell::from(char_skip(&cs.type_short, x_offset)),
             ])
         })
         .collect();
@@ -182,6 +192,16 @@ fn render_child_groups_panel(
         DetailFocus::Section { idx, .. } if *idx == my_idx
     );
 
+    let x_offset = if is_focused {
+        if let DetailFocus::Section { x_offsets, .. } = detail_focus {
+            x_offsets[my_idx]
+        } else {
+            0
+        }
+    } else {
+        0
+    };
+
     let kids: Vec<ChildPgSummary> = state.child_process_groups(&d.id);
     let total = kids.len();
 
@@ -204,7 +224,7 @@ fn render_child_groups_panel(
         .iter()
         .map(|k| {
             Row::new(vec![
-                Cell::from(k.name.clone()),
+                Cell::from(char_skip(&k.name, x_offset)),
                 Cell::from(k.running.to_string()),
                 Cell::from(k.stopped.to_string()),
                 Cell::from(k.invalid.to_string()),
