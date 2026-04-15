@@ -37,30 +37,13 @@
 
 ## Features
 
-- **Cluster overview dashboard** — cluster identity, component counts,
-  bulletin-rate sparkline, per-node heap/GC/load strips, repository fill
-  bars, unhealthy-queue leaderboard, and noisiest components. Dual-cadence
-  refresh (10 s PG status, 30 s system diagnostics).
-- **Cluster-wide bulletin tail** — live, filterable, with auto-scroll
-  pause, severity / component / free-text filters, and source-based
-  deduplication so repeating errors collapse into a single row with an
-  `×N` count column.
-- **Flow browser** — two-pane PG tree + per-node detail
-  (Processor / Connection / ProcessGroup / Controller Service). Global
-  `Shift+F` fuzzy find across all known components, `p` for a full properties
-  modal, `c` to copy a node id to the clipboard.
-- **Cluster-wide provenance events** — pre-filtered provenance search
-  (time / type / source / uuid / attribute) with results colored by
-  event type; cross-linked from Bulletins and Browser.
-- **Forensic flowfile tracing** — paste a UUID, get the full provenance
-  lineage with attribute diffs and on-demand content previews
-  (text, JSON prettyprint, or hex dump).
-- **Multi-cluster, multi-version** — kubeconfig-style contexts; one
-  binary works against every supported NiFi 2.x version via
-  [`nifi-rust-client`](https://docs.rs/nifi-rust-client)'s `dynamic`
-  feature.
-- **Read-only and safe by construction** — v0.1 never mutates cluster
-  state.
+- **Cluster overview** — health dashboard with bulletin-rate sparkline, queue backpressure, per-node heap/GC, and noisiest components.
+- **Bulletin tail** — live cluster-wide log with severity filters, source deduplication, and per-source mute.
+- **Flow browser** — component tree with per-node detail; `Shift+F` fuzzy search across all known components.
+- **Provenance events** — filterable cluster-wide event search cross-linked from Bulletins and Browser.
+- **Flowfile tracer** — paste a UUID to trace its full lineage with attribute diffs and content previews (text, JSON, hex).
+- **Multi-cluster** — kubeconfig-style contexts; `Shift+K` to switch clusters; one binary for every NiFi 2.x version.
+- **Read-only** — v0.1 never mutates cluster state.
 
 ## Install
 
@@ -104,186 +87,53 @@ export NIFILENS_DEV_PASSWORD=...
 nifilens
 ```
 
-Press `?` inside the tool for a context-aware help modal. A context-sensitive
-hint line at the bottom of the screen shows relevant keybindings for the
-current view and mode.
+Press `?` inside the tool for a context-aware help modal. A hint line at
+the bottom shows relevant keybindings for the current view.
 
 ## Core Components
 
-`nifilens` has five top-level tabs, each optimized for a specific
-operational question.
+Five top-level tabs, each targeting a specific operational question.
 
-**Overview** — "Is this cluster OK right now?" Cluster identity, component
-counts, bulletin-rate sparkline, queue backpressure metrics, repository fill
-status, per-node health strips, and noisiest components. Dual-cadence refresh
-(PG status every 10 s, system diagnostics every 30 s).
+**Overview** — Cluster health at a glance: component counts, bulletin-rate
+sparkline, queue backpressure, repository fill, per-node health strips, and
+noisiest components.
 
-**Bulletins** — "What is the cluster complaining about?" Cluster-wide
-bulletin tail with severity, component-type, and free-text filters;
-auto-scroll pause with a new-bulletin badge; `Enter` on a row jumps
-directly to the component in the Browser tab (Rule 1a Enter-fallback).
-Rows are deduplicated by `(source_id, message_stem)` — repeating
-errors collapse into a single row with an `×N` count column. `1`/`2`/`3`
-toggle error/warning/info severity chips, `Shift+G` cycles group-by modes
-(`source+msg` / `source` / `off`), `Shift+P` pauses auto-scroll, `Shift+M` mutes
-the selected row's source for the session, and severity chips carry
-live ring counts (`[E 87] [W 32] [I 0]`).
+**Bulletins** — Live cluster-wide bulletin tail. Severity, component-type,
+and free-text filters; deduplication collapses repeating errors into a single
+row with an `×N` count. `Enter` on a row jumps to the component in Browser.
 
-**Browser** — "Where does X live and what is it doing?" Two-pane PG
-tree with drill-in, per-node detail pane, and global `Shift+F` fuzzy find
-across all known components via
-[`nucleo`](https://crates.io/crates/nucleo). Press `p` for a full
-properties modal on Processor / Controller Service nodes; `c` to copy
-the selected node's id to the clipboard.
+**Browser** — Two-pane PG tree with per-node detail. `p` opens a properties
+modal; `c` copies the node id; `g` opens the cross-tab jump menu.
 
-**Events** — "What just happened across the cluster?" Provenance
-search with a 2-row filter bar (time / type / source / flowfile uuid /
-attribute), results list colored by event type, and a detail pane for
-the selected event. Cross-linked from Bulletins and Browser via the
-`g` jump menu, pre-filtered to the source component and the last 15 minutes.
+**Events** — Provenance search with a filter bar (time / type / source /
+flowfile UUID / attribute). Results are colored by event type and
+cross-linked from Bulletins and Browser.
 
-**Tracer** — "Why did this flowfile fail?" Paste a flowfile UUID to
-trace its full lineage as a chronological event timeline. Expand any
-event to see a tabbed detail pane (Attributes | Input | Output) with
-`←`/`→` to cycle tabs, `d` to toggle the attribute All / Changed diff,
-and on-demand content fetching for the Input / Output tabs (text, JSON
-prettyprint, or hex dump for binary). Press `s` to save the raw
-content bytes to a file.
-
-### Browser tab
-
-Two-pane view: PG tree on the left, per-node detail on the right.
-Selection fires an on-demand detail fetch (15 s cadence for the tree,
-on-select for detail). Press `p` on a processor or controller service
-to pop the full properties list in a modal. Press `c` to copy the
-selected node's id to the clipboard. Press `g` on a processor to
-open the jump menu and navigate to its Events or Tracer view.
-
-**Tree navigation:** `↑`/`↓` move the cursor; `Enter` drills into a
-process group or focuses the Detail panel on a leaf; `Esc` collapses
-the current node or pops focus up one level; `→` expands, `←` collapses.
-
-**Detail focus (Processor / Controller Service only):** press `Enter`
-to move from the tree into the detail panel.
-
-| Key | Action |
-|---|---|
-| `→` / `←` | Cycle to the next / previous focusable section |
-| `↑` / `↓` | Scroll rows within the focused section |
-| `Enter` | Drill into a child group (when focused on the ChildGroups section) |
-| `Esc` | Return focus to the tree |
-| `c` | Copy focused row's property value or bulletin message |
-
-### Tracer tab
-
-Forensic flowfile investigation:
-
-- **Entry** — type or paste a flowfile UUID into the input bar and
-  press `Enter` to start a lineage query. Cross-links from the Events
-  jump menu populate the UUID automatically.
-- **Lineage running** — a progress bar shows the NiFi server's
-  completion percentage while the query is in flight.
-- **Lineage** — chronological event timeline. Navigate with `↑`/`↓`.
-  Press `Enter` to load an event's detail into the tabbed detail pane.
-  - **Detail pane** — three sibling tabs: `Attributes` | `Input` |
-    `Output`. Cycle with `←` / `→` (disabled tabs without a content
-    claim are skipped). Scroll rows within the active tab with
-    `↑`/`↓`, page with `PgUp`/`PgDn`, jump with `Home`/`End`.
-  - **Attributes tab**: `d` toggles the All / Changed diff view.
-  - **Input / Output tabs**: text rendered as-is, JSON pretty-printed
-    automatically, binary shown as a hex dump. Press `s` to save the
-    raw bytes to a file.
-  - Press `Esc` to return from the detail pane to the timeline.
+**Tracer** — Paste a flowfile UUID to trace its full lineage. Expand any
+event for a tabbed detail pane (Attributes | Input | Output); `d` toggles
+the attribute All / Changed diff; `s` saves raw content to a file.
 
 ## Keybindings
 
-Short global reference; full per-view help is available with `?` inside the
-tool.
+The tool is largely self-explanatory — `?` opens context-aware help and the
+hint bar at the bottom always shows what's available. A few highlights:
 
-### Global
+**Navigation** — `↑`/`↓` rows, `Tab`/`Shift+Tab` between panes,
+`F1`–`F5` jump to tabs, `g` opens the cross-tab goto menu, `Shift+K`
+switches the active cluster context, `Shift+F` opens global fuzzy search,
+`q`/`Ctrl+C` to quit.
 
-| Key | Action |
-|---|---|
-| `↑` / `↓` / `←` / `→` | Navigate (up/down rows, left/right peers) |
-| `PgUp` / `PgDn` | Page up / down |
-| `Home` / `End` | Jump to first / last |
-| `Enter` | Drill / activate / submit |
-| `Esc` | Leave focused pane / cancel pending input |
-| `Shift+←` / `Shift+→` | History back / forward |
-| `Tab` / `Shift+Tab` | Focus next / prev pane |
-| `F1`..`F5` | Jump to tab 1..5 (Overview / Bulletins / Browser / Events / Tracer) |
-| `?` | Context-aware help modal |
-| `Shift+K` | Switch cluster context |
-| `Shift+F` | Global component fuzzy find (available once Browser has loaded once to seed the index) |
-| `v` | Paste from clipboard (text-input fields) |
-| `x` | Cut to clipboard (text-input fields) |
-| `q` / `Ctrl+C` | Quit |
-| `F12` | Dump the keymap reverse table to the log file (dev/support) |
+**Bulletins** — `1`/`2`/`3` toggle severity filters; `Shift+G` cycles
+group-by modes; `Shift+P` pauses auto-scroll; `Shift+M` mutes a source.
 
-### Cross-tab jumps (`g`)
+**Browser** — `p` for properties modal; `c` to copy; `Shift+F` for
+global fuzzy search.
 
-Press `g` to open a context-sensitive jump menu. The menu shows only
-the destinations that are reachable from the current selection. Select
-a destination and press `Enter`, or press `Esc` to cancel.
+**Events** — `Shift+D`/`T`/`S`/`U`/`A` to edit filters; `Enter` in
+the filter bar to submit.
 
-Available destinations (context-dependent):
-
-| Destination | Goes to |
-|---|---|
-| Browser | Show selection in the Browser tab |
-| Events | Show provenance events for the selection |
-| Tracer | Trace the selection's flowfile in Tracer |
-
-### Bulletins
-
-| Key | Action |
-|---|---|
-| `1` / `2` / `3` | Toggle error / warning / info severity filter |
-| `Shift+T` | Cycle component-type filter |
-| `Shift+G` | Cycle group-by mode (`source+msg` / `source` / `off`) |
-| `Shift+P` | Pause / resume auto-scroll |
-| `Shift+M` | Mute selected row's source for the session |
-| `c` | Copy raw message to clipboard |
-| `Shift+R` | Clear all filters |
-| `/` | Open text search |
-| `r` | Refresh |
-| `Enter` | Jump to source component in Browser (Rule 1a fallback) |
-
-### Browser
-
-| Key | Action |
-|---|---|
-| `p` | Open Properties modal (Processor / Controller Service) |
-| `c` | Copy id (tree) / row value (detail) |
-| `r` | Refresh the tree |
-
-### Events
-
-| Key | Action |
-|---|---|
-| `Shift+D` / `Shift+T` / `Shift+S` / `Shift+U` / `Shift+A` | Edit Time / Types / Source / UUID / Attributes filter |
-| `Shift+N` | Clear filters and submit a new query |
-| `Shift+R` | Reset filters (no submit) |
-| `Shift+L` | Raise result cap (500 → 5000) |
-| `r` | Re-run current query |
-| `Enter` (filter bar) | Submit query |
-
-### Tracer
-
-| Key | Action |
-|---|---|
-| `Enter` (Entry) | Submit lineage query |
-| `Enter` (Timeline) | Load event detail and focus the Detail pane |
-| `←` / `→` (Detail) | Cycle Attributes / Input / Output tabs |
-| `d` (Attributes tab) | Toggle attribute All / Changed diff |
-| `s` (Input / Output tab) | Save raw content bytes to a file |
-| `r` | Refresh lineage |
-| `c` | Copy UUID / attribute value |
-| `Esc` (Detail) | Return to the timeline |
-| `Esc` (Timeline) | Return to the Entry screen |
-
-No view binds `j` or `k`. No view binds bare `[` or `]`. Regression
-tests enforce this.
+**Tracer** — `←`/`→` cycle detail tabs; `d` toggles attribute diff;
+`s` saves content.
 
 ## Configuration
 
