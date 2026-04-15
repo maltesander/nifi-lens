@@ -204,6 +204,15 @@ fn render_properties_panel(
         detail_focus,
         DetailFocus::Section { idx, .. } if *idx == props_idx
     );
+    let x_offset = if is_focused {
+        if let DetailFocus::Section { x_offsets, .. } = detail_focus {
+            x_offsets[props_idx]
+        } else {
+            0
+        }
+    } else {
+        0
+    };
 
     let total = d.properties.len();
     let panel = Panel::new(" Properties ")
@@ -219,7 +228,12 @@ fn render_properties_panel(
     let rows_data: Vec<Row> = d
         .properties
         .iter()
-        .map(|(k, v)| Row::new(vec![Cell::from(k.clone()), Cell::from(v.clone())]))
+        .map(|(k, v)| {
+            Row::new(vec![
+                Cell::from(k.clone()),
+                Cell::from(char_skip(v, x_offset)),
+            ])
+        })
         .collect();
     let widths = [Constraint::Length(30), Constraint::Fill(1)];
     let table = Table::new(rows_data, widths)
@@ -325,6 +339,11 @@ fn truncate(s: &str, max: usize) -> String {
         let head: String = s.chars().take(max.saturating_sub(1)).collect();
         format!("{head}…")
     }
+}
+
+/// Skip the first `n` Unicode scalar values from `s`, returning the remainder.
+fn char_skip(s: &str, n: usize) -> String {
+    s.chars().skip(n).collect()
 }
 
 #[cfg(test)]
