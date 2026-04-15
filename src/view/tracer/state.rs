@@ -192,7 +192,9 @@ pub enum AttributeClass {
     Added,
     /// Attribute was removed by this event (no current value).
     Deleted,
-    /// Attribute is present on both sides (may or may not have changed).
+    /// Attribute is present on both sides and its value changed.
+    Updated,
+    /// Attribute is present on both sides and its value is identical.
     Unchanged,
 }
 
@@ -202,6 +204,7 @@ impl AttributeClass {
         match (attr.previous.as_ref(), attr.current.as_ref()) {
             (None, Some(_)) => Self::Added,
             (Some(_), None) => Self::Deleted,
+            _ if attr.is_changed() => Self::Updated,
             _ => Self::Unchanged,
         }
     }

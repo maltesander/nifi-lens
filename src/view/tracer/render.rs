@@ -404,13 +404,14 @@ fn render_detail_tab_bar(
     frame.render_widget(Paragraph::new(line), area);
 }
 
-/// Style helper — maps an [`AttributeClass`] onto the user-requested
-/// diff palette: added→green, deleted→red, unchanged/modified→yellow.
+/// Style helper — maps an [`AttributeClass`] onto the diff palette:
+/// added→green, updated→yellow, deleted→red, unchanged→grey.
 fn attribute_row_style(class: AttributeClass) -> Style {
     match class {
         AttributeClass::Added => theme::success(),
+        AttributeClass::Updated => theme::warning(),
         AttributeClass::Deleted => theme::error(),
-        AttributeClass::Unchanged => theme::warning(),
+        AttributeClass::Unchanged => theme::muted(),
     }
 }
 
@@ -438,9 +439,11 @@ fn render_attribute_table(
         ),
         Span::styled("+added", theme::success()),
         Span::styled(" \u{00b7} ", theme::muted()),
+        Span::styled("~updated", theme::warning()),
+        Span::styled(" \u{00b7} ", theme::muted()),
         Span::styled("-deleted", theme::error()),
         Span::styled(" \u{00b7} ", theme::muted()),
-        Span::styled("~unchanged", theme::warning()),
+        Span::styled(" unchanged", theme::muted()),
     ]);
 
     let visible_attrs: Vec<&AttributeTriple> = attributes
@@ -479,8 +482,8 @@ fn render_attribute_table(
             let class = AttributeClass::of(attr);
             let gutter = match class {
                 AttributeClass::Added => "+",
+                AttributeClass::Updated => "~",
                 AttributeClass::Deleted => "-",
-                AttributeClass::Unchanged if attr.is_changed() => "~",
                 AttributeClass::Unchanged => " ",
             };
             let row_style = attribute_row_style(class);
