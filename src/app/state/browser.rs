@@ -129,14 +129,32 @@ impl ViewKeyHandler for BrowserHandler {
                     })
                 }
                 FocusAction::Left => {
-                    // Left is unmapped in section focus (was previously used
-                    // to cycle sections; now NextPane/PrevPane do that).
-                    None
+                    let mut new_x = x_offsets;
+                    new_x[idx] = new_x[idx].saturating_sub(1);
+                    state.browser.detail_focus = DetailFocus::Section {
+                        idx,
+                        rows,
+                        x_offsets: new_x,
+                    };
+                    Some(UpdateResult {
+                        redraw: true,
+                        intent: None,
+                        tracer_followup: None,
+                    })
                 }
                 FocusAction::Right => {
-                    // Right is unmapped in section focus (was previously used
-                    // to cycle sections; now NextPane/PrevPane do that).
-                    None
+                    let mut new_x = x_offsets;
+                    new_x[idx] += 1;
+                    state.browser.detail_focus = DetailFocus::Section {
+                        idx,
+                        rows,
+                        x_offsets: new_x,
+                    };
+                    Some(UpdateResult {
+                        redraw: true,
+                        intent: None,
+                        tracer_followup: None,
+                    })
                 }
                 FocusAction::Up => {
                     let mut new_rows = rows;
@@ -1814,7 +1832,7 @@ mod tests {
     }
 
     #[test]
-    fn left_right_unmapped_in_section_focus() {
+    fn left_right_scroll_in_section_focus() {
         use crate::input::FocusAction;
         use crate::view::browser::state::{DetailFocus, MAX_DETAIL_SECTIONS};
         let (mut s, _c) = fresh_browser_on_processor();
@@ -1823,13 +1841,36 @@ mod tests {
             rows: [0; MAX_DETAIL_SECTIONS],
             x_offsets: [0; MAX_DETAIL_SECTIONS],
         };
+
+        // Right increments x_offsets[idx].
+        let r = BrowserHandler::handle_focus(&mut s, FocusAction::Right);
+        assert!(r.is_some(), "Right must return Some in Section focus");
         assert!(
-            BrowserHandler::handle_focus(&mut s, FocusAction::Left).is_none(),
-            "Left must be unmapped in Section focus"
+            matches!(
+                s.browser.detail_focus,
+                DetailFocus::Section { x_offsets, .. } if x_offsets[0] == 1
+            ),
+            "Right must increment x_offsets[0]"
         );
+
+        // Left decrements back to 0.
+        BrowserHandler::handle_focus(&mut s, FocusAction::Left);
         assert!(
-            BrowserHandler::handle_focus(&mut s, FocusAction::Right).is_none(),
-            "Right must be unmapped in Section focus"
+            matches!(
+                s.browser.detail_focus,
+                DetailFocus::Section { x_offsets, .. } if x_offsets[0] == 0
+            ),
+            "Left must decrement x_offsets[0]"
+        );
+
+        // Left at 0 stays at 0 (saturating).
+        BrowserHandler::handle_focus(&mut s, FocusAction::Left);
+        assert!(
+            matches!(
+                s.browser.detail_focus,
+                DetailFocus::Section { x_offsets, .. } if x_offsets[0] == 0
+            ),
+            "Left at 0 must not underflow"
         );
     }
 }
