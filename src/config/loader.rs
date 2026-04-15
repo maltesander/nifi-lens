@@ -57,6 +57,8 @@ pub fn load(args: &Args) -> Result<(Config, ResolvedContext), NifiLensError> {
 
     validate_tls(context)?;
 
+    validate_proxy_urls(context)?;
+
     let resolved = ResolvedContext {
         name: context.name.clone(),
         url: context.url.clone(),
@@ -65,6 +67,9 @@ pub fn load(args: &Args) -> Result<(Config, ResolvedContext), NifiLensError> {
         insecure_tls: context.insecure_tls,
         ca_cert_path: context.ca_cert_path.clone(),
         proxied_entities_chain: context.proxied_entities_chain.clone(),
+        proxy_url: context.proxy_url.clone(),
+        http_proxy_url: context.http_proxy_url.clone(),
+        https_proxy_url: context.https_proxy_url.clone(),
     };
 
     Ok((config, resolved))
@@ -181,6 +186,25 @@ fn validate_tls(context: &crate::config::Context) -> Result<(), NifiLensError> {
         && !ca.exists()
     {
         return CaCertNotFoundSnafu { path: ca.clone() }.fail();
+    }
+    Ok(())
+}
+
+fn validate_proxy_urls(context: &crate::config::Context) -> Result<(), NifiLensError> {
+    let fields = [
+        ("proxy_url", &context.proxy_url),
+        ("http_proxy_url", &context.http_proxy_url),
+        ("https_proxy_url", &context.https_proxy_url),
+    ];
+    for (field, value) in fields {
+        if let Some(raw) = value {
+            url::Url::parse(raw).map_err(|_| NifiLensError::ConfigInvalid {
+                detail: format!(
+                    "context {:?}: {field} is not a valid URL: {raw:?}",
+                    context.name
+                ),
+            })?;
+        }
     }
     Ok(())
 }
@@ -609,5 +633,118 @@ password = "x"
             resolved.proxied_entities_chain.as_deref(),
             Some("CN=proxy.example.com")
         );
+    }
+
+    #[test]
+    fn proxy_url_resolves() {
+        let file = temp_config_with(
+            r#"
+current_context = "dev"
+
+[[contexts]]
+name = "dev"
+url = "https://localhost:8443"
+proxy_url = "http://proxy.internal:3128"
+
+[contexts.auth]
+type = "password"
+username = "admin"
+password = "x"
+"#,
+        );
+        let args = args_for(file.path(), None);
+        let (_config, resolved) = load(&args).unwrap();
+        assert_eq!(
+            resolved.proxy_url.as_deref(),
+            Some("http://proxy.internal:3128")
+        );
+        assert!(resolved.http_proxy_url.is_none());
+        assert!(resolved.https_proxy_url.is_none());
+    }
+
+    #[test]
+    fn http_and_https_proxy_urls_resolve_independently() {
+        let file = temp_config_with(
+            r#"
+current_context = "dev"
+
+[[contexts]]
+name = "dev"
+url = "https://localhost:8443"
+http_proxy_url  = "http://proxy.internal:3128"
+https_proxy_url = "http://secure-proxy.internal:3129"
+
+[contexts.auth]
+type = "password"
+username = "admin"
+password = "x"
+"#,
+        );
+        let args = args_for(file.path(), None);
+        let (_config, resolved) = load(&args).unwrap();
+        assert!(resolved.proxy_url.is_none());
+        assert_eq!(
+            resolved.http_proxy_url.as_deref(),
+            Some("http://proxy.internal:3128")
+        );
+        assert_eq!(
+            resolved.https_proxy_url.as_deref(),
+            Some("http://secure-proxy.internal:3129")
+        );
+    }
+
+    #[test]
+    fn invalid_proxy_url_errors() {
+        let file = temp_config_with(
+            r#"
+current_context = "dev"
+
+[[contexts]]
+name = "dev"
+url = "https://localhost:8443"
+proxy_url = "not a url"
+
+[contexts.auth]
+type = "password"
+username = "admin"
+password = "x"
+"#,
+        );
+        let args = args_for(file.path(), None);
+        let err = load(&args).unwrap_err();
+        match err {
+            NifiLensError::ConfigInvalid { detail } => {
+                assert!(detail.contains("proxy_url"));
+                assert!(detail.contains("not a url"));
+            }
+            other => panic!("expected ConfigInvalid, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn invalid_https_proxy_url_names_field() {
+        let file = temp_config_with(
+            r#"
+current_context = "dev"
+
+[[contexts]]
+name = "dev"
+url = "https://localhost:8443"
+https_proxy_url = "://bad"
+
+[contexts.auth]
+type = "password"
+username = "admin"
+password = "x"
+"#,
+        );
+        let args = args_for(file.path(), None);
+        let err = load(&args).unwrap_err();
+        match err {
+            NifiLensError::ConfigInvalid { detail } => {
+                assert!(detail.contains("https_proxy_url"));
+            }
+            other => panic!("expected ConfigInvalid, got {other:?}"),
+        }
     }
 }

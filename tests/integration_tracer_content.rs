@@ -47,6 +47,9 @@ async fn integration_tracer_content_text_render() {
             insecure_tls: false,
             ca_cert_path: Some(ca_path.clone().into()),
             proxied_entities_chain: None,
+            proxy_url: None,
+            http_proxy_url: None,
+            https_proxy_url: None,
         };
 
         let client = NifiClient::connect(&ctx)

@@ -70,6 +70,12 @@ insecure_tls = false
 # Optional: path to a PEM-encoded CA certificate to trust in addition to
 # the system trust store.
 # ca_cert_path = "/etc/nifi-lens/certs/dev-ca.crt"
+
+# Optional: HTTP proxy routing. Use proxy_url to route all traffic through a
+# single proxy, or http_proxy_url / https_proxy_url to route by scheme.
+# proxy_url = "http://proxy.internal:3128"
+# http_proxy_url  = "http://proxy.internal:3128"
+# https_proxy_url = "http://proxy.internal:3128"
 "#;
 
 pub fn write_template(force: bool) -> Result<PathBuf, NifiLensError> {

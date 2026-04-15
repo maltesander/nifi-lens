@@ -18,6 +18,9 @@ fn ctx_for(url: String) -> ResolvedContext {
         insecure_tls: true,
         ca_cert_path: None,
         proxied_entities_chain: None,
+        proxy_url: None,
+        http_proxy_url: None,
+        https_proxy_url: None,
     }
 }
 

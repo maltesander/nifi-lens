@@ -47,6 +47,24 @@ pub fn build_dynamic_client(ctx: &ResolvedContext) -> Result<DynamicClient, Nifi
             })?;
     }
 
+    // HTTP proxy routing (validated as parseable URLs at config load time).
+    // parse() is infallible here: loader::validate_proxy_urls already accepted it.
+    if let Some(ref raw) = ctx.proxy_url
+        && let Ok(url) = url::Url::parse(raw)
+    {
+        builder = builder.proxy(url);
+    }
+    if let Some(ref raw) = ctx.http_proxy_url
+        && let Ok(url) = url::Url::parse(raw)
+    {
+        builder = builder.http_proxy(url);
+    }
+    if let Some(ref raw) = ctx.https_proxy_url
+        && let Ok(url) = url::Url::parse(raw)
+    {
+        builder = builder.https_proxy(url);
+    }
+
     // Proxied entities chain.
     if let Some(ref chain) = ctx.proxied_entities_chain {
         builder = builder.proxied_entities_chain(chain);

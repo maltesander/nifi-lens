@@ -317,6 +317,9 @@ impl IntentDispatcher {
             insecure_tls: context.insecure_tls,
             ca_cert_path: context.ca_cert_path.clone(),
             proxied_entities_chain: context.proxied_entities_chain.clone(),
+            proxy_url: context.proxy_url.clone(),
+            http_proxy_url: context.http_proxy_url.clone(),
+            https_proxy_url: context.https_proxy_url.clone(),
         };
 
         let new_context_name = resolved.name.clone();

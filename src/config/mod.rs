@@ -59,6 +59,15 @@ pub struct Context {
     pub insecure_tls: bool,
     #[serde(default)]
     pub ca_cert_path: Option<PathBuf>,
+    /// Route all traffic (HTTP and HTTPS) through this proxy URL.
+    #[serde(default)]
+    pub proxy_url: Option<String>,
+    /// Route only HTTP traffic through this proxy URL.
+    #[serde(default)]
+    pub http_proxy_url: Option<String>,
+    /// Route only HTTPS traffic through this proxy URL.
+    #[serde(default)]
+    pub https_proxy_url: Option<String>,
 }
 
 /// Authentication configuration for a single NiFi context.
@@ -147,6 +156,9 @@ pub struct ResolvedContext {
     pub version_strategy: VersionStrategy,
     pub insecure_tls: bool,
     pub ca_cert_path: Option<PathBuf>,
+    pub proxy_url: Option<String>,
+    pub http_proxy_url: Option<String>,
+    pub https_proxy_url: Option<String>,
 }
 
 #[cfg(test)]
@@ -295,6 +307,45 @@ mod tests {
             ctx.proxied_entities_chain.as_deref(),
             Some("<CN=proxy,OU=NiFi>")
         );
+    }
+
+    #[test]
+    fn proxy_url_fields_deserialize() {
+        let toml = r#"
+            name = "test"
+            url = "https://nifi.example.com"
+            proxy_url       = "http://proxy.internal:3128"
+            http_proxy_url  = "http://proxy.internal:3129"
+            https_proxy_url = "http://proxy.internal:3130"
+            [auth]
+            type = "token"
+            token = "tok"
+        "#;
+        let ctx: Context = toml::from_str(toml).unwrap();
+        assert_eq!(ctx.proxy_url.as_deref(), Some("http://proxy.internal:3128"));
+        assert_eq!(
+            ctx.http_proxy_url.as_deref(),
+            Some("http://proxy.internal:3129")
+        );
+        assert_eq!(
+            ctx.https_proxy_url.as_deref(),
+            Some("http://proxy.internal:3130")
+        );
+    }
+
+    #[test]
+    fn proxy_url_fields_default_to_none() {
+        let toml = r#"
+            name = "test"
+            url = "https://nifi.example.com"
+            [auth]
+            type = "token"
+            token = "tok"
+        "#;
+        let ctx: Context = toml::from_str(toml).unwrap();
+        assert!(ctx.proxy_url.is_none());
+        assert!(ctx.http_proxy_url.is_none());
+        assert!(ctx.https_proxy_url.is_none());
     }
 
     #[test]

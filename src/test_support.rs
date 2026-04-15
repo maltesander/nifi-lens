@@ -31,6 +31,9 @@ pub(crate) fn tiny_config() -> Config {
             insecure_tls: false,
             ca_cert_path: None,
             proxied_entities_chain: None,
+            proxy_url: None,
+            http_proxy_url: None,
+            https_proxy_url: None,
         }],
     }
 }

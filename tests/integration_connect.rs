@@ -34,6 +34,9 @@ async fn connect_detects_version_and_reads_about() {
             insecure_tls: false,
             ca_cert_path: Some(ca_path.clone().into()),
             proxied_entities_chain: None,
+            proxy_url: None,
+            http_proxy_url: None,
+            https_proxy_url: None,
         };
 
         let client = NifiClient::connect(&ctx)

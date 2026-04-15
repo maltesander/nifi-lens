@@ -43,6 +43,9 @@ async fn connect_happy_path_detects_version() {
         insecure_tls: true, // wiremock is plaintext HTTP
         ca_cert_path: None,
         proxied_entities_chain: None,
+        proxy_url: None,
+        http_proxy_url: None,
+        https_proxy_url: None,
     };
 
     let client = NifiClient::connect(&ctx)
