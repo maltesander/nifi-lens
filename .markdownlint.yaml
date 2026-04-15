@@ -9,5 +9,10 @@ MD013: false
 # MD033: allow inline HTML (badges, etc.)
 MD033: false
 
+# MD024: duplicate headings — allow same name under different parent sections
+# (Keep a Changelog uses ### Changed / ### Added / ### Fixed under each version).
+MD024:
+  siblings_only: true
+
 # MD041: first line in file must be a top-level heading — allow license headers etc.
 MD041: false

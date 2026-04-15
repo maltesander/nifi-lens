@@ -7,6 +7,62 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- **Keybinding consolidation — all views.** FuzzyFind moves from `f` to
+  `Shift+F`. Bulletins: CycleGroupBy `g` → `Shift+G`, TogglePause `p` →
+  `Shift+P`, MuteSource `m` → `Shift+M`, ClearFilters `Shift+C` →
+  `Shift+R`. Events: all filter-field edit keys move to Shift variants
+  (`Shift+D` Time / `Shift+T` Types / `Shift+S` Source / `Shift+U` UUID /
+  `Shift+A` Attributes); new-query `n` → `Shift+N`; reset `r` → `Shift+R`;
+  bare `r` is now Refresh. No view binds bare `j`, `k`, `[`, or `]`;
+  regression tests enforce this.
+- **Cross-tab jump redesigned.** The two-key `g <letter>` leader combo is
+  replaced by a single `g` that dispatches `AppAction::Jump`. When exactly
+  one destination is reachable the jump fires silently; when multiple are
+  available the new JumpMenu modal opens (see Added).
+- **Tab / Shift+Tab cycle panes within each view.** All tabs (Overview,
+  Browser, Events, Tracer) now use Tab/Shift+Tab for intra-view pane focus
+  cycling. Tab-bar switching stays on F1–F5 exclusively.
+
+### Added
+
+- **`v` = paste, `x` = cut** from the system clipboard in every text-input
+  field (Bulletins `/` search, Events filter fields, Tracer UUID entry).
+- **JumpMenu modal** — `g` opens a scrollable, keyboard-navigable list of
+  context-sensitive cross-tab destinations. `↑`/`↓` move the selection,
+  `Enter` confirms, `Esc` cancels. Fires immediately when only one
+  destination is reachable.
+- **Overview interactive panels** — Nodes, Queues, and Noisy panels are
+  now focusable `Table` widgets with row selection, scroll-to-cursor, and
+  thick-border focus indicators. Tab/Shift+Tab cycles focus between panels.
+- **Overview node detail popup** — `Enter` on a selected node row opens a
+  two-pane modal with heap/load/threads/uptime summary on the left and GC
+  collector table + per-type repository utilization with fill bars on the
+  right.
+- **Tracer timeline enriched** — lineage rows now show component type and
+  per-event detail hints alongside the existing timestamp and event-type
+  columns.
+- **Bulletins `c`** copies the selected row's raw message to the clipboard.
+
+### Fixed
+
+- Overview: Queues panel `g` → Browser cross-link now navigates to the
+  connection's parent process group instead of the connection itself.
+- Overview: aligned repository fill bars; replaced aggregate load
+  spark-bar with per-CPU strip.
+- Overview: fixed bulletins-per-minute rolling window accumulating
+  duplicate counts.
+- Events: widened type column; replaced the empty `rel` column with an
+  event-details column.
+
+### Security
+
+- Updated `rustls-webpki` to 0.103.12 (fixes
+  [RUSTSEC-2026-0098](https://rustsec.org/advisories/RUSTSEC-2026-0098)
+  and
+  [RUSTSEC-2026-0099](https://rustsec.org/advisories/RUSTSEC-2026-0099)).
+
 ## [0.1.0] — 2026-04-14
 
 ### Changed
