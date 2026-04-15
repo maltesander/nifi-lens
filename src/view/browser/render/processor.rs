@@ -267,6 +267,15 @@ fn render_recent_bulletins_panel(
         detail_focus,
         DetailFocus::Section { idx, .. } if *idx == bul_idx
     );
+    let x_offset = if is_focused {
+        if let DetailFocus::Section { x_offsets, .. } = detail_focus {
+            x_offsets[bul_idx]
+        } else {
+            0
+        }
+    } else {
+        0
+    };
 
     // Collect ALL matching bulletins (no cap) — the Table scrolls.
     let matching: Vec<&BulletinSnapshot> =
@@ -288,9 +297,11 @@ fn render_recent_bulletins_panel(
             Row::new(vec![
                 Cell::from(short_time(&b.timestamp_iso, &b.timestamp_human)),
                 Cell::from(sev_label).style(sev_style),
-                Cell::from(
-                    crate::view::bulletins::state::strip_component_prefix(&b.message).to_string(),
-                ),
+                {
+                    let msg = crate::view::bulletins::state::strip_component_prefix(&b.message)
+                        .to_string();
+                    Cell::from(char_skip(&msg, x_offset))
+                },
             ])
         })
         .collect();

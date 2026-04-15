@@ -247,6 +247,15 @@ fn render_recent_bulletins_panel(
         detail_focus,
         DetailFocus::Section { idx, .. } if *idx == my_idx
     );
+    let x_offset = if is_focused {
+        if let DetailFocus::Section { x_offsets, .. } = detail_focus {
+            x_offsets[my_idx]
+        } else {
+            0
+        }
+    } else {
+        0
+    };
 
     // Newest-first, no cap.
     let matching: Vec<&BulletinSnapshot> = bulletins
@@ -280,9 +289,11 @@ fn render_recent_bulletins_panel(
                 Cell::from(short_time(&b.timestamp_iso, &b.timestamp_human)),
                 Cell::from(sev_label).style(sev_style),
                 Cell::from(b.source_name.clone()),
-                Cell::from(
-                    crate::view::bulletins::state::strip_component_prefix(&b.message).to_string(),
-                ),
+                {
+                    let msg = crate::view::bulletins::state::strip_component_prefix(&b.message)
+                        .to_string();
+                    Cell::from(char_skip(&msg, x_offset))
+                },
             ])
         })
         .collect();
@@ -322,6 +333,11 @@ fn short_time(iso: &str, human: &str) -> String {
         }
     }
     "--:--:--".to_string()
+}
+
+/// Skip the first `n` Unicode scalar values from `s`, returning the remainder.
+fn char_skip(s: &str, n: usize) -> String {
+    s.chars().skip(n).collect()
 }
 
 #[cfg(test)]
