@@ -112,6 +112,16 @@ fn render_controller_services_panel(
         DetailFocus::Section { idx, .. } if *idx == my_idx
     );
 
+    let x_offset = if is_focused {
+        if let DetailFocus::Section { x_offsets, .. } = detail_focus {
+            x_offsets[my_idx]
+        } else {
+            0
+        }
+    } else {
+        0
+    };
+
     let total = d.controller_services.len();
     let panel = Panel::new(" Controller services ")
         .right(Line::from(format!(" {total} ")))
@@ -134,7 +144,7 @@ fn render_controller_services_panel(
             Row::new(vec![
                 Cell::from(cs.state.clone()).style(cs_state_style(&cs.state)),
                 Cell::from(cs.name.clone()),
-                Cell::from(cs.type_short.clone()),
+                Cell::from(char_skip(&cs.type_short, x_offset)),
             ])
         })
         .collect();
@@ -182,6 +192,16 @@ fn render_child_groups_panel(
         DetailFocus::Section { idx, .. } if *idx == my_idx
     );
 
+    let x_offset = if is_focused {
+        if let DetailFocus::Section { x_offsets, .. } = detail_focus {
+            x_offsets[my_idx]
+        } else {
+            0
+        }
+    } else {
+        0
+    };
+
     let kids: Vec<ChildPgSummary> = state.child_process_groups(&d.id);
     let total = kids.len();
 
@@ -204,7 +224,7 @@ fn render_child_groups_panel(
         .iter()
         .map(|k| {
             Row::new(vec![
-                Cell::from(k.name.clone()),
+                Cell::from(char_skip(&k.name, x_offset)),
                 Cell::from(k.running.to_string()),
                 Cell::from(k.stopped.to_string()),
                 Cell::from(k.invalid.to_string()),
@@ -247,6 +267,15 @@ fn render_recent_bulletins_panel(
         detail_focus,
         DetailFocus::Section { idx, .. } if *idx == my_idx
     );
+    let x_offset = if is_focused {
+        if let DetailFocus::Section { x_offsets, .. } = detail_focus {
+            x_offsets[my_idx]
+        } else {
+            0
+        }
+    } else {
+        0
+    };
 
     // Newest-first, no cap.
     let matching: Vec<&BulletinSnapshot> = bulletins
@@ -280,9 +309,11 @@ fn render_recent_bulletins_panel(
                 Cell::from(short_time(&b.timestamp_iso, &b.timestamp_human)),
                 Cell::from(sev_label).style(sev_style),
                 Cell::from(b.source_name.clone()),
-                Cell::from(
-                    crate::view::bulletins::state::strip_component_prefix(&b.message).to_string(),
-                ),
+                {
+                    let msg = crate::view::bulletins::state::strip_component_prefix(&b.message)
+                        .to_string();
+                    Cell::from(char_skip(&msg, x_offset))
+                },
             ])
         })
         .collect();
@@ -324,9 +355,15 @@ fn short_time(iso: &str, human: &str) -> String {
     "--:--:--".to_string()
 }
 
+/// Skip the first `n` Unicode scalar values from `s`, returning the remainder.
+fn char_skip(s: &str, n: usize) -> String {
+    s.chars().skip(n).collect()
+}
+
 #[cfg(test)]
 mod snapshots {
     use super::*;
+    use crate::view::browser::state::MAX_DETAIL_SECTIONS;
     use insta::assert_snapshot;
     use ratatui::Terminal;
     use ratatui::backend::TestBackend;
@@ -381,6 +418,7 @@ mod snapshots {
         let focus = DetailFocus::Section {
             idx: 0, // ControllerServices
             rows: [1, 0, 0, 0],
+            x_offsets: [0; MAX_DETAIL_SECTIONS],
         };
         let mut terminal = Terminal::new(TestBackend::new(100, 28)).unwrap();
         terminal
@@ -400,6 +438,7 @@ mod snapshots {
         let focus = DetailFocus::Section {
             idx: 1, // ChildGroups
             rows: [0, 0, 0, 0],
+            x_offsets: [0; MAX_DETAIL_SECTIONS],
         };
         let mut terminal = Terminal::new(TestBackend::new(100, 28)).unwrap();
         terminal
@@ -430,6 +469,7 @@ mod snapshots {
         let focus = DetailFocus::Section {
             idx: 2, // RecentBulletins
             rows: [0, 0, 0, 0],
+            x_offsets: [0; MAX_DETAIL_SECTIONS],
         };
         let mut terminal = Terminal::new(TestBackend::new(100, 28)).unwrap();
         terminal

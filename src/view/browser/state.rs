@@ -132,6 +132,9 @@ pub enum DetailFocus {
         /// Row cursor per section index. Slots beyond the current
         /// node's `DetailSections::len()` are unused.
         rows: [usize; MAX_DETAIL_SECTIONS],
+        /// Horizontal character offset per section index. Incremented by
+        /// `FocusAction::Right`, decremented (saturating) by `FocusAction::Left`.
+        x_offsets: [usize; MAX_DETAIL_SECTIONS],
     },
 }
 
@@ -464,7 +467,7 @@ impl BrowserState {
         &self,
         bulletins: &std::collections::VecDeque<crate::client::BulletinSnapshot>,
     ) -> Option<String> {
-        let DetailFocus::Section { idx, rows } = &self.detail_focus else {
+        let DetailFocus::Section { idx, rows, .. } = &self.detail_focus else {
             return None;
         };
         let arena_idx = *self.visible.get(self.selected)?;
@@ -531,7 +534,7 @@ impl BrowserState {
         &self,
         bulletins: &std::collections::VecDeque<crate::client::BulletinSnapshot>,
     ) -> Option<String> {
-        let DetailFocus::Section { idx, rows } = &self.detail_focus else {
+        let DetailFocus::Section { idx, rows, .. } = &self.detail_focus else {
             return None;
         };
         let arena_idx = *self.visible.get(self.selected)?;
@@ -2102,6 +2105,7 @@ mod tests {
         s.detail_focus = DetailFocus::Section {
             idx: 0, // ControllerServices is the first section for PG
             rows: [1, 0, 0, 0],
+            x_offsets: [0; MAX_DETAIL_SECTIONS],
         };
 
         let ring: VecDeque<crate::client::BulletinSnapshot> = VecDeque::new();
@@ -2151,6 +2155,7 @@ mod tests {
         s.detail_focus = DetailFocus::Section {
             idx: 2,
             rows: [0, 0, 1, 0],
+            x_offsets: [0; MAX_DETAIL_SECTIONS],
         };
 
         // Ring: older → newer. Newest-first iteration should be [b3, b2, b1].
@@ -2226,6 +2231,7 @@ mod tests {
         s.detail_focus = DetailFocus::Section {
             idx: 1,
             rows: [0; MAX_DETAIL_SECTIONS],
+            x_offsets: [0; MAX_DETAIL_SECTIONS],
         };
 
         let ok = s.drill_into_group("enrich");

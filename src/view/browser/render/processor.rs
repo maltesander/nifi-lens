@@ -148,9 +148,19 @@ fn render_properties_and_validation(
         .constraints(constraints)
         .split(area);
 
+    let val_x_offset = val_idx
+        .and_then(|i| {
+            if let DetailFocus::Section { x_offsets, .. } = detail_focus {
+                Some(x_offsets[i])
+            } else {
+                None
+            }
+        })
+        .unwrap_or(0);
+
     render_properties_panel(frame, chunks[0], d, detail_focus);
     if has_validation {
-        render_validation_errors_panel(frame, chunks[1], d, is_val_focused);
+        render_validation_errors_panel(frame, chunks[1], d, is_val_focused, val_x_offset);
     }
 }
 
@@ -159,6 +169,7 @@ fn render_validation_errors_panel(
     area: Rect,
     d: &ProcessorDetail,
     is_focused: bool,
+    x_offset: usize,
 ) {
     let count = d.validation_errors.len();
     let panel = Panel::new(" Validation errors ")
@@ -168,13 +179,12 @@ fn render_validation_errors_panel(
     let inner = panel.inner(area);
     frame.render_widget(panel, area);
 
-    let width = inner.width.saturating_sub(1) as usize;
     let lines: Vec<Line> = d
         .validation_errors
         .iter()
-        .map(|e| Line::from(Span::styled(truncate(e, width), theme::error())))
+        .map(|e| Line::from(Span::styled(e.as_str(), theme::error())))
         .collect();
-    frame.render_widget(Paragraph::new(lines), inner);
+    frame.render_widget(Paragraph::new(lines).scroll((0, x_offset as u16)), inner);
 }
 
 fn render_properties_panel(
@@ -194,6 +204,15 @@ fn render_properties_panel(
         detail_focus,
         DetailFocus::Section { idx, .. } if *idx == props_idx
     );
+    let x_offset = if is_focused {
+        if let DetailFocus::Section { x_offsets, .. } = detail_focus {
+            x_offsets[props_idx]
+        } else {
+            0
+        }
+    } else {
+        0
+    };
 
     let total = d.properties.len();
     let panel = Panel::new(" Properties ")
@@ -209,7 +228,12 @@ fn render_properties_panel(
     let rows_data: Vec<Row> = d
         .properties
         .iter()
-        .map(|(k, v)| Row::new(vec![Cell::from(k.clone()), Cell::from(v.clone())]))
+        .map(|(k, v)| {
+            Row::new(vec![
+                Cell::from(k.clone()),
+                Cell::from(char_skip(v, x_offset)),
+            ])
+        })
         .collect();
     let widths = [Constraint::Length(30), Constraint::Fill(1)];
     let table = Table::new(rows_data, widths)
@@ -243,6 +267,15 @@ fn render_recent_bulletins_panel(
         detail_focus,
         DetailFocus::Section { idx, .. } if *idx == bul_idx
     );
+    let x_offset = if is_focused {
+        if let DetailFocus::Section { x_offsets, .. } = detail_focus {
+            x_offsets[bul_idx]
+        } else {
+            0
+        }
+    } else {
+        0
+    };
 
     // Collect ALL matching bulletins (no cap) — the Table scrolls.
     let matching: Vec<&BulletinSnapshot> =
@@ -264,9 +297,11 @@ fn render_recent_bulletins_panel(
             Row::new(vec![
                 Cell::from(short_time(&b.timestamp_iso, &b.timestamp_human)),
                 Cell::from(sev_label).style(sev_style),
-                Cell::from(
-                    crate::view::bulletins::state::strip_component_prefix(&b.message).to_string(),
-                ),
+                {
+                    let msg = crate::view::bulletins::state::strip_component_prefix(&b.message)
+                        .to_string();
+                    Cell::from(char_skip(&msg, x_offset))
+                },
             ])
         })
         .collect();
@@ -317,10 +352,16 @@ fn truncate(s: &str, max: usize) -> String {
     }
 }
 
+/// Skip the first `n` Unicode scalar values from `s`, returning the remainder.
+fn char_skip(s: &str, n: usize) -> String {
+    s.chars().skip(n).collect()
+}
+
 #[cfg(test)]
 mod snapshots {
     use super::*;
     use crate::client::BulletinSnapshot;
+    use crate::view::browser::state::MAX_DETAIL_SECTIONS;
     use insta::assert_snapshot;
     use ratatui::Terminal;
     use ratatui::backend::TestBackend;
@@ -383,6 +424,7 @@ mod snapshots {
         let focus = DetailFocus::Section {
             idx: 0,
             rows: [1, 0, 0, 0],
+            x_offsets: [0; MAX_DETAIL_SECTIONS],
         };
         let out = render_snapshot(&focus);
         assert_snapshot!("processor_detail_properties_focused", out);
@@ -393,6 +435,7 @@ mod snapshots {
         let focus = DetailFocus::Section {
             idx: 1,
             rows: [0, 0, 0, 0],
+            x_offsets: [0; MAX_DETAIL_SECTIONS],
         };
         let out = render_snapshot(&focus);
         assert_snapshot!("processor_detail_recent_bulletins_focused", out);
