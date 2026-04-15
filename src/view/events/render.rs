@@ -26,6 +26,7 @@ use ratatui::layout::{Alignment, Constraint, Direction, Layout, Rect};
 use ratatui::style::Modifier;
 use ratatui::text::{Line, Span};
 use ratatui::widgets::Paragraph;
+use time;
 
 use crate::theme;
 use crate::view::events::state::{EventsQueryStatus, EventsState, FilterField};
@@ -38,7 +39,7 @@ pub fn render(
     frame: &mut Frame,
     area: Rect,
     state: &EventsState,
-    _cfg: &crate::timestamp::TimestampConfig,
+    cfg: &crate::timestamp::TimestampConfig,
 ) {
     let age_label = match &state.status {
         EventsQueryStatus::Done { fetched_at, .. } => SystemTime::now()
@@ -64,19 +65,21 @@ pub fn render(
     frame.render_widget(filters_block, rows[0]);
     render_filter_bar(frame, filters_inner, state);
 
+    let now = time::OffsetDateTime::now_utc();
+
     // Events list panel (with age label on the right)
     let list_block = Panel::new(" Events ")
         .right(Line::from(Span::styled(age_label, theme::muted())))
         .into_block();
     let list_inner = list_block.inner(rows[1]);
     frame.render_widget(list_block, rows[1]);
-    render_body(frame, list_inner, state);
+    render_body(frame, list_inner, state, now, cfg);
 
     // Detail panel
     let detail_block = Panel::new(" Detail ").into_block();
     let detail_inner = detail_block.inner(rows[2]);
     frame.render_widget(detail_block, rows[2]);
-    render_detail_pane(frame, detail_inner, state);
+    render_detail_pane(frame, detail_inner, state, now, cfg);
 }
 
 fn format_age(secs: u64) -> String {
@@ -194,7 +197,13 @@ fn field_chip(label_prefix: &'static str, field: FilterField, state: &EventsStat
     }
 }
 
-fn render_body(frame: &mut Frame, area: Rect, state: &EventsState) {
+fn render_body(
+    frame: &mut Frame,
+    area: Rect,
+    state: &EventsState,
+    now: time::OffsetDateTime,
+    cfg: &crate::timestamp::TimestampConfig,
+) {
     if matches!(state.status, EventsQueryStatus::Idle) && state.events.is_empty() {
         render_empty_state(frame, area);
         return;
@@ -218,10 +227,16 @@ fn render_body(frame: &mut Frame, area: Rect, state: &EventsState) {
     // Otherwise (Done with events, or Failed), render the real results list.
     // On Failed the results list falls through to its empty-state message;
     // the global footer banner is the single source of truth for the error.
-    render_results_list(frame, area, state);
+    render_results_list(frame, area, state, now, cfg);
 }
 
-fn render_results_list(frame: &mut Frame, area: Rect, state: &EventsState) {
+fn render_results_list(
+    frame: &mut Frame,
+    area: Rect,
+    state: &EventsState,
+    now: time::OffsetDateTime,
+    cfg: &crate::timestamp::TimestampConfig,
+) {
     use ratatui::style::Style;
     use ratatui::widgets::{Cell, Row, Table};
 
@@ -265,7 +280,7 @@ fn render_results_list(frame: &mut Frame, area: Rect, state: &EventsState) {
                 Style::default()
             };
             Row::new(vec![
-                Cell::from(short_time(&e.event_time_iso)),
+                Cell::from(format_event_time(&e.event_time_iso, now, cfg)),
                 Cell::from(e.event_type.clone()).style(event_type_style(&e.event_type)),
                 Cell::from(e.component_name.clone()),
                 Cell::from(short_uuid(&e.flow_file_uuid)),
@@ -284,7 +299,7 @@ fn render_results_list(frame: &mut Frame, area: Rect, state: &EventsState) {
     let table = Table::new(
         rows,
         [
-            Constraint::Length(10), // time (HH:MM:SS)
+            Constraint::Length(15), // time (HH:MM:SS or Mon DD HH:MM:SS)
             Constraint::Length(22), // type (longest: ATTRIBUTES_MODIFIED = 20 chars)
             Constraint::Length(24), // component
             Constraint::Length(14), // file uuid
@@ -309,14 +324,15 @@ fn short_uuid(uuid: &str) -> String {
     }
 }
 
-fn short_time(iso: &str) -> String {
-    if iso.len() >= 19 {
-        let t = &iso[11..19];
-        if t.as_bytes().get(2) == Some(&b':') && t.as_bytes().get(5) == Some(&b':') {
-            return t.to_string();
-        }
+fn format_event_time(
+    iso: &str,
+    now: time::OffsetDateTime,
+    cfg: &crate::timestamp::TimestampConfig,
+) -> String {
+    match crate::timestamp::parse_nifi_timestamp(iso) {
+        Some(dt) => crate::timestamp::format(dt, now, cfg, false),
+        None => "--:--:--".to_string(),
     }
-    "--:--:--".to_string()
 }
 
 /// Colorize event types by category.
@@ -374,7 +390,13 @@ fn render_empty_state(frame: &mut Frame, area: Rect) {
     frame.render_widget(Paragraph::new(lines), area);
 }
 
-fn render_detail_pane(frame: &mut Frame, area: Rect, state: &EventsState) {
+fn render_detail_pane(
+    frame: &mut Frame,
+    area: Rect,
+    state: &EventsState,
+    now: time::OffsetDateTime,
+    cfg: &crate::timestamp::TimestampConfig,
+) {
     let inner = area;
 
     let Some(e) = state.selected_event() else {
@@ -397,7 +419,10 @@ fn render_detail_pane(frame: &mut Frame, area: Rect, state: &EventsState) {
         Span::raw(" \u{00b7} "),
         Span::styled(e.component_name.clone(), theme::accent()),
         Span::raw(" \u{00b7} "),
-        Span::styled(short_time(&e.event_time_iso), theme::muted()),
+        Span::styled(
+            format_event_time(&e.event_time_iso, now, cfg),
+            theme::muted(),
+        ),
         Span::raw(" \u{00b7} "),
         Span::styled(format!("flowfile {}", e.flow_file_uuid), theme::muted()),
     ]);
