@@ -119,34 +119,14 @@ impl ViewKeyHandler for BrowserHandler {
                     })
                 }
                 FocusAction::Left => {
-                    // Cycle to the previous section (wrap around).
-                    if sections.is_empty() {
-                        return Some(UpdateResult::default());
-                    }
-                    let new_idx = if idx == 0 {
-                        sections.len() - 1
-                    } else {
-                        idx - 1
-                    };
-                    state.browser.detail_focus = DetailFocus::Section { idx: new_idx, rows };
-                    Some(UpdateResult {
-                        redraw: true,
-                        intent: None,
-                        tracer_followup: None,
-                    })
+                    // Left is unmapped in section focus (was previously used
+                    // to cycle sections; now NextPane/PrevPane do that).
+                    None
                 }
                 FocusAction::Right => {
-                    // Cycle to the next section (wrap around).
-                    if sections.is_empty() {
-                        return Some(UpdateResult::default());
-                    }
-                    let new_idx = (idx + 1) % sections.len();
-                    state.browser.detail_focus = DetailFocus::Section { idx: new_idx, rows };
-                    Some(UpdateResult {
-                        redraw: true,
-                        intent: None,
-                        tracer_followup: None,
-                    })
+                    // Right is unmapped in section focus (was previously used
+                    // to cycle sections; now NextPane/PrevPane do that).
+                    None
                 }
                 FocusAction::Up => {
                     let mut new_rows = rows;
@@ -207,12 +187,44 @@ impl ViewKeyHandler for BrowserHandler {
                     // Other sections: no local descent.
                     None
                 }
+                FocusAction::NextPane => {
+                    // Advance to the next section, wrapping back to Tree.
+                    let section_count = sections.len();
+                    if section_count == 0 {
+                        return Some(UpdateResult::default());
+                    }
+                    let new_idx = idx + 1;
+                    if new_idx >= section_count {
+                        state.browser.detail_focus = DetailFocus::Tree;
+                    } else {
+                        state.browser.detail_focus = DetailFocus::Section { idx: new_idx, rows };
+                    }
+                    Some(UpdateResult {
+                        redraw: true,
+                        intent: None,
+                        tracer_followup: None,
+                    })
+                }
+                FocusAction::PrevPane => {
+                    // Go back to the previous section, wrapping to Tree at idx 0.
+                    if sections.is_empty() {
+                        return Some(UpdateResult::default());
+                    }
+                    if idx == 0 {
+                        state.browser.detail_focus = DetailFocus::Tree;
+                    } else {
+                        state.browser.detail_focus = DetailFocus::Section { idx: idx - 1, rows };
+                    }
+                    Some(UpdateResult {
+                        redraw: true,
+                        intent: None,
+                        tracer_followup: None,
+                    })
+                }
                 FocusAction::PageUp
                 | FocusAction::PageDown
                 | FocusAction::First
-                | FocusAction::Last
-                | FocusAction::NextPane
-                | FocusAction::PrevPane => None,
+                | FocusAction::Last => None,
             };
         }
 
@@ -337,7 +349,46 @@ impl ViewKeyHandler for BrowserHandler {
                     tracer_followup: None,
                 })
             }
-            FocusAction::NextPane | FocusAction::PrevPane => None,
+            FocusAction::NextPane => {
+                // From Tree: enter Section{0} if the selected node has sections.
+                let Some(&arena_idx) = state.browser.visible.get(state.browser.selected) else {
+                    return Some(UpdateResult::default());
+                };
+                let kind = state.browser.nodes[arena_idx].kind;
+                let sections = DetailSections::for_node(kind);
+                if sections.is_empty() {
+                    return Some(UpdateResult::default());
+                }
+                state.browser.detail_focus = DetailFocus::Section {
+                    idx: 0,
+                    rows: [0; MAX_DETAIL_SECTIONS],
+                };
+                Some(UpdateResult {
+                    redraw: true,
+                    intent: None,
+                    tracer_followup: None,
+                })
+            }
+            FocusAction::PrevPane => {
+                // From Tree: enter Section{last} if the selected node has sections.
+                let Some(&arena_idx) = state.browser.visible.get(state.browser.selected) else {
+                    return Some(UpdateResult::default());
+                };
+                let kind = state.browser.nodes[arena_idx].kind;
+                let sections = DetailSections::for_node(kind);
+                if sections.is_empty() {
+                    return Some(UpdateResult::default());
+                }
+                state.browser.detail_focus = DetailFocus::Section {
+                    idx: sections.len() - 1,
+                    rows: [0; MAX_DETAIL_SECTIONS],
+                };
+                Some(UpdateResult {
+                    redraw: true,
+                    intent: None,
+                    tracer_followup: None,
+                })
+            }
         }
     }
 
@@ -950,16 +1001,16 @@ mod tests {
     }
 
     #[test]
-    fn right_from_last_section_wraps_to_zero() {
-        // Right cycles sections forward; wraps from last to first.
+    fn right_is_noop_in_section_focus() {
+        // Right is unmapped in section focus — use NextPane (Tab) to cycle sections.
         let (mut s, c) = fresh_browser_on_processor();
-        // Processor has 2 focusable sections. Enter→0, Right→1, Right→0 (wrap).
+        // Enter detail focus (Section{0}), then press Right twice — idx must stay 0.
         update(&mut s, key(KeyCode::Enter, KeyModifiers::NONE), &c);
         update(&mut s, key(KeyCode::Right, KeyModifiers::NONE), &c);
         update(&mut s, key(KeyCode::Right, KeyModifiers::NONE), &c);
         match &s.browser.detail_focus {
             crate::view::browser::state::DetailFocus::Section { idx, .. } => {
-                assert_eq!(*idx, 0, "wrap")
+                assert_eq!(*idx, 0, "Right must be a no-op in section focus")
             }
             _ => panic!("expected Section focus"),
         }
@@ -1582,5 +1633,171 @@ mod tests {
         );
         // Interactive breadcrumb mode has been removed; `b` must be a no-op.
         assert_eq!(s.browser.selected, before_selected, "b must be a no-op");
+    }
+
+    // -----------------------------------------------------------------------
+    // Task 7: NextPane/PrevPane cycle Tree → Section{0..n} → Tree
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn next_pane_in_tree_enters_first_section_for_processor() {
+        use crate::input::FocusAction;
+        use crate::view::browser::state::DetailFocus;
+        let (mut s, _c) = fresh_browser_on_processor();
+        // Selection is on the "gen" Processor which has sections.
+        let r = BrowserHandler::handle_focus(&mut s, FocusAction::NextPane);
+        assert!(r.is_some(), "NextPane in Tree focus should return Some");
+        match &s.browser.detail_focus {
+            DetailFocus::Section { idx, .. } => {
+                assert_eq!(*idx, 0, "NextPane from Tree should enter Section{{0}}")
+            }
+            DetailFocus::Tree => panic!("expected Section focus, got Tree"),
+        }
+    }
+
+    #[test]
+    fn prev_pane_in_tree_enters_last_section_for_processor() {
+        use crate::input::FocusAction;
+        use crate::view::browser::state::{DetailFocus, DetailSections};
+        let (mut s, _c) = fresh_browser_on_processor();
+        let arena_idx = s.browser.visible[s.browser.selected];
+        let kind = s.browser.nodes[arena_idx].kind;
+        let section_count = DetailSections::for_node(kind).len();
+        let r = BrowserHandler::handle_focus(&mut s, FocusAction::PrevPane);
+        assert!(r.is_some(), "PrevPane in Tree focus should return Some");
+        match &s.browser.detail_focus {
+            DetailFocus::Section { idx, .. } => {
+                assert_eq!(
+                    *idx,
+                    section_count - 1,
+                    "PrevPane from Tree should enter Section{{last}}"
+                )
+            }
+            DetailFocus::Tree => panic!("expected Section focus, got Tree"),
+        }
+    }
+
+    #[test]
+    fn next_pane_in_tree_enters_first_section_for_pg() {
+        use crate::input::FocusAction;
+        use crate::view::browser::state::DetailFocus;
+        let (mut s, _c) = seeded_browser_state();
+        // seeded_browser_state puts the root PG at selected=0 (arena 0).
+        // ProcessGroup has 3 focusable sections (ControllerServices, ChildGroups, RecentBulletins).
+        s.browser.selected = 0;
+        let r = BrowserHandler::handle_focus(&mut s, FocusAction::NextPane);
+        assert!(r.is_some(), "NextPane on PG should return Some");
+        match &s.browser.detail_focus {
+            DetailFocus::Section { idx, .. } => {
+                assert_eq!(
+                    *idx, 0,
+                    "NextPane from Tree on PG should enter Section{{0}}"
+                )
+            }
+            DetailFocus::Tree => panic!("expected Section focus, got Tree"),
+        }
+    }
+
+    #[test]
+    fn next_pane_in_section_advances_to_next_section() {
+        use crate::input::FocusAction;
+        use crate::view::browser::state::{DetailFocus, MAX_DETAIL_SECTIONS};
+        let (mut s, _c) = fresh_browser_on_processor();
+        // Enter section 0 manually.
+        s.browser.detail_focus = DetailFocus::Section {
+            idx: 0,
+            rows: [0; MAX_DETAIL_SECTIONS],
+        };
+        let r = BrowserHandler::handle_focus(&mut s, FocusAction::NextPane);
+        assert!(r.is_some(), "NextPane in Section focus should return Some");
+        match &s.browser.detail_focus {
+            DetailFocus::Section { idx, .. } => {
+                assert_eq!(
+                    *idx, 1,
+                    "NextPane from Section{{0}} should go to Section{{1}}"
+                )
+            }
+            DetailFocus::Tree => panic!("expected Section focus, got Tree"),
+        }
+    }
+
+    #[test]
+    fn next_pane_from_last_section_wraps_to_tree() {
+        use crate::input::FocusAction;
+        use crate::view::browser::state::{DetailFocus, DetailSections, MAX_DETAIL_SECTIONS};
+        let (mut s, _c) = fresh_browser_on_processor();
+        let arena_idx = s.browser.visible[s.browser.selected];
+        let kind = s.browser.nodes[arena_idx].kind;
+        let last_idx = DetailSections::for_node(kind).len() - 1;
+        s.browser.detail_focus = DetailFocus::Section {
+            idx: last_idx,
+            rows: [0; MAX_DETAIL_SECTIONS],
+        };
+        let r = BrowserHandler::handle_focus(&mut s, FocusAction::NextPane);
+        assert!(r.is_some(), "NextPane from last section should return Some");
+        assert_eq!(
+            s.browser.detail_focus,
+            DetailFocus::Tree,
+            "NextPane from last section must wrap back to Tree"
+        );
+    }
+
+    #[test]
+    fn prev_pane_from_section_zero_wraps_to_tree() {
+        use crate::input::FocusAction;
+        use crate::view::browser::state::{DetailFocus, MAX_DETAIL_SECTIONS};
+        let (mut s, _c) = fresh_browser_on_processor();
+        s.browser.detail_focus = DetailFocus::Section {
+            idx: 0,
+            rows: [0; MAX_DETAIL_SECTIONS],
+        };
+        let r = BrowserHandler::handle_focus(&mut s, FocusAction::PrevPane);
+        assert!(r.is_some(), "PrevPane from Section{{0}} should return Some");
+        assert_eq!(
+            s.browser.detail_focus,
+            DetailFocus::Tree,
+            "PrevPane from Section{{0}} must wrap to Tree"
+        );
+    }
+
+    #[test]
+    fn prev_pane_in_section_goes_to_previous_section() {
+        use crate::input::FocusAction;
+        use crate::view::browser::state::{DetailFocus, MAX_DETAIL_SECTIONS};
+        let (mut s, _c) = fresh_browser_on_processor();
+        s.browser.detail_focus = DetailFocus::Section {
+            idx: 1,
+            rows: [0; MAX_DETAIL_SECTIONS],
+        };
+        let r = BrowserHandler::handle_focus(&mut s, FocusAction::PrevPane);
+        assert!(r.is_some(), "PrevPane from Section{{1}} should return Some");
+        match &s.browser.detail_focus {
+            DetailFocus::Section { idx, .. } => {
+                assert_eq!(
+                    *idx, 0,
+                    "PrevPane from Section{{1}} should go to Section{{0}}"
+                )
+            }
+            DetailFocus::Tree => panic!("expected Section focus, got Tree"),
+        }
+    }
+
+    #[test]
+    fn left_right_unmapped_in_section_focus() {
+        use crate::input::FocusAction;
+        use crate::view::browser::state::{DetailFocus, MAX_DETAIL_SECTIONS};
+        let (mut s, _c) = fresh_browser_on_processor();
+        s.browser.detail_focus = DetailFocus::Section {
+            idx: 0,
+            rows: [0; MAX_DETAIL_SECTIONS],
+        };
+        assert!(
+            BrowserHandler::handle_focus(&mut s, FocusAction::Left).is_none(),
+            "Left must be unmapped in Section focus"
+        );
+        assert!(
+            BrowserHandler::handle_focus(&mut s, FocusAction::Right).is_none(),
+            "Right must be unmapped in Section focus"
+        );
     }
 }
