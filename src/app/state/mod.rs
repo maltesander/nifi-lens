@@ -263,6 +263,20 @@ impl AppState {
             .ok_or_else(|| "clipboard handle unavailable".to_string())?;
         handle.0.set_text(text).map_err(|e| e.to_string())
     }
+
+    /// Returns true when the currently active view has a text-input field open.
+    /// Used by `AppAction::Paste/Cut` enabled predicates.
+    pub fn text_input_is_active(&self) -> bool {
+        match self.current_tab {
+            ViewId::Bulletins => self.bulletins.text_input.is_some(),
+            ViewId::Events => self.events.filter_edit.is_some(),
+            ViewId::Tracer => matches!(
+                self.tracer.mode,
+                crate::view::tracer::state::TracerMode::Entry(_)
+            ),
+            _ => false,
+        }
+    }
 }
 
 #[derive(Debug)]
@@ -1003,6 +1017,14 @@ fn handle_key(state: &mut AppState, key: KeyEvent, config: &Config) -> UpdateRes
                 intent: None,
                 tracer_followup: None,
             };
+        }
+        InputEvent::App(AppAction::Jump) => {
+            // Properly wired in Task 10
+            return UpdateResult::default();
+        }
+        InputEvent::App(AppAction::Paste) | InputEvent::App(AppAction::Cut) => {
+            // Properly wired in Task 12 via text-input bypass
+            return UpdateResult::default();
         }
         InputEvent::Go(target) => {
             if state.modal.is_some() {
@@ -2049,11 +2071,11 @@ mod tests {
         s.current_tab = ViewId::Browser;
         // Seed the flow index so the fuzzy find modal can actually open.
         s.flow_index = Some(crate::view::browser::state::FlowIndex { entries: vec![] });
-        // Open the modal via `f`.
-        update(&mut s, key(KeyCode::Char('f'), KeyModifiers::NONE), &c);
+        // Open the modal via Shift+F.
+        update(&mut s, key(KeyCode::Char('F'), KeyModifiers::SHIFT), &c);
         assert!(
             matches!(s.modal, Some(Modal::FuzzyFind(_))),
-            "f should open the FuzzyFind modal"
+            "Shift+F should open the FuzzyFind modal"
         );
         // Type 'f' again — this should append to the query, NOT close the modal.
         update(&mut s, key(KeyCode::Char('f'), KeyModifiers::NONE), &c);

@@ -167,7 +167,10 @@ impl Verb for AppAction {
             Self::Quit => Chord::simple(KeyCode::Char('q')),
             Self::Help => Chord::simple(KeyCode::Char('?')),
             Self::ContextSwitcher => Chord::shift(KeyCode::Char('K')),
-            Self::FuzzyFind => Chord::simple(KeyCode::Char('f')),
+            Self::FuzzyFind => Chord::shift(KeyCode::Char('F')),
+            Self::Jump => Chord::simple(KeyCode::Char('g')),
+            Self::Paste => Chord::simple(KeyCode::Char('v')),
+            Self::Cut => Chord::simple(KeyCode::Char('x')),
         }
     }
     fn label(self) -> &'static str {
@@ -176,6 +179,9 @@ impl Verb for AppAction {
             Self::Help => "help",
             Self::ContextSwitcher => "switch cluster context",
             Self::FuzzyFind => "fuzzy find component",
+            Self::Jump => "jump to related tab",
+            Self::Paste => "paste from clipboard",
+            Self::Cut => "cut to clipboard",
         }
     }
     fn hint(self) -> &'static str {
@@ -184,11 +190,23 @@ impl Verb for AppAction {
             Self::Help => "help",
             Self::ContextSwitcher => "ctx",
             Self::FuzzyFind => "find",
+            Self::Jump => "jump",
+            Self::Paste => "paste",
+            Self::Cut => "cut",
+        }
+    }
+    fn enabled(self, ctx: &HintContext<'_>) -> bool {
+        match self {
+            Self::Jump => !ctx.state.selection_cross_links().is_empty(),
+            Self::Paste | Self::Cut => ctx.state.text_input_is_active(),
+            _ => true,
         }
     }
     fn priority(self) -> u8 {
         match self {
             Self::Help => 80,
+            Self::Jump => 60,
+            Self::Paste | Self::Cut => 50,
             _ => 30,
         }
     }
@@ -198,6 +216,9 @@ impl Verb for AppAction {
             Self::Help,
             Self::ContextSwitcher,
             Self::FuzzyFind,
+            Self::Jump,
+            Self::Paste,
+            Self::Cut,
         ]
     }
 }
@@ -252,6 +273,9 @@ pub enum AppAction {
     Help,
     ContextSwitcher,
     FuzzyFind,
+    Jump,
+    Paste,
+    Cut,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -358,8 +382,11 @@ mod tests {
         );
         assert_eq!(
             AppAction::FuzzyFind.chord(),
-            Chord::simple(KeyCode::Char('f'))
+            Chord::shift(KeyCode::Char('F'))
         );
+        assert_eq!(AppAction::Jump.chord(), Chord::simple(KeyCode::Char('g')));
+        assert_eq!(AppAction::Paste.chord(), Chord::simple(KeyCode::Char('v')));
+        assert_eq!(AppAction::Cut.chord(), Chord::simple(KeyCode::Char('x')));
     }
 
     #[test]
@@ -367,5 +394,28 @@ mod tests {
         assert_eq!(GoTarget::Browser.chord(), Chord::go(KeyCode::Char('b')));
         assert_eq!(GoTarget::Events.chord(), Chord::go(KeyCode::Char('e')));
         assert_eq!(GoTarget::Tracer.chord(), Chord::go(KeyCode::Char('t')));
+    }
+
+    #[test]
+    fn fuzzy_find_chord_is_shift_f() {
+        assert_eq!(
+            AppAction::FuzzyFind.chord(),
+            Chord::shift(KeyCode::Char('F'))
+        );
+    }
+
+    #[test]
+    fn jump_chord_is_bare_g() {
+        assert_eq!(AppAction::Jump.chord(), Chord::simple(KeyCode::Char('g')));
+    }
+
+    #[test]
+    fn paste_chord_is_v() {
+        assert_eq!(AppAction::Paste.chord(), Chord::simple(KeyCode::Char('v')));
+    }
+
+    #[test]
+    fn cut_chord_is_x() {
+        assert_eq!(AppAction::Cut.chord(), Chord::simple(KeyCode::Char('x')));
     }
 }
