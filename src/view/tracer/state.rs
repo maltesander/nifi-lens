@@ -954,14 +954,8 @@ pub fn apply_payload(state: &mut TracerState, payload: TracerPayload) -> Option<
             }
             None
         }
-        TracerPayload::ContentSaved { path } => {
-            state.last_error = Some(format!("saved to {}", path.display()));
-            None
-        }
-        TracerPayload::ContentSaveFailed { path, error } => {
-            state.last_error = Some(format!("save to {} failed: {}", path.display(), error));
-            None
-        }
+        TracerPayload::ContentSaved { .. } => None,
+        TracerPayload::ContentSaveFailed { .. } => None,
     }
 }
 

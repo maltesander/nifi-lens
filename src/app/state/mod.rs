@@ -790,10 +790,9 @@ fn update_inner(state: &mut AppState, event: AppEvent, config: &Config) -> Updat
             }
         }
         AppEvent::Data(ViewPayload::Tracer(payload)) => {
-            // Mirror EventDetailFailed / ContentFailed errors into the
-            // global status banner so the footer surfaces them the same
-            // way other tab errors do; the in-pane Failed rendering
-            // still shows the detail locally.
+            // Mirror several tracer outcomes into the global status banner
+            // so the footer surfaces them the same way other tab errors do;
+            // in-pane Failed rendering still shows the detail locally.
             match &payload {
                 crate::event::TracerPayload::EventDetailFailed { error, .. } => {
                     state.status.banner = Some(Banner {
@@ -806,6 +805,20 @@ fn update_inner(state: &mut AppState, event: AppEvent, config: &Config) -> Updat
                     state.status.banner = Some(Banner {
                         severity: BannerSeverity::Error,
                         message: format!("event {} content failed: {error}", side.as_str()),
+                        detail: None,
+                    });
+                }
+                crate::event::TracerPayload::ContentSaved { path } => {
+                    state.status.banner = Some(Banner {
+                        severity: BannerSeverity::Info,
+                        message: format!("saved to {}", path.display()),
+                        detail: None,
+                    });
+                }
+                crate::event::TracerPayload::ContentSaveFailed { path, error } => {
+                    state.status.banner = Some(Banner {
+                        severity: BannerSeverity::Error,
+                        message: format!("save to {} failed: {error}", path.display()),
                         detail: None,
                     });
                 }

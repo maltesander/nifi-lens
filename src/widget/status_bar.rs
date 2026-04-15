@@ -12,7 +12,7 @@ use ratatui::Frame;
 use ratatui::layout::{Alignment, Constraint, Direction, Layout, Rect};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::Paragraph;
-use unicode_width::UnicodeWidthStr;
+use unicode_width::{UnicodeWidthChar, UnicodeWidthStr};
 
 use crate::app::state::{AppState, BannerSeverity};
 use crate::theme;
@@ -45,11 +45,35 @@ fn render_banner(frame: &mut Frame, area: Rect, state: &AppState) {
                 BannerSeverity::Warning => theme::warning(),
                 BannerSeverity::Info => theme::info(),
             };
-            Line::from(Span::styled(banner.message.clone(), style))
+            let msg = truncate_to_width(&banner.message, area.width as usize);
+            Line::from(Span::styled(msg, style))
         }
         None => Line::from(Span::raw("")),
     };
     frame.render_widget(Paragraph::new(line), area);
+}
+
+/// Truncates `s` to at most `max_width` terminal columns, appending `…` when
+/// the text is shortened. Returns an owned `String` in all cases.
+fn truncate_to_width(s: &str, max_width: usize) -> String {
+    if s.width() <= max_width {
+        return s.to_string();
+    }
+    if max_width == 0 {
+        return String::new();
+    }
+    let mut out = String::new();
+    let mut used = 0usize;
+    for ch in s.chars() {
+        let cw = ch.width().unwrap_or(0);
+        if used + cw + 1 > max_width {
+            break;
+        }
+        out.push(ch);
+        used += cw;
+    }
+    out.push('\u{2026}'); // …
+    out
 }
 
 fn render_refresh_age(frame: &mut Frame, area: Rect, refresh_text: &str) {

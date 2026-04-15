@@ -197,7 +197,7 @@ fn render_lineage_running(frame: &mut Frame, area: Rect, running: &LineageRunnin
 
 // ── Lineage ───────────────────────────────────────────────────────────────────
 
-const DETAIL_HEIGHT: u16 = 14;
+const DETAIL_HEIGHT: u16 = 18;
 
 fn render_lineage_timeline(
     frame: &mut Frame,
