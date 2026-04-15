@@ -121,9 +121,9 @@ All keyboard input flows through `src/input/`. A `KeyMap` state
 machine (`Idle` ↔ `PendingGo`) translates `crossterm::KeyEvent` into
 `InputEvent` values carrying typed action enums:
 
-- `FocusAction` (Up/Down/Left/Right/PgUp/PgDn/First/Last/Descend/Ascend)
+- `FocusAction` (Up/Down/Left/Right/PgUp/PgDn/First/Last/Descend/Ascend/NextPane/PrevPane — Tab/BackTab)
 - `HistoryAction` (Back/Forward — `Shift+←`/`Shift+→`)
-- `TabAction` (Next/Prev/Jump(n))
+- `TabAction` (Jump(n) — F1–F5)
 - `AppAction` (Quit/Help/ContextSwitcher/FuzzyFind)
 - `GoTarget` (Browser/Events/Tracer — reached via the two-key `g <letter>` combo)
 - `ViewVerb` — wraps per-view enums (`BulletinsVerb`, `BrowserVerb`, `EventsVerb`, `TracerVerb`)

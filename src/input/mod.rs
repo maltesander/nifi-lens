@@ -512,6 +512,15 @@ mod keymap_tests {
     }
 
     #[test]
+    fn back_tab_is_focus_prev_pane() {
+        let mut km = KeyMap::default();
+        assert_eq!(
+            km.translate(press(KeyCode::BackTab), ViewId::Overview),
+            InputEvent::Focus(FocusAction::PrevPane)
+        );
+    }
+
+    #[test]
     fn f3_is_tab_jump_3() {
         let mut km = KeyMap::default();
         assert_eq!(

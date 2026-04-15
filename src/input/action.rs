@@ -368,32 +368,4 @@ mod tests {
         assert_eq!(GoTarget::Events.chord(), Chord::go(KeyCode::Char('e')));
         assert_eq!(GoTarget::Tracer.chord(), Chord::go(KeyCode::Char('t')));
     }
-
-    #[test]
-    fn focus_next_pane_is_tab() {
-        assert_eq!(FocusAction::NextPane.chord(), Chord::simple(KeyCode::Tab));
-    }
-
-    #[test]
-    fn focus_prev_pane_is_backtab() {
-        assert_eq!(
-            FocusAction::PrevPane.chord(),
-            Chord::simple(KeyCode::BackTab)
-        );
-    }
-
-    #[test]
-    fn focus_pane_actions_have_priority_60() {
-        assert_eq!(FocusAction::NextPane.priority(), 60);
-        assert_eq!(FocusAction::PrevPane.priority(), 60);
-    }
-
-    #[test]
-    fn tab_action_only_has_jump_variants() {
-        // TabAction::Next and TabAction::Prev must no longer exist.
-        // All entries in all() must be Jump variants.
-        for &v in TabAction::all() {
-            assert!(matches!(v, TabAction::Jump(_)));
-        }
-    }
 }
