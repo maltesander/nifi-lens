@@ -148,9 +148,19 @@ fn render_properties_and_validation(
         .constraints(constraints)
         .split(area);
 
+    let val_x_offset = val_idx
+        .and_then(|i| {
+            if let DetailFocus::Section { x_offsets, .. } = detail_focus {
+                Some(x_offsets[i])
+            } else {
+                None
+            }
+        })
+        .unwrap_or(0);
+
     render_properties_panel(frame, chunks[0], d, detail_focus);
     if has_validation {
-        render_validation_errors_panel(frame, chunks[1], d, is_val_focused);
+        render_validation_errors_panel(frame, chunks[1], d, is_val_focused, val_x_offset);
     }
 }
 
@@ -159,6 +169,7 @@ fn render_validation_errors_panel(
     area: Rect,
     d: &ProcessorDetail,
     is_focused: bool,
+    x_offset: usize,
 ) {
     let count = d.validation_errors.len();
     let panel = Panel::new(" Validation errors ")
@@ -168,13 +179,12 @@ fn render_validation_errors_panel(
     let inner = panel.inner(area);
     frame.render_widget(panel, area);
 
-    let width = inner.width.saturating_sub(1) as usize;
     let lines: Vec<Line> = d
         .validation_errors
         .iter()
-        .map(|e| Line::from(Span::styled(truncate(e, width), theme::error())))
+        .map(|e| Line::from(Span::styled(e.as_str(), theme::error())))
         .collect();
-    frame.render_widget(Paragraph::new(lines), inner);
+    frame.render_widget(Paragraph::new(lines).scroll((0, x_offset as u16)), inner);
 }
 
 fn render_properties_panel(
