@@ -1,5 +1,16 @@
-//! Jump-menu modal (full implementation in Task 11).
+//! Jump-menu modal — context-sensitive cross-tab jump target picker.
+//!
+//! Opened by `AppAction::Jump` when more than one cross-link target
+//! is available for the current selection. Auto-jumps without showing
+//! this modal when only one target exists.
+
+use ratatui::Frame;
+use ratatui::layout::Rect;
+use ratatui::text::{Line, Span};
+use ratatui::widgets::{Block, BorderType, Clear, Paragraph};
+
 use crate::input::GoTarget;
+use crate::theme;
 
 #[derive(Debug, Clone)]
 pub struct JumpMenuState {
@@ -29,5 +40,82 @@ impl JumpMenuState {
 
     pub fn selected_target(&self) -> Option<GoTarget> {
         self.targets.get(self.selected).copied()
+    }
+}
+
+fn target_label(t: GoTarget) -> &'static str {
+    match t {
+        GoTarget::Browser => "Browser — open in flow tree",
+        GoTarget::Events => "Events  — show events for component",
+        GoTarget::Tracer => "Tracer  — trace flowfile",
+    }
+}
+
+/// Render the jump menu as a small centered overlay.
+pub fn render(frame: &mut Frame, area: Rect, state: &JumpMenuState) {
+    let width: u16 = 44;
+    let height: u16 = state.targets.len() as u16 + 2; // border rows
+
+    let x = area.x + area.width.saturating_sub(width) / 2;
+    let y = area.y + area.height.saturating_sub(height) / 2;
+    let popup = Rect {
+        x,
+        y,
+        width: width.min(area.width),
+        height: height.min(area.height),
+    };
+
+    frame.render_widget(Clear, popup);
+
+    let block = Block::bordered()
+        .border_type(BorderType::Rounded)
+        .border_style(theme::accent())
+        .title(" Jump to ");
+
+    let inner = block.inner(popup);
+    frame.render_widget(block, popup);
+
+    let lines: Vec<Line> = state
+        .targets
+        .iter()
+        .enumerate()
+        .map(|(i, &t)| {
+            let label = target_label(t);
+            if i == state.selected {
+                Line::from(Span::styled(format!(" \u{25b6} {label}"), theme::accent()))
+            } else {
+                Line::from(Span::styled(format!("   {label}"), theme::muted()))
+            }
+        })
+        .collect();
+
+    frame.render_widget(Paragraph::new(lines), inner);
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::input::GoTarget;
+
+    #[test]
+    fn move_down_clamps_at_last() {
+        let mut s = JumpMenuState::new(vec![GoTarget::Browser, GoTarget::Events]);
+        s.move_down();
+        assert_eq!(s.selected, 1);
+        s.move_down();
+        assert_eq!(s.selected, 1, "should not exceed last");
+    }
+
+    #[test]
+    fn move_up_clamps_at_zero() {
+        let mut s = JumpMenuState::new(vec![GoTarget::Browser, GoTarget::Tracer]);
+        s.move_up();
+        assert_eq!(s.selected, 0, "should not underflow");
+    }
+
+    #[test]
+    fn selected_target_returns_correct_variant() {
+        let s = JumpMenuState::new(vec![GoTarget::Events, GoTarget::Browser]);
+        assert_eq!(s.selected_target(), Some(GoTarget::Events));
     }
 }

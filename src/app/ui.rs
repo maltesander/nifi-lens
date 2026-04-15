@@ -49,8 +49,9 @@ pub fn render(frame: &mut Frame, state: &AppState) {
             Modal::NodeDetail(row) => {
                 crate::view::overview::render::render_node_detail_modal(frame, frame.area(), row);
             }
-            // Task 11 fills in the actual jump-menu render.
-            Modal::JumpMenu(_) => {}
+            Modal::JumpMenu(jm) => {
+                crate::widget::jump_menu::render(frame, frame.area(), jm);
+            }
         }
     }
 }
