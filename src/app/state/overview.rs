@@ -25,6 +25,30 @@ impl ViewKeyHandler for OverviewHandler {
             })
         };
 
+        // Cycle order for NextPane/PrevPane: None → Nodes → Noisy → Queues → None
+        match action {
+            FA::NextPane => {
+                state.overview.focus = match state.overview.focus {
+                    OverviewFocus::None => OverviewFocus::Nodes,
+                    OverviewFocus::Nodes => OverviewFocus::Noisy,
+                    OverviewFocus::Noisy => OverviewFocus::Queues,
+                    OverviewFocus::Queues => OverviewFocus::None,
+                };
+                return done();
+            }
+            FA::PrevPane => {
+                state.overview.focus = match state.overview.focus {
+                    OverviewFocus::None => OverviewFocus::Queues,
+                    OverviewFocus::Nodes => OverviewFocus::None,
+                    OverviewFocus::Noisy => OverviewFocus::Nodes,
+                    OverviewFocus::Queues => OverviewFocus::Noisy,
+                };
+                return done();
+            }
+            FA::Left | FA::Right => return None,
+            _ => {}
+        }
+
         match state.overview.focus {
             OverviewFocus::None => match action {
                 FA::Descend => {
@@ -36,14 +60,6 @@ impl ViewKeyHandler for OverviewHandler {
             OverviewFocus::Nodes => match action {
                 FA::Ascend => {
                     state.overview.focus = OverviewFocus::None;
-                    done()
-                }
-                FA::Right => {
-                    state.overview.focus = OverviewFocus::Noisy;
-                    done()
-                }
-                FA::Left => {
-                    state.overview.focus = OverviewFocus::Queues;
                     done()
                 }
                 FA::Up => {
@@ -73,14 +89,6 @@ impl ViewKeyHandler for OverviewHandler {
                     state.overview.focus = OverviewFocus::None;
                     done()
                 }
-                FA::Right => {
-                    state.overview.focus = OverviewFocus::Queues;
-                    done()
-                }
-                FA::Left => {
-                    state.overview.focus = OverviewFocus::Nodes;
-                    done()
-                }
                 FA::Up => {
                     state.overview.noisy_selected = state.overview.noisy_selected.saturating_sub(1);
                     done()
@@ -95,14 +103,6 @@ impl ViewKeyHandler for OverviewHandler {
             OverviewFocus::Queues => match action {
                 FA::Ascend => {
                     state.overview.focus = OverviewFocus::None;
-                    done()
-                }
-                FA::Right => {
-                    state.overview.focus = OverviewFocus::Nodes;
-                    done()
-                }
-                FA::Left => {
-                    state.overview.focus = OverviewFocus::Noisy;
                     done()
                 }
                 FA::Up => {
@@ -182,29 +182,78 @@ mod tests {
     }
 
     #[test]
-    fn right_cycles_nodes_noisy_queues_nodes() {
+    fn next_pane_from_none_enters_nodes() {
         let mut s = fresh_state();
         s.current_tab = ViewId::Overview;
-        s.overview.focus = OverviewFocus::Nodes;
-        OverviewHandler::handle_focus(&mut s, FocusAction::Right);
-        assert_eq!(s.overview.focus, OverviewFocus::Noisy);
-        OverviewHandler::handle_focus(&mut s, FocusAction::Right);
-        assert_eq!(s.overview.focus, OverviewFocus::Queues);
-        OverviewHandler::handle_focus(&mut s, FocusAction::Right);
+        let r = OverviewHandler::handle_focus(&mut s, FocusAction::NextPane);
+        assert!(r.unwrap().redraw);
         assert_eq!(s.overview.focus, OverviewFocus::Nodes);
     }
 
     #[test]
-    fn left_cycles_in_reverse() {
+    fn prev_pane_from_none_wraps_to_queues() {
+        let mut s = fresh_state();
+        s.current_tab = ViewId::Overview;
+        let r = OverviewHandler::handle_focus(&mut s, FocusAction::PrevPane);
+        assert!(r.unwrap().redraw);
+        assert_eq!(s.overview.focus, OverviewFocus::Queues);
+    }
+
+    #[test]
+    fn next_pane_cycles_nodes_noisy_queues_none() {
         let mut s = fresh_state();
         s.current_tab = ViewId::Overview;
         s.overview.focus = OverviewFocus::Nodes;
-        OverviewHandler::handle_focus(&mut s, FocusAction::Left);
-        assert_eq!(s.overview.focus, OverviewFocus::Queues);
-        OverviewHandler::handle_focus(&mut s, FocusAction::Left);
+        OverviewHandler::handle_focus(&mut s, FocusAction::NextPane);
         assert_eq!(s.overview.focus, OverviewFocus::Noisy);
-        OverviewHandler::handle_focus(&mut s, FocusAction::Left);
-        assert_eq!(s.overview.focus, OverviewFocus::Nodes);
+        OverviewHandler::handle_focus(&mut s, FocusAction::NextPane);
+        assert_eq!(s.overview.focus, OverviewFocus::Queues);
+        OverviewHandler::handle_focus(&mut s, FocusAction::NextPane);
+        assert_eq!(s.overview.focus, OverviewFocus::None);
+    }
+
+    #[test]
+    fn next_pane_from_queues_wraps_to_none() {
+        let mut s = fresh_state();
+        s.current_tab = ViewId::Overview;
+        s.overview.focus = OverviewFocus::Queues;
+        OverviewHandler::handle_focus(&mut s, FocusAction::NextPane);
+        assert_eq!(s.overview.focus, OverviewFocus::None);
+    }
+
+    #[test]
+    fn prev_pane_cycles_in_reverse() {
+        let mut s = fresh_state();
+        s.current_tab = ViewId::Overview;
+        s.overview.focus = OverviewFocus::Nodes;
+        OverviewHandler::handle_focus(&mut s, FocusAction::PrevPane);
+        assert_eq!(s.overview.focus, OverviewFocus::None);
+        OverviewHandler::handle_focus(&mut s, FocusAction::PrevPane);
+        assert_eq!(s.overview.focus, OverviewFocus::Queues);
+        OverviewHandler::handle_focus(&mut s, FocusAction::PrevPane);
+        assert_eq!(s.overview.focus, OverviewFocus::Noisy);
+    }
+
+    #[test]
+    fn left_right_are_unmapped_in_all_overview_focus_states() {
+        let mut s = fresh_state();
+        s.current_tab = ViewId::Overview;
+        for focus in [
+            OverviewFocus::None,
+            OverviewFocus::Nodes,
+            OverviewFocus::Noisy,
+            OverviewFocus::Queues,
+        ] {
+            s.overview.focus = focus;
+            assert!(
+                OverviewHandler::handle_focus(&mut s, FocusAction::Left).is_none(),
+                "Left should be unmapped in {focus:?}"
+            );
+            assert!(
+                OverviewHandler::handle_focus(&mut s, FocusAction::Right).is_none(),
+                "Right should be unmapped in {focus:?}"
+            );
+        }
     }
 
     #[test]
