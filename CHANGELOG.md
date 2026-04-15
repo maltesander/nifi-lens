@@ -7,6 +7,35 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **Browser: validation errors in bordered panel.** Processors and
+  controller services that have active validation errors now display them
+  in a focusable bordered panel instead of inline text, making the list
+  navigable and visually distinct.
+
+### Changed
+
+- **Tracer detail pane is taller.** `DETAIL_HEIGHT` increased from 14 to
+  18 rows, giving more room to the attribute table and content body.
+
+### Fixed
+
+- **Tracer: save confirmation shown in status bar.** After saving content
+  to a file (`s`), the "saved to \<path\>" message now appears in the
+  global footer banner (Info severity) instead of being silently
+  discarded. Save failures are likewise surfaced as Error banners.
+- **Status bar: long messages truncated with `…`.** Banner text wider than
+  the available column count is trimmed and suffixed with an ellipsis
+  rather than being hard-clipped by the terminal.
+- **Tracer: `Updated` attribute class shown in yellow.** Changed
+  attributes in the lineage detail pane now render with the warning
+  (yellow) colour to distinguish them from added (green) and deleted
+  (red) entries.
+- **Events: `timestamp_tz` config honoured in detail pane.** Event detail
+  rows now respect the `[timestamps] timezone` setting instead of always
+  showing UTC.
+
 ## [0.2.0] — 2026-04-15
 
 ### Changed
