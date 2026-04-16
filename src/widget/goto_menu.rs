@@ -86,9 +86,24 @@ fn target_label(t: GoTarget) -> &'static str {
     }
 }
 
+/// Fixed popup width. Sized so `ProcessorName (abcd1234)` fits without
+/// middle-truncation in the common case; longer names / flowfile
+/// uuids are middle-truncated by `format_subject`.
+const POPUP_WIDTH: u16 = 50;
+
+/// Builds the block title from `state.selected_subject()`. Factored
+/// out so tests can assert the title string without rendering.
+fn title_for(state: &GotoMenuState) -> String {
+    let inner_budget = (POPUP_WIDTH as usize).saturating_sub(4); // borders + padding
+    match state.selected_subject() {
+        Some(subject) => format!(" Go to · {} ", format_subject(subject, inner_budget)),
+        None => " Go to ".to_string(),
+    }
+}
+
 /// Render the goto menu as a small centered overlay.
 pub fn render(frame: &mut Frame, area: Rect, state: &GotoMenuState) {
-    let width: u16 = 44;
+    let width: u16 = POPUP_WIDTH;
     let height: u16 = state.targets.len() as u16 + 2; // border rows
 
     let x = area.x + area.width.saturating_sub(width) / 2;
@@ -102,10 +117,11 @@ pub fn render(frame: &mut Frame, area: Rect, state: &GotoMenuState) {
 
     frame.render_widget(Clear, popup);
 
+    let title = title_for(state);
     let block = Block::bordered()
         .border_type(BorderType::Rounded)
         .border_style(theme::accent())
-        .title(" Go to ");
+        .title(title);
 
     let inner = block.inner(popup);
     frame.render_widget(block, popup);
@@ -132,8 +148,6 @@ pub fn render(frame: &mut Frame, area: Rect, state: &GotoMenuState) {
 /// prefix); missing-name components fall back to the id prefix alone.
 /// Flowfiles render as `flowfile <uuid>`, middle-truncated with `…`
 /// if the full uuid would exceed the budget.
-// Task 3 wires this into the render path; tests cover it already.
-#[allow(dead_code)]
 fn format_subject(subject: &GotoSubject, max_width: usize) -> String {
     match subject {
         GotoSubject::Component { name, id } => {
@@ -155,8 +169,6 @@ fn format_subject(subject: &GotoSubject, max_width: usize) -> String {
 /// Shorten `s` to at most `max` chars by replacing the middle with `…`.
 /// Returns `s` unchanged when already short enough. For `max == 0`
 /// returns the empty string; for `max == 1` returns the ellipsis alone.
-// Task 3 wires this into the render path; tests cover it already.
-#[allow(dead_code)]
 fn middle_truncate(s: &str, max: usize) -> String {
     let total = s.chars().count();
     if total <= max {
@@ -293,5 +305,24 @@ mod tests {
         let out = middle_truncate("abcdefghij", 7);
         assert!(out.chars().count() <= 7);
         assert!(out.contains('…'));
+    }
+
+    #[test]
+    fn render_title_follows_selected_subject() {
+        let mut s = GotoMenuState::new(
+            vec![GoTarget::Browser, GoTarget::Tracer],
+            vec![
+                GotoSubject::Component {
+                    name: "ProcA".into(),
+                    id: "abcd1234-0000-0000-0000-000000000000".into(),
+                },
+                GotoSubject::Flowfile {
+                    uuid: "ff-1".into(),
+                },
+            ],
+        );
+        assert_eq!(title_for(&s), " Go to · ProcA (abcd1234) ");
+        s.move_down();
+        assert_eq!(title_for(&s), " Go to · flowfile ff-1 ");
     }
 }
