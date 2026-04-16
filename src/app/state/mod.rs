@@ -1658,8 +1658,7 @@ fn handle_intent_outcome(
                 anchor,
             });
             state.current_tab = ViewId::Browser;
-            state.modal = None;
-            state.error_detail = None;
+            state.close_modal();
             // Walk the arena for any node matching the component id.
             let target_arena = state
                 .browser
