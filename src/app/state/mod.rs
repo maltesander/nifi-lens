@@ -1089,8 +1089,12 @@ fn handle_key(state: &mut AppState, key: KeyEvent, config: &Config) -> UpdateRes
                 }
                 _ => {
                     // Multiple targets: open goto menu modal.
+                    let subjects: Vec<crate::widget::goto_menu::GotoSubject> = targets
+                        .iter()
+                        .map(|_| crate::widget::goto_menu::GotoSubject::unknown())
+                        .collect();
                     state.modal = Some(Modal::GotoMenu(
-                        crate::widget::goto_menu::GotoMenuState::new(targets),
+                        crate::widget::goto_menu::GotoMenuState::new(targets, subjects),
                     ));
                     return UpdateResult {
                         redraw: true,

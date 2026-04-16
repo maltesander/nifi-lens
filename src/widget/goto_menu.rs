@@ -12,16 +12,47 @@ use ratatui::widgets::{Block, BorderType, Clear, Paragraph};
 use crate::input::GoTarget;
 use crate::theme;
 
+/// Subject of a goto — what the jump is "bound to". Displayed in the
+/// popup's title bar. For a component jump (Browser / Events targets)
+/// this carries a speaking name + uuid. For a flowfile jump
+/// (Events → Tracer) only the uuid exists.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum GotoSubject {
+    Component { name: String, id: String },
+    Flowfile { uuid: String },
+}
+
+impl GotoSubject {
+    /// Safety net for code paths that cannot build a real subject. The
+    /// `AppAction::Goto` builder never reaches this in practice — it
+    /// is here so the menu can still render rather than `unwrap()`.
+    pub fn unknown() -> Self {
+        GotoSubject::Component {
+            name: "?".into(),
+            id: String::new(),
+        }
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct GotoMenuState {
     pub targets: Vec<GoTarget>,
+    /// Aligned 1:1 with `targets` — `subjects[i]` is the subject the
+    /// jump would carry if the user picks `targets[i]`.
+    pub subjects: Vec<GotoSubject>,
     pub selected: usize,
 }
 
 impl GotoMenuState {
-    pub fn new(targets: Vec<GoTarget>) -> Self {
+    pub fn new(targets: Vec<GoTarget>, subjects: Vec<GotoSubject>) -> Self {
+        debug_assert_eq!(
+            targets.len(),
+            subjects.len(),
+            "goto menu: targets and subjects must be aligned",
+        );
         Self {
             targets,
+            subjects,
             selected: 0,
         }
     }
@@ -40,6 +71,10 @@ impl GotoMenuState {
 
     pub fn selected_target(&self) -> Option<GoTarget> {
         self.targets.get(self.selected).copied()
+    }
+
+    pub fn selected_subject(&self) -> Option<&GotoSubject> {
+        self.subjects.get(self.selected)
     }
 }
 
@@ -99,7 +134,10 @@ mod tests {
 
     #[test]
     fn move_down_clamps_at_last() {
-        let mut s = GotoMenuState::new(vec![GoTarget::Browser, GoTarget::Events]);
+        let mut s = GotoMenuState::new(
+            vec![GoTarget::Browser, GoTarget::Events],
+            vec![GotoSubject::unknown(), GotoSubject::unknown()],
+        );
         s.move_down();
         assert_eq!(s.selected, 1);
         s.move_down();
@@ -108,14 +146,38 @@ mod tests {
 
     #[test]
     fn move_up_clamps_at_zero() {
-        let mut s = GotoMenuState::new(vec![GoTarget::Browser, GoTarget::Tracer]);
+        let mut s = GotoMenuState::new(
+            vec![GoTarget::Browser, GoTarget::Tracer],
+            vec![GotoSubject::unknown(), GotoSubject::unknown()],
+        );
         s.move_up();
         assert_eq!(s.selected, 0, "should not underflow");
     }
 
     #[test]
     fn selected_target_returns_correct_variant() {
-        let s = GotoMenuState::new(vec![GoTarget::Events, GoTarget::Browser]);
+        let s = GotoMenuState::new(
+            vec![GoTarget::Events, GoTarget::Browser],
+            vec![GotoSubject::unknown(), GotoSubject::unknown()],
+        );
         assert_eq!(s.selected_target(), Some(GoTarget::Events));
+    }
+
+    #[test]
+    fn new_stores_targets_and_subjects_aligned() {
+        let targets = vec![GoTarget::Browser, GoTarget::Tracer];
+        let subjects = vec![
+            GotoSubject::Component {
+                name: "ProcA".into(),
+                id: "abcd1234-0000-0000-0000-000000000000".into(),
+            },
+            GotoSubject::Flowfile {
+                uuid: "ff-1".into(),
+            },
+        ];
+        let s = GotoMenuState::new(targets.clone(), subjects.clone());
+        assert_eq!(s.targets, targets);
+        assert_eq!(s.subjects.len(), 2);
+        assert_eq!(s.selected, 0);
     }
 }
