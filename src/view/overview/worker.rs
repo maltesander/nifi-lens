@@ -25,7 +25,9 @@ use tokio::sync::{RwLock, mpsc};
 use tokio::task::JoinHandle;
 use tokio::time::MissedTickBehavior;
 
+use crate::app::worker::send_poll_result;
 use crate::client::NifiClient;
+use crate::error::NifiLensError;
 use crate::event::{AppEvent, OverviewPayload, OverviewPgStatusPayload, ViewPayload};
 
 /// Spawn the dual-cadence overview polling task on the current `LocalSet`.
@@ -44,96 +46,53 @@ pub fn spawn(
         sysdiag_ticker.set_missed_tick_behavior(MissedTickBehavior::Delay);
         loop {
             tokio::select! {
-                _ = pg_ticker.tick() => { poll_pg_status(&client, &tx).await; }
-                _ = sysdiag_ticker.tick() => { poll_system_diagnostics(&client, &tx).await; }
+                _ = pg_ticker.tick() => {
+                    send_poll_result(&tx, "overview pg_status", pg_status_payload(&client).await).await;
+                }
+                _ = sysdiag_ticker.tick() => {
+                    send_poll_result(&tx, "overview sysdiag", sysdiag_payload(&client).await).await;
+                }
             }
         }
     })
 }
 
-async fn poll_pg_status(client: &Arc<RwLock<NifiClient>>, tx: &mpsc::Sender<AppEvent>) {
+async fn pg_status_payload(client: &Arc<RwLock<NifiClient>>) -> Result<ViewPayload, NifiLensError> {
     let guard = client.read().await;
-    let about = match guard.about().await {
-        Ok(a) => a,
-        Err(err) => {
-            tracing::warn!(error = %err, "overview worker: about() failed");
-            let _ = tx.send(AppEvent::IntentOutcome(Err(err))).await;
-            return;
-        }
-    };
-    let controller = match guard.controller_status().await {
-        Ok(c) => c,
-        Err(err) => {
-            tracing::warn!(error = %err, "overview worker: controller_status() failed");
-            let _ = tx.send(AppEvent::IntentOutcome(Err(err))).await;
-            return;
-        }
-    };
-    let root_pg = match guard.root_pg_status().await {
-        Ok(r) => r,
-        Err(err) => {
-            tracing::warn!(error = %err, "overview worker: root_pg_status() failed");
-            let _ = tx.send(AppEvent::IntentOutcome(Err(err))).await;
-            return;
-        }
-    };
-    let bulletin_board = match guard.bulletin_board(None, Some(200)).await {
-        Ok(b) => b,
-        Err(err) => {
-            tracing::warn!(error = %err, "overview worker: bulletin_board() failed");
-            let _ = tx.send(AppEvent::IntentOutcome(Err(err))).await;
-            return;
-        }
-    };
-    let payload = OverviewPgStatusPayload {
-        about,
-        controller,
-        root_pg,
-        bulletin_board,
-        fetched_at: SystemTime::now(),
-    };
-    let _ = tx
-        .send(AppEvent::Data(ViewPayload::Overview(
-            OverviewPayload::PgStatus(payload),
-        )))
-        .await;
+    let about = guard.about().await?;
+    let controller = guard.controller_status().await?;
+    let root_pg = guard.root_pg_status().await?;
+    let bulletin_board = guard.bulletin_board(None, Some(200)).await?;
+    Ok(ViewPayload::Overview(OverviewPayload::PgStatus(
+        OverviewPgStatusPayload {
+            about,
+            controller,
+            root_pg,
+            bulletin_board,
+            fetched_at: SystemTime::now(),
+        },
+    )))
 }
 
-async fn poll_system_diagnostics(client: &Arc<RwLock<NifiClient>>, tx: &mpsc::Sender<AppEvent>) {
+/// Poll system-diagnostics with nodewise, falling back to aggregate-only
+/// if the nodewise call is rejected (older NiFi versions or a
+/// misconfigured cluster). If both fail, the nodewise error is
+/// propagated.
+async fn sysdiag_payload(client: &Arc<RwLock<NifiClient>>) -> Result<ViewPayload, NifiLensError> {
     let guard = client.read().await;
     match guard.system_diagnostics(true).await {
-        Ok(diag) => {
-            let _ = tx
-                .send(AppEvent::Data(ViewPayload::Overview(
-                    OverviewPayload::SystemDiag(diag),
-                )))
-                .await;
-        }
+        Ok(diag) => Ok(ViewPayload::Overview(OverviewPayload::SystemDiag(diag))),
         Err(nodewise_err) => {
             tracing::warn!(
                 error = %nodewise_err,
                 "overview worker: nodewise sysdiag failed, trying aggregate fallback"
             );
             match guard.system_diagnostics(false).await {
-                Ok(diag) => {
-                    let _ = tx
-                        .send(AppEvent::Data(ViewPayload::Overview(
-                            OverviewPayload::SystemDiagFallback {
-                                diag,
-                                warning:
-                                    "nodewise diagnostics unavailable; showing cluster aggregate"
-                                        .into(),
-                            },
-                        )))
-                        .await;
-                }
-                Err(agg_err) => {
-                    tracing::warn!(
-                        error = %agg_err,
-                        "overview worker: aggregate sysdiag also failed"
-                    );
-                    let _ = tx.send(AppEvent::IntentOutcome(Err(nodewise_err))).await;
-                }
+                Ok(diag) => Ok(ViewPayload::Overview(OverviewPayload::SystemDiagFallback {
+                    diag,
+                    warning: "nodewise diagnostics unavailable; showing cluster aggregate".into(),
+                })),
+                Err(_agg_err) => Err(nodewise_err),
             }
         }
     }

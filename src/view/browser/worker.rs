@@ -13,7 +13,9 @@ use tokio::sync::{RwLock, mpsc, oneshot};
 use tokio::task::JoinHandle;
 use tokio::time::{Duration, MissedTickBehavior, interval};
 
+use crate::app::worker::send_poll_result;
 use crate::client::NifiClient;
+use crate::error::NifiLensError;
 use crate::event::{AppEvent, BrowserPayload, ViewPayload};
 use crate::view::browser::state::{DetailRequest, NodeDetail, NodeDetailSnapshot};
 
@@ -63,25 +65,11 @@ pub fn spawn(
 
 async fn fetch_tree_once(client: &Arc<RwLock<NifiClient>>, tx: &mpsc::Sender<AppEvent>) {
     let guard = client.read().await;
-    match guard.browser_tree().await {
-        Ok(snap) => {
-            if tx
-                .send(AppEvent::Data(ViewPayload::Browser(BrowserPayload::Tree(
-                    snap,
-                ))))
-                .await
-                .is_err()
-            {
-                tracing::debug!("browser worker: app channel closed during tree send");
-            }
-        }
-        Err(err) => {
-            tracing::warn!(error = %err, "browser worker: tree fetch failed");
-            if tx.send(AppEvent::IntentOutcome(Err(err))).await.is_err() {
-                tracing::debug!("browser worker: app channel closed during error send");
-            }
-        }
-    }
+    let result = guard
+        .browser_tree()
+        .await
+        .map(|snap| ViewPayload::Browser(BrowserPayload::Tree(snap)));
+    send_poll_result(tx, "browser tree", result).await;
 }
 
 async fn fetch_detail_once(
@@ -91,7 +79,7 @@ async fn fetch_detail_once(
 ) {
     use crate::client::NodeKind;
     let guard = client.read().await;
-    let result = match req.kind {
+    let detail: Result<NodeDetail, NifiLensError> = match req.kind {
         NodeKind::ProcessGroup => guard
             .browser_pg_detail(&req.id)
             .await
@@ -110,34 +98,13 @@ async fn fetch_detail_once(
             .map(NodeDetail::ControllerService),
         NodeKind::InputPort | NodeKind::OutputPort => return,
     };
-    match result {
-        Ok(detail) => {
-            let payload = NodeDetailSnapshot {
-                arena_idx: req.arena_idx,
-                kind: req.kind,
-                id: req.id,
-                detail,
-            };
-            if tx
-                .send(AppEvent::Data(ViewPayload::Browser(
-                    BrowserPayload::Detail(Box::new(payload)),
-                )))
-                .await
-                .is_err()
-            {
-                tracing::debug!("browser worker: app channel closed during detail send");
-            }
-        }
-        Err(err) => {
-            tracing::warn!(
-                error = %err,
-                kind = ?req.kind,
-                id = %req.id,
-                "browser worker: detail fetch failed"
-            );
-            if tx.send(AppEvent::IntentOutcome(Err(err))).await.is_err() {
-                tracing::debug!("browser worker: app channel closed during error send");
-            }
-        }
-    }
+    let result = detail.map(|detail| {
+        ViewPayload::Browser(BrowserPayload::Detail(Box::new(NodeDetailSnapshot {
+            arena_idx: req.arena_idx,
+            kind: req.kind,
+            id: req.id,
+            detail,
+        })))
+    });
+    send_poll_result(tx, "browser detail", result).await;
 }

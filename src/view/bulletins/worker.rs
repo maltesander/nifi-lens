@@ -37,6 +37,7 @@ pub fn spawn(
     let last_id = Rc::new(Cell::new(initial_last_id));
     spawn_polling_worker(
         poll_interval,
+        "bulletins",
         move || {
             let client = client.clone();
             let last_id = Rc::clone(&last_id);

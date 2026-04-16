@@ -18,12 +18,36 @@ use crate::client::NifiClient;
 use crate::error::NifiLensError;
 use crate::event::{AppEvent, ViewPayload};
 
+/// Ship a poll result to the UI task: success becomes `AppEvent::Data`,
+/// error is logged at `warn!` and forwarded as `AppEvent::IntentOutcome`.
+/// `label` identifies the worker in log output.
+pub(crate) async fn send_poll_result(
+    tx: &mpsc::Sender<AppEvent>,
+    label: &'static str,
+    result: Result<ViewPayload, NifiLensError>,
+) {
+    match result {
+        Ok(payload) => {
+            if tx.send(AppEvent::Data(payload)).await.is_err() {
+                tracing::debug!(worker = label, "channel closed during data send");
+            }
+        }
+        Err(err) => {
+            tracing::warn!(error = %err, worker = label, "poll failed");
+            if tx.send(AppEvent::IntentOutcome(Err(err))).await.is_err() {
+                tracing::debug!(worker = label, "channel closed during error send");
+            }
+        }
+    }
+}
+
 /// Spawn a polling worker on the current `LocalSet` that calls `poll_fn`
-/// every `interval`, sending successful payloads as `AppEvent::Data` and
-/// errors as `AppEvent::IntentOutcome(Err(...))`. The closure is `FnMut`
-/// so callers like Bulletins can capture mutable cursor state.
+/// every `interval`, shipping results via [`send_poll_result`]. `label`
+/// is used for log output. The closure is `FnMut` so callers like
+/// Bulletins can capture mutable cursor state.
 pub(crate) fn spawn_polling_worker<F, Fut>(
     interval: Duration,
+    label: &'static str,
     mut poll_fn: F,
     tx: mpsc::Sender<AppEvent>,
 ) -> JoinHandle<()>
@@ -36,19 +60,10 @@ where
         ticker.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
         loop {
             ticker.tick().await;
-            match poll_fn().await {
-                Ok(payload) => {
-                    if tx.send(AppEvent::Data(payload)).await.is_err() {
-                        tracing::debug!("polling worker: channel closed, exiting");
-                        return;
-                    }
-                }
-                Err(err) => {
-                    tracing::warn!(error = %err, "polling worker: poll failed");
-                    if tx.send(AppEvent::IntentOutcome(Err(err))).await.is_err() {
-                        return;
-                    }
-                }
+            send_poll_result(&tx, label, poll_fn().await).await;
+            if tx.is_closed() {
+                tracing::debug!(worker = label, "channel closed, exiting");
+                return;
             }
         }
     })
@@ -156,5 +171,42 @@ impl WorkerRegistry {
         if let Some((_, handle)) = self.current.take() {
             handle.abort();
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::path::PathBuf;
+
+    use super::*;
+    use crate::event::BulletinsPayload;
+
+    #[tokio::test]
+    async fn send_poll_result_ok_yields_data_event() {
+        let (tx, mut rx) = mpsc::channel(4);
+        let payload = ViewPayload::Bulletins(BulletinsPayload {
+            bulletins: Vec::new(),
+            fetched_at: std::time::SystemTime::now(),
+        });
+        send_poll_result(&tx, "test", Ok(payload)).await;
+        let ev = rx.recv().await.expect("event");
+        assert!(
+            matches!(ev, AppEvent::Data(ViewPayload::Bulletins(_))),
+            "expected Data(Bulletins)"
+        );
+    }
+
+    #[tokio::test]
+    async fn send_poll_result_err_yields_intent_outcome() {
+        let (tx, mut rx) = mpsc::channel(4);
+        let err = NifiLensError::ConfigMissing {
+            path: PathBuf::from("/nonexistent"),
+        };
+        send_poll_result(&tx, "test", Err(err)).await;
+        let ev = rx.recv().await.expect("event");
+        assert!(
+            matches!(ev, AppEvent::IntentOutcome(Err(_))),
+            "expected IntentOutcome(Err)"
+        );
     }
 }
