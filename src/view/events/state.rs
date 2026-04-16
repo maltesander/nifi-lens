@@ -3,6 +3,12 @@
 use crate::client::ProvenanceEventSummary;
 use std::time::SystemTime;
 
+/// Default provenance query result cap.
+pub(crate) const DEFAULT_RESULT_CAP: u32 = 500;
+
+/// Expanded provenance query result cap, used after the `L` hotkey.
+pub(crate) const EXPANDED_RESULT_CAP: u32 = 5000;
+
 /// Which filter field is currently being edited, if any.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum FilterField {
@@ -119,7 +125,7 @@ pub struct EventsState {
     /// Selected row in the results list, or `None` when no row is
     /// selected (filter-bar focus, Mode A).
     pub selected_row: Option<usize>,
-    /// Max results cap. Default 500; `L` raises to 5000.
+    /// Max results cap. Starts at `DEFAULT_RESULT_CAP`; `L` raises to `EXPANDED_RESULT_CAP`.
     pub cap: u32,
     /// When `Some`, the user is editing one of the filter fields.
     /// The wrapped `String` is the in-progress text buffer; the
@@ -138,7 +144,7 @@ impl EventsState {
             status: EventsQueryStatus::Idle,
             events: Vec::new(),
             selected_row: None,
-            cap: 500,
+            cap: DEFAULT_RESULT_CAP,
             filter_edit: None,
             pre_edit_value: None,
         }
@@ -231,15 +237,15 @@ impl EventsState {
         self.events.clear();
         self.selected_row = None;
         self.status = EventsQueryStatus::Idle;
-        self.cap = 500;
+        self.cap = DEFAULT_RESULT_CAP;
         self.filter_edit = None;
         self.pre_edit_value = None;
     }
 
-    /// Raise the cap (`L` key) from 500 to 5000. Idempotent once at 5000.
+    /// Raise the cap (`L` key) from `DEFAULT_RESULT_CAP` to `EXPANDED_RESULT_CAP`. Idempotent once at `EXPANDED_RESULT_CAP`.
     pub fn raise_cap(&mut self) {
-        if self.cap < 5000 {
-            self.cap = 5000;
+        if self.cap < EXPANDED_RESULT_CAP {
+            self.cap = EXPANDED_RESULT_CAP;
         }
     }
 

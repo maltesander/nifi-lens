@@ -85,7 +85,11 @@ fn render_error_detail(frame: &mut Frame, area: Rect, state: &AppState) {
         .title(" Error detail (e/Esc to close) ")
         .borders(Borders::ALL);
     let p = Paragraph::new(text).block(block);
-    let modal = center(area, 80, 15);
+    let modal = center(
+        area,
+        crate::layout::ERROR_DETAIL_MODAL_WIDTH_PCT,
+        crate::layout::ERROR_DETAIL_MODAL_HEIGHT,
+    );
     frame.render_widget(Clear, modal);
     frame.render_widget(p, modal);
 }

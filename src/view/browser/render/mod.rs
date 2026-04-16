@@ -20,6 +20,7 @@ use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Borders, Paragraph};
 
 use crate::client::{NodeKind, NodeStatusSummary};
+use crate::layout;
 use crate::theme;
 use crate::view::browser::state::{BrowserState, FlowIndex, NodeDetail, PgHealth};
 
@@ -279,8 +280,8 @@ pub fn render_properties_modal(
     modal: &crate::view::browser::state::PropertiesModalState,
     state: &BrowserState,
 ) {
-    let w = area.width.min(90);
-    let h = area.height.min(24);
+    let w = area.width.min(layout::BROWSER_DETAIL_MODAL_MAX_WIDTH);
+    let h = area.height.min(layout::BROWSER_DETAIL_MODAL_MAX_HEIGHT);
     let x = area.x + (area.width - w) / 2;
     let y = area.y + (area.height - h) / 2;
     let rect = Rect {

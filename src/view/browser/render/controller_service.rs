@@ -27,6 +27,7 @@ use ratatui::text::{Line, Span};
 use ratatui::widgets::{Cell, Paragraph, Row, Table, TableState};
 
 use crate::client::{ControllerServiceDetail, NodeKind};
+use crate::layout;
 use crate::theme;
 use crate::view::browser::state::{BrowserState, DetailFocus, DetailSection, DetailSections};
 use crate::widget::panel::Panel;
@@ -124,7 +125,11 @@ fn render_properties_and_validation(
         .is_some_and(|i| matches!(detail_focus, DetailFocus::Section { idx, .. } if *idx == i));
 
     let constraints: Vec<Constraint> = if has_validation {
-        let panel_height = (d.validation_errors.len().min(5) + 2) as u16;
+        let panel_height = (d
+            .validation_errors
+            .len()
+            .min(layout::VALIDATION_ERROR_ROWS_MAX)
+            + 2) as u16;
         vec![Constraint::Fill(1), Constraint::Length(panel_height)]
     } else {
         vec![Constraint::Fill(1)]
@@ -223,7 +228,7 @@ fn render_properties_panel(
             ])
         })
         .collect();
-    let widths = [Constraint::Length(30), Constraint::Fill(1)];
+    let widths = layout::detail_row_constraints();
     let table = Table::new(rows_data, widths)
         .header(header)
         .row_highlight_style(theme::cursor_row());

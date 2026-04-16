@@ -428,4 +428,22 @@ mod tests {
             assert_ne!(c.key, KeyCode::Char('k'), "no view verb may bind k");
         }
     }
+
+    #[test]
+    fn raise_cap_label_matches_constants() {
+        use crate::view::events::state::{DEFAULT_RESULT_CAP, EXPANDED_RESULT_CAP};
+        let label = EventsVerb::RaiseCap.label();
+        let default_s = DEFAULT_RESULT_CAP.to_string();
+        let expanded_s = EXPANDED_RESULT_CAP.to_string();
+        assert!(
+            label.contains(&default_s),
+            "RaiseCap label {label:?} does not mention DEFAULT_RESULT_CAP={default_s}; \
+             update the label or the constant",
+        );
+        assert!(
+            label.contains(&expanded_s),
+            "RaiseCap label {label:?} does not mention EXPANDED_RESULT_CAP={expanded_s}; \
+             update the label or the constant",
+        );
+    }
 }

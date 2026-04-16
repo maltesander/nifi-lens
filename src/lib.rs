@@ -13,6 +13,7 @@ pub mod error;
 pub mod event;
 pub mod input;
 pub mod intent;
+pub mod layout;
 pub mod logging;
 pub mod theme;
 pub mod timestamp;
