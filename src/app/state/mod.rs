@@ -1091,7 +1091,10 @@ fn handle_key(state: &mut AppState, key: KeyEvent, config: &Config) -> UpdateRes
                     // Multiple targets: open goto menu modal.
                     let subjects: Vec<crate::widget::goto_menu::GotoSubject> = targets
                         .iter()
-                        .map(|_| crate::widget::goto_menu::GotoSubject::unknown())
+                        .map(|t| {
+                            build_goto_subject(state, *t)
+                                .unwrap_or_else(crate::widget::goto_menu::GotoSubject::unknown)
+                        })
                         .collect();
                     state.modal = Some(Modal::GotoMenu(
                         crate::widget::goto_menu::GotoMenuState::new(targets, subjects),
@@ -1547,6 +1550,85 @@ fn build_go_crosslink(state: &AppState, target: crate::input::GoTarget) -> Optio
                 let n = state.overview.noisy.get(state.overview.noisy_selected)?;
                 Some(CrossLink::GotoEvents {
                     component_id: n.source_id.clone(),
+                })
+            } else {
+                None
+            }
+        }
+        _ => None,
+    }
+}
+
+fn build_goto_subject(
+    state: &AppState,
+    target: crate::input::GoTarget,
+) -> Option<crate::widget::goto_menu::GotoSubject> {
+    use crate::input::GoTarget;
+    use crate::widget::goto_menu::GotoSubject;
+
+    match (state.current_tab, target) {
+        (ViewId::Bulletins, GoTarget::Browser) | (ViewId::Bulletins, GoTarget::Events) => {
+            let idx = state.bulletins.selected_ring_index()?;
+            let b = state.bulletins.ring.get(idx)?;
+            Some(GotoSubject::Component {
+                name: b.source_name.clone(),
+                id: b.source_id.clone(),
+            })
+        }
+        (ViewId::Browser, GoTarget::Events) => {
+            let arena_idx = *state.browser.visible.get(state.browser.selected)?;
+            let node = state.browser.nodes.get(arena_idx)?;
+            Some(GotoSubject::Component {
+                name: node.name.clone(),
+                id: node.id.clone(),
+            })
+        }
+        (ViewId::Events, GoTarget::Browser) => {
+            let event = state.events.selected_event()?;
+            Some(GotoSubject::Component {
+                name: event.component_name.clone(),
+                id: event.component_id.clone(),
+            })
+        }
+        (ViewId::Events, GoTarget::Tracer) => {
+            let event = state.events.selected_event()?;
+            Some(GotoSubject::Flowfile {
+                uuid: event.flow_file_uuid.clone(),
+            })
+        }
+        (ViewId::Tracer, GoTarget::Browser) | (ViewId::Tracer, GoTarget::Events) => {
+            let id = state.tracer.selected_component_id()?;
+            let name = state.tracer.selected_component_label().unwrap_or_default();
+            Some(GotoSubject::Component { name, id })
+        }
+        (ViewId::Overview, GoTarget::Browser) => match state.overview.focus {
+            OverviewFocus::Noisy => {
+                let n = state.overview.noisy.get(state.overview.noisy_selected)?;
+                Some(GotoSubject::Component {
+                    name: n.source_name.clone(),
+                    id: n.source_id.clone(),
+                })
+            }
+            OverviewFocus::Queues => {
+                let q = state
+                    .overview
+                    .unhealthy
+                    .get(state.overview.queues_selected)?;
+                // Connection name is the anchor the user selected; the
+                // jump itself routes to the owning PG (see `build_go_crosslink`).
+                Some(GotoSubject::Component {
+                    name: q.source_name.clone(),
+                    id: q.group_id.clone(),
+                })
+            }
+            _ => None,
+        },
+        (ViewId::Overview, GoTarget::Events) => {
+            if state.overview.focus == OverviewFocus::Noisy {
+                let n = state.overview.noisy.get(state.overview.noisy_selected)?;
+                Some(GotoSubject::Component {
+                    name: n.source_name.clone(),
+                    id: n.source_id.clone(),
                 })
             } else {
                 None
@@ -2910,5 +2992,99 @@ mod tests {
         s.close_modal();
         assert!(s.modal.is_none());
         assert!(s.error_detail.is_none());
+    }
+}
+
+#[cfg(test)]
+mod goto_subject_tests {
+    use super::*;
+    use crate::client::BulletinSnapshot;
+    use crate::input::GoTarget;
+    use crate::test_support::fresh_state;
+    use crate::widget::goto_menu::GotoSubject;
+
+    fn stock_bulletin() -> BulletinSnapshot {
+        BulletinSnapshot {
+            id: 1,
+            level: "WARNING".into(),
+            message: "boom".into(),
+            source_id: "src-a".into(),
+            source_name: "ProcA".into(),
+            source_type: "PROCESSOR".into(),
+            group_id: "grp-a".into(),
+            timestamp_iso: "2026-04-17T00:00:00Z".into(),
+            timestamp_human: String::new(),
+        }
+    }
+
+    fn stock_event() -> crate::client::ProvenanceEventSummary {
+        crate::client::ProvenanceEventSummary {
+            event_id: 7,
+            event_time_iso: "2026-04-17T00:00:00Z".into(),
+            event_type: "DROP".into(),
+            component_id: "cid".into(),
+            component_name: "CName".into(),
+            component_type: "PROCESSOR".into(),
+            group_id: "gid".into(),
+            flow_file_uuid: "ff-42".into(),
+            relationship: None,
+            details: None,
+        }
+    }
+
+    #[test]
+    fn bulletins_browser_subject_is_component_with_name_and_id() {
+        let mut s = fresh_state();
+        s.current_tab = ViewId::Bulletins;
+        s.bulletins.ring.push_front(stock_bulletin());
+        s.bulletins.selected = 0;
+        let subject = build_goto_subject(&s, GoTarget::Browser).expect("subject");
+        assert_eq!(
+            subject,
+            GotoSubject::Component {
+                name: "ProcA".into(),
+                id: "src-a".into(),
+            }
+        );
+    }
+
+    #[test]
+    fn events_tracer_subject_is_flowfile_uuid() {
+        let mut s = fresh_state();
+        s.current_tab = ViewId::Events;
+        s.events.events.push(stock_event());
+        s.events.selected_row = Some(0);
+
+        let subject = build_goto_subject(&s, GoTarget::Tracer).expect("subject");
+        assert_eq!(
+            subject,
+            GotoSubject::Flowfile {
+                uuid: "ff-42".into()
+            }
+        );
+    }
+
+    #[test]
+    fn events_browser_subject_is_component_name_and_id() {
+        let mut s = fresh_state();
+        s.current_tab = ViewId::Events;
+        s.events.events.push(stock_event());
+        s.events.selected_row = Some(0);
+
+        let subject = build_goto_subject(&s, GoTarget::Browser).expect("subject");
+        assert_eq!(
+            subject,
+            GotoSubject::Component {
+                name: "CName".into(),
+                id: "cid".into(),
+            }
+        );
+    }
+
+    #[test]
+    fn no_selection_returns_none() {
+        let s = fresh_state();
+        // Default tab = Overview with no noisy/queue selection populated.
+        assert!(build_goto_subject(&s, GoTarget::Browser).is_none());
     }
 }
