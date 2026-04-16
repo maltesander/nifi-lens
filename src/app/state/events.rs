@@ -215,6 +215,10 @@ impl ViewKeyHandler for EventsHandler {
         state.events.filter_edit.is_some()
     }
 
+    fn blocks_app_shortcuts(state: &AppState) -> bool {
+        state.events.filter_edit.is_some()
+    }
+
     fn handle_text_input(state: &mut AppState, key: KeyEvent) -> Option<UpdateResult> {
         if state.events.filter_edit.is_some()
             && matches!(key.modifiers, KeyModifiers::NONE | KeyModifiers::SHIFT)

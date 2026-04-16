@@ -90,6 +90,10 @@ impl ViewKeyHandler for BulletinsHandler {
         state.bulletins.text_input.is_some()
     }
 
+    fn blocks_app_shortcuts(state: &AppState) -> bool {
+        state.bulletins.text_input.is_some()
+    }
+
     fn handle_text_input(state: &mut AppState, key: KeyEvent) -> Option<UpdateResult> {
         if state.bulletins.text_input.is_some()
             && matches!(key.modifiers, KeyModifiers::NONE | KeyModifiers::SHIFT)

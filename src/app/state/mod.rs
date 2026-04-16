@@ -58,6 +58,19 @@ pub(crate) trait ViewKeyHandler {
         false
     }
 
+    /// True when app-level shortcuts (F1-F5 tab switch, `?` help, `:`
+    /// context switcher, `f` fuzzy find) must be suppressed because the
+    /// user is actively typing into a modal-style input bar.
+    ///
+    /// This is a strict subset of [`Self::is_text_input_focused`]:
+    /// Bulletins' filter bar and Events' filter edit both capture chars
+    /// *and* block global shortcuts, but Tracer's Entry (UUID input)
+    /// captures chars without blocking — the user still needs F1-F5 to
+    /// leave the tab from the default Entry screen. Default: `false`.
+    fn blocks_app_shortcuts(_state: &AppState) -> bool {
+        false
+    }
+
     /// Handle a raw `KeyEvent` while in text-input mode. Default: drop
     /// (return `None`). Views with text-input mode override this.
     fn handle_text_input(_state: &mut AppState, _key: KeyEvent) -> Option<UpdateResult> {
@@ -306,6 +319,14 @@ impl AppState {
     /// Used by `AppAction::Paste/Cut` enabled predicates.
     pub fn text_input_is_active(&self) -> bool {
         dispatch_handler!(self.current_tab, is_text_input_focused, self)
+    }
+
+    /// Returns true when the current view is in a modal-style input mode
+    /// that must suppress app-level shortcuts (F1-F5, `?`, `:`, `f`).
+    /// See [`ViewKeyHandler::blocks_app_shortcuts`] for the Tracer-Entry
+    /// carve-out.
+    pub fn app_shortcuts_blocked(&self) -> bool {
+        dispatch_handler!(self.current_tab, blocks_app_shortcuts, self)
     }
 }
 
@@ -973,7 +994,7 @@ fn handle_key(state: &mut AppState, key: KeyEvent, config: &Config) -> UpdateRes
             };
         }
         InputEvent::Tab(TabAction::Goto(n)) => {
-            if state.modal.is_some() || state.text_input_is_active() {
+            if state.modal.is_some() || state.app_shortcuts_blocked() {
                 return UpdateResult::default();
             }
             state.current_tab = match n {
@@ -999,7 +1020,7 @@ fn handle_key(state: &mut AppState, key: KeyEvent, config: &Config) -> UpdateRes
                 tracer_followup: None,
             };
         }
-        InputEvent::App(_) if state.modal.is_some() || state.text_input_is_active() => {
+        InputEvent::App(_) if state.modal.is_some() || state.app_shortcuts_blocked() => {
             // All other App actions fall through when a modal is active or
             // a per-view text-input mode is active:
             //  - modal active: let the modal handler run (e.g. `?` closes
@@ -1882,6 +1903,26 @@ mod tests {
         assert_eq!(s.current_tab, ViewId::Browser);
         update(&mut s, key(KeyCode::F(4), KeyModifiers::NONE), &c);
         assert_eq!(s.current_tab, ViewId::Events);
+    }
+
+    #[test]
+    fn f_keys_leave_tracer_while_in_entry_mode() {
+        // Regression: Tracer starts in TracerMode::Entry (UUID input),
+        // which routes printable chars to handle_text_input but must NOT
+        // suppress global F1-F5 tab-switch shortcuts. Otherwise the user
+        // is trapped in the Tracer tab.
+        let mut s = fresh_state();
+        let c = tiny_config();
+        s.current_tab = ViewId::Tracer;
+        assert!(
+            matches!(
+                s.tracer.mode,
+                crate::view::tracer::state::TracerMode::Entry(_)
+            ),
+            "Tracer should start in Entry mode"
+        );
+        update(&mut s, key(KeyCode::F(1), KeyModifiers::NONE), &c);
+        assert_eq!(s.current_tab, ViewId::Overview, "F1 should leave Tracer");
     }
 
     #[test]
