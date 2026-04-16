@@ -65,6 +65,22 @@ pub(crate) trait ViewKeyHandler {
     }
 }
 
+/// Expand to a `match` over every `ViewId` variant that calls the
+/// named `ViewKeyHandler` static method on the corresponding per-view
+/// handler type. Adding a new view means one new arm here plus one
+/// `ViewId` variant; the call sites do not change.
+macro_rules! dispatch_handler {
+    ($tab:expr, $method:ident, $state:expr $(, $arg:expr)* $(,)?) => {
+        match $tab {
+            ViewId::Overview  => overview::OverviewHandler::$method($state $(, $arg)*),
+            ViewId::Bulletins => bulletins::BulletinsHandler::$method($state $(, $arg)*),
+            ViewId::Browser   => browser::BrowserHandler::$method($state $(, $arg)*),
+            ViewId::Events    => events::EventsHandler::$method($state $(, $arg)*),
+            ViewId::Tracer    => tracer::TracerHandler::$method($state $(, $arg)*),
+        }
+    };
+}
+
 // ---------------------------------------------------------------------------
 // Core types
 // ---------------------------------------------------------------------------
@@ -289,13 +305,7 @@ impl AppState {
     /// Returns true when the currently active view has a text-input field open.
     /// Used by `AppAction::Paste/Cut` enabled predicates.
     pub fn text_input_is_active(&self) -> bool {
-        match self.current_tab {
-            ViewId::Overview => overview::OverviewHandler::is_text_input_focused(self),
-            ViewId::Bulletins => bulletins::BulletinsHandler::is_text_input_focused(self),
-            ViewId::Browser => browser::BrowserHandler::is_text_input_focused(self),
-            ViewId::Events => events::EventsHandler::is_text_input_focused(self),
-            ViewId::Tracer => tracer::TracerHandler::is_text_input_focused(self),
-        }
+        dispatch_handler!(self.current_tab, is_text_input_focused, self)
     }
 }
 
@@ -493,14 +503,7 @@ pub fn collect_hints(state: &AppState) -> Vec<crate::widget::hint_bar::HintSpan>
     // Text-input-focused views show their own edit-mode hint strip.
     // The keymap is bypassed in this mode; the hint bar advertises
     // the conventional type/apply/cancel contract.
-    let text_input = match state.current_tab {
-        ViewId::Overview => overview::OverviewHandler::is_text_input_focused(state),
-        ViewId::Bulletins => bulletins::BulletinsHandler::is_text_input_focused(state),
-        ViewId::Browser => browser::BrowserHandler::is_text_input_focused(state),
-        ViewId::Events => events::EventsHandler::is_text_input_focused(state),
-        ViewId::Tracer => tracer::TracerHandler::is_text_input_focused(state),
-    };
-    if text_input {
+    if state.text_input_is_active() {
         return vec![
             HintSpan {
                 key: "type",
@@ -913,25 +916,10 @@ fn handle_key(state: &mut AppState, key: KeyEvent, config: &Config) -> UpdateRes
     // Text-input bypass: if the active view is in text-input mode, skip
     // the KeyMap entirely and forward the raw KeyEvent. This preserves
     // the spec's rule that text-input modes own Esc/Enter semantics.
-    if state.modal.is_none() {
-        let text_input = match state.current_tab {
-            ViewId::Overview => overview::OverviewHandler::is_text_input_focused(state),
-            ViewId::Bulletins => bulletins::BulletinsHandler::is_text_input_focused(state),
-            ViewId::Browser => browser::BrowserHandler::is_text_input_focused(state),
-            ViewId::Events => events::EventsHandler::is_text_input_focused(state),
-            ViewId::Tracer => tracer::TracerHandler::is_text_input_focused(state),
-        };
-        if text_input {
-            let handler_result = match state.current_tab {
-                ViewId::Overview => overview::OverviewHandler::handle_text_input(state, key),
-                ViewId::Bulletins => bulletins::BulletinsHandler::handle_text_input(state, key),
-                ViewId::Browser => browser::BrowserHandler::handle_text_input(state, key),
-                ViewId::Events => events::EventsHandler::handle_text_input(state, key),
-                ViewId::Tracer => tracer::TracerHandler::handle_text_input(state, key),
-            };
-            if let Some(r) = handler_result {
-                return r;
-            }
+    if state.modal.is_none() && state.text_input_is_active() {
+        let handler_result = dispatch_handler!(state.current_tab, handle_text_input, state, key);
+        if let Some(r) = handler_result {
+            return r;
         }
     }
 
@@ -985,7 +973,7 @@ fn handle_key(state: &mut AppState, key: KeyEvent, config: &Config) -> UpdateRes
             };
         }
         InputEvent::Tab(TabAction::Goto(n)) => {
-            if state.modal.is_some() || view_text_input_active(state) {
+            if state.modal.is_some() || state.text_input_is_active() {
                 return UpdateResult::default();
             }
             state.current_tab = match n {
@@ -1011,7 +999,7 @@ fn handle_key(state: &mut AppState, key: KeyEvent, config: &Config) -> UpdateRes
                 tracer_followup: None,
             };
         }
-        InputEvent::App(_) if state.modal.is_some() || view_text_input_active(state) => {
+        InputEvent::App(_) if state.modal.is_some() || state.text_input_is_active() => {
             // All other App actions fall through when a modal is active or
             // a per-view text-input mode is active:
             //  - modal active: let the modal handler run (e.g. `?` closes
@@ -1123,26 +1111,15 @@ fn handle_key(state: &mut AppState, key: KeyEvent, config: &Config) -> UpdateRes
             }
             // Dispatch through typed handle_focus.
             if state.modal.is_none() {
-                let consumed = match state.current_tab {
-                    ViewId::Bulletins => bulletins::BulletinsHandler::handle_focus(state, action),
-                    ViewId::Browser => browser::BrowserHandler::handle_focus(state, action),
-                    ViewId::Events => events::EventsHandler::handle_focus(state, action),
-                    ViewId::Overview => overview::OverviewHandler::handle_focus(state, action),
-                    ViewId::Tracer => tracer::TracerHandler::handle_focus(state, action),
-                };
+                let consumed = dispatch_handler!(state.current_tab, handle_focus, state, action);
                 if let Some(r) = consumed {
                     return r;
                 }
                 // Rule 1a: ported view returned None for Descend →
                 // fall back to default_cross_link.
                 if matches!(action, crate::input::FocusAction::Descend) {
-                    let cross_target = match state.current_tab {
-                        ViewId::Bulletins => bulletins::BulletinsHandler::default_cross_link(state),
-                        ViewId::Browser => browser::BrowserHandler::default_cross_link(state),
-                        ViewId::Events => events::EventsHandler::default_cross_link(state),
-                        ViewId::Tracer => tracer::TracerHandler::default_cross_link(state),
-                        _ => None,
-                    };
+                    let cross_target =
+                        dispatch_handler!(state.current_tab, default_cross_link, state);
                     if let Some(target) = cross_target
                         && let Some(cross) = build_go_crosslink(state, target)
                     {
@@ -1159,13 +1136,7 @@ fn handle_key(state: &mut AppState, key: KeyEvent, config: &Config) -> UpdateRes
         InputEvent::View(verb) => {
             // Dispatch through typed handle_verb.
             if state.modal.is_none() {
-                let consumed = match state.current_tab {
-                    ViewId::Bulletins => bulletins::BulletinsHandler::handle_verb(state, verb),
-                    ViewId::Browser => browser::BrowserHandler::handle_verb(state, verb),
-                    ViewId::Events => events::EventsHandler::handle_verb(state, verb),
-                    ViewId::Tracer => tracer::TracerHandler::handle_verb(state, verb),
-                    _ => None,
-                };
+                let consumed = dispatch_handler!(state.current_tab, handle_verb, state, verb);
                 if let Some(r) = consumed {
                     return r;
                 }
@@ -1468,22 +1439,6 @@ fn handle_key(state: &mut AppState, key: KeyEvent, config: &Config) -> UpdateRes
     }
 
     UpdateResult::default()
-}
-
-// ---------------------------------------------------------------------------
-// Text-input guard
-// ---------------------------------------------------------------------------
-
-/// Returns `true` when the current view is in a text-input mode that should
-/// capture raw keystrokes (e.g. Bulletins filter bar, Events filter edit).
-/// Used to prevent App-level key bindings from firing while the user is typing
-/// in a per-view input field.
-fn view_text_input_active(state: &AppState) -> bool {
-    match state.current_tab {
-        ViewId::Bulletins => state.bulletins.text_input.is_some(),
-        ViewId::Events => state.events.filter_edit.is_some(),
-        _ => false,
-    }
 }
 
 // ---------------------------------------------------------------------------

@@ -146,6 +146,24 @@ memory is preserved.
 enum source) to the log file. Unadvertised in the help modal; use it
 when debugging "why doesn't key X do anything".
 
+### Adding a new view
+
+1. Create `src/view/<name>/{mod,state,render,worker}.rs` (mirror an
+   existing small view like Events).
+2. Add a new `ViewId::<Name>` variant. Update `ViewId::next()` and
+   `ViewId::prev()` cycle arms.
+3. Create `src/app/state/<name>.rs` with a `<Name>Handler` zero-sized
+   type implementing `ViewKeyHandler`.
+4. Add one arm to the `dispatch_handler!` macro in
+   `src/app/state/mod.rs`.
+5. If the view has a worker, add a spawn arm to `src/app/worker.rs`'s
+   `WorkerRegistry::ensure`.
+6. Add a render arm to `src/app/ui.rs`'s render dispatch.
+7. Add a top-bar label (`src/widget/top_bar.rs`).
+
+All seven steps are mechanical. `dispatch_handler!` means
+cross-cutting key-handling dispatch is a single touch, not five.
+
 ### Logging
 
 `tracing` + `tracing-subscriber` + `tracing-appender` write to
