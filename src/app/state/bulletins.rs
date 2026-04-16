@@ -512,10 +512,8 @@ mod tests {
         s.current_tab = ViewId::Bulletins;
         let spans = collect_hints(&s);
         assert!(
-            spans
-                .iter()
-                .any(|h| h.key == "Shift+G" && h.action == "group"),
-            "Shift+G hint should show `group`; got {spans:?}"
+            spans.iter().any(|h| h.key == "G" && h.action == "group"),
+            "G hint should show `group`; got {spans:?}"
         );
     }
 
@@ -525,11 +523,7 @@ mod tests {
         let mut s = fresh_state();
         s.current_tab = ViewId::Bulletins;
         let spans = collect_hints(&s);
-        assert!(
-            spans
-                .iter()
-                .any(|h| h.key == "Shift+M" && h.action == "mute")
-        );
+        assert!(spans.iter().any(|h| h.key == "M" && h.action == "mute"));
     }
 
     #[test]

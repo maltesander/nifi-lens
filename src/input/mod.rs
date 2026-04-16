@@ -105,7 +105,11 @@ fn render_key(key: KeyCode, mods: KeyModifiers) -> String {
     if mods.contains(KeyModifiers::CONTROL) {
         prefix.push_str("Ctrl+");
     }
-    if mods.contains(KeyModifiers::SHIFT) {
+    // For `Char` keys the uppercase letter already conveys Shift, so we
+    // skip the `Shift+` prefix there (`Shift+D` → `D`). Keep it for
+    // non-Char keys like arrows, where `←` alone would collide with
+    // plain arrow navigation.
+    if mods.contains(KeyModifiers::SHIFT) && !matches!(key, KeyCode::Char(_)) {
         prefix.push_str("Shift+");
     }
     if mods.contains(KeyModifiers::ALT) {
