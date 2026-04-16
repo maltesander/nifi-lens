@@ -323,7 +323,7 @@ impl AppState {
 
     /// Returns true when the current view is in a modal-style input mode
     /// that must suppress app-level shortcuts (F1-F5, `?`, `:`, `f`).
-    /// See [`ViewKeyHandler::blocks_app_shortcuts`] for the Tracer-Entry
+    /// See `ViewKeyHandler::blocks_app_shortcuts` for the Tracer-Entry
     /// carve-out.
     pub fn app_shortcuts_blocked(&self) -> bool {
         dispatch_handler!(self.current_tab, blocks_app_shortcuts, self)
