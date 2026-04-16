@@ -127,6 +127,56 @@ pub fn render(frame: &mut Frame, area: Rect, state: &GotoMenuState) {
     frame.render_widget(Paragraph::new(lines), inner);
 }
 
+/// Render a `GotoSubject` as a single line of at most `max_width`
+/// characters. Components render as `Name (xxxxxxxx)` (8-char id
+/// prefix); missing-name components fall back to the id prefix alone.
+/// Flowfiles render as `flowfile <uuid>`, middle-truncated with `…`
+/// if the full uuid would exceed the budget.
+// Task 3 wires this into the render path; tests cover it already.
+#[allow(dead_code)]
+fn format_subject(subject: &GotoSubject, max_width: usize) -> String {
+    match subject {
+        GotoSubject::Component { name, id } => {
+            let id_short: String = id.chars().take(8).collect();
+            let rendered = if name.is_empty() {
+                id_short
+            } else {
+                format!("{name} ({id_short})")
+            };
+            middle_truncate(&rendered, max_width)
+        }
+        GotoSubject::Flowfile { uuid } => {
+            let full = format!("flowfile {uuid}");
+            middle_truncate(&full, max_width)
+        }
+    }
+}
+
+/// Shorten `s` to at most `max` chars by replacing the middle with `…`.
+/// Returns `s` unchanged when already short enough. For `max == 0`
+/// returns the empty string; for `max == 1` returns the ellipsis alone.
+// Task 3 wires this into the render path; tests cover it already.
+#[allow(dead_code)]
+fn middle_truncate(s: &str, max: usize) -> String {
+    let total = s.chars().count();
+    if total <= max {
+        return s.to_string();
+    }
+    if max == 0 {
+        return String::new();
+    }
+    if max <= 1 {
+        return "…".into();
+    }
+    // Keep `left` chars from the head, `right` from the tail, plus `…`.
+    let keep = max - 1;
+    let left = keep.div_ceil(2);
+    let right = keep - left;
+    let head: String = s.chars().take(left).collect();
+    let tail: String = s.chars().skip(total - right).collect();
+    format!("{head}…{tail}")
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -179,5 +229,69 @@ mod tests {
         assert_eq!(s.targets, targets);
         assert_eq!(s.subjects.len(), 2);
         assert_eq!(s.selected, 0);
+    }
+
+    #[test]
+    fn format_subject_component_with_name() {
+        let s = GotoSubject::Component {
+            name: "ProcA".into(),
+            id: "abcd1234-0000-0000-0000-000000000000".into(),
+        };
+        assert_eq!(format_subject(&s, 64), "ProcA (abcd1234)");
+    }
+
+    #[test]
+    fn format_subject_component_missing_name_shows_id_prefix() {
+        let s = GotoSubject::Component {
+            name: String::new(),
+            id: "abcd1234-0000-0000-0000-000000000000".into(),
+        };
+        assert_eq!(format_subject(&s, 64), "abcd1234");
+    }
+
+    #[test]
+    fn format_subject_component_short_id_no_panic() {
+        // Guard the id-slicing code against shorter-than-8-char ids.
+        let s = GotoSubject::Component {
+            name: String::new(),
+            id: "abc".into(),
+        };
+        assert_eq!(format_subject(&s, 64), "abc");
+    }
+
+    #[test]
+    fn format_subject_flowfile_short_enough_untruncated() {
+        let s = GotoSubject::Flowfile {
+            uuid: "ff-1".into(),
+        };
+        assert_eq!(format_subject(&s, 64), "flowfile ff-1");
+    }
+
+    #[test]
+    fn format_subject_flowfile_middle_truncated_to_fit() {
+        let s = GotoSubject::Flowfile {
+            uuid: "abcd1234-0000-0000-0000-000000000000".into(),
+        };
+        let out = format_subject(&s, 20);
+        assert!(
+            out.chars().count() <= 20,
+            "got {:?} (len {})",
+            out,
+            out.chars().count()
+        );
+        assert!(out.starts_with("flowfile "), "got {:?}", out);
+        assert!(out.contains('…'), "got {:?}", out);
+    }
+
+    #[test]
+    fn middle_truncate_noop_when_short() {
+        assert_eq!(middle_truncate("abc", 10), "abc");
+    }
+
+    #[test]
+    fn middle_truncate_shortens_with_ellipsis() {
+        let out = middle_truncate("abcdefghij", 7);
+        assert!(out.chars().count() <= 7);
+        assert!(out.contains('…'));
     }
 }
