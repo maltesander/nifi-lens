@@ -14,6 +14,7 @@ impl ViewKeyHandler for OverviewHandler {
         state: &mut AppState,
         action: crate::input::FocusAction,
     ) -> Option<UpdateResult> {
+        use crate::app::navigation::ListNavigation;
         use crate::input::FocusAction as FA;
         use crate::view::overview::state::OverviewFocus;
 
@@ -63,12 +64,11 @@ impl ViewKeyHandler for OverviewHandler {
                     done()
                 }
                 FA::Up => {
-                    state.overview.nodes.selected = state.overview.nodes.selected.saturating_sub(1);
+                    state.overview.nodes.move_up();
                     done()
                 }
                 FA::Down => {
-                    let max = state.overview.nodes.nodes.len().saturating_sub(1);
-                    state.overview.nodes.selected = (state.overview.nodes.selected + 1).min(max);
+                    state.overview.nodes.move_down();
                     done()
                 }
                 FA::Descend => {
@@ -90,12 +90,11 @@ impl ViewKeyHandler for OverviewHandler {
                     done()
                 }
                 FA::Up => {
-                    state.overview.noisy_selected = state.overview.noisy_selected.saturating_sub(1);
+                    state.overview.noisy_nav().move_up();
                     done()
                 }
                 FA::Down => {
-                    let max = state.overview.noisy.len().saturating_sub(1);
-                    state.overview.noisy_selected = (state.overview.noisy_selected + 1).min(max);
+                    state.overview.noisy_nav().move_down();
                     done()
                 }
                 _ => None,
@@ -106,13 +105,11 @@ impl ViewKeyHandler for OverviewHandler {
                     done()
                 }
                 FA::Up => {
-                    state.overview.queues_selected =
-                        state.overview.queues_selected.saturating_sub(1);
+                    state.overview.queues_nav().move_up();
                     done()
                 }
                 FA::Down => {
-                    let max = state.overview.unhealthy.len().saturating_sub(1);
-                    state.overview.queues_selected = (state.overview.queues_selected + 1).min(max);
+                    state.overview.queues_nav().move_down();
                     done()
                 }
                 _ => None,

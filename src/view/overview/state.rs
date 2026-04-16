@@ -150,6 +150,18 @@ impl OverviewState {
     pub fn new() -> Self {
         Self::default()
     }
+
+    /// Cursor view over the Noisy-components list for `ListNavigation`.
+    pub(crate) fn noisy_nav(&mut self) -> crate::app::navigation::CursorRef<'_> {
+        let len = self.noisy.len();
+        crate::app::navigation::CursorRef::new(&mut self.noisy_selected, len)
+    }
+
+    /// Cursor view over the Unhealthy-queues list for `ListNavigation`.
+    pub(crate) fn queues_nav(&mut self) -> crate::app::navigation::CursorRef<'_> {
+        let len = self.unhealthy.len();
+        crate::app::navigation::CursorRef::new(&mut self.queues_selected, len)
+    }
 }
 
 /// Fold one poll result into the state. Pure; no I/O.

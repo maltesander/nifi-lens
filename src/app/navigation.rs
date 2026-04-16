@@ -108,6 +108,40 @@ pub(crate) trait ListNavigation {
     }
 }
 
+/// Cursor view over a `(len, &mut usize)` pair so a state struct with a
+/// bare `usize` selection field can participate in `ListNavigation`
+/// without being refactored into a dedicated list struct. The `len` is
+/// snapshotted at construction; callers rebuild the shim per navigation
+/// action.
+pub(crate) struct CursorRef<'a> {
+    len: usize,
+    selected: &'a mut usize,
+}
+
+impl<'a> CursorRef<'a> {
+    pub(crate) fn new(selected: &'a mut usize, len: usize) -> Self {
+        Self { len, selected }
+    }
+}
+
+impl ListNavigation for CursorRef<'_> {
+    fn list_len(&self) -> usize {
+        self.len
+    }
+
+    fn selected(&self) -> Option<usize> {
+        if self.len == 0 {
+            None
+        } else {
+            Some(*self.selected)
+        }
+    }
+
+    fn set_selected(&mut self, index: Option<usize>) {
+        *self.selected = index.unwrap_or(0);
+    }
+}
+
 /// The visible window of a scrolling list, given the selected row and
 /// the number of rows the list can show.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -411,6 +445,45 @@ mod tests {
         list.set_selected(None);
         list.page_up(3);
         assert_eq!(list.selected(), Some(0));
+    }
+
+    // ── CursorRef ──────────────────────────────────────────────────
+
+    #[test]
+    fn cursor_ref_move_down_clamps_at_end() {
+        let mut cursor: usize = 2;
+        CursorRef::new(&mut cursor, 3).move_down();
+        assert_eq!(cursor, 2);
+    }
+
+    #[test]
+    fn cursor_ref_move_down_normal() {
+        let mut cursor: usize = 1;
+        CursorRef::new(&mut cursor, 5).move_down();
+        assert_eq!(cursor, 2);
+    }
+
+    #[test]
+    fn cursor_ref_move_up_saturates_at_zero() {
+        let mut cursor: usize = 0;
+        CursorRef::new(&mut cursor, 5).move_up();
+        assert_eq!(cursor, 0);
+    }
+
+    #[test]
+    fn cursor_ref_empty_is_noop() {
+        let mut cursor: usize = 0;
+        CursorRef::new(&mut cursor, 0).move_down();
+        assert_eq!(cursor, 0);
+        CursorRef::new(&mut cursor, 0).move_up();
+        assert_eq!(cursor, 0);
+    }
+
+    #[test]
+    fn cursor_ref_goto_last() {
+        let mut cursor: usize = 0;
+        CursorRef::new(&mut cursor, 10).goto_last();
+        assert_eq!(cursor, 9);
     }
 
     // ── compute_scroll_window ──────────────────────────────────────

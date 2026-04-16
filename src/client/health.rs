@@ -4,6 +4,7 @@ use std::time::Instant;
 
 use nifi_rust_client::dynamic::types::common::StorageUsageDto;
 
+use crate::app::navigation::ListNavigation;
 use crate::client::NifiClient;
 use crate::client::classify_or_fallback;
 use crate::error::NifiLensError;
@@ -131,6 +132,24 @@ pub struct NodeHealthRow {
 pub struct NodesState {
     pub nodes: Vec<NodeHealthRow>,
     pub selected: usize,
+}
+
+impl ListNavigation for NodesState {
+    fn list_len(&self) -> usize {
+        self.nodes.len()
+    }
+
+    fn selected(&self) -> Option<usize> {
+        if self.nodes.is_empty() {
+            None
+        } else {
+            Some(self.selected)
+        }
+    }
+
+    fn set_selected(&mut self, index: Option<usize>) {
+        self.selected = index.unwrap_or(0);
+    }
 }
 
 // ---------------------------------------------------------------------------
