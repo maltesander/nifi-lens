@@ -52,6 +52,24 @@ impl TracerState {
             _ => None,
         }
     }
+
+    /// Returns the speaking component name for the currently-focused
+    /// component in Tracer, or `None` when nothing is selected.
+    /// Parallel to [`Self::selected_component_id`]:
+    /// * `LatestEvents` → `view.component_label`
+    /// * `Lineage` → the selected event's `component_name`
+    /// * other modes → `None`
+    pub fn selected_component_label(&self) -> Option<String> {
+        match &self.mode {
+            TracerMode::LatestEvents(v) => Some(v.component_label.clone()),
+            TracerMode::Lineage(v) => v
+                .snapshot
+                .events
+                .get(v.selected_event)
+                .map(|e| e.component_name.clone()),
+            _ => None,
+        }
+    }
 }
 
 impl Default for TracerState {
@@ -2103,5 +2121,28 @@ mod tests {
             };
             assert_eq!(view.diff_mode, AttributeDiffMode::All);
         }
+    }
+
+    #[test]
+    fn selected_component_label_returns_latest_events_label() {
+        let view = LatestEventsView {
+            component_id: "cid".into(),
+            component_label: "MyProcessor".into(),
+            events: Vec::new(),
+            selected: 0,
+            fetched_at: SystemTime::UNIX_EPOCH,
+            loading: false,
+        };
+        let ts = TracerState {
+            mode: TracerMode::LatestEvents(view),
+            last_error: None,
+        };
+        assert_eq!(ts.selected_component_label(), Some("MyProcessor".into()));
+    }
+
+    #[test]
+    fn selected_component_label_none_in_entry_mode() {
+        let ts = TracerState::new();
+        assert_eq!(ts.selected_component_label(), None);
     }
 }
