@@ -1797,6 +1797,7 @@ mod tests {
             current_context: "dev".into(),
             bulletins: Default::default(),
             ui: Default::default(),
+            polling: Default::default(),
             contexts: vec![
                 Context {
                     name: "dev".into(),

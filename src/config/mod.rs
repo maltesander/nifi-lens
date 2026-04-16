@@ -2,8 +2,10 @@
 
 pub mod init;
 pub mod loader;
+pub mod polling;
 
 use std::path::PathBuf;
+use std::time::Duration;
 
 use serde::Deserialize;
 
@@ -15,6 +17,8 @@ pub struct Config {
     pub bulletins: BulletinsConfig,
     #[serde(default)]
     pub ui: UiConfig,
+    #[serde(default)]
+    pub polling: PollingConfig,
     #[serde(default)]
     pub contexts: Vec<Context>,
 }
@@ -159,6 +163,168 @@ pub struct ResolvedContext {
     pub proxy_url: Option<String>,
     pub http_proxy_url: Option<String>,
     pub https_proxy_url: Option<String>,
+}
+
+#[derive(Debug, Clone, Default, Deserialize, PartialEq, Eq)]
+pub struct PollingConfig {
+    #[serde(default)]
+    pub overview: OverviewPollingConfig,
+    #[serde(default)]
+    pub browser: BrowserPollingConfig,
+    #[serde(default)]
+    pub bulletins: BulletinsPollingConfig,
+}
+
+#[derive(Debug, Clone, Deserialize, PartialEq, Eq)]
+pub struct OverviewPollingConfig {
+    #[serde(default = "default_overview_pg_status", with = "humantime_serde")]
+    pub pg_status: Duration,
+    #[serde(default = "default_overview_sysdiag", with = "humantime_serde")]
+    pub sysdiag: Duration,
+}
+
+impl Default for OverviewPollingConfig {
+    fn default() -> Self {
+        Self {
+            pg_status: default_overview_pg_status(),
+            sysdiag: default_overview_sysdiag(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Deserialize, PartialEq, Eq)]
+pub struct BrowserPollingConfig {
+    #[serde(default = "default_browser_interval", with = "humantime_serde")]
+    pub interval: Duration,
+}
+
+impl Default for BrowserPollingConfig {
+    fn default() -> Self {
+        Self {
+            interval: default_browser_interval(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Deserialize, PartialEq, Eq)]
+pub struct BulletinsPollingConfig {
+    #[serde(default = "default_bulletins_interval", with = "humantime_serde")]
+    pub interval: Duration,
+}
+
+impl Default for BulletinsPollingConfig {
+    fn default() -> Self {
+        Self {
+            interval: default_bulletins_interval(),
+        }
+    }
+}
+
+fn default_overview_pg_status() -> Duration {
+    Duration::from_secs(10)
+}
+
+fn default_overview_sysdiag() -> Duration {
+    Duration::from_secs(30)
+}
+
+fn default_browser_interval() -> Duration {
+    Duration::from_secs(15)
+}
+
+fn default_bulletins_interval() -> Duration {
+    Duration::from_secs(5)
+}
+
+#[cfg(test)]
+mod polling_tests {
+    use super::*;
+    use std::time::Duration;
+
+    #[test]
+    fn polling_section_defaults_when_omitted() {
+        let toml_src = r#"
+current_context = "dev"
+
+[[contexts]]
+name = "dev"
+url = "https://dev:8443"
+
+[contexts.auth]
+type = "password"
+username = "admin"
+password = "x"
+"#;
+        let cfg: Config = toml::from_str(toml_src).expect("parses");
+        assert_eq!(cfg.polling.overview.pg_status, Duration::from_secs(10));
+        assert_eq!(cfg.polling.overview.sysdiag, Duration::from_secs(30));
+        assert_eq!(cfg.polling.browser.interval, Duration::from_secs(15));
+        assert_eq!(cfg.polling.bulletins.interval, Duration::from_secs(5));
+    }
+
+    #[test]
+    fn polling_section_parses_humantime_values() {
+        let toml_src = r#"
+current_context = "dev"
+
+[polling.overview]
+pg_status = "2s"
+sysdiag   = "45s"
+
+[polling.browser]
+interval = "1m"
+
+[polling.bulletins]
+interval = "250ms"
+
+[[contexts]]
+name = "dev"
+url = "https://dev:8443"
+
+[contexts.auth]
+type = "password"
+username = "admin"
+password = "x"
+"#;
+        let cfg: Config = toml::from_str(toml_src).expect("parses");
+        assert_eq!(cfg.polling.overview.pg_status, Duration::from_secs(2));
+        assert_eq!(cfg.polling.overview.sysdiag, Duration::from_secs(45));
+        assert_eq!(cfg.polling.browser.interval, Duration::from_secs(60));
+        assert_eq!(cfg.polling.bulletins.interval, Duration::from_millis(250));
+    }
+
+    #[test]
+    fn polling_partial_section_fills_in_defaults() {
+        let toml_src = r#"
+current_context = "dev"
+
+[polling.overview]
+pg_status = "3s"
+
+[[contexts]]
+name = "dev"
+url = "https://dev:8443"
+
+[contexts.auth]
+type = "password"
+username = "admin"
+password = "x"
+"#;
+        let cfg: Config = toml::from_str(toml_src).expect("parses");
+        assert_eq!(cfg.polling.overview.pg_status, Duration::from_secs(3));
+        assert_eq!(cfg.polling.overview.sysdiag, Duration::from_secs(30));
+        assert_eq!(cfg.polling.browser.interval, Duration::from_secs(15));
+        assert_eq!(cfg.polling.bulletins.interval, Duration::from_secs(5));
+    }
+
+    #[test]
+    fn polling_default_matches_serde_empty() {
+        // Guard against drift between hand-written `Default` impls and
+        // the `#[serde(default = "...")]` helpers.
+        let from_default = PollingConfig::default();
+        let from_serde: PollingConfig = toml::from_str("").expect("empty table parses as default");
+        assert_eq!(from_default, from_serde);
+    }
 }
 
 #[cfg(test)]

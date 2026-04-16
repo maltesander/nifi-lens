@@ -18,6 +18,7 @@ pub(crate) fn tiny_config() -> Config {
         current_context: "dev".into(),
         bulletins: Default::default(),
         ui: Default::default(),
+        polling: Default::default(),
         contexts: vec![Context {
             name: "dev".into(),
             url: "https://dev:8443".into(),

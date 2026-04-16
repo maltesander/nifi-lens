@@ -76,6 +76,22 @@ insecure_tls = false
 # proxy_url = "http://proxy.internal:3128"
 # http_proxy_url  = "http://proxy.internal:3128"
 # https_proxy_url = "http://proxy.internal:3128"
+
+# Poll cadences for background data refresh. Values use the humantime
+# format — examples: "5s", "750ms", "2m", "1h30m". Defaults shown.
+# Out-of-band values (below the cluster-hammering floor or above the
+# ui-feels-stale ceiling) produce a warning in the log file but are
+# accepted as-is.
+#
+# [polling.overview]
+# pg_status = "10s"   # process-group status refresh
+# sysdiag   = "30s"   # system diagnostics refresh
+#
+# [polling.browser]
+# interval  = "15s"   # flow tree refresh
+#
+# [polling.bulletins]
+# interval  = "5s"    # bulletin board poll
 "#;
 
 pub fn write_template(force: bool) -> Result<PathBuf, NifiLensError> {
@@ -130,5 +146,15 @@ mod tests {
     fn template_bulletins_ring_size_defaults_when_block_commented() {
         let parsed: crate::config::Config = toml::from_str(TEMPLATE).expect("template parses");
         assert_eq!(parsed.bulletins.ring_size, 5000);
+    }
+
+    #[test]
+    fn template_polling_defaults_when_block_commented() {
+        use std::time::Duration;
+        let parsed: crate::config::Config = toml::from_str(TEMPLATE).expect("template parses");
+        assert_eq!(parsed.polling.overview.pg_status, Duration::from_secs(10));
+        assert_eq!(parsed.polling.overview.sysdiag, Duration::from_secs(30));
+        assert_eq!(parsed.polling.browser.interval, Duration::from_secs(15));
+        assert_eq!(parsed.polling.bulletins.interval, Duration::from_secs(5));
     }
 }

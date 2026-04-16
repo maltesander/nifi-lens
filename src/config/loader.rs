@@ -30,6 +30,7 @@ pub fn load(args: &Args) -> Result<(Config, ResolvedContext), NifiLensError> {
         toml::from_str(&contents).context(ConfigParseSnafu { path: path.clone() })?;
 
     validate_bulletins(&config.bulletins)?;
+    crate::config::polling::warn_if_out_of_band(&config.polling);
 
     let active_name = args
         .context
