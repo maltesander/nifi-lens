@@ -383,6 +383,58 @@ pub struct Banner {
     pub detail: Option<String>,
 }
 
+impl AppState {
+    /// Post an error banner. `detail`, if present, is shown in a modal
+    /// when the user presses Enter on the banner.
+    pub fn post_error(&mut self, message: String, detail: Option<String>) {
+        self.status.banner = Some(Banner {
+            severity: BannerSeverity::Error,
+            message,
+            detail,
+        });
+    }
+
+    /// Post a warning banner (e.g. recoverable failures like clipboard unavailable).
+    pub fn post_warning(&mut self, message: String) {
+        self.status.banner = Some(Banner {
+            severity: BannerSeverity::Warning,
+            message,
+            detail: None,
+        });
+    }
+
+    /// Post an informational banner (e.g. "copied: foo", "saved to /tmp/x").
+    pub fn post_info(&mut self, message: String) {
+        self.status.banner = Some(Banner {
+            severity: BannerSeverity::Info,
+            message,
+            detail: None,
+        });
+    }
+
+    /// If the current banner carries a detail, copy it into `error_detail`
+    /// and open the error-detail modal. Returns `true` if a modal was opened,
+    /// `false` if there was no banner or no detail to escalate.
+    pub fn open_banner_detail(&mut self) -> bool {
+        let Some(b) = &self.status.banner else {
+            return false;
+        };
+        let Some(detail) = &b.detail else {
+            return false;
+        };
+        self.error_detail = Some(detail.clone());
+        self.modal = Some(Modal::ErrorDetail);
+        true
+    }
+
+    /// Close the current modal and clear any detail text so `error_detail`
+    /// does not linger between modal openings.
+    pub fn close_modal(&mut self) {
+        self.modal = None;
+        self.error_detail = None;
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum BannerSeverity {
     Error,
@@ -751,11 +803,7 @@ fn update_inner(state: &mut AppState, event: AppEvent, config: &Config) -> Updat
                 let previous = state.overview.sysdiag_mode;
                 let transitioning = !matches!(previous, Some(SysdiagMode::Aggregate));
                 if transitioning {
-                    state.status.banner = Some(crate::app::state::Banner {
-                        severity: crate::app::state::BannerSeverity::Warning,
-                        message: warning.clone(),
-                        detail: None,
-                    });
+                    state.post_warning(warning.clone());
                 }
             }
 
@@ -795,32 +843,19 @@ fn update_inner(state: &mut AppState, event: AppEvent, config: &Config) -> Updat
             // in-pane Failed rendering still shows the detail locally.
             match &payload {
                 crate::event::TracerPayload::EventDetailFailed { error, .. } => {
-                    state.status.banner = Some(Banner {
-                        severity: BannerSeverity::Error,
-                        message: format!("event detail failed: {error}"),
-                        detail: None,
-                    });
+                    state.post_error(format!("event detail failed: {error}"), None);
                 }
                 crate::event::TracerPayload::ContentFailed { error, side, .. } => {
-                    state.status.banner = Some(Banner {
-                        severity: BannerSeverity::Error,
-                        message: format!("event {} content failed: {error}", side.as_str()),
-                        detail: None,
-                    });
+                    state.post_error(
+                        format!("event {} content failed: {error}", side.as_str()),
+                        None,
+                    );
                 }
                 crate::event::TracerPayload::ContentSaved { path } => {
-                    state.status.banner = Some(Banner {
-                        severity: BannerSeverity::Info,
-                        message: format!("saved to {}", path.display()),
-                        detail: None,
-                    });
+                    state.post_info(format!("saved to {}", path.display()));
                 }
                 crate::event::TracerPayload::ContentSaveFailed { path, error } => {
-                    state.status.banner = Some(Banner {
-                        severity: BannerSeverity::Error,
-                        message: format!("save to {} failed: {error}", path.display()),
-                        detail: None,
-                    });
+                    state.post_error(format!("save to {} failed: {error}", path.display()), None);
                 }
                 _ => {}
             }
@@ -836,11 +871,7 @@ fn update_inner(state: &mut AppState, event: AppEvent, config: &Config) -> Updat
             // Mirror QueryFailed errors into the global status banner so
             // the footer surfaces them the same way other tab errors do.
             if let crate::event::EventsPayload::QueryFailed { error, .. } = &payload {
-                state.status.banner = Some(Banner {
-                    severity: BannerSeverity::Error,
-                    message: format!("Events query failed: {error}"),
-                    detail: None,
-                });
+                state.post_error(format!("Events query failed: {error}"), None);
             }
             crate::view::events::state::apply_payload(&mut state.events, payload);
             state.last_refresh = Instant::now();
@@ -1009,11 +1040,7 @@ fn handle_key(state: &mut AppState, key: KeyEvent, config: &Config) -> UpdateRes
         }
         InputEvent::App(AppAction::FuzzyFind) => {
             if state.flow_index.is_none() {
-                state.status.banner = Some(Banner {
-                    severity: BannerSeverity::Warning,
-                    message: "fuzzy find: flow not indexed yet, open Browser to seed".into(),
-                    detail: None,
-                });
+                state.post_warning("fuzzy find: flow not indexed yet, open Browser to seed".into());
                 return UpdateResult {
                     redraw: true,
                     intent: None,
@@ -1073,11 +1100,8 @@ fn handle_key(state: &mut AppState, key: KeyEvent, config: &Config) -> UpdateRes
             // priority over any view's own Descend/Ascend handling.
             if state.modal.is_none() {
                 if matches!(action, crate::input::FocusAction::Descend)
-                    && let Some(b) = &state.status.banner
-                    && let Some(detail) = &b.detail
+                    && state.open_banner_detail()
                 {
-                    state.error_detail = Some(detail.clone());
-                    state.modal = Some(Modal::ErrorDetail);
                     return UpdateResult {
                         redraw: true,
                         intent: None,
@@ -1164,7 +1188,7 @@ fn handle_key(state: &mut AppState, key: KeyEvent, config: &Config) -> UpdateRes
             }
             Modal::ErrorDetail => {
                 if matches!(key.code, KeyCode::Esc) {
-                    state.modal = None;
+                    state.close_modal();
                     return UpdateResult {
                         redraw: true,
                         intent: None,
@@ -1617,11 +1641,7 @@ fn handle_intent_outcome(
             }
         }
         Ok(IntentOutcome::NotImplementedInPhase { intent_name, phase }) => {
-            state.status.banner = Some(Banner {
-                severity: BannerSeverity::Info,
-                message: format!("{intent_name}: not yet wired (Phase {phase})"),
-                detail: None,
-            });
+            state.post_info(format!("{intent_name}: not yet wired (Phase {phase})"));
             UpdateResult {
                 redraw: true,
                 intent: None,
@@ -1647,11 +1667,9 @@ fn handle_intent_outcome(
                 .iter()
                 .position(|n| n.id == component_id);
             let Some(arena_idx) = target_arena else {
-                state.status.banner = Some(Banner {
-                    severity: BannerSeverity::Warning,
-                    message: format!("component {component_id} not found in current flow tree"),
-                    detail: None,
-                });
+                state.post_warning(format!(
+                    "component {component_id} not found in current flow tree"
+                ));
                 return UpdateResult {
                     redraw: true,
                     intent: None,
@@ -1702,11 +1720,7 @@ fn handle_intent_outcome(
             }
         }
         Ok(IntentOutcome::TracerInputInvalid { raw }) => {
-            state.status.banner = Some(Banner {
-                severity: BannerSeverity::Warning,
-                message: format!("invalid UUID: {raw}"),
-                detail: None,
-            });
+            state.post_warning(format!("invalid UUID: {raw}"));
             UpdateResult {
                 redraw: true,
                 intent: None,
@@ -1733,12 +1747,7 @@ fn handle_intent_outcome(
             }
         }
         Err(err) => {
-            let msg = err.to_string();
-            state.status.banner = Some(Banner {
-                severity: BannerSeverity::Error,
-                message: msg.clone(),
-                detail: Some(format!("{err:?}")),
-            });
+            state.post_error(err.to_string(), Some(format!("{err:?}")));
             // Close the context switcher modal so the banner is visible.
             if matches!(state.modal, Some(Modal::ContextSwitcher(_))) {
                 state.modal = None;
@@ -1760,18 +1769,10 @@ fn clipboard_copy(state: &mut AppState, text: &str) {
     let preview = text.to_string();
     match state.copy_to_clipboard(text.to_string()) {
         Ok(()) => {
-            state.status.banner = Some(Banner {
-                severity: BannerSeverity::Info,
-                message: format!("copied: {preview}"),
-                detail: None,
-            });
+            state.post_info(format!("copied: {preview}"));
         }
         Err(err) => {
-            state.status.banner = Some(Banner {
-                severity: BannerSeverity::Warning,
-                message: format!("clipboard: {err}"),
-                detail: None,
-            });
+            state.post_warning(format!("clipboard: {err}"));
         }
     }
 }
@@ -2833,5 +2834,79 @@ mod tests {
             s.modal.is_none(),
             "no modal should open for single-target auto-goto"
         );
+    }
+
+    // ── banner + modal helper methods ────────────────────────────────
+
+    #[test]
+    fn post_error_sets_error_severity_and_detail() {
+        let mut s = fresh_state();
+        s.post_error("boom".to_string(), Some("stack".to_string()));
+        let b = s.status.banner.as_ref().expect("banner was set");
+        assert_eq!(b.severity, BannerSeverity::Error);
+        assert_eq!(b.message, "boom");
+        assert_eq!(b.detail.as_deref(), Some("stack"));
+    }
+
+    #[test]
+    fn post_info_replaces_prior_banner() {
+        let mut s = fresh_state();
+        s.post_error("err".to_string(), Some("d".to_string()));
+        s.post_info("copied: foo".to_string());
+        let b = s.status.banner.as_ref().expect("banner was set");
+        assert_eq!(b.severity, BannerSeverity::Info);
+        assert_eq!(b.message, "copied: foo");
+        assert!(
+            b.detail.is_none(),
+            "post_info must not carry over prior detail"
+        );
+    }
+
+    #[test]
+    fn post_warning_sets_warning_severity() {
+        let mut s = fresh_state();
+        s.post_warning("clipboard: no display".to_string());
+        let b = s.status.banner.as_ref().expect("banner was set");
+        assert_eq!(b.severity, BannerSeverity::Warning);
+        assert_eq!(b.message, "clipboard: no display");
+        assert!(b.detail.is_none());
+    }
+
+    #[test]
+    fn open_banner_detail_is_noop_without_banner() {
+        let mut s = fresh_state();
+        assert!(!s.open_banner_detail());
+        assert!(s.modal.is_none());
+        assert!(s.error_detail.is_none());
+    }
+
+    #[test]
+    fn open_banner_detail_is_noop_when_banner_has_no_detail() {
+        let mut s = fresh_state();
+        s.post_info("copied".to_string());
+        assert!(!s.open_banner_detail());
+        assert!(s.modal.is_none());
+        assert!(s.error_detail.is_none());
+    }
+
+    #[test]
+    fn open_banner_detail_copies_detail_and_sets_modal() {
+        let mut s = fresh_state();
+        s.post_error("boom".to_string(), Some("full chain".to_string()));
+        assert!(s.open_banner_detail());
+        assert!(matches!(s.modal, Some(Modal::ErrorDetail)));
+        assert_eq!(s.error_detail.as_deref(), Some("full chain"));
+    }
+
+    #[test]
+    fn close_modal_clears_both_modal_and_error_detail() {
+        let mut s = fresh_state();
+        s.post_error("boom".to_string(), Some("d".to_string()));
+        s.open_banner_detail();
+        assert!(s.modal.is_some());
+        assert!(s.error_detail.is_some());
+        s.close_modal();
+        assert!(s.modal.is_none());
+        assert!(s.error_detail.is_none());
     }
 }

@@ -553,11 +553,7 @@ impl ViewKeyHandler for TracerHandler {
                         }
                     }
                     Err(err) => {
-                        state.status.banner = Some(crate::app::state::Banner {
-                            severity: crate::app::state::BannerSeverity::Warning,
-                            message: format!("clipboard paste: {err}"),
-                            detail: None,
-                        });
+                        state.post_warning(format!("clipboard paste: {err}"));
                     }
                 }
                 Some(UpdateResult {

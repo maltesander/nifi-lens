@@ -2,7 +2,7 @@
 
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 
-use super::{AppState, Banner, BannerSeverity, UpdateResult, ViewKeyHandler};
+use super::{AppState, UpdateResult, ViewKeyHandler};
 use crate::input::{BulletinsVerb, FocusAction, GoTarget, Severity, ViewVerb};
 
 /// Zero-sized dispatch struct for the Bulletins tab.
@@ -33,18 +33,10 @@ impl ViewKeyHandler for BulletinsHandler {
                 let preview: String = msg.chars().take(40).collect();
                 match state.copy_to_clipboard(msg) {
                     Ok(()) => {
-                        state.status.banner = Some(Banner {
-                            severity: BannerSeverity::Info,
-                            message: format!("copied: {preview}"),
-                            detail: None,
-                        });
+                        state.post_info(format!("copied: {preview}"));
                     }
                     Err(err) => {
-                        state.status.banner = Some(Banner {
-                            severity: BannerSeverity::Warning,
-                            message: format!("clipboard: {err}"),
-                            detail: None,
-                        });
+                        state.post_warning(format!("clipboard: {err}"));
                     }
                 }
             }
@@ -148,11 +140,7 @@ fn handle_text_input(state: &mut AppState, key: KeyEvent) -> Option<UpdateResult
                     }
                 }
                 Err(err) => {
-                    state.status.banner = Some(Banner {
-                        severity: BannerSeverity::Warning,
-                        message: format!("clipboard paste: {err}"),
-                        detail: None,
-                    });
+                    state.post_warning(format!("clipboard paste: {err}"));
                 }
             }
             Some(UpdateResult {

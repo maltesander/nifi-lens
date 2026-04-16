@@ -2,7 +2,7 @@
 
 use crossterm::event::KeyEvent;
 
-use super::{AppState, Banner, BannerSeverity, Modal, UpdateResult, ViewKeyHandler};
+use super::{AppState, Modal, UpdateResult, ViewKeyHandler};
 use crate::input::{FocusAction, ViewVerb};
 use crate::view::browser::state::{
     DetailFocus, DetailSection, DetailSections, MAX_DETAIL_SECTIONS, NodeDetail,
@@ -38,18 +38,10 @@ impl ViewKeyHandler for BrowserHandler {
                     let preview: String = value.chars().take(40).collect();
                     match state.copy_to_clipboard(value) {
                         Ok(()) => {
-                            state.status.banner = Some(Banner {
-                                severity: BannerSeverity::Info,
-                                message: format!("copied: {preview}"),
-                                detail: None,
-                            });
+                            state.post_info(format!("copied: {preview}"));
                         }
                         Err(err) => {
-                            state.status.banner = Some(Banner {
-                                severity: BannerSeverity::Warning,
-                                message: format!("clipboard: {err}"),
-                                detail: None,
-                            });
+                            state.post_warning(format!("clipboard: {err}"));
                         }
                     }
                 } else {
@@ -60,18 +52,10 @@ impl ViewKeyHandler for BrowserHandler {
                     let id = state.browser.nodes[arena_idx].id.clone();
                     match state.copy_to_clipboard(id.clone()) {
                         Ok(()) => {
-                            state.status.banner = Some(Banner {
-                                severity: BannerSeverity::Info,
-                                message: format!("copied id: {id}"),
-                                detail: None,
-                            });
+                            state.post_info(format!("copied id: {id}"));
                         }
                         Err(err) => {
-                            state.status.banner = Some(Banner {
-                                severity: BannerSeverity::Warning,
-                                message: format!("clipboard: {err}"),
-                                detail: None,
-                            });
+                            state.post_warning(format!("clipboard: {err}"));
                         }
                     }
                 }

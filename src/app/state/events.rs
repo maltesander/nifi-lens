@@ -2,7 +2,7 @@
 
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 
-use super::{AppState, Banner, BannerSeverity, PendingIntent, UpdateResult, ViewKeyHandler};
+use super::{AppState, PendingIntent, UpdateResult, ViewKeyHandler};
 use crate::input::FilterField as InputFilterField;
 use crate::input::{EventsVerb, FocusAction, GoTarget, ViewVerb};
 use crate::view::events::state::FilterField;
@@ -274,11 +274,7 @@ fn handle_filter_edit(state: &mut AppState, key: KeyEvent) -> Option<UpdateResul
                     }
                 }
                 Err(err) => {
-                    state.status.banner = Some(Banner {
-                        severity: BannerSeverity::Warning,
-                        message: format!("clipboard paste: {err}"),
-                        detail: None,
-                    });
+                    state.post_warning(format!("clipboard paste: {err}"));
                 }
             }
             redraw()
