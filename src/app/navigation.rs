@@ -108,6 +108,56 @@ pub(crate) trait ListNavigation {
     }
 }
 
+/// The visible window of a scrolling list, given the selected row and
+/// the number of rows the list can show.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct ScrollWindow {
+    /// Index of the first visible row in the backing slice.
+    pub(crate) offset: usize,
+    /// Index of the selected row relative to the visible window
+    /// (i.e. `selected - offset`).
+    pub(crate) selected_local: usize,
+}
+
+/// Compute the minimal scroll offset that keeps `selected` in view,
+/// assuming the window can show `visible_rows` rows.
+///
+/// Invariants (for `total > 0` and `visible_rows > 0`):
+/// * `offset + selected_local == min(selected, total - 1)`
+/// * `selected_local < visible_rows`
+///
+/// Degenerate inputs:
+/// * `total == 0` → `ScrollWindow { offset: 0, selected_local: 0 }`
+/// * `visible_rows == 0` → `ScrollWindow { offset: selected, selected_local: 0 }`
+pub(crate) fn compute_scroll_window(
+    selected: usize,
+    total: usize,
+    visible_rows: usize,
+) -> ScrollWindow {
+    if total == 0 {
+        return ScrollWindow {
+            offset: 0,
+            selected_local: 0,
+        };
+    }
+    let clamped_selected = selected.min(total - 1);
+    if visible_rows == 0 {
+        return ScrollWindow {
+            offset: clamped_selected,
+            selected_local: 0,
+        };
+    }
+    let offset = if clamped_selected >= visible_rows {
+        clamped_selected + 1 - visible_rows
+    } else {
+        0
+    };
+    ScrollWindow {
+        offset,
+        selected_local: clamped_selected - offset,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -361,5 +411,94 @@ mod tests {
         list.set_selected(None);
         list.page_up(3);
         assert_eq!(list.selected(), Some(0));
+    }
+
+    // ── compute_scroll_window ──────────────────────────────────────
+
+    #[test]
+    fn scroll_window_first_row_visible() {
+        let w = compute_scroll_window(0, 100, 10);
+        assert_eq!(
+            w,
+            ScrollWindow {
+                offset: 0,
+                selected_local: 0
+            }
+        );
+    }
+
+    #[test]
+    fn scroll_window_last_row_visible() {
+        let w = compute_scroll_window(99, 100, 10);
+        assert_eq!(
+            w,
+            ScrollWindow {
+                offset: 90,
+                selected_local: 9
+            }
+        );
+    }
+
+    #[test]
+    fn scroll_window_selected_fits_in_first_window() {
+        let w = compute_scroll_window(5, 100, 10);
+        assert_eq!(
+            w,
+            ScrollWindow {
+                offset: 0,
+                selected_local: 5
+            }
+        );
+    }
+
+    #[test]
+    fn scroll_window_just_scrolled() {
+        // Window shows 10 rows. Selected row 15 means offset must be at least 6.
+        let w = compute_scroll_window(15, 100, 10);
+        assert_eq!(
+            w,
+            ScrollWindow {
+                offset: 6,
+                selected_local: 9
+            }
+        );
+    }
+
+    #[test]
+    fn scroll_window_empty_list() {
+        let w = compute_scroll_window(0, 0, 10);
+        assert_eq!(
+            w,
+            ScrollWindow {
+                offset: 0,
+                selected_local: 0
+            }
+        );
+    }
+
+    #[test]
+    fn scroll_window_zero_visible_rows() {
+        // Degenerate window — caller asked for 0 rows. Return something sane.
+        let w = compute_scroll_window(5, 10, 0);
+        assert_eq!(
+            w,
+            ScrollWindow {
+                offset: 5,
+                selected_local: 0
+            }
+        );
+    }
+
+    #[test]
+    fn scroll_window_selected_beyond_total_clamps() {
+        // Defensive: if caller passes selected >= total, clamp to last row.
+        let w = compute_scroll_window(50, 10, 3);
+        assert_eq!(
+            w,
+            ScrollWindow {
+                offset: 7,
+                selected_local: 2
+            }
+        );
     }
 }

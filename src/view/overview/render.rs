@@ -28,6 +28,7 @@ use super::state::{
     BulletinBucket, NoisyComponent, OverviewFocus, OverviewSnapshot, OverviewState,
     SPARKLINE_MINUTES, Severity, UnhealthyQueue,
 };
+use crate::app::navigation::compute_scroll_window;
 use crate::theme;
 use crate::widget::gauge::fill_bar;
 use crate::widget::panel::Panel;
@@ -151,23 +152,17 @@ fn render_nodes_zone(frame: &mut Frame, area: Rect, state: &OverviewState) {
     let selected = state.nodes.selected;
     // Reserve 1 row at the bottom for the repositories aggregate.
     let visible_node_rows = area.height.saturating_sub(1) as usize;
-    let scroll_offset = if visible_node_rows == 0 {
-        0
-    } else if selected >= visible_node_rows {
-        selected + 1 - visible_node_rows
-    } else {
-        0
-    };
+    let window = compute_scroll_window(selected, state.nodes.nodes.len(), visible_node_rows);
 
     let mut rows: Vec<Row> = state
         .nodes
         .nodes
         .iter()
-        .skip(scroll_offset)
+        .skip(window.offset)
         .take(visible_node_rows)
         .enumerate()
         .map(|(idx, node)| {
-            let row_style = if focused && idx == selected.saturating_sub(scroll_offset) {
+            let row_style = if focused && idx == window.selected_local {
                 theme::cursor_row()
             } else {
                 Style::default()
@@ -426,22 +421,15 @@ fn render_noisy_components(
         ])]
     } else {
         let visible_rows = area.height.saturating_sub(1) as usize;
-        let scroll_offset = if visible_rows == 0 {
-            0
-        } else if selected >= visible_rows {
-            selected + 1 - visible_rows
-        } else {
-            0
-        };
-        let selected_in_window = selected.saturating_sub(scroll_offset);
+        let window = compute_scroll_window(selected, noisy.len(), visible_rows);
         noisy
             .iter()
-            .skip(scroll_offset)
+            .skip(window.offset)
             .take(visible_rows)
             .enumerate()
             .map(|(idx, n)| {
                 let sev_style = severity_style(n.max_severity);
-                let row_style = if focused && idx == selected_in_window {
+                let row_style = if focused && idx == window.selected_local {
                     theme::cursor_row()
                 } else {
                     Style::default()
@@ -483,22 +471,15 @@ fn render_unhealthy_queues(
         ])]
     } else {
         let visible_rows = area.height.saturating_sub(1) as usize;
-        let scroll_offset = if visible_rows == 0 {
-            0
-        } else if selected >= visible_rows {
-            selected + 1 - visible_rows
-        } else {
-            0
-        };
-        let selected_in_window = selected.saturating_sub(scroll_offset);
+        let window = compute_scroll_window(selected, queues.len(), visible_rows);
         queues
             .iter()
-            .skip(scroll_offset)
+            .skip(window.offset)
             .take(visible_rows)
             .enumerate()
             .map(|(idx, q)| {
                 let style = fill_style(q.fill_percent);
-                let row_style = if focused && idx == selected_in_window {
+                let row_style = if focused && idx == window.selected_local {
                     theme::cursor_row()
                 } else {
                     Style::default()
