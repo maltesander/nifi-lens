@@ -24,19 +24,19 @@ use crate::app::worker::spawn_polling_worker;
 use crate::client::NifiClient;
 use crate::event::{AppEvent, BulletinsPayload, ViewPayload};
 
-const POLL_INTERVAL: Duration = Duration::from_secs(5);
 const POLL_LIMIT: u32 = 1000;
 
 pub fn spawn(
     client: Arc<RwLock<NifiClient>>,
     tx: mpsc::Sender<AppEvent>,
     initial_last_id: Option<i64>,
+    poll_interval: Duration,
 ) -> JoinHandle<()> {
     // Rc<Cell> is safe here: the worker runs on a single-threaded LocalSet
     // and only one poll is in flight at a time.
     let last_id = Rc::new(Cell::new(initial_last_id));
     spawn_polling_worker(
-        POLL_INTERVAL,
+        poll_interval,
         move || {
             let client = client.clone();
             let last_id = Rc::clone(&last_id);

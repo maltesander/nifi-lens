@@ -54,6 +54,7 @@ pub async fn run(
         &tx,
         bulletins_last_id,
         &mut state.browser,
+        &state.polling,
     );
 
     let dispatcher = Arc::new(IntentDispatcher {
@@ -137,12 +138,14 @@ pub async fn run(
             state.pending_worker_restart = false;
         }
         let bulletins_last_id = state.bulletins.last_id;
+        let polling = state.polling.clone();
         workers.ensure(
             state.current_tab,
             &client,
             &tx,
             bulletins_last_id,
             &mut state.browser,
+            &polling,
         );
 
         // After ensure(), re-emit any pending Browser detail request that

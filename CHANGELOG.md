@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **Configurable poll intervals** for Overview, Browser, and Bulletins
+  tabs via a new `[polling]` section in `config.toml`. Values use the
+  humantime format (`"10s"`, `"750ms"`). Defaults match the previously-
+  hardcoded cadences (10s/30s/15s/5s). Out-of-band values log a warning
+  but are accepted as-is. Events in-flight query polling and Tracer
+  content polling stay on their internal cadences.
+
 ## [0.3.0] — 2026-04-15
 
 ### Added

@@ -136,6 +136,7 @@ pub struct AppState {
     pub flow_index: Option<FlowIndex>,
     pub status: StatusLine,
     pub timestamp_cfg: crate::timestamp::TimestampConfig,
+    pub polling: crate::config::PollingConfig,
     pub error_detail: Option<String>,
     pub should_quit: bool,
     /// Set by the context-switch handler so the app loop can force-restart
@@ -174,6 +175,7 @@ impl AppState {
                 format: config.ui.timestamp_format,
                 tz: config.ui.timestamp_tz,
             },
+            polling: config.polling.clone(),
             error_detail: None,
             should_quit: false,
             pending_worker_restart: false,

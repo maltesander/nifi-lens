@@ -171,6 +171,25 @@ into a single row with an `×N` count column. Grouping mode is cycled by
 `Shift+G` (`source+msg` / `source` / `off`). `g` triggers
 `AppAction::Jump` — a context-sensitive cross-tab jump menu.
 
+### Poll intervals
+
+Per-view worker cadences are configurable via the `[polling]` section
+in `config.toml`:
+
+- `[polling.overview] pg_status` (default `"10s"`) and `sysdiag`
+  (default `"30s"`).
+- `[polling.browser] interval` (default `"15s"`).
+- `[polling.bulletins] interval` (default `"5s"`).
+
+Values use the humantime format (`"10s"`, `"750ms"`, `"2m"`). The
+loader emits a `tracing::warn!` (into the rotating log file) for
+values outside the recommended range but accepts them as-is — no
+hard rejection. The `AppState::polling` field holds the resolved
+`PollingConfig` and is forwarded to each worker at spawn time by
+`src/app/worker.rs`. Events in-flight query polling and Tracer
+content in-flight polling stay hardcoded — those are internal
+query mechanics, not user cadences.
+
 ### Visual language
 
 A single project-wide bordered-box visual language goes through

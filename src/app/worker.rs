@@ -74,6 +74,7 @@ impl WorkerRegistry {
         tx: &mpsc::Sender<AppEvent>,
         bulletins_last_id: Option<i64>,
         browser: &mut crate::view::browser::state::BrowserState,
+        polling: &crate::config::PollingConfig,
     ) {
         if matches!(&self.current, Some((existing, _)) if *existing == view) {
             return;
@@ -96,6 +97,8 @@ impl WorkerRegistry {
                 Some(crate::view::overview::worker::spawn(
                     client.clone(),
                     tx.clone(),
+                    polling.overview.pg_status,
+                    polling.overview.sysdiag,
                 ))
             }
             ViewId::Bulletins => {
@@ -104,6 +107,7 @@ impl WorkerRegistry {
                     client.clone(),
                     tx.clone(),
                     bulletins_last_id,
+                    polling.bulletins.interval,
                 ))
             }
             ViewId::Browser => {
@@ -117,6 +121,7 @@ impl WorkerRegistry {
                     tx.clone(),
                     detail_rx,
                     force_rx,
+                    polling.browser.interval,
                 ))
             }
             ViewId::Events => {

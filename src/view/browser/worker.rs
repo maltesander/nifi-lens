@@ -17,16 +17,15 @@ use crate::client::NifiClient;
 use crate::event::{AppEvent, BrowserPayload, ViewPayload};
 use crate::view::browser::state::{DetailRequest, NodeDetail, NodeDetailSnapshot};
 
-const POLL_INTERVAL: Duration = Duration::from_secs(15);
-
 pub fn spawn(
     client: Arc<RwLock<NifiClient>>,
     tx: mpsc::Sender<AppEvent>,
     mut detail_rx: mpsc::UnboundedReceiver<DetailRequest>,
     force_rx: oneshot::Receiver<()>,
+    poll_interval: Duration,
 ) -> JoinHandle<()> {
     tokio::task::spawn_local(async move {
-        let mut ticker = interval(POLL_INTERVAL);
+        let mut ticker = interval(poll_interval);
         ticker.set_missed_tick_behavior(MissedTickBehavior::Delay);
 
         // Wrap the oneshot in an Option so we can "disarm" it after it

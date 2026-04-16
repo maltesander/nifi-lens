@@ -28,16 +28,18 @@ use tokio::time::MissedTickBehavior;
 use crate::client::NifiClient;
 use crate::event::{AppEvent, OverviewPayload, OverviewPgStatusPayload, ViewPayload};
 
-const PG_STATUS_INTERVAL: Duration = Duration::from_secs(10);
-const SYSDIAG_INTERVAL: Duration = Duration::from_secs(30);
-
 /// Spawn the dual-cadence overview polling task on the current `LocalSet`.
 /// Returns a `JoinHandle<()>`; the caller cancels the worker by calling
 /// `.abort()` on the handle.
-pub fn spawn(client: Arc<RwLock<NifiClient>>, tx: mpsc::Sender<AppEvent>) -> JoinHandle<()> {
+pub fn spawn(
+    client: Arc<RwLock<NifiClient>>,
+    tx: mpsc::Sender<AppEvent>,
+    pg_status: Duration,
+    sysdiag: Duration,
+) -> JoinHandle<()> {
     tokio::task::spawn_local(async move {
-        let mut pg_ticker = tokio::time::interval(PG_STATUS_INTERVAL);
-        let mut sysdiag_ticker = tokio::time::interval(SYSDIAG_INTERVAL);
+        let mut pg_ticker = tokio::time::interval(pg_status);
+        let mut sysdiag_ticker = tokio::time::interval(sysdiag);
         pg_ticker.set_missed_tick_behavior(MissedTickBehavior::Delay);
         sysdiag_ticker.set_missed_tick_behavior(MissedTickBehavior::Delay);
         loop {

@@ -159,6 +159,18 @@ timestamp_format = "short"
 # "utc" or "local". "local" uses the host machine's time zone.
 timestamp_tz = "utc"
 
+# Optional: poll cadences for Overview / Browser / Bulletins workers.
+# Humantime format ("5s", "750ms", "2m"). Defaults shown.
+[polling.overview]
+pg_status = "10s"
+sysdiag   = "30s"
+
+[polling.browser]
+interval  = "15s"
+
+[polling.bulletins]
+interval  = "5s"
+
 [[contexts]]
 name = "dev"
 url = "https://nifi-dev.internal:8443"
@@ -198,6 +210,11 @@ password_env = "NIFILENS_PROD_PASSWORD"
   for NiFi proxy deployments.
 - **File permissions** must be `0600`; `nifilens` refuses to start if the
   config is world-readable.
+- **Poll intervals.** Set under `[polling.*]` using humantime (`"10s"`,
+  `"750ms"`). Out-of-band values emit a `tracing::warn!` to the log file
+  but are accepted as-is. Only `overview`, `browser`, and `bulletins`
+  workers honour this; in-flight polling for Events queries and Tracer
+  content stays on the internal cadence.
 - **CLI overrides:** `nifilens --context stage`, `nifilens --config ./local.toml`.
 - **Version strategy** maps to `nifi-rust-client`'s `VersionResolutionStrategy`.
 
