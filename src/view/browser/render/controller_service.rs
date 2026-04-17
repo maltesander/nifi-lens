@@ -287,6 +287,11 @@ mod snapshots {
             ],
             validation_errors: vec!["Keystore password is required".into()],
             bulletin_level: "WARN".into(),
+            comments: String::new(),
+            restricted: false,
+            deprecated: false,
+            persists_state: false,
+            referencing_components: Vec::new(),
         };
         let state = BrowserState::new();
         (d, state)

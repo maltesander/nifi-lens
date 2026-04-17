@@ -428,6 +428,7 @@ pub struct BulletinBoardSnapshot {
 pub use browser::{
     ConnectionDetail, ControllerServiceDetail, ControllerServiceSummary, FolderKind, NodeKind,
     NodeStatusSummary, ProcessGroupDetail, ProcessorDetail, RawNode, RecursiveSnapshot,
+    ReferencingComponent, ReferencingKind,
 };
 pub use events::{ProvenancePollResult, ProvenanceQuery, ProvenanceQueryHandle};
 pub use health::{

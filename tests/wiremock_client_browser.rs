@@ -249,7 +249,7 @@ async fn browser_cs_detail_carries_state_and_properties() {
     assert!(d.bundle.contains("nifi-ssl-context-service-nar"));
     assert_eq!(d.state, "ENABLED");
     assert_eq!(d.parent_group_id.as_deref(), Some("ingest"));
-    assert_eq!(d.properties.len(), 4);
+    assert_eq!(d.properties.len(), 2);
     assert!(d.validation_errors.is_empty());
     assert_eq!(d.bulletin_level, "WARN");
 }
@@ -314,6 +314,45 @@ async fn browser_tree_includes_controller_services_under_owning_pgs() {
         let parent = n.parent_idx.expect("CS must have a parent PG");
         assert!(matches!(snap.nodes[parent].kind, NodeKind::ProcessGroup));
     }
+}
+
+#[tokio::test]
+async fn browser_cs_detail_parses_extended_fields() {
+    use nifi_lens::client::ReferencingKind;
+    let server = MockServer::start().await;
+    stub_login_and_about(&server).await;
+    let body = load_fixture("controller_service.json");
+    // Note: NiFi's `GET /controller-services/{id}` returns
+    // `referencingComponents` by default; the generated client's only
+    // query parameter is `uiOnly`, which we intentionally do not pass.
+    Mock::given(method("GET"))
+        .and(path("/nifi-api/controller-services/cs-1"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(body))
+        .mount(&server)
+        .await;
+
+    let client = NifiClient::connect(&ctx(server.uri())).await.unwrap();
+    let d: ControllerServiceDetail = client.browser_cs_detail("cs-1").await.expect("ok");
+
+    assert_eq!(
+        d.comments,
+        "Shared SSL context for all HTTP ingestion processors."
+    );
+    assert!(d.restricted);
+    assert!(!d.deprecated);
+    assert!(!d.persists_state);
+    assert_eq!(d.referencing_components.len(), 2);
+
+    let a = &d.referencing_components[0];
+    assert_eq!(a.id, "proc-a");
+    assert_eq!(a.name, "InvokeHTTP");
+    assert!(matches!(a.kind, ReferencingKind::Processor));
+    assert_eq!(a.state, "RUNNING");
+    assert_eq!(a.active_thread_count, 2);
+    assert_eq!(a.group_id, "ingest");
+
+    let b = &d.referencing_components[1];
+    assert!(matches!(b.kind, ReferencingKind::ControllerService));
 }
 
 #[tokio::test]

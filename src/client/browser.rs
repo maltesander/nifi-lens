@@ -661,17 +661,69 @@ pub struct ControllerServiceDetail {
     pub properties: Vec<(String, String)>,
     pub validation_errors: Vec<String>,
     pub bulletin_level: String,
+    pub comments: String,
+    pub restricted: bool,
+    pub deprecated: bool,
+    pub persists_state: bool,
+    pub referencing_components: Vec<ReferencingComponent>,
+}
+
+/// Kind of component that references a controller service. Raw NiFi
+/// `referenceType` strings (which vary in case across versions) are
+/// normalized into this enum; unknown values are preserved via
+/// [`ReferencingKind::Other`].
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ReferencingKind {
+    Processor,
+    ControllerService,
+    ReportingTask,
+    FlowRegistryClient,
+    ParameterProvider,
+    Other(String),
+}
+
+impl ReferencingKind {
+    /// Normalize a raw `referenceType` string from the NiFi API.
+    pub fn from_api(raw: &str) -> Self {
+        match raw {
+            "Processor" | "PROCESSOR" => Self::Processor,
+            "ControllerService" | "CONTROLLER_SERVICE" => Self::ControllerService,
+            "ReportingTask" | "REPORTING_TASK" => Self::ReportingTask,
+            "FlowRegistryClient" | "FLOW_REGISTRY_CLIENT" => Self::FlowRegistryClient,
+            "ParameterProvider" | "PARAMETER_PROVIDER" => Self::ParameterProvider,
+            other => Self::Other(other.to_string()),
+        }
+    }
+}
+
+/// One component that references a controller service, as returned by
+/// `GET /controller-services/{id}?includeReferencingComponents=true`.
+#[derive(Debug, Clone)]
+pub struct ReferencingComponent {
+    pub id: String,
+    pub name: String,
+    pub kind: ReferencingKind,
+    pub state: String,
+    pub active_thread_count: u32,
+    pub group_id: String,
 }
 
 impl NifiClient {
     /// Single-endpoint detail fetch for a controller service. Returns
-    /// identity, state, parent scope, properties, and validation
-    /// errors.
+    /// identity, state, parent scope, properties, validation errors,
+    /// bulletin level, comments, restricted/deprecated/persists-state
+    /// flags, and the list of referencing components (processors and
+    /// other controller services that depend on this service).
     pub async fn browser_cs_detail(
         &self,
         cs_id: &str,
     ) -> Result<ControllerServiceDetail, NifiLensError> {
         tracing::debug!(context = %self.context_name(), %cs_id, "fetching CS detail");
+        // NB: the generated `get_controller_service(id, ui_only)` has no
+        // explicit `includeReferencingComponents` parameter — NiFi's
+        // `GET /controller-services/{id}` returns `referencingComponents`
+        // in the body by default. Passing `ui_only=true` would strip the
+        // response, so we pass `None`.
         let entity = self
             .controller_services()
             .get_controller_service(cs_id, None)
@@ -709,6 +761,23 @@ impl NifiClient {
             .collect();
         properties.sort_by(|a, b| a.0.cmp(&b.0));
 
+        let referencing_components: Vec<ReferencingComponent> = component
+            .referencing_components
+            .unwrap_or_default()
+            .into_iter()
+            .filter_map(|e| {
+                let c = e.component?;
+                Some(ReferencingComponent {
+                    id: c.id.clone().unwrap_or_default(),
+                    name: c.name.clone().unwrap_or_default(),
+                    kind: ReferencingKind::from_api(c.reference_type.as_deref().unwrap_or("")),
+                    state: c.state.clone().unwrap_or_default(),
+                    active_thread_count: c.active_thread_count.unwrap_or(0).max(0) as u32,
+                    group_id: c.group_id.clone().unwrap_or_default(),
+                })
+            })
+            .collect();
+
         Ok(ControllerServiceDetail {
             id: cs_id.to_string(),
             name: component.name.unwrap_or_default(),
@@ -719,6 +788,11 @@ impl NifiClient {
             properties,
             validation_errors: component.validation_errors.unwrap_or_default(),
             bulletin_level: component.bulletin_level.unwrap_or_default(),
+            comments: component.comments.unwrap_or_default(),
+            restricted: component.restricted.unwrap_or(false),
+            deprecated: component.deprecated.unwrap_or(false),
+            persists_state: component.persists_state.unwrap_or(false),
+            referencing_components,
         })
     }
 }

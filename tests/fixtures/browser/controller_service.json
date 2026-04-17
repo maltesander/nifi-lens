@@ -12,13 +12,39 @@
     "state": "ENABLED",
     "parentGroupId": "ingest",
     "bulletinLevel": "WARN",
+    "comments": "Shared SSL context for all HTTP ingestion processors.",
+    "restricted": true,
+    "deprecated": false,
+    "persistsState": false,
     "properties": {
       "Keystore Filename": "/opt/nifi/keystore.jks",
-      "Keystore Type": "JKS",
-      "Truststore Filename": "/opt/nifi/truststore.jks",
-      "SSL Protocol": "TLSv1.2"
+      "Keystore Type": "JKS"
     },
-    "validationErrors": []
+    "validationErrors": [],
+    "referencingComponents": [
+      {
+        "id": "proc-a",
+        "component": {
+          "id": "proc-a",
+          "name": "InvokeHTTP",
+          "referenceType": "Processor",
+          "state": "RUNNING",
+          "activeThreadCount": 2,
+          "groupId": "ingest"
+        }
+      },
+      {
+        "id": "cs-b",
+        "component": {
+          "id": "cs-b",
+          "name": "dependent-ssl",
+          "referenceType": "ControllerService",
+          "state": "ENABLED",
+          "activeThreadCount": 0,
+          "groupId": "ingest"
+        }
+      }
+    ]
   },
   "bulletins": []
 }
