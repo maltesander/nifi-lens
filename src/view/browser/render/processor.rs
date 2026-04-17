@@ -454,8 +454,10 @@ mod snapshots {
 
     #[test]
     fn processor_detail_recent_bulletins_focused() {
+        // RecentBulletins is now section index 2 (Properties=0, Connections=1,
+        // RecentBulletins=2).
         let focus = DetailFocus::Section {
-            idx: 1,
+            idx: 2,
             rows: [0, 0, 0, 0, 0],
             x_offsets: [0; MAX_DETAIL_SECTIONS],
         };

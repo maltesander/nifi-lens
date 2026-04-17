@@ -51,7 +51,7 @@ pub struct ChildPgSummary {
 /// This is a closed set — adding a new variant requires updating
 /// `DetailSections::for_node`, `DetailSections::for_node_detail`, and
 /// the render leaves that draw it.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum DetailSection {
     Properties,
     ValidationErrors,
@@ -60,6 +60,7 @@ pub enum DetailSection {
     ChildGroups,
     ReferencingComponents,
     Endpoints,
+    Connections,
 }
 
 /// Per-node-kind list of focusable sections, in cycle order.
@@ -75,9 +76,11 @@ impl DetailSections {
     pub fn for_node(kind: crate::client::NodeKind) -> Self {
         use crate::client::NodeKind as NK;
         match kind {
-            NK::Processor => {
-                DetailSections(&[DetailSection::Properties, DetailSection::RecentBulletins])
-            }
+            NK::Processor => DetailSections(&[
+                DetailSection::Properties,
+                DetailSection::Connections,
+                DetailSection::RecentBulletins,
+            ]),
             NK::ControllerService => DetailSections(&[
                 DetailSection::Properties,
                 DetailSection::ReferencingComponents,
@@ -104,6 +107,7 @@ impl DetailSections {
             (NK::Processor, true) => DetailSections(&[
                 DetailSection::Properties,
                 DetailSection::ValidationErrors,
+                DetailSection::Connections,
                 DetailSection::RecentBulletins,
             ]),
             (NK::ControllerService, true) => DetailSections(&[
@@ -553,6 +557,10 @@ impl BrowserState {
                 bulletins.iter().filter(|b| b.source_id == p.id).count()
             }
             (DetailSection::Endpoints, NodeDetail::Connection(_)) => 2,
+            (DetailSection::Connections, NodeDetail::Processor(_)) => {
+                let source_id = &self.nodes[arena_idx].id;
+                self.connections_for_processor(source_id).len()
+            }
             _ => 0,
         }
     }
@@ -2856,5 +2864,115 @@ mod tests {
         );
         let ring: VecDeque<crate::client::BulletinSnapshot> = VecDeque::new();
         assert_eq!(s.section_len(DetailSection::Endpoints, &ring), 2);
+    }
+
+    #[test]
+    fn for_node_processor_now_includes_connections_section() {
+        use crate::client::NodeKind;
+        let s = DetailSections::for_node(NodeKind::Processor);
+        assert_eq!(
+            s.0,
+            &[
+                DetailSection::Properties,
+                DetailSection::Connections,
+                DetailSection::RecentBulletins,
+            ][..]
+        );
+    }
+
+    #[test]
+    fn for_node_detail_processor_with_validation_includes_connections_before_bulletins() {
+        use crate::client::NodeKind;
+        let s = DetailSections::for_node_detail(NodeKind::Processor, true);
+        assert_eq!(
+            s.0,
+            &[
+                DetailSection::Properties,
+                DetailSection::ValidationErrors,
+                DetailSection::Connections,
+                DetailSection::RecentBulletins,
+            ][..]
+        );
+    }
+
+    #[test]
+    fn section_len_connections_counts_processor_edges() {
+        use crate::client::{NodeKind, NodeStatusSummary, ProcessorDetail};
+        use crate::view::browser::state::NodeDetail;
+        use std::collections::VecDeque;
+
+        let mut s = BrowserState::new();
+        // root PG (0), proc (1), conn in→proc (2), conn proc→out (3).
+        s.nodes.push(TreeNode {
+            parent: None,
+            children: vec![1, 2, 3],
+            kind: NodeKind::ProcessGroup,
+            id: "root".into(),
+            group_id: "root".into(),
+            name: "root".into(),
+            status_summary: NodeStatusSummary::ProcessGroup {
+                running: 0,
+                stopped: 0,
+                invalid: 0,
+                disabled: 0,
+            },
+        });
+        s.nodes.push(TreeNode {
+            parent: Some(0),
+            children: vec![],
+            kind: NodeKind::Processor,
+            id: "proc".into(),
+            group_id: "root".into(),
+            name: "proc".into(),
+            status_summary: NodeStatusSummary::Processor {
+                run_status: "Running".into(),
+            },
+        });
+        for (id, src, dst) in [("c-in", "src", "proc"), ("c-out", "proc", "dst")] {
+            s.nodes.push(TreeNode {
+                parent: Some(0),
+                children: vec![],
+                kind: NodeKind::Connection,
+                id: id.into(),
+                group_id: "root".into(),
+                name: id.into(),
+                status_summary: NodeStatusSummary::Connection {
+                    fill_percent: 0,
+                    flow_files_queued: 0,
+                    queued_display: "0".into(),
+                    source_id: src.into(),
+                    source_name: src.into(),
+                    destination_id: dst.into(),
+                    destination_name: dst.into(),
+                },
+            });
+        }
+        // Expand the root PG so children appear in visible.
+        s.expanded.insert(0);
+        crate::view::browser::state::rebuild_visible(&mut s);
+        // Select the processor (arena idx 1). Need the correct visible index.
+        s.selected = s.visible.iter().position(|&i| i == 1).unwrap();
+        // A minimal ProcessorDetail so section_len can dispatch.
+        s.details.insert(
+            1,
+            NodeDetail::Processor(ProcessorDetail {
+                id: "proc".into(),
+                name: "proc".into(),
+                type_name: "".into(),
+                bundle: "".into(),
+                run_status: "RUNNING".into(),
+                scheduling_strategy: "".into(),
+                scheduling_period: "".into(),
+                concurrent_tasks: 1,
+                run_duration_ms: 0,
+                penalty_duration: "".into(),
+                yield_duration: "".into(),
+                bulletin_level: "".into(),
+                properties: vec![],
+                validation_errors: vec![],
+            }),
+        );
+        let ring: VecDeque<crate::client::BulletinSnapshot> = VecDeque::new();
+        assert_eq!(s.section_len(DetailSection::Connections, &ring), 2);
     }
 }
