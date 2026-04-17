@@ -177,6 +177,29 @@ impl ViewKeyHandler for BrowserHandler {
                     })
                 }
                 FocusAction::Descend => {
+                    // On the ReferencingComponents section of a CS, emit a
+                    // Goto intent so the Browser jumps to the referenced
+                    // component (processor / other CS / etc.).
+                    if sections.0.get(idx) == Some(&DetailSection::ReferencingComponents) {
+                        let Some(NodeDetail::ControllerService(cs)) =
+                            state.browser.details.get(&arena_idx)
+                        else {
+                            return Some(UpdateResult::default());
+                        };
+                        let Some(target) = cs.referencing_components.get(rows[idx]) else {
+                            return Some(UpdateResult::default());
+                        };
+                        let intent =
+                            super::PendingIntent::Goto(crate::intent::CrossLink::OpenInBrowser {
+                                component_id: target.id.clone(),
+                                group_id: target.group_id.clone(),
+                            });
+                        return Some(UpdateResult {
+                            redraw: true,
+                            intent: Some(intent),
+                            tracer_followup: None,
+                        });
+                    }
                     // On the ChildGroups section, drill into the selected child PG.
                     if sections.0.get(idx) == Some(&DetailSection::ChildGroups) {
                         let pg_id = match state.browser.details.get(&arena_idx) {
@@ -1965,5 +1988,107 @@ mod tests {
             !s.browser.expanded.contains(&arena),
             "folder must be collapsed after second Descend"
         );
+    }
+
+    #[test]
+    fn descend_on_referencing_component_emits_goto() {
+        use crate::app::state::PendingIntent;
+        use crate::client::{ControllerServiceDetail, ReferencingComponent, ReferencingKind};
+        use crate::intent::CrossLink;
+        use crate::view::browser::state::{
+            DetailFocus, DetailSection, DetailSections, MAX_DETAIL_SECTIONS, NodeDetail,
+        };
+
+        let mut s = crate::test_support::fresh_state();
+        // Minimal browser arena with one CS node at index 1 under a root PG at 0.
+        s.browser.nodes.clear();
+        s.browser.nodes.push(crate::view::browser::state::TreeNode {
+            parent: None,
+            children: vec![1],
+            kind: NodeKind::ProcessGroup,
+            id: "root".into(),
+            group_id: "root".into(),
+            name: "root".into(),
+            status_summary: NodeStatusSummary::ProcessGroup {
+                running: 0,
+                stopped: 0,
+                invalid: 0,
+                disabled: 0,
+            },
+        });
+        s.browser.nodes.push(crate::view::browser::state::TreeNode {
+            parent: Some(0),
+            children: vec![],
+            kind: NodeKind::ControllerService,
+            id: "cs".into(),
+            group_id: "root".into(),
+            name: "pool".into(),
+            status_summary: NodeStatusSummary::ControllerService {
+                state: "ENABLED".into(),
+            },
+        });
+        s.browser.expanded.insert(0);
+        crate::view::browser::state::rebuild_visible(&mut s.browser);
+        s.browser.selected = s.browser.visible.iter().position(|&i| i == 1).unwrap();
+
+        let cs = ControllerServiceDetail {
+            id: "cs".into(),
+            name: "pool".into(),
+            type_name: "T".into(),
+            bundle: "".into(),
+            state: "ENABLED".into(),
+            parent_group_id: Some("root".into()),
+            properties: vec![],
+            validation_errors: vec![],
+            bulletin_level: "INFO".into(),
+            comments: "".into(),
+            restricted: false,
+            deprecated: false,
+            persists_state: false,
+            referencing_components: vec![ReferencingComponent {
+                id: "proc-x".into(),
+                name: "p".into(),
+                kind: ReferencingKind::Processor,
+                state: "RUNNING".into(),
+                active_thread_count: 0,
+                group_id: "child-group".into(),
+            }],
+        };
+        s.browser
+            .details
+            .insert(1, NodeDetail::ControllerService(cs));
+
+        // Focus the Referencing components section, first row.
+        let sections = DetailSections::for_node(NodeKind::ControllerService);
+        let ref_idx = sections
+            .0
+            .iter()
+            .position(|sec| *sec == DetailSection::ReferencingComponents)
+            .expect("CS sections must include ReferencingComponents");
+        let mut rows = [0usize; MAX_DETAIL_SECTIONS];
+        rows[ref_idx] = 0;
+        s.browser.detail_focus = DetailFocus::Section {
+            idx: ref_idx,
+            rows,
+            x_offsets: [0; MAX_DETAIL_SECTIONS],
+        };
+
+        let r = BrowserHandler::handle_focus(&mut s, crate::input::FocusAction::Descend)
+            .expect("descend must produce a result");
+
+        // Intent must be a Goto(OpenInBrowser) carrying the referenced
+        // processor's id and its group id.
+        match r.intent {
+            Some(PendingIntent::Goto(CrossLink::OpenInBrowser {
+                component_id,
+                group_id,
+            })) => {
+                assert_eq!(component_id, "proc-x");
+                assert_eq!(group_id, "child-group");
+            }
+            other => {
+                panic!("Descend on ref-components row must emit Goto(OpenInBrowser), got {other:?}")
+            }
+        }
     }
 }
