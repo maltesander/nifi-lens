@@ -177,6 +177,28 @@ impl ViewKeyHandler for BrowserHandler {
                     })
                 }
                 FocusAction::Descend => {
+                    // Endpoints (Connection detail): row 0 = FROM, row 1 = TO.
+                    if sections.0.get(idx) == Some(&DetailSection::Endpoints) {
+                        let Some(NodeDetail::Connection(c)) = state.browser.details.get(&arena_idx)
+                        else {
+                            return Some(UpdateResult::default());
+                        };
+                        let (component_id, group_id) = match rows[idx] {
+                            0 => (c.source_id.clone(), c.source_group_id.clone()),
+                            1 => (c.destination_id.clone(), c.destination_group_id.clone()),
+                            _ => return Some(UpdateResult::default()),
+                        };
+                        let intent =
+                            super::PendingIntent::Goto(crate::intent::CrossLink::OpenInBrowser {
+                                component_id,
+                                group_id,
+                            });
+                        return Some(UpdateResult {
+                            redraw: true,
+                            intent: Some(intent),
+                            tracer_followup: None,
+                        });
+                    }
                     // On the ReferencingComponents section of a CS, emit a
                     // Goto intent so the Browser jumps to the referenced
                     // component (processor / other CS / etc.).
@@ -2140,5 +2162,138 @@ mod tests {
             s.browser_selection_has_properties(),
             "p (OpenProperties) must be enabled on a CS tree row"
         );
+    }
+
+    /// Build a minimal browser state with a single Connection node at arena
+    /// index 1 (child of root at 0) and a `ConnectionDetail` inserted, with
+    /// `detail_focus` set to the Endpoints section (idx 0).
+    fn browser_state_on_connection_endpoints(row: usize) -> (AppState, crate::config::Config) {
+        use crate::client::{ConnectionDetail, NodeKind, NodeStatusSummary};
+        use crate::view::browser::state::{
+            DetailFocus, DetailSection, DetailSections, MAX_DETAIL_SECTIONS, NodeDetail, TreeNode,
+            rebuild_visible,
+        };
+
+        let mut s = crate::test_support::fresh_state();
+        s.current_tab = ViewId::Browser;
+
+        s.browser.nodes.clear();
+        s.browser.nodes.push(TreeNode {
+            parent: None,
+            children: vec![1],
+            kind: NodeKind::ProcessGroup,
+            id: "root".into(),
+            group_id: "root".into(),
+            name: "root".into(),
+            status_summary: NodeStatusSummary::ProcessGroup {
+                running: 0,
+                stopped: 0,
+                invalid: 0,
+                disabled: 0,
+            },
+        });
+        s.browser.nodes.push(TreeNode {
+            parent: Some(0),
+            children: vec![],
+            kind: NodeKind::Connection,
+            id: "conn".into(),
+            group_id: "root".into(),
+            name: "src→dst".into(),
+            status_summary: NodeStatusSummary::Connection {
+                fill_percent: 0,
+                flow_files_queued: 0,
+                queued_display: "0".into(),
+                source_id: "src-proc".into(),
+                source_name: "Source".into(),
+                destination_id: "dst-proc".into(),
+                destination_name: "Dest".into(),
+            },
+        });
+        s.browser.expanded.insert(0);
+        rebuild_visible(&mut s.browser);
+        s.browser.selected = s.browser.visible.iter().position(|&i| i == 1).unwrap();
+
+        s.browser.details.insert(
+            1,
+            NodeDetail::Connection(ConnectionDetail {
+                id: "conn".into(),
+                name: "src→dst".into(),
+                source_id: "src-proc".into(),
+                source_name: "Source".into(),
+                source_type: "PROCESSOR".into(),
+                source_group_id: "root".into(),
+                destination_id: "dst-proc".into(),
+                destination_name: "Dest".into(),
+                destination_type: "PROCESSOR".into(),
+                destination_group_id: "root".into(),
+                selected_relationships: vec!["success".into()],
+                available_relationships: vec!["success".into()],
+                back_pressure_object_threshold: 0,
+                back_pressure_data_size_threshold: "".into(),
+                flow_file_expiration: "".into(),
+                load_balance_strategy: "".into(),
+                fill_percent: 0,
+                flow_files_queued: 0,
+                bytes_queued: 0,
+                queued_display: "0".into(),
+            }),
+        );
+
+        // Focus the Endpoints section (idx 0) with the requested row cursor.
+        let sections = DetailSections::for_node(NodeKind::Connection);
+        let ep_idx = sections
+            .0
+            .iter()
+            .position(|sec| *sec == DetailSection::Endpoints)
+            .expect("Connection sections must include Endpoints");
+        let mut rows = [0usize; MAX_DETAIL_SECTIONS];
+        rows[ep_idx] = row;
+        s.browser.detail_focus = DetailFocus::Section {
+            idx: ep_idx,
+            rows,
+            x_offsets: [0; MAX_DETAIL_SECTIONS],
+        };
+
+        (s, tiny_config())
+    }
+
+    #[test]
+    fn descend_on_focused_endpoints_row_zero_emits_open_in_browser_for_source() {
+        use crate::app::state::PendingIntent;
+        use crate::intent::CrossLink;
+
+        let (mut s, _c) = browser_state_on_connection_endpoints(0);
+        let r = BrowserHandler::handle_focus(&mut s, crate::input::FocusAction::Descend)
+            .expect("Descend on Endpoints must produce a result");
+        match r.intent {
+            Some(PendingIntent::Goto(CrossLink::OpenInBrowser {
+                component_id,
+                group_id,
+            })) => {
+                assert_eq!(component_id, "src-proc");
+                assert_eq!(group_id, "root");
+            }
+            other => panic!("expected Goto(OpenInBrowser {{ src-proc }}), got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn descend_on_focused_endpoints_row_one_emits_open_in_browser_for_destination() {
+        use crate::app::state::PendingIntent;
+        use crate::intent::CrossLink;
+
+        let (mut s, _c) = browser_state_on_connection_endpoints(1);
+        let r = BrowserHandler::handle_focus(&mut s, crate::input::FocusAction::Descend)
+            .expect("Descend on Endpoints must produce a result");
+        match r.intent {
+            Some(PendingIntent::Goto(CrossLink::OpenInBrowser {
+                component_id,
+                group_id,
+            })) => {
+                assert_eq!(component_id, "dst-proc");
+                assert_eq!(group_id, "root");
+            }
+            other => panic!("expected Goto(OpenInBrowser {{ dst-proc }}), got {other:?}"),
+        }
     }
 }
