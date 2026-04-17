@@ -199,6 +199,35 @@ impl ViewKeyHandler for BrowserHandler {
                             tracer_followup: None,
                         });
                     }
+                    // Properties (Processor or CS): jump when the selected
+                    // row's value resolves to a known arena node.
+                    if sections.0.get(idx) == Some(&DetailSection::Properties) {
+                        let value = match state.browser.details.get(&arena_idx) {
+                            Some(NodeDetail::Processor(p)) => {
+                                p.properties.get(rows[idx]).map(|(_, v)| v.clone())
+                            }
+                            Some(NodeDetail::ControllerService(cs)) => {
+                                cs.properties.get(rows[idx]).map(|(_, v)| v.clone())
+                            }
+                            _ => None,
+                        };
+                        if let Some(v) = value
+                            && let Some(r) = state.browser.resolve_id(&v)
+                        {
+                            let intent = super::PendingIntent::Goto(
+                                crate::intent::CrossLink::OpenInBrowser {
+                                    component_id: v,
+                                    group_id: r.group_id,
+                                },
+                            );
+                            return Some(UpdateResult {
+                                redraw: true,
+                                intent: Some(intent),
+                                tracer_followup: None,
+                            });
+                        }
+                        return Some(UpdateResult::default());
+                    }
                     // On the ReferencingComponents section of a CS, emit a
                     // Goto intent so the Browser jumps to the referenced
                     // component (processor / other CS / etc.).
@@ -2295,5 +2324,99 @@ mod tests {
             }
             other => panic!("expected Goto(OpenInBrowser {{ dst-proc }}), got {other:?}"),
         }
+    }
+
+    #[test]
+    fn descend_on_focused_properties_row_with_resolvable_uuid_emits_goto() {
+        use crate::client::{NodeKind, NodeStatusSummary};
+        use crate::intent::CrossLink;
+        use crate::view::browser::state::{
+            DetailFocus, DetailSection, DetailSections, MAX_DETAIL_SECTIONS, NodeDetail, TreeNode,
+        };
+
+        let (mut s, _c) = fresh_browser_on_processor_with_properties();
+        let cs_uuid = "a1b2c3d4-e5f6-7890-abcd-ef1234567890";
+
+        // Add a CS node to the arena so the UUID resolves.
+        s.browser.nodes.push(TreeNode {
+            parent: Some(0),
+            children: vec![],
+            kind: NodeKind::ControllerService,
+            id: cs_uuid.into(),
+            group_id: "root".into(),
+            name: "http-pool".into(),
+            status_summary: NodeStatusSummary::ControllerService {
+                state: "ENABLED".into(),
+            },
+        });
+
+        // Rewrite the selected processor's detail to have our one property.
+        if let Some(NodeDetail::Processor(p)) = s.browser.details.get_mut(&1) {
+            p.properties = vec![("Record Reader".into(), cs_uuid.into())];
+        }
+
+        // Focus Properties section row 0. Resolve Properties' index so we
+        // don't depend on it being 0 forever.
+        let sections = DetailSections::for_node_detail(NodeKind::Processor, false);
+        let props_idx = sections
+            .0
+            .iter()
+            .position(|x| *x == DetailSection::Properties)
+            .expect("Processor has Properties section");
+        s.browser.detail_focus = DetailFocus::Section {
+            idx: props_idx,
+            rows: [0; MAX_DETAIL_SECTIONS],
+            x_offsets: [0; MAX_DETAIL_SECTIONS],
+        };
+
+        let result = BrowserHandler::handle_focus(&mut s, crate::input::FocusAction::Descend)
+            .expect("Descend must be handled");
+
+        use crate::app::state::PendingIntent;
+        match result.intent {
+            Some(PendingIntent::Goto(CrossLink::OpenInBrowser {
+                component_id,
+                group_id,
+            })) => {
+                assert_eq!(component_id, cs_uuid);
+                assert_eq!(group_id, "root");
+            }
+            other => panic!("expected Goto(OpenInBrowser), got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn descend_on_focused_properties_row_with_non_resolvable_value_is_noop() {
+        use crate::client::NodeKind;
+        use crate::view::browser::state::{
+            DetailFocus, DetailSection, DetailSections, MAX_DETAIL_SECTIONS, NodeDetail,
+        };
+
+        let (mut s, _c) = fresh_browser_on_processor_with_properties();
+        if let Some(NodeDetail::Processor(p)) = s.browser.details.get_mut(&1) {
+            p.properties = vec![("Batch Size".into(), "500".into())];
+        }
+
+        let sections = DetailSections::for_node_detail(NodeKind::Processor, false);
+        let props_idx = sections
+            .0
+            .iter()
+            .position(|x| *x == DetailSection::Properties)
+            .expect("Processor has Properties section");
+        s.browser.detail_focus = DetailFocus::Section {
+            idx: props_idx,
+            rows: [0; MAX_DETAIL_SECTIONS],
+            x_offsets: [0; MAX_DETAIL_SECTIONS],
+        };
+
+        let result =
+            super::BrowserHandler::handle_focus(&mut s, crate::input::FocusAction::Descend)
+                .expect("Descend must be handled");
+
+        assert!(
+            result.intent.is_none(),
+            "Descend on non-resolvable property row must be a silent no-op, got {:?}",
+            result.intent
+        );
     }
 }
