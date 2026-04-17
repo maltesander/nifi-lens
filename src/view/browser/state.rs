@@ -1128,6 +1128,7 @@ mod tests {
         RecursiveSnapshot {
             nodes,
             fetched_at: UNIX_EPOCH,
+            cs_fetch_error: None,
         }
     }
 
@@ -1741,6 +1742,7 @@ mod tests {
         // Root PG → one processor with RUNNING.
         let snap = RecursiveSnapshot {
             fetched_at: UNIX_EPOCH,
+            cs_fetch_error: None,
             nodes: vec![
                 RawNode {
                     parent_idx: None,
@@ -1776,6 +1778,7 @@ mod tests {
     fn pg_health_rollup_yellow_when_any_stopped() {
         let snap = RecursiveSnapshot {
             fetched_at: UNIX_EPOCH,
+            cs_fetch_error: None,
             nodes: vec![
                 RawNode {
                     parent_idx: None,
@@ -1821,6 +1824,7 @@ mod tests {
     fn pg_health_rollup_red_when_any_invalid_even_if_some_stopped() {
         let snap = RecursiveSnapshot {
             fetched_at: UNIX_EPOCH,
+            cs_fetch_error: None,
             nodes: vec![
                 RawNode {
                     parent_idx: None,
@@ -1867,6 +1871,7 @@ mod tests {
         // Root PG → inner PG → processor INVALID.
         let snap = RecursiveSnapshot {
             fetched_at: UNIX_EPOCH,
+            cs_fetch_error: None,
             nodes: vec![
                 RawNode {
                     parent_idx: None,
@@ -1916,6 +1921,7 @@ mod tests {
     fn pg_health_rollup_green_for_empty_pg() {
         let snap = RecursiveSnapshot {
             fetched_at: UNIX_EPOCH,
+            cs_fetch_error: None,
             nodes: vec![RawNode {
                 parent_idx: None,
                 kind: NodeKind::ProcessGroup,
@@ -1993,6 +1999,7 @@ mod tests {
                 },
             ],
             fetched_at: UNIX_EPOCH,
+            cs_fetch_error: None,
         };
         let mut s = BrowserState::new();
         apply_tree_snapshot(&mut s, snap);
@@ -2041,6 +2048,7 @@ mod tests {
                 },
             ],
             fetched_at: UNIX_EPOCH,
+            cs_fetch_error: None,
         };
         let mut s = BrowserState::new();
         apply_tree_snapshot(&mut s, snap);
@@ -2382,6 +2390,7 @@ mod tests {
                 cs("cs1", Some(0), "ENABLED"),
             ],
             fetched_at: fetched,
+            cs_fetch_error: None,
         };
         let mut s = BrowserState::new();
         apply_tree_snapshot(&mut s, snap);
@@ -2419,6 +2428,7 @@ mod tests {
         let snap = RecursiveSnapshot {
             nodes: vec![pg("root", None, 1), proc("p1", 0, "Running")],
             fetched_at: SystemTime::now(),
+            cs_fetch_error: None,
         };
         let mut s = BrowserState::new();
         apply_tree_snapshot(&mut s, snap);

@@ -404,3 +404,45 @@ async fn browser_port_detail_parses_input_port() {
     assert_eq!(d.comments, "accepts from edge agents");
     assert_eq!(d.concurrent_tasks, 3);
 }
+
+#[tokio::test]
+async fn browser_tree_cs_fetch_failure_is_non_fatal() {
+    let server = MockServer::start().await;
+    stub_login_and_about(&server).await;
+
+    let status_body = load_fixture("recursive_tree.json");
+    Mock::given(method("GET"))
+        .and(path("/nifi-api/flow/process-groups/root/status"))
+        .and(query_param("recursive", "true"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(status_body))
+        .mount(&server)
+        .await;
+
+    // CS endpoint returns 500 — tree should still render, error captured.
+    Mock::given(method("GET"))
+        .and(path(
+            "/nifi-api/flow/process-groups/root/controller-services",
+        ))
+        .respond_with(ResponseTemplate::new(500).set_body_string("upstream error"))
+        .mount(&server)
+        .await;
+
+    let client = NifiClient::connect(&ctx(server.uri())).await.unwrap();
+    let snap = client
+        .browser_tree()
+        .await
+        .expect("tree fetch must not fail on CS-only failure");
+
+    // 7 nodes (same as the base recursive_tree.json count, no CS).
+    assert_eq!(snap.nodes.len(), 7);
+    assert!(
+        snap.cs_fetch_error.is_some(),
+        "CS fetch error must be captured"
+    );
+    assert!(
+        snap.cs_fetch_error
+            .unwrap()
+            .contains("controller services list fetch failed"),
+        "error message must be human-readable"
+    );
+}

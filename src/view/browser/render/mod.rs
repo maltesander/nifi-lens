@@ -466,6 +466,7 @@ mod snapshots {
                 },
             ],
             fetched_at,
+            cs_fetch_error: None,
         };
         apply_tree_snapshot(&mut s, snap);
         // Re-pin last_fetched_at to stabilize the snapshot regardless of
@@ -545,6 +546,7 @@ mod snapshots {
                 },
             ],
             fetched_at,
+            cs_fetch_error: None,
         };
         apply_tree_snapshot(&mut s, snap);
         s.last_tree_fetched_at = Some(SystemTime::now() - std::time::Duration::from_secs(3));

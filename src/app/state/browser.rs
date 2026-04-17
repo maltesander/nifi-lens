@@ -540,6 +540,7 @@ mod tests {
                 },
             ],
             fetched_at: SystemTime::now(),
+            cs_fetch_error: None,
         };
         let r = update(
             &mut s,
@@ -598,6 +599,7 @@ mod tests {
                 },
             ],
             fetched_at: SystemTime::now(),
+            cs_fetch_error: None,
         };
         update(
             &mut s,
@@ -886,6 +888,7 @@ mod tests {
                 },
             ],
             fetched_at: SystemTime::now(),
+            cs_fetch_error: None,
         };
         update(
             &mut s,
@@ -1572,6 +1575,7 @@ mod tests {
                 },
             ],
             fetched_at: SystemTime::now(),
+            cs_fetch_error: None,
         };
         update(
             s,
@@ -1620,6 +1624,7 @@ mod tests {
                 },
             ],
             fetched_at: SystemTime::now(),
+            cs_fetch_error: None,
         };
         update(
             s,
@@ -1953,6 +1958,7 @@ mod tests {
                     },
                 ],
                 fetched_at: std::time::SystemTime::now(),
+                cs_fetch_error: None,
             },
         );
 

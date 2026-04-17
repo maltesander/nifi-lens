@@ -1646,8 +1646,16 @@ fn handle_browser_payload(state: &mut AppState, payload: crate::event::BrowserPa
     use crate::event::BrowserPayload;
     match payload {
         BrowserPayload::Tree(snap) => {
+            // Surface the non-fatal CS-list fetch failure as a warning
+            // banner. Captured by `browser_tree` when the descendant-CS
+            // call fails while the base status call succeeded — the tree
+            // still renders, just without CS rows.
+            let cs_fetch_error = snap.cs_fetch_error.clone();
             apply_tree_snapshot(&mut state.browser, snap);
             state.flow_index = Some(build_flow_index(&state.browser));
+            if let Some(msg) = cs_fetch_error {
+                state.post_warning(msg);
+            }
         }
         BrowserPayload::Detail(detail) => {
             crate::view::browser::state::apply_node_detail(&mut state.browser, *detail);
@@ -1952,6 +1960,7 @@ mod tests {
                 },
             ],
             fetched_at: SystemTime::now(),
+            cs_fetch_error: None,
         };
         update(
             &mut s,
