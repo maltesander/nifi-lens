@@ -51,7 +51,7 @@ pub struct ChildPgSummary {
 /// This is a closed set — adding a new variant requires updating
 /// `DetailSections::for_node`, `DetailSections::for_node_detail`, and
 /// the render leaves that draw it.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum DetailSection {
     Properties,
     ValidationErrors,

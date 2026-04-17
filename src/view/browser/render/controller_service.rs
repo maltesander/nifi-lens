@@ -252,7 +252,7 @@ fn render_properties_panel(
         .properties
         .iter()
         .map(|(k, v)| {
-            let value_cell = match format_property_value(v, state) {
+            let value_cell = match super::format_property_value(v, state) {
                 Some(formatted) => Cell::from(formatted),
                 None => Cell::from(char_skip(v, x_offset)),
             };
@@ -434,20 +434,6 @@ fn render_recent_bulletins_panel(
         ts.select(Some(rows[my_idx]));
     }
     frame.render_stateful_widget(table, inner, &mut ts);
-}
-
-/// Format a property value. Returns `Some(Line)` when the raw value is
-/// a UUID that resolves to a known arena node (rendered as
-/// `<name> (short8…) →`). Returns `None` otherwise, so the caller can
-/// fall back to raw-value rendering (with x-offset scrolling).
-fn format_property_value(raw: &str, state: &BrowserState) -> Option<Line<'static>> {
-    let r = state.resolve_id(raw)?;
-    let short: String = raw.trim().chars().take(8).collect();
-    Some(Line::from(vec![
-        Span::raw(r.name),
-        Span::styled(format!(" ({short}…)"), theme::muted()),
-        Span::styled(" →", theme::muted()),
-    ]))
 }
 
 /// Extract `HH:MM:SS` from an ISO-8601 timestamp, falling back to a

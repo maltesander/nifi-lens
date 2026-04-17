@@ -25,6 +25,21 @@ use crate::layout;
 use crate::theme;
 use crate::view::browser::state::{BrowserState, FlowIndex, NodeDetail, PgHealth};
 
+/// Format a property value for Processor/CS detail tables. Returns
+/// `Some(Line)` when the raw value is a UUID that resolves to a known
+/// arena node (rendered as `<name> (short8…) →`). Returns `None`
+/// otherwise, so the caller can fall back to raw-value rendering
+/// (with x-offset scrolling).
+pub(super) fn format_property_value(raw: &str, state: &BrowserState) -> Option<Line<'static>> {
+    let r = state.resolve_id(raw)?;
+    let short: String = raw.trim().chars().take(8).collect();
+    Some(Line::from(vec![
+        Span::raw(r.name),
+        Span::styled(format!(" ({short}…)"), theme::muted()),
+        Span::styled(" →", theme::muted()),
+    ]))
+}
+
 /// Entry point called from `app::ui`.
 pub fn render(
     frame: &mut Frame,

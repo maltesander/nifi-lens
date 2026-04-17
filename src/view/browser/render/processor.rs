@@ -243,7 +243,7 @@ fn render_properties_panel(
         .properties
         .iter()
         .map(|(k, v)| {
-            let value_cell = match format_property_value(v, state) {
+            let value_cell = match super::format_property_value(v, state) {
                 Some(formatted) => Cell::from(formatted),
                 None => Cell::from(char_skip(v, x_offset)),
             };
@@ -451,20 +451,6 @@ fn truncate(s: &str, max: usize) -> String {
 /// Skip the first `n` Unicode scalar values from `s`, returning the remainder.
 fn char_skip(s: &str, n: usize) -> String {
     s.chars().skip(n).collect()
-}
-
-/// Format a property value. Returns `Some(Line)` when the raw value is
-/// a UUID that resolves to a known arena node (rendered as
-/// `<name> (short8…) →`). Returns `None` otherwise, so the caller can
-/// fall back to raw-value rendering (with x-offset scrolling).
-fn format_property_value(raw: &str, state: &BrowserState) -> Option<Line<'static>> {
-    let r = state.resolve_id(raw)?;
-    let short: String = raw.trim().chars().take(8).collect();
-    Some(Line::from(vec![
-        Span::raw(r.name),
-        Span::styled(format!(" ({short}…)"), theme::muted()),
-        Span::styled(" →", theme::muted()),
-    ]))
 }
 
 #[cfg(test)]

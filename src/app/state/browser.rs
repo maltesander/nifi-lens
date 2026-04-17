@@ -216,7 +216,7 @@ impl ViewKeyHandler for BrowserHandler {
                         {
                             let intent = super::PendingIntent::Goto(
                                 crate::intent::CrossLink::OpenInBrowser {
-                                    component_id: v,
+                                    component_id: v.trim().to_string(),
                                     group_id: r.group_id,
                                 },
                             );
