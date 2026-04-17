@@ -25,6 +25,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   and a `Recent bulletins` section.
 - **Browser**: input / output ports have a working detail pane
   (identity + recent bulletins).
+- **Tracer content-pane preview cap**: bodies over 1 MiB are fetched with
+  a `Range: bytes=0-1048575` header and flagged as truncated in the panel
+  title. Save re-fetches the full body on demand.
+- **Integration fixture**: new `bulky-pipeline` producing ~1.5 MiB
+  flowfiles, and an `UpdateAttribute-cleanup` processor in
+  `healthy-pipeline/enrich` that exercises the attribute-removed rendering
+  path.
+
+### Changed
+
+- Fixture marker bumped to `nifilens-fixture-v2`; existing clusters will
+  be re-seeded automatically on next run.
+- `ContentSnapshot` no longer carries raw bytes; `ContentPane::Shown`
+  follows suit. The Save action now re-fetches via
+  `provenance_content_raw`.
+- `ContentRender::Text` now carries a single authoritative `String` plus a
+  `pretty_printed: bool` flag, replacing the separate `pretty: String`
+  field.
 
 ## [0.3.0] — 2026-04-15
 

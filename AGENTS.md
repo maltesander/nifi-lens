@@ -318,19 +318,23 @@ cargo run -- --config integration-tests/nifilens-config.toml \
 ```
 
 `--skip-if-seeded` makes re-runs of the seeder a no-op when the fixture
-marker PG (`nifilens-fixture-v1`) is already present, so iterating on
+marker PG (`nifilens-fixture-v2`) is already present, so iterating on
 `nifi-lens` itself doesn't reset the fixture state.
 
-The fixture is four process groups (`healthy-pipeline` with nested
+The fixture is five process groups (`healthy-pipeline` with nested
 `ingest` / `enrich` children, `noisy-pipeline`, `backpressure-pipeline`,
-`invalid-pipeline`) plus three controller services, all under a
-top-level marker PG named `nifilens-fixture-v1`. When the detected NiFi
-version is >= 2.9.0, the seeder also creates `stress-pipeline` — a
-longer branching flow with ConvertRecord (JSON to CSV), UpdateRecord,
-RouteOnAttribute (hot/normal split), and dual ControlRate bottlenecks
-for sustained queue backpressure, plus four additional controller
-services. Bumping the marker name invalidates stale fixtures
-automatically on the next seed pass.
+`invalid-pipeline`, and `bulky-pipeline`) plus three controller services,
+all under a top-level marker PG named `nifilens-fixture-v2`.
+`bulky-pipeline` produces ~1.5 MiB flowfiles at a low rate, providing
+content for Tracer truncation testing. The `healthy-pipeline/enrich`
+processor chain now ends with `UpdateAttribute-cleanup` before
+`LogAttribute-INFO`, exercising the attribute-removed rendering path in
+the Tracer content pane. When the detected NiFi version is >= 2.9.0, the
+seeder also creates `stress-pipeline` — a longer branching flow with
+ConvertRecord (JSON to CSV), UpdateRecord, RouteOnAttribute (hot/normal
+split), and dual ControlRate bottlenecks for sustained queue backpressure,
+plus four additional controller services. Bumping the marker name
+invalidates stale fixtures automatically on the next seed pass.
 
 ### Bumping the NiFi ceiling version
 
