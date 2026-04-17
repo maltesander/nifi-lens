@@ -27,7 +27,7 @@ pub fn render(
 
     let rows = Layout::default()
         .direction(Direction::Vertical)
-        .constraints([Constraint::Length(6), Constraint::Fill(1)])
+        .constraints([Constraint::Length(7), Constraint::Fill(1)])
         .split(inner);
 
     render_identity(frame, rows[0], d);
@@ -64,6 +64,12 @@ fn render_identity(frame: &mut Frame, area: Rect, d: &PortDetail) {
     let inner = block.inner(area);
     frame.render_widget(block, area);
     let parent = d.parent_group_id.as_deref().unwrap_or("(root)");
+    let w = inner.width.saturating_sub(18) as usize;
+    let comments = if d.comments.is_empty() {
+        "—".to_string()
+    } else {
+        truncate(&d.comments, w)
+    };
     let lines = vec![
         Line::from(vec![
             Span::styled("kind            ", theme::muted()),
@@ -78,11 +84,27 @@ fn render_identity(frame: &mut Frame, area: Rect, d: &PortDetail) {
             Span::raw(parent.to_string()),
         ]),
         Line::from(vec![
+            Span::styled("comments        ", theme::muted()),
+            Span::raw(comments),
+        ]),
+        Line::from(vec![
             Span::styled("concurrent tasks", theme::muted()),
             Span::raw(format!(" {}", d.concurrent_tasks)),
         ]),
     ];
     frame.render_widget(Paragraph::new(lines), inner);
+}
+
+fn truncate(s: &str, max: usize) -> String {
+    if max == 0 {
+        return String::new();
+    }
+    if s.chars().count() <= max {
+        s.to_string()
+    } else {
+        let head: String = s.chars().take(max.saturating_sub(1)).collect();
+        format!("{head}…")
+    }
 }
 
 fn render_recent_bulletins(
@@ -159,6 +181,28 @@ mod snapshots {
     use insta::assert_snapshot;
     use ratatui::Terminal;
     use ratatui::backend::TestBackend;
+
+    #[test]
+    fn port_detail_output_port_renders_without_comments() {
+        let d = PortDetail {
+            id: "out-1".into(),
+            name: "downstream".into(),
+            kind: PortKind::Output,
+            state: "STOPPED".into(),
+            comments: String::new(),
+            concurrent_tasks: 1,
+            parent_group_id: Some("ingest".into()),
+        };
+        let state = BrowserState::new();
+        let bulletins: VecDeque<BulletinSnapshot> = VecDeque::new();
+        let mut term = Terminal::new(TestBackend::new(100, 20)).unwrap();
+        term.draw(|f| render(f, f.area(), &d, &state, &bulletins, &DetailFocus::Tree))
+            .unwrap();
+        assert_snapshot!(
+            "port_detail_output_port_renders_without_comments",
+            format!("{}", term.backend())
+        );
+    }
 
     #[test]
     fn port_detail_input_port_renders() {
