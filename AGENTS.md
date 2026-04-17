@@ -228,6 +228,34 @@ rows and re-parent the leaves. Folders are never cross-link targets,
 never emit detail-fetch requests, and are filtered out of the fuzzy-
 find flow index.
 
+### Browser cross-navigation
+
+Any row rendered in a Browser detail sub-panel whose value resolves to
+a node in the arena is annotated with a trailing `→`. Pressing Enter
+(Descend) on such a row emits `CrossLink::OpenInBrowser`, reusing the
+reducer arm that already handles Bulletins → Browser and CS
+Referencing → Browser jumps. Resolution goes through
+`BrowserState::resolve_id`, which gates on a canonical-UUID shape
+check before scanning `state.nodes` — a linear scan the renderer
+performs once per annotatable row.
+
+Jumpable surfaces:
+
+- Connection detail: `Endpoints` section (FROM/TO rows → source /
+  destination component).
+- Processor / Controller Service detail: `Properties` rows whose value
+  is a UUID pointing to a known arena node (typically CS references).
+- Processor detail: the `Connections` section (→ opposite endpoint).
+- Controller Service & Port Identity panels resolve `parent` /
+  `parent group` UUIDs to the owning PG's name (display only — parent
+  is always reachable via Left/Ascend).
+
+Selected-relationships on connections are intentionally not surfaced
+in the processor Connections section: that data lives on
+`ConnectionDTO` (fetched by `browser_connection_detail`), not on the
+status snapshot the tree walker reads. Surfacing them would cost a
+second fetch per connection.
+
 ## Dependency on `nifi-rust-client`
 
 `nifi-lens` depends on `nifi-rust-client` with the `dynamic` feature,

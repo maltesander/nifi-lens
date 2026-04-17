@@ -40,6 +40,11 @@
 - **Cluster overview** — health dashboard with bulletin-rate sparkline, queue backpressure, per-node heap/GC, and noisiest components.
 - **Bulletin tail** — live cluster-wide log with severity filters, source deduplication, and per-source mute.
 - **Flow browser** — component tree with per-node detail; `Shift+F` fuzzy search across all known components.
+  - **Cross-navigation.** Detail rows whose value is a known component
+    (queue endpoints, processor UUID properties, inbound/outbound
+    connections) render a trailing `→` and jump to that component on
+    Enter. Controller Service and Port Identity panels resolve the
+    parent group UUID to the PG name.
 - **Provenance events** — filterable cluster-wide event search cross-linked from Bulletins and Browser.
 - **Flowfile tracer** — paste a UUID to trace its full lineage with attribute diffs and content previews (text, JSON, hex).
 - **Multi-cluster** — kubeconfig-style contexts; `Shift+K` to switch clusters; one binary for every NiFi 2.x version.
