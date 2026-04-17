@@ -1,0 +1,24 @@
+{
+  "controllerServices": [
+    {
+      "id": "cs-root-1",
+      "component": {
+        "id": "cs-root-1",
+        "name": "root-ssl-context",
+        "type": "org.apache.nifi.ssl.StandardRestrictedSSLContextService",
+        "parentGroupId": "root",
+        "state": "ENABLED"
+      }
+    },
+    {
+      "id": "cs-child-1",
+      "component": {
+        "id": "cs-child-1",
+        "name": "child-dbcp-pool",
+        "type": "org.apache.nifi.dbcp.DBCPConnectionPool",
+        "parentGroupId": "child",
+        "state": "DISABLED"
+      }
+    }
+  ]
+}
