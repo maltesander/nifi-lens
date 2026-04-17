@@ -579,7 +579,7 @@ pub fn lineage_content_line_count(view: &LineageView) -> usize {
     } = &view.event_detail
     {
         match render {
-            ContentRender::Text { pretty } => pretty.lines().count().max(1),
+            ContentRender::Text { text, .. } => text.lines().count().max(1),
             ContentRender::Hex { first_4k } => first_4k.lines().count().max(1),
             ContentRender::Empty => 1,
         }
@@ -1731,7 +1731,8 @@ mod tests {
             event_id: 42,
             side: ContentSide::Output,
             render: ContentRender::Text {
-                pretty: "hello".to_string(),
+                text: "hello".to_string(),
+                pretty_printed: false,
             },
             bytes_fetched: 5,
             truncated: false,
@@ -1959,7 +1960,8 @@ mod tests {
             *content = ContentPane::Shown {
                 side: ContentSide::Output,
                 render: ContentRender::Text {
-                    pretty: body.to_string(),
+                    text: body.to_string(),
+                    pretty_printed: false,
                 },
                 bytes_fetched: body.len(),
                 truncated: false,
@@ -2065,7 +2067,8 @@ mod tests {
                 event_id: 1,
                 side: ContentSide::Output,
                 render: ContentRender::Text {
-                    pretty: new_body.to_string(),
+                    text: new_body.to_string(),
+                    pretty_printed: false,
                 },
                 bytes_fetched: new_body.len(),
                 truncated: false,

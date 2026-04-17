@@ -580,7 +580,7 @@ fn render_content_panel(frame: &mut Frame, area: Rect, content: &ContentPane, vi
                 ContentSide::Output => "output",
             };
             let body = match render {
-                ContentRender::Text { pretty } => pretty.clone(),
+                ContentRender::Text { text, .. } => text.clone(),
                 ContentRender::Hex { first_4k } => first_4k.clone(),
                 ContentRender::Empty => "(empty)".to_string(),
             };
@@ -1093,7 +1093,8 @@ mod tests {
                 content: ContentPane::Shown {
                     side: ContentSide::Output,
                     render: ContentRender::Text {
-                        pretty: "{\n  \"key\": \"value\",\n  \"count\": 42\n}".to_string(),
+                        text: "{\n  \"key\": \"value\",\n  \"count\": 42\n}".to_string(),
+                        pretty_printed: false,
                     },
                     bytes_fetched: 36,
                     truncated: false,

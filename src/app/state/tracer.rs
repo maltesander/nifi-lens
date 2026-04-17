@@ -1066,7 +1066,8 @@ mod tests {
                 content: ContentPane::Shown {
                     side: ContentSide::Input,
                     render: ContentRender::Text {
-                        pretty: "data".to_string(),
+                        text: "data".to_string(),
+                        pretty_printed: false,
                     },
                     bytes_fetched: 4,
                     truncated: false,
@@ -1232,7 +1233,8 @@ mod tests {
                 *content = ContentPane::Shown {
                     side: ClientSide::Input,
                     render: ContentRender::Text {
-                        pretty: "hi".into(),
+                        text: "hi".into(),
+                        pretty_printed: false,
                     },
                     bytes_fetched: 2,
                     truncated: false,

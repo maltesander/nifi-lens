@@ -273,10 +273,10 @@ async fn provenance_content_input_text_json_is_pretty_printed() {
     assert_eq!(snap.side, ContentSide::Input);
     assert_eq!(snap.bytes_fetched, br#"{"a":1,"b":2}"#.len());
     match snap.render {
-        ContentRender::Text { pretty } => {
-            assert!(pretty.contains('\n'), "expected newlines in pretty output");
-            assert!(pretty.contains("\"a\": 1"));
-            assert!(pretty.contains("\"b\": 2"));
+        ContentRender::Text { text, .. } => {
+            assert!(text.contains('\n'), "expected newlines in pretty output");
+            assert!(text.contains("\"a\": 1"));
+            assert!(text.contains("\"b\": 2"));
         }
         other => panic!("expected ContentRender::Text, got: {other:?}"),
     }

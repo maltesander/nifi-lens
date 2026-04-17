@@ -93,8 +93,13 @@ pub enum LineagePoll {
 
 #[derive(Debug, Clone)]
 pub enum ContentRender {
-    Text { pretty: String },
+    /// Valid UTF-8 body. `pretty_printed` is true iff JSON pretty-
+    /// printing succeeded AND produced bytes different from the
+    /// original. `text` is always the authoritative render target.
+    Text { text: String, pretty_printed: bool },
+    /// Non-UTF-8 body, hex dump of up to the first 4 KiB.
     Hex { first_4k: String },
+    /// Empty body.
     Empty,
 }
 
@@ -423,8 +428,9 @@ impl NifiClient {
 
         let bytes_fetched = bytes.len();
         let truncated = matches!(max_bytes, Some(n) if bytes_fetched >= n);
-        let render = classify_content(&bytes);
-        let raw: std::sync::Arc<[u8]> = bytes.into();
+        // TODO(task-5): remove `raw` entirely; the Arc copy is throwaway while ContentSnapshot.raw still exists.
+        let raw: std::sync::Arc<[u8]> = std::sync::Arc::from(bytes.as_slice());
+        let render = classify_content(bytes);
 
         Ok(ContentSnapshot {
             event_id,
@@ -492,20 +498,32 @@ impl NifiClient {
 /// - Empty slice → [`ContentRender::Empty`]
 /// - Valid UTF-8 text → [`ContentRender::Text`] with JSON pretty-printing if parseable
 /// - Non-UTF-8 bytes → [`ContentRender::Hex`] with the first 4 KiB hex-dumped
-pub(crate) fn classify_content(bytes: &[u8]) -> ContentRender {
+pub(crate) fn classify_content(bytes: Vec<u8>) -> ContentRender {
     if bytes.is_empty() {
         return ContentRender::Empty;
     }
-    match std::str::from_utf8(bytes) {
+    match String::from_utf8(bytes) {
         Ok(text) => {
-            let pretty = serde_json::from_slice::<serde_json::Value>(bytes)
+            let pretty = serde_json::from_str::<serde_json::Value>(&text)
                 .and_then(|v| serde_json::to_string_pretty(&v))
-                .unwrap_or_else(|_| text.to_string());
-            ContentRender::Text { pretty }
+                .ok();
+            match pretty {
+                Some(p) if p != text => ContentRender::Text {
+                    text: p,
+                    pretty_printed: true,
+                },
+                _ => ContentRender::Text {
+                    text,
+                    pretty_printed: false,
+                },
+            }
         }
-        Err(_) => ContentRender::Hex {
-            first_4k: hex_dump(&bytes[..bytes.len().min(4096)]),
-        },
+        Err(err) => {
+            let bytes = err.into_bytes();
+            ContentRender::Hex {
+                first_4k: hex_dump(&bytes[..bytes.len().min(4096)]),
+            }
+        }
     }
 }
 
@@ -578,23 +596,26 @@ mod tests {
 
     #[test]
     fn classify_empty_is_empty() {
-        assert!(matches!(classify_content(b""), ContentRender::Empty));
+        assert!(matches!(
+            classify_content(b"".to_vec()),
+            ContentRender::Empty
+        ));
     }
 
     #[test]
     fn classify_plain_utf8_is_text() {
-        match classify_content(b"hello world") {
-            ContentRender::Text { pretty } => assert_eq!(pretty, "hello world"),
+        match classify_content(b"hello world".to_vec()) {
+            ContentRender::Text { text, .. } => assert_eq!(text, "hello world"),
             other => panic!("got {other:?}"),
         }
     }
 
     #[test]
     fn classify_json_is_prettyprinted_text() {
-        match classify_content(br#"{"a":1,"b":[2,3]}"#) {
-            ContentRender::Text { pretty } => {
-                assert!(pretty.contains("\"a\": 1"));
-                assert!(pretty.contains('\n'));
+        match classify_content(br#"{"a":1,"b":[2,3]}"#.to_vec()) {
+            ContentRender::Text { text, .. } => {
+                assert!(text.contains("\"a\": 1"));
+                assert!(text.contains('\n'));
             }
             other => panic!("got {other:?}"),
         }
@@ -603,7 +624,7 @@ mod tests {
     #[test]
     fn classify_invalid_utf8_is_hex() {
         let bytes = vec![0xff, 0x00, 0x61, 0xfe];
-        match classify_content(&bytes) {
+        match classify_content(bytes) {
             ContentRender::Hex { first_4k } => assert_eq!(first_4k, "ff 00 61 fe"),
             other => panic!("got {other:?}"),
         }
@@ -795,5 +816,68 @@ mod tests {
             .expect("fetch should succeed");
         assert_eq!(snap.bytes_fetched, 800);
         assert!(!snap.truncated);
+    }
+
+    #[test]
+    fn classify_content_empty_returns_empty() {
+        assert!(matches!(classify_content(Vec::new()), ContentRender::Empty));
+    }
+
+    #[test]
+    fn classify_content_plain_text_no_pretty_print() {
+        let csv = b"a,b,c\n1,2,3\n".to_vec();
+        match classify_content(csv.clone()) {
+            ContentRender::Text {
+                text,
+                pretty_printed,
+            } => {
+                assert_eq!(text.as_bytes(), csv.as_slice());
+                assert!(!pretty_printed);
+            }
+            other => panic!("expected Text, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn classify_content_json_pretty_prints() {
+        let compact = br#"{"a":1,"b":2}"#.to_vec();
+        match classify_content(compact) {
+            ContentRender::Text {
+                text,
+                pretty_printed,
+            } => {
+                assert!(pretty_printed);
+                assert!(text.contains('\n'));
+                let v: serde_json::Value = serde_json::from_str(&text).unwrap();
+                assert_eq!(v["a"], 1);
+            }
+            other => panic!("expected Text, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn classify_content_json_already_pretty_no_reformat() {
+        let pretty = "{\n  \"a\": 1\n}".as_bytes().to_vec();
+        match classify_content(pretty.clone()) {
+            ContentRender::Text {
+                text,
+                pretty_printed,
+            } => {
+                assert_eq!(text.as_bytes(), pretty.as_slice());
+                assert!(!pretty_printed);
+            }
+            other => panic!("expected Text, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn classify_content_non_utf8_hex() {
+        let bytes = vec![0xff, 0xfe, 0xfd];
+        match classify_content(bytes) {
+            ContentRender::Hex { first_4k } => {
+                assert!(first_4k.contains("ff fe fd"));
+            }
+            other => panic!("expected Hex, got {other:?}"),
+        }
     }
 }
