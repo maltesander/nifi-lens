@@ -275,6 +275,48 @@ async fn browser_tree_error_is_mapped_to_typed_nifilens_error() {
 }
 
 #[tokio::test]
+async fn browser_tree_includes_controller_services_under_owning_pgs() {
+    let server = MockServer::start().await;
+    stub_login_and_about(&server).await;
+
+    let status_body = load_fixture("recursive_tree.json");
+    Mock::given(method("GET"))
+        .and(path("/nifi-api/flow/process-groups/root/status"))
+        .and(query_param("recursive", "true"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(status_body))
+        .mount(&server)
+        .await;
+
+    let cs_body = load_fixture("root_cs_list.json");
+    Mock::given(method("GET"))
+        .and(path(
+            "/nifi-api/flow/process-groups/root/controller-services",
+        ))
+        .and(query_param("includeDescendantGroups", "true"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(cs_body))
+        .mount(&server)
+        .await;
+
+    let client = NifiClient::connect(&ctx(server.uri())).await.unwrap();
+    let snap = client.browser_tree().await.expect("ok");
+
+    // Base tree from recursive_tree.json had 7 nodes; +2 CS rows = 9.
+    assert_eq!(snap.nodes.len(), 9);
+
+    let cs: Vec<_> = snap
+        .nodes
+        .iter()
+        .filter(|n| matches!(n.kind, NodeKind::ControllerService))
+        .collect();
+    assert_eq!(cs.len(), 2);
+    // Each CS must parent to the arena entry for its owning PG.
+    for n in cs {
+        let parent = n.parent_idx.expect("CS must have a parent PG");
+        assert!(matches!(snap.nodes[parent].kind, NodeKind::ProcessGroup));
+    }
+}
+
+#[tokio::test]
 async fn browser_pg_detail_unauthorized_maps_to_typed_error() {
     let server = MockServer::start().await;
     stub_login_and_about(&server).await;

@@ -16,7 +16,7 @@
         "id": "cs-child-1",
         "name": "child-dbcp-pool",
         "type": "org.apache.nifi.dbcp.DBCPConnectionPool",
-        "parentGroupId": "child",
+        "parentGroupId": "ingest",
         "state": "DISABLED"
       }
     }
