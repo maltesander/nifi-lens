@@ -397,7 +397,10 @@ impl NifiClient {
         let id_str = event_id.to_string();
         let events_api = self.inner.provenanceevents();
         let cluster_node_id = self.inner.cluster_node_id();
-        let range = max_bytes.map(|n| format!("bytes=0-{}", n.saturating_sub(1)));
+        // NiFi treats the Range header's end value as exclusive (returns
+        // `last - first` bytes), unlike RFC 7233's inclusive semantics. Ask
+        // for one byte past the cap so we receive exactly `n` bytes back.
+        let range = max_bytes.map(|n| format!("bytes=0-{n}"));
         let range_ref = range.as_deref();
 
         let bytes = match side {
@@ -767,7 +770,7 @@ mod tests {
             .and(wiremock::matchers::path(
                 "/nifi-api/provenance-events/8/content/output",
             ))
-            .and(wiremock::matchers::header("range", "bytes=0-1023"))
+            .and(wiremock::matchers::header("range", "bytes=0-1024"))
             .respond_with(
                 wiremock::ResponseTemplate::new(206)
                     .set_body_bytes(vec![b'x'; 1024])
@@ -793,7 +796,7 @@ mod tests {
             .and(wiremock::matchers::path(
                 "/nifi-api/provenance-events/9/content/output",
             ))
-            .and(wiremock::matchers::header("range", "bytes=0-1023"))
+            .and(wiremock::matchers::header("range", "bytes=0-1024"))
             .respond_with(
                 wiremock::ResponseTemplate::new(200)
                     .set_body_bytes(vec![b'x'; 800])
