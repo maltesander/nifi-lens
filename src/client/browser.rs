@@ -77,6 +77,10 @@ pub enum NodeStatusSummary {
         fill_percent: u32,
         flow_files_queued: u32,
         queued_display: String,
+        source_id: String,
+        source_name: String,
+        destination_id: String,
+        destination_name: String,
     },
     ControllerService {
         state: String,
@@ -246,6 +250,10 @@ fn walk_pg_snapshot(
                     fill_percent: by_count.max(by_bytes),
                     flow_files_queued: c.flow_files_queued.unwrap_or(0).max(0) as u32,
                     queued_display: c.queued.clone().unwrap_or_default(),
+                    source_id: c.source_id.clone().unwrap_or_default(),
+                    source_name: c.source_name.clone().unwrap_or_default(),
+                    destination_id: c.destination_id.clone().unwrap_or_default(),
+                    destination_name: c.destination_name.clone().unwrap_or_default(),
                 },
             });
         }
@@ -913,7 +921,7 @@ impl NifiClient {
 
 #[cfg(test)]
 mod tests {
-    use super::short_type;
+    use super::*;
 
     #[test]
     fn short_type_strips_package_prefix() {
@@ -931,5 +939,33 @@ mod tests {
     #[test]
     fn short_type_empty_string() {
         assert_eq!(short_type(""), "");
+    }
+
+    #[test]
+    fn connection_summary_carries_endpoint_ids_and_names() {
+        let summary = NodeStatusSummary::Connection {
+            fill_percent: 10,
+            flow_files_queued: 1,
+            queued_display: "1 / 1B".into(),
+            source_id: "src-id".into(),
+            source_name: "SrcProc".into(),
+            destination_id: "dst-id".into(),
+            destination_name: "DstProc".into(),
+        };
+        if let NodeStatusSummary::Connection {
+            source_id,
+            source_name,
+            destination_id,
+            destination_name,
+            ..
+        } = summary
+        {
+            assert_eq!(source_id, "src-id");
+            assert_eq!(source_name, "SrcProc");
+            assert_eq!(destination_id, "dst-id");
+            assert_eq!(destination_name, "DstProc");
+        } else {
+            panic!("expected Connection variant");
+        }
     }
 }

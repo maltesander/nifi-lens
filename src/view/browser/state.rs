@@ -1120,6 +1120,10 @@ mod tests {
                 fill_percent: fill,
                 flow_files_queued: 10,
                 queued_display: "10 / 1KB".into(),
+                source_id: String::new(),
+                source_name: String::new(),
+                destination_id: String::new(),
+                destination_name: String::new(),
             },
         }
     }
@@ -1995,6 +1999,10 @@ mod tests {
                         fill_percent: 10,
                         flow_files_queued: 100,
                         queued_display: "100 / 1 KB".into(),
+                        source_id: String::new(),
+                        source_name: String::new(),
+                        destination_id: String::new(),
+                        destination_name: String::new(),
                     },
                 },
             ],
