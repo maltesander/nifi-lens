@@ -96,7 +96,20 @@ async fn fetch_detail_once(
             .browser_cs_detail(&req.id)
             .await
             .map(NodeDetail::ControllerService),
-        NodeKind::InputPort | NodeKind::OutputPort => return,
+        NodeKind::InputPort => {
+            let kind = crate::client::PortKind::Input;
+            guard
+                .browser_port_detail(&req.id, kind)
+                .await
+                .map(NodeDetail::Port)
+        }
+        NodeKind::OutputPort => {
+            let kind = crate::client::PortKind::Output;
+            guard
+                .browser_port_detail(&req.id, kind)
+                .await
+                .map(NodeDetail::Port)
+        }
         NodeKind::Folder(_) => return,
     };
     let result = detail.map(|detail| {

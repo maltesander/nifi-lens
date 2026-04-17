@@ -275,7 +275,7 @@ fn render_detail(
                 &state.detail_focus,
             );
         }
-        None => {
+        None | Some(NodeDetail::Port(_)) => {
             let lines = vec![
                 header_line,
                 Line::from(""),

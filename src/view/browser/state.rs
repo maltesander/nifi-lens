@@ -87,6 +87,7 @@ impl DetailSections {
                 DetailSection::ChildGroups,
                 DetailSection::RecentBulletins,
             ]),
+            NK::InputPort | NK::OutputPort => DetailSections(&[DetailSection::RecentBulletins]),
             _ => DetailSections(&[]),
         }
     }
@@ -475,6 +476,9 @@ impl BrowserState {
                 let group_id = &d.id;
                 bulletins.iter().filter(|b| b.group_id == *group_id).count()
             }
+            (DetailSection::RecentBulletins, NodeDetail::Port(p)) => {
+                bulletins.iter().filter(|b| b.source_id == p.id).count()
+            }
             _ => 0,
         }
     }
@@ -665,6 +669,7 @@ pub enum NodeDetail {
     Processor(ProcessorDetail),
     Connection(ConnectionDetail),
     ControllerService(ControllerServiceDetail),
+    Port(crate::client::PortDetail),
 }
 
 #[derive(Debug, Clone)]
