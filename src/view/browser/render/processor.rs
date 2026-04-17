@@ -375,7 +375,7 @@ fn format_property_value(raw: &str, state: &BrowserState) -> Option<Line<'static
     Some(Line::from(vec![
         Span::raw(r.name),
         Span::styled(format!(" ({short}…)"), theme::muted()),
-        Span::styled(" →".to_string(), theme::muted()),
+        Span::styled(" →", theme::muted()),
     ]))
 }
 

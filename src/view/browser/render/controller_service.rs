@@ -43,7 +43,7 @@ pub fn render(
     frame: &mut Frame,
     area: Rect,
     d: &ControllerServiceDetail,
-    _state: &BrowserState,
+    state: &BrowserState,
     bulletins: &std::collections::VecDeque<crate::client::BulletinSnapshot>,
     detail_focus: &DetailFocus,
 ) {
@@ -76,7 +76,7 @@ pub fn render(
     let mut idx = 0;
     render_identity_panel(frame, rows[idx], d);
     idx += 1;
-    render_properties_panel(frame, rows[idx], d, detail_focus, &sections);
+    render_properties_panel(frame, rows[idx], d, state, detail_focus, &sections);
     idx += 1;
     if has_validation {
         render_validation_errors_panel(frame, rows[idx], d, detail_focus, &sections);
@@ -203,6 +203,7 @@ fn render_properties_panel(
     frame: &mut Frame,
     area: Rect,
     d: &ControllerServiceDetail,
+    state: &BrowserState,
     detail_focus: &DetailFocus,
     sections: &DetailSections,
 ) {
@@ -240,10 +241,11 @@ fn render_properties_panel(
         .properties
         .iter()
         .map(|(k, v)| {
-            Row::new(vec![
-                Cell::from(k.clone()),
-                Cell::from(char_skip(v, x_offset)),
-            ])
+            let value_cell = match format_property_value(v, state) {
+                Some(formatted) => Cell::from(formatted),
+                None => Cell::from(char_skip(v, x_offset)),
+            };
+            Row::new(vec![Cell::from(k.clone()), value_cell])
         })
         .collect();
     let widths = layout::detail_row_constraints();
@@ -423,6 +425,20 @@ fn render_recent_bulletins_panel(
     frame.render_stateful_widget(table, inner, &mut ts);
 }
 
+/// Format a property value. Returns `Some(Line)` when the raw value is
+/// a UUID that resolves to a known arena node (rendered as
+/// `<name> (short8…) →`). Returns `None` otherwise, so the caller can
+/// fall back to raw-value rendering (with x-offset scrolling).
+fn format_property_value(raw: &str, state: &BrowserState) -> Option<Line<'static>> {
+    let r = state.resolve_id(raw)?;
+    let short: String = raw.trim().chars().take(8).collect();
+    Some(Line::from(vec![
+        Span::raw(r.name),
+        Span::styled(format!(" ({short}…)"), theme::muted()),
+        Span::styled(" →", theme::muted()),
+    ]))
+}
+
 /// Extract `HH:MM:SS` from an ISO-8601 timestamp, falling back to a
 /// short slice of the human-readable form when the ISO field is empty.
 fn short_time(iso: &str, human: &str) -> String {
@@ -563,6 +579,63 @@ mod snapshots {
             .unwrap();
         assert_snapshot!(
             "controller_service_detail_with_referencing_components",
+            format!("{}", term.backend())
+        );
+    }
+
+    fn seeded_cs_with_uuid_property() -> (ControllerServiceDetail, BrowserState) {
+        use crate::client::{NodeKind, NodeStatusSummary};
+        use crate::view::browser::state::TreeNode;
+        let dep_uuid = "11111111-2222-3333-4444-555555555555";
+        let d = ControllerServiceDetail {
+            id: "cs1".into(),
+            name: "http-pool".into(),
+            type_name: "org.apache.nifi.ssl.StandardRestrictedSSLContextService".into(),
+            bundle: "org.apache.nifi:nifi-ssl-context-service-nar:2.8.0".into(),
+            state: "ENABLED".into(),
+            parent_group_id: Some("ingest".into()),
+            properties: vec![
+                ("Keystore Filename".into(), "/opt/nifi/keystore.jks".into()),
+                ("Delegate Service".into(), dep_uuid.into()),
+            ],
+            validation_errors: vec![],
+            bulletin_level: "WARN".into(),
+            comments: String::new(),
+            restricted: false,
+            deprecated: false,
+            persists_state: false,
+            referencing_components: Vec::new(),
+        };
+        let mut state = BrowserState::new();
+        state.nodes.push(TreeNode {
+            parent: None,
+            children: vec![],
+            kind: NodeKind::ControllerService,
+            id: dep_uuid.into(),
+            group_id: "ingest".into(),
+            name: "dependent-ssl".into(),
+            status_summary: NodeStatusSummary::ControllerService {
+                state: "ENABLED".into(),
+            },
+        });
+        (d, state)
+    }
+
+    #[test]
+    fn controller_service_detail_properties_resolvable_uuid_shows_arrow() {
+        let (d, state) = seeded_cs_with_uuid_property();
+        let bulletins: std::collections::VecDeque<crate::client::BulletinSnapshot> =
+            std::collections::VecDeque::new();
+        let focus = DetailFocus::Section {
+            idx: 0,
+            rows: [0; MAX_DETAIL_SECTIONS],
+            x_offsets: [0; MAX_DETAIL_SECTIONS],
+        };
+        let mut term = Terminal::new(TestBackend::new(120, 30)).unwrap();
+        term.draw(|f| render(f, f.area(), &d, &state, &bulletins, &focus))
+            .unwrap();
+        assert_snapshot!(
+            "controller_service_detail_properties_resolvable_uuid_shows_arrow",
             format!("{}", term.backend())
         );
     }
