@@ -60,16 +60,16 @@ pub fn render(
 
     // 2. Inner vertical layout.
     //    identity:    4  (2 borders + 2 content lines)
-    //    properties(+validation): Fill(2)
-    //    connections: Fill(1)
-    //    bulletins:   8  (2 borders + 6 content rows)
+    //    properties(+validation): Fill(1)
+    //    connections: 6  (2 borders + header + 3 data rows)
+    //    bulletins:   6  (2 borders + 4 content rows)
     let rows = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
             Constraint::Length(4),
-            Constraint::Fill(2),
             Constraint::Fill(1),
-            Constraint::Length(8),
+            Constraint::Length(6),
+            Constraint::Length(6),
         ])
         .split(inner);
 
@@ -327,10 +327,11 @@ fn render_connections_panel(
         })
         .collect();
 
+    // QUEUED must fit NiFi's `"5,500 (50 MB)"` — up to ~16 chars.
     let widths = [
         Constraint::Length(4),
         Constraint::Fill(2),
-        Constraint::Length(10),
+        Constraint::Length(16),
         Constraint::Fill(2),
     ];
     let table = Table::new(rows_data, widths)
