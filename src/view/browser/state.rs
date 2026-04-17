@@ -12,8 +12,8 @@ use tokio::sync::{mpsc, oneshot};
 
 use crate::app::navigation::ListNavigation;
 use crate::client::browser::{
-    ConnectionDetail, ControllerServiceDetail, NodeKind, NodeStatusSummary, ProcessGroupDetail,
-    ProcessorDetail, RawNode, RecursiveSnapshot,
+    ConnectionDetail, ControllerServiceDetail, FolderKind, NodeKind, NodeStatusSummary,
+    ProcessGroupDetail, ProcessorDetail, RawNode, RecursiveSnapshot,
 };
 
 /// Rolled-up health color for a Process Group's tree marker glyph.
@@ -719,6 +719,71 @@ pub fn apply_tree_snapshot(state: &mut BrowserState, snap: RecursiveSnapshot) {
         }
     }
 
+    // 2b) Synthesize folder nodes per PG that has Connection and/or
+    // ControllerService children. Re-parents the leaves onto the folder.
+    // Folders are UI-only: they never come from the client.
+    let pg_indices: Vec<usize> = (0..nodes.len())
+        .filter(|&i| matches!(nodes[i].kind, NodeKind::ProcessGroup))
+        .collect();
+    for pg_idx in pg_indices {
+        let children = nodes[pg_idx].children.clone();
+        let mut processors: Vec<usize> = Vec::new();
+        let mut queues: Vec<usize> = Vec::new();
+        let mut cs_kids: Vec<usize> = Vec::new();
+        let mut rest: Vec<usize> = Vec::new();
+        for c in children {
+            match nodes[c].kind {
+                NodeKind::Processor => processors.push(c),
+                NodeKind::Connection => queues.push(c),
+                NodeKind::ControllerService => cs_kids.push(c),
+                _ => rest.push(c),
+            }
+        }
+
+        let mut new_children: Vec<usize> = processors;
+
+        if !queues.is_empty() {
+            let folder_idx = nodes.len();
+            nodes.push(TreeNode {
+                parent: Some(pg_idx),
+                children: queues.clone(),
+                kind: NodeKind::Folder(FolderKind::Queues),
+                id: format!("{}::folder::queues", nodes[pg_idx].id),
+                group_id: nodes[pg_idx].id.clone(),
+                name: format!("Queues ({})", queues.len()),
+                status_summary: NodeStatusSummary::Folder {
+                    count: queues.len() as u32,
+                },
+            });
+            for q in &queues {
+                nodes[*q].parent = Some(folder_idx);
+            }
+            new_children.push(folder_idx);
+        }
+
+        if !cs_kids.is_empty() {
+            let folder_idx = nodes.len();
+            nodes.push(TreeNode {
+                parent: Some(pg_idx),
+                children: cs_kids.clone(),
+                kind: NodeKind::Folder(FolderKind::ControllerServices),
+                id: format!("{}::folder::cs", nodes[pg_idx].id),
+                group_id: nodes[pg_idx].id.clone(),
+                name: format!("Controller services ({})", cs_kids.len()),
+                status_summary: NodeStatusSummary::Folder {
+                    count: cs_kids.len() as u32,
+                },
+            });
+            for c in &cs_kids {
+                nodes[*c].parent = Some(folder_idx);
+            }
+            new_children.push(folder_idx);
+        }
+
+        new_children.extend(rest);
+        nodes[pg_idx].children = new_children;
+    }
+
     // 3) Translate expansion set by (id, kind).
     let mut new_expanded: HashSet<usize> = HashSet::new();
     for (new_idx, n) in nodes.iter().enumerate() {
@@ -983,8 +1048,8 @@ pub fn build_flow_index(state: &BrowserState) -> FlowIndex {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::client::browser::{NodeKind, NodeStatusSummary, RawNode};
-    use std::time::UNIX_EPOCH;
+    use crate::client::browser::{FolderKind, NodeKind, NodeStatusSummary, RawNode};
+    use std::time::{SystemTime, UNIX_EPOCH};
     use tokio::sync::mpsc;
 
     fn pg(id: &str, parent: Option<usize>, running: u32) -> RawNode {
@@ -1064,8 +1129,11 @@ mod tests {
     fn first_tree_snapshot_auto_expands_root_and_selects_first_child() {
         let mut s = BrowserState::new();
         apply_tree_snapshot(&mut s, demo_snap());
-        // Root (0), gen (1), c1 (2), ingest (3) visible (ingest collapsed).
-        assert_eq!(s.visible, vec![0, 1, 2, 3]);
+        // Root (0), gen (1), Queues folder (5, collapsed), ingest (3,
+        // collapsed) visible. B2 folder synthesis inserts a Queues folder
+        // under root to bucket `c1`, so `c1` (arena 2) is hidden behind
+        // the collapsed folder and `root.children == [1, 5, 3]`.
+        assert_eq!(s.visible, vec![0, 1, 5, 3]);
         // First snapshot: no prior selection key, so selection falls back
         // to visible index 0 (the root).
         assert_eq!(s.selected, 0);
@@ -1078,13 +1146,16 @@ mod tests {
         // Manually expand "ingest" (arena idx 3).
         s.expanded.insert(3);
         rebuild_visible(&mut s);
-        assert_eq!(s.visible, vec![0, 1, 2, 3, 4]);
+        // B2 folder synthesis: root.children == [1, 5, 3] (gen, Queues
+        // folder, ingest). Folder stays collapsed so c1 (arena 2) is
+        // hidden; upd (arena 4) is visible because ingest is expanded.
+        assert_eq!(s.visible, vec![0, 1, 5, 3, 4]);
 
         // Re-apply the same snapshot — indices stay the same, but the
         // retranslation path still runs.
         apply_tree_snapshot(&mut s, demo_snap());
         assert!(s.expanded.contains(&3));
-        assert_eq!(s.visible, vec![0, 1, 2, 3, 4]);
+        assert_eq!(s.visible, vec![0, 1, 5, 3, 4]);
     }
 
     #[test]
@@ -1375,10 +1446,13 @@ mod tests {
         let mut s = BrowserState::new();
         apply_tree_snapshot(&mut s, demo_snap());
         let idx1 = build_flow_index(&s);
-        assert_eq!(idx1.entries.len(), 5);
+        // B2 folder synthesis: demo_snap has 5 raw nodes; the reducer
+        // adds one Queues folder under root -> 6 arena entries.
+        assert_eq!(idx1.entries.len(), 6);
         let shifted = snap(vec![pg("root", None, 2), proc("only", 0, "Running")]);
         apply_tree_snapshot(&mut s, shifted);
         let idx2 = build_flow_index(&s);
+        // No connections or CS, so no folders synthesized.
         assert_eq!(idx2.entries.len(), 2);
     }
 
@@ -2253,5 +2327,77 @@ mod tests {
     fn drill_into_group_missing_id_returns_false() {
         let mut s = BrowserState::new();
         assert!(!s.drill_into_group("nope"));
+    }
+
+    fn cs(id: &str, parent: Option<usize>, state: &str) -> RawNode {
+        RawNode {
+            parent_idx: parent,
+            kind: NodeKind::ControllerService,
+            id: id.into(),
+            group_id: parent.map(|_| "root".to_string()).unwrap_or_default(),
+            name: id.into(),
+            status_summary: NodeStatusSummary::ControllerService {
+                state: state.into(),
+            },
+        }
+    }
+
+    #[test]
+    fn apply_tree_snapshot_inserts_folder_for_queues_and_cs() {
+        let fetched = SystemTime::now();
+        let snap = RecursiveSnapshot {
+            nodes: vec![
+                pg("root", None, 1),
+                proc("p1", 0, "Running"),
+                conn("c1", 0, 30),
+                cs("cs1", Some(0), "ENABLED"),
+            ],
+            fetched_at: fetched,
+        };
+        let mut s = BrowserState::new();
+        apply_tree_snapshot(&mut s, snap);
+
+        // Expected arena:
+        //   0: PG root
+        //   1: Processor p1 (child of root)
+        //   2: Connection c1 (reparented to Queues folder)
+        //   3: CS cs1         (reparented to CS folder)
+        //   4: Folder(Queues) (child of root)
+        //   5: Folder(ControllerServices) (child of root)
+
+        assert_eq!(s.nodes.len(), 6);
+        assert!(matches!(
+            s.nodes[4].kind,
+            NodeKind::Folder(FolderKind::Queues)
+        ));
+        assert!(matches!(
+            s.nodes[5].kind,
+            NodeKind::Folder(FolderKind::ControllerServices)
+        ));
+
+        // Processor remains directly under root; folders appear after processors.
+        assert_eq!(s.nodes[0].children, vec![1, 4, 5]);
+        // Connection re-parented to the Queues folder.
+        assert_eq!(s.nodes[4].children, vec![2]);
+        assert_eq!(s.nodes[2].parent, Some(4));
+        // CS re-parented to the CS folder.
+        assert_eq!(s.nodes[5].children, vec![3]);
+        assert_eq!(s.nodes[3].parent, Some(5));
+    }
+
+    #[test]
+    fn apply_tree_snapshot_skips_empty_folders() {
+        let snap = RecursiveSnapshot {
+            nodes: vec![pg("root", None, 1), proc("p1", 0, "Running")],
+            fetched_at: SystemTime::now(),
+        };
+        let mut s = BrowserState::new();
+        apply_tree_snapshot(&mut s, snap);
+        assert_eq!(s.nodes.len(), 2);
+        assert!(
+            s.nodes
+                .iter()
+                .all(|n| !matches!(n.kind, NodeKind::Folder(_)))
+        );
     }
 }
