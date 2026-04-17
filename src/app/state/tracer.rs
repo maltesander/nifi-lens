@@ -901,6 +901,8 @@ mod tests {
             transit_uri: None,
             input_available: true,
             output_available: true,
+            input_size: None,
+            output_size: None,
         };
         s.tracer.mode = TracerMode::Lineage(Box::new(LineageView {
             uuid: "ff-99".to_string(),
@@ -945,6 +947,8 @@ mod tests {
             transit_uri: None,
             input_available: false,
             output_available: true,
+            input_size: None,
+            output_size: None,
         };
         s.tracer.mode = TracerMode::Lineage(Box::new(LineageView {
             uuid: "ff-88".to_string(),

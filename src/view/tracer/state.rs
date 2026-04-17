@@ -904,7 +904,7 @@ pub fn apply_payload(state: &mut TracerState, payload: TracerPayload) -> Option<
             if let TracerMode::Lineage(ref mut view) = state.mode {
                 // Always cache — used to enrich all timeline rows with
                 // attribute-change and content indicators as the user scrolls.
-                view.loaded_details.insert(event_id, detail.clone());
+                view.loaded_details.insert(event_id, (*detail).clone());
 
                 let selected_id = view
                     .snapshot
@@ -913,7 +913,7 @@ pub fn apply_payload(state: &mut TracerState, payload: TracerPayload) -> Option<
                     .map(|e| e.event_id);
                 if selected_id == Some(event_id) {
                     view.event_detail = EventDetail::Loaded {
-                        event: Box::new(detail),
+                        event: detail,
                         content: ContentPane::default(),
                     };
                 }
@@ -1579,6 +1579,8 @@ mod tests {
             transit_uri: None,
             input_available: false,
             output_available: false,
+            input_size: None,
+            output_size: None,
         }
     }
 
@@ -1671,7 +1673,7 @@ mod tests {
             &mut state,
             TracerPayload::EventDetail {
                 event_id: 42,
-                detail: fake_detail(42),
+                detail: Box::new(fake_detail(42)),
             },
         );
         assert!(followup.is_none());
@@ -1697,7 +1699,7 @@ mod tests {
             &mut state,
             TracerPayload::EventDetail {
                 event_id: 99,
-                detail: fake_detail(99),
+                detail: Box::new(fake_detail(99)),
             },
         );
 
@@ -1760,6 +1762,8 @@ mod tests {
             transit_uri: None,
             input_available: false,
             output_available: false,
+            input_size: None,
+            output_size: None,
         }
     }
 

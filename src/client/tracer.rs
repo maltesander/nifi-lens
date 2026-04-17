@@ -59,6 +59,12 @@ pub struct ProvenanceEventDetail {
     pub transit_uri: Option<String>,
     pub input_available: bool,
     pub output_available: bool,
+    /// Content claim size (bytes) for the input side, when the NiFi
+    /// DTO exposes it. None when the field is absent or no input
+    /// content claim exists.
+    pub input_size: Option<u64>,
+    /// Content claim size (bytes) for the output side.
+    pub output_size: Option<u64>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -295,6 +301,12 @@ impl NifiClient {
         let input_available = dto.input_content_available.unwrap_or(false);
         let output_available = dto.output_content_available.unwrap_or(false);
         let transit_uri = dto.transit_uri.clone();
+        let input_size = dto
+            .input_content_claim_file_size_bytes
+            .and_then(|n| u64::try_from(n).ok());
+        let output_size = dto
+            .output_content_claim_file_size_bytes
+            .and_then(|n| u64::try_from(n).ok());
         let attributes = dto
             .attributes
             .as_ref()
@@ -316,6 +328,8 @@ impl NifiClient {
             transit_uri,
             input_available,
             output_available,
+            input_size,
+            output_size,
         })
     }
 

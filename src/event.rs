@@ -156,7 +156,7 @@ pub enum TracerPayload {
     },
     EventDetail {
         event_id: i64,
-        detail: crate::client::ProvenanceEventDetail,
+        detail: Box<crate::client::ProvenanceEventDetail>,
     },
     EventDetailFailed {
         event_id: i64,

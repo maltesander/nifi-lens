@@ -169,7 +169,10 @@ pub fn spawn_event_detail(
             Ok(detail) => {
                 let _ = tx
                     .send(AppEvent::Data(ViewPayload::Tracer(
-                        TracerPayload::EventDetail { event_id, detail },
+                        TracerPayload::EventDetail {
+                            event_id,
+                            detail: Box::new(detail),
+                        },
                     )))
                     .await;
             }

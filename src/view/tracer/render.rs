@@ -1018,6 +1018,8 @@ mod tests {
             transit_uri: None,
             input_available: true,
             output_available: true,
+            input_size: None,
+            output_size: None,
         }
     }
 
