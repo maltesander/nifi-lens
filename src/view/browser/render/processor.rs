@@ -45,7 +45,7 @@ pub fn render(
     frame: &mut Frame,
     area: Rect,
     d: &ProcessorDetail,
-    _state: &BrowserState,
+    state: &BrowserState,
     bulletins: &VecDeque<BulletinSnapshot>,
     detail_focus: &DetailFocus,
 ) {
@@ -68,7 +68,7 @@ pub fn render(
         .split(inner);
 
     render_identity_panel(frame, rows[0], d);
-    render_properties_and_validation(frame, rows[1], d, detail_focus);
+    render_properties_and_validation(frame, rows[1], d, state, detail_focus);
     render_recent_bulletins_panel(frame, rows[2], d, bulletins, detail_focus);
 }
 
@@ -127,6 +127,7 @@ fn render_properties_and_validation(
     frame: &mut Frame,
     area: Rect,
     d: &ProcessorDetail,
+    state: &BrowserState,
     detail_focus: &DetailFocus,
 ) {
     let has_validation = !d.validation_errors.is_empty();
@@ -163,7 +164,7 @@ fn render_properties_and_validation(
         })
         .unwrap_or(0);
 
-    render_properties_panel(frame, chunks[0], d, detail_focus);
+    render_properties_panel(frame, chunks[0], d, state, detail_focus);
     if has_validation {
         render_validation_errors_panel(frame, chunks[1], d, is_val_focused, val_x_offset);
     }
@@ -196,6 +197,7 @@ fn render_properties_panel(
     frame: &mut Frame,
     area: Rect,
     d: &ProcessorDetail,
+    state: &BrowserState,
     detail_focus: &DetailFocus,
 ) {
     let sections =
@@ -234,10 +236,11 @@ fn render_properties_panel(
         .properties
         .iter()
         .map(|(k, v)| {
-            Row::new(vec![
-                Cell::from(k.clone()),
-                Cell::from(char_skip(v, x_offset)),
-            ])
+            let value_cell = match format_property_value(v, state) {
+                Some(formatted) => Cell::from(formatted),
+                None => Cell::from(char_skip(v, x_offset)),
+            };
+            Row::new(vec![Cell::from(k.clone()), value_cell])
         })
         .collect();
     let widths = layout::detail_row_constraints();
@@ -362,6 +365,20 @@ fn char_skip(s: &str, n: usize) -> String {
     s.chars().skip(n).collect()
 }
 
+/// Format a property value. Returns `Some(Line)` when the raw value is
+/// a UUID that resolves to a known arena node (rendered as
+/// `<name> (short8…) →`). Returns `None` otherwise, so the caller can
+/// fall back to raw-value rendering (with x-offset scrolling).
+fn format_property_value(raw: &str, state: &BrowserState) -> Option<Line<'static>> {
+    let r = state.resolve_id(raw)?;
+    let short: String = raw.trim().chars().take(8).collect();
+    Some(Line::from(vec![
+        Span::raw(r.name),
+        Span::styled(format!(" ({short}…)"), theme::muted()),
+        Span::styled(" →".to_string(), theme::muted()),
+    ]))
+}
+
 #[cfg(test)]
 mod snapshots {
     use super::*;
@@ -444,5 +461,78 @@ mod snapshots {
         };
         let out = render_snapshot(&focus);
         assert_snapshot!("processor_detail_recent_bulletins_focused", out);
+    }
+
+    fn seeded_with_property_uuid() -> (
+        ProcessorDetail,
+        BrowserState,
+        std::collections::VecDeque<BulletinSnapshot>,
+    ) {
+        use crate::client::{NodeKind, NodeStatusSummary};
+        use crate::view::browser::state::TreeNode;
+        let cs_uuid = "a1b2c3d4-e5f6-7890-abcd-ef1234567890";
+        let d = ProcessorDetail {
+            id: "put-kafka-1".into(),
+            name: "PutKafka".into(),
+            type_name: "org.apache.nifi.processors.kafka.pubsub.PublishKafka_2_6".into(),
+            bundle: "org.apache.nifi:nifi-kafka-2-6-nar:2.8.0".into(),
+            run_status: "RUNNING".into(),
+            scheduling_strategy: "TIMER_DRIVEN".into(),
+            scheduling_period: "1 sec".into(),
+            concurrent_tasks: 2,
+            run_duration_ms: 25,
+            penalty_duration: "30 sec".into(),
+            yield_duration: "1 sec".into(),
+            bulletin_level: "WARN".into(),
+            properties: vec![
+                ("Record Reader".into(), cs_uuid.into()),
+                ("Topic Name".into(), "events.in".into()),
+            ],
+            validation_errors: vec![],
+        };
+        let mut state = BrowserState::new();
+        state.nodes.push(TreeNode {
+            parent: None,
+            children: vec![],
+            kind: NodeKind::ControllerService,
+            id: cs_uuid.into(),
+            group_id: "root".into(),
+            name: "fixture-json-reader".into(),
+            status_summary: NodeStatusSummary::ControllerService {
+                state: "ENABLED".into(),
+            },
+        });
+        let bulletins = std::collections::VecDeque::new();
+        (d, state, bulletins)
+    }
+
+    #[test]
+    fn processor_detail_properties_value_with_resolvable_uuid_shows_arrow() {
+        let (d, state, bulletins) = seeded_with_property_uuid();
+        let focus = DetailFocus::Section {
+            idx: 0,
+            rows: [0; crate::view::browser::state::MAX_DETAIL_SECTIONS],
+            x_offsets: [0; crate::view::browser::state::MAX_DETAIL_SECTIONS],
+        };
+        let mut term = Terminal::new(TestBackend::new(120, 30)).unwrap();
+        term.draw(|f| render(f, f.area(), &d, &state, &bulletins, &focus))
+            .unwrap();
+        assert_snapshot!(
+            "processor_detail_properties_value_with_resolvable_uuid_shows_arrow",
+            format!("{}", term.backend())
+        );
+    }
+
+    #[test]
+    fn processor_detail_properties_value_without_resolution_shows_raw_uuid() {
+        let (d, mut state, bulletins) = seeded_with_property_uuid();
+        state.nodes.clear(); // no resolution possible
+        let mut term = Terminal::new(TestBackend::new(120, 30)).unwrap();
+        term.draw(|f| render(f, f.area(), &d, &state, &bulletins, &DetailFocus::Tree))
+            .unwrap();
+        assert_snapshot!(
+            "processor_detail_properties_value_without_resolution_shows_raw_uuid",
+            format!("{}", term.backend())
+        );
     }
 }
