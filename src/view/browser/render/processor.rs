@@ -15,15 +15,19 @@
 //! ││ error message 1                 │     │
 //! ││ ...                             │     │
 //! │└─────────────────────────────────┘     │
+//! │┌ Connections  N ─────────────────┐     │  ← focusable
+//! ││ DIR  NAME       QUEUED  TARGET  │     │
+//! ││ ...scrollable Table...          │     │
+//! │└─────────────────────────────────┘     │
 //! │┌ Recent bulletins  N ────────────┐     │  ← focusable
 //! ││ ...scrollable Table...          │     │
 //! │└─────────────────────────────────┘     │
 //! └────────────────────────────────────────┘
 //! ```
 //!
-//! The Properties and Recent bulletins sub-panels flip their border to
-//! thick + accent when the corresponding `DetailSection` holds focus, and
-//! their Table widget selects the row from `DetailFocus::rows[idx]`.
+//! The Properties, Connections, and Recent bulletins sub-panels flip their
+//! border to thick + accent when the corresponding `DetailSection` holds
+//! focus, and their Table widget selects the row from `DetailFocus::rows[idx]`.
 //! Key hints live in the sticky footer hint bar, not inside the pane.
 
 use std::collections::VecDeque;
@@ -55,13 +59,15 @@ pub fn render(
     frame.render_widget(outer, area);
 
     // 2. Inner vertical layout.
-    //    identity: 4 rows (2 borders + 2 content lines)
-    //    properties: fill — takes the bulk
-    //    recent bulletins: 8 rows (2 borders + 6 content rows)
+    //    identity:    4  (2 borders + 2 content lines)
+    //    properties(+validation): Fill(2)
+    //    connections: Fill(1)
+    //    bulletins:   8  (2 borders + 6 content rows)
     let rows = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
             Constraint::Length(4),
+            Constraint::Fill(2),
             Constraint::Fill(1),
             Constraint::Length(8),
         ])
@@ -69,7 +75,8 @@ pub fn render(
 
     render_identity_panel(frame, rows[0], d);
     render_properties_and_validation(frame, rows[1], d, state, detail_focus);
-    render_recent_bulletins_panel(frame, rows[2], d, bulletins, detail_focus);
+    render_connections_panel(frame, rows[2], d, state, detail_focus);
+    render_recent_bulletins_panel(frame, rows[3], d, bulletins, detail_focus);
 }
 
 /// Build the outer panel title: ` <name> · processor · <run_status> `.
@@ -255,6 +262,87 @@ fn render_properties_panel(
         state.select(Some(rows[props_idx]));
     }
     frame.render_stateful_widget(table, inner, &mut state);
+}
+
+fn render_connections_panel(
+    frame: &mut Frame,
+    area: Rect,
+    d: &ProcessorDetail,
+    state: &BrowserState,
+    detail_focus: &DetailFocus,
+) {
+    use crate::view::browser::state::{DetailSection, DetailSections, EdgeDirection};
+
+    let sections =
+        DetailSections::for_node_detail(NodeKind::Processor, !d.validation_errors.is_empty());
+    let my_idx = sections
+        .0
+        .iter()
+        .position(|s| *s == DetailSection::Connections)
+        .unwrap_or(0);
+    let is_focused = matches!(
+        detail_focus,
+        DetailFocus::Section { idx, .. } if *idx == my_idx
+    );
+    let x_offset = match detail_focus {
+        DetailFocus::Section { x_offsets, .. } if is_focused => x_offsets[my_idx],
+        _ => 0,
+    };
+
+    let edges = state.connections_for_processor(&d.id);
+    let total = edges.len();
+    let panel = Panel::new(" Connections ")
+        .right(Line::from(format!(" {total} ")))
+        .focused(is_focused)
+        .into_block();
+    let inner = panel.inner(area);
+    frame.render_widget(panel, area);
+
+    let header = Row::new(vec![
+        Cell::from("DIR"),
+        Cell::from("NAME"),
+        Cell::from("QUEUED"),
+        Cell::from("TARGET"),
+    ])
+    .style(theme::muted().add_modifier(Modifier::BOLD));
+
+    let rows_data: Vec<Row> = edges
+        .iter()
+        .map(|e| {
+            let dir = match e.direction {
+                EdgeDirection::In => "IN",
+                EdgeDirection::Out => "OUT",
+            };
+            let target = if state.resolve_id(&e.opposite_id).is_some() {
+                format!("{}  →", e.opposite_name)
+            } else {
+                e.opposite_name.clone()
+            };
+            Row::new(vec![
+                Cell::from(dir.to_string()),
+                Cell::from(char_skip(&e.connection_name, x_offset)),
+                Cell::from(e.queued_display.clone()),
+                Cell::from(target),
+            ])
+        })
+        .collect();
+
+    let widths = [
+        Constraint::Length(4),
+        Constraint::Fill(2),
+        Constraint::Length(10),
+        Constraint::Fill(2),
+    ];
+    let table = Table::new(rows_data, widths)
+        .header(header)
+        .row_highlight_style(theme::cursor_row());
+    let mut ts = TableState::default();
+    if let DetailFocus::Section { rows, .. } = detail_focus
+        && is_focused
+    {
+        ts.select(Some(rows[my_idx]));
+    }
+    frame.render_stateful_widget(table, inner, &mut ts);
 }
 
 fn render_recent_bulletins_panel(
@@ -534,6 +622,105 @@ mod snapshots {
             .unwrap();
         assert_snapshot!(
             "processor_detail_properties_value_without_resolution_shows_raw_uuid",
+            format!("{}", term.backend())
+        );
+    }
+
+    fn seeded_with_edges() -> (
+        ProcessorDetail,
+        BrowserState,
+        std::collections::VecDeque<BulletinSnapshot>,
+    ) {
+        use crate::client::{NodeKind, NodeStatusSummary};
+        use crate::view::browser::state::TreeNode;
+
+        let d = ProcessorDetail {
+            id: "enrich-proc".into(),
+            name: "EnrichAttribute".into(),
+            type_name: "org.apache.nifi.processors.attributes.EnrichAttribute".into(),
+            bundle: "org.apache.nifi:nifi-standard-nar:2.8.0".into(),
+            run_status: "RUNNING".into(),
+            scheduling_strategy: "TIMER_DRIVEN".into(),
+            scheduling_period: "1 sec".into(),
+            concurrent_tasks: 1,
+            run_duration_ms: 25,
+            penalty_duration: "30 sec".into(),
+            yield_duration: "1 sec".into(),
+            bulletin_level: "WARN".into(),
+            properties: vec![],
+            validation_errors: vec![],
+        };
+        let mut state = BrowserState::new();
+        // Upstream + downstream processors + two connections.
+        for (id, name) in [
+            ("enrich-proc", "EnrichAttribute"),
+            ("gen-proc", "GenerateFlowFile"),
+            ("pub-proc", "PublishKafka"),
+        ] {
+            state.nodes.push(TreeNode {
+                parent: None,
+                children: vec![],
+                kind: NodeKind::Processor,
+                id: id.into(),
+                group_id: "root".into(),
+                name: name.into(),
+                status_summary: NodeStatusSummary::Processor {
+                    run_status: "Running".into(),
+                },
+            });
+        }
+        state.nodes.push(TreeNode {
+            parent: None,
+            children: vec![],
+            kind: NodeKind::Connection,
+            id: "c-in".into(),
+            group_id: "root".into(),
+            name: "gen→enrich".into(),
+            status_summary: NodeStatusSummary::Connection {
+                fill_percent: 0,
+                flow_files_queued: 12,
+                queued_display: "12 / 1KB".into(),
+                source_id: "gen-proc".into(),
+                source_name: "GenerateFlowFile".into(),
+                destination_id: "enrich-proc".into(),
+                destination_name: "EnrichAttribute".into(),
+            },
+        });
+        state.nodes.push(TreeNode {
+            parent: None,
+            children: vec![],
+            kind: NodeKind::Connection,
+            id: "c-out".into(),
+            group_id: "root".into(),
+            name: "enrich→publish".into(),
+            status_summary: NodeStatusSummary::Connection {
+                fill_percent: 0,
+                flow_files_queued: 0,
+                queued_display: "0".into(),
+                source_id: "enrich-proc".into(),
+                source_name: "EnrichAttribute".into(),
+                destination_id: "pub-proc".into(),
+                destination_name: "PublishKafka".into(),
+            },
+        });
+        let bulletins = std::collections::VecDeque::new();
+        (d, state, bulletins)
+    }
+
+    #[test]
+    fn processor_detail_connections_focused() {
+        let (d, state, bulletins) = seeded_with_edges();
+        // Connections is section 1 (without validation errors).
+        let focus = DetailFocus::Section {
+            idx: 1,
+            rows: [0; crate::view::browser::state::MAX_DETAIL_SECTIONS],
+            x_offsets: [0; crate::view::browser::state::MAX_DETAIL_SECTIONS],
+        };
+        let mut term = Terminal::new(TestBackend::new(120, 30)).unwrap();
+        term.draw(|f| render(f, f.area(), &d, &state, &bulletins, &focus))
+            .unwrap();
+        assert_snapshot!(
+            "processor_detail_connections_focused",
             format!("{}", term.backend())
         );
     }
