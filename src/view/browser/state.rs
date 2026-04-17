@@ -58,6 +58,7 @@ pub enum DetailSection {
     RecentBulletins,
     ControllerServices,
     ChildGroups,
+    ReferencingComponents,
 }
 
 /// Per-node-kind list of focusable sections, in cycle order.
@@ -76,7 +77,11 @@ impl DetailSections {
             NK::Processor => {
                 DetailSections(&[DetailSection::Properties, DetailSection::RecentBulletins])
             }
-            NK::ControllerService => DetailSections(&[DetailSection::Properties]),
+            NK::ControllerService => DetailSections(&[
+                DetailSection::Properties,
+                DetailSection::ReferencingComponents,
+                DetailSection::RecentBulletins,
+            ]),
             NK::ProcessGroup => DetailSections(&[
                 DetailSection::ControllerServices,
                 DetailSection::ChildGroups,
@@ -98,9 +103,12 @@ impl DetailSections {
                 DetailSection::ValidationErrors,
                 DetailSection::RecentBulletins,
             ]),
-            (NK::ControllerService, true) => {
-                DetailSections(&[DetailSection::Properties, DetailSection::ValidationErrors])
-            }
+            (NK::ControllerService, true) => DetailSections(&[
+                DetailSection::Properties,
+                DetailSection::ValidationErrors,
+                DetailSection::ReferencingComponents,
+                DetailSection::RecentBulletins,
+            ]),
             _ => Self::for_node(kind),
         }
     }
@@ -116,7 +124,7 @@ impl DetailSections {
 
 /// Max number of focusable sections any node kind has — drives the
 /// size of the per-section row-cursor array inside `DetailFocus`.
-pub const MAX_DETAIL_SECTIONS: usize = 4;
+pub const MAX_DETAIL_SECTIONS: usize = 5;
 
 /// Browser tab focus — the cursor is either in the tree (default)
 /// or inside one of the detail pane's focusable sub-sections.
@@ -443,6 +451,12 @@ impl BrowserState {
             }
             (DetailSection::ValidationErrors, NodeDetail::ControllerService(cs)) => {
                 cs.validation_errors.len()
+            }
+            (DetailSection::ReferencingComponents, NodeDetail::ControllerService(cs)) => {
+                cs.referencing_components.len()
+            }
+            (DetailSection::RecentBulletins, NodeDetail::ControllerService(cs)) => {
+                bulletins.iter().filter(|b| b.source_id == cs.id).count()
             }
             (DetailSection::RecentBulletins, NodeDetail::Processor(_)) => {
                 let source_id = &self.nodes[arena_idx].id;
@@ -2190,7 +2204,7 @@ mod tests {
         );
         s.detail_focus = DetailFocus::Section {
             idx: 0, // ControllerServices is the first section for PG
-            rows: [1, 0, 0, 0],
+            rows: [1, 0, 0, 0, 0],
             x_offsets: [0; MAX_DETAIL_SECTIONS],
         };
 
@@ -2240,7 +2254,7 @@ mod tests {
         // Focus is PG's RecentBulletins section (idx 2).
         s.detail_focus = DetailFocus::Section {
             idx: 2,
-            rows: [0, 0, 1, 0],
+            rows: [0, 0, 1, 0, 0],
             x_offsets: [0; MAX_DETAIL_SECTIONS],
         };
 

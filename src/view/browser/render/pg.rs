@@ -417,7 +417,7 @@ mod snapshots {
         let bulletins: VecDeque<BulletinSnapshot> = VecDeque::new();
         let focus = DetailFocus::Section {
             idx: 0, // ControllerServices
-            rows: [1, 0, 0, 0],
+            rows: [1, 0, 0, 0, 0],
             x_offsets: [0; MAX_DETAIL_SECTIONS],
         };
         let mut terminal = Terminal::new(TestBackend::new(100, 28)).unwrap();
@@ -437,7 +437,7 @@ mod snapshots {
         let bulletins: VecDeque<BulletinSnapshot> = VecDeque::new();
         let focus = DetailFocus::Section {
             idx: 1, // ChildGroups
-            rows: [0, 0, 0, 0],
+            rows: [0, 0, 0, 0, 0],
             x_offsets: [0; MAX_DETAIL_SECTIONS],
         };
         let mut terminal = Terminal::new(TestBackend::new(100, 28)).unwrap();
@@ -468,7 +468,7 @@ mod snapshots {
         });
         let focus = DetailFocus::Section {
             idx: 2, // RecentBulletins
-            rows: [0, 0, 0, 0],
+            rows: [0, 0, 0, 0, 0],
             x_offsets: [0; MAX_DETAIL_SECTIONS],
         };
         let mut terminal = Terminal::new(TestBackend::new(100, 28)).unwrap();

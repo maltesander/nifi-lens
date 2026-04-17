@@ -317,7 +317,7 @@ mod snapshots {
     fn controller_service_detail_properties_focused() {
         let focus = DetailFocus::Section {
             idx: 0,
-            rows: [1, 0, 0, 0],
+            rows: [1, 0, 0, 0, 0],
             x_offsets: [0; MAX_DETAIL_SECTIONS],
         };
         let out = render_snapshot(&focus);

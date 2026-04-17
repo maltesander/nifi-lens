@@ -428,7 +428,7 @@ mod snapshots {
     fn processor_detail_properties_focused() {
         let focus = DetailFocus::Section {
             idx: 0,
-            rows: [1, 0, 0, 0],
+            rows: [1, 0, 0, 0, 0],
             x_offsets: [0; MAX_DETAIL_SECTIONS],
         };
         let out = render_snapshot(&focus);
@@ -439,7 +439,7 @@ mod snapshots {
     fn processor_detail_recent_bulletins_focused() {
         let focus = DetailFocus::Section {
             idx: 1,
-            rows: [0, 0, 0, 0],
+            rows: [0, 0, 0, 0, 0],
             x_offsets: [0; MAX_DETAIL_SECTIONS],
         };
         let out = render_snapshot(&focus);

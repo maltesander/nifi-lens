@@ -1397,7 +1397,7 @@ mod tests {
         // Focus PG's RecentBulletins section (idx 2 per for_node(PG)).
         s.browser.detail_focus = DetailFocus::Section {
             idx: 2,
-            rows: [0, 0, 0, 0],
+            rows: [0, 0, 0, 0, 0],
             x_offsets: [0; MAX_DETAIL_SECTIONS],
         };
 
@@ -1498,7 +1498,7 @@ mod tests {
         // Focus PG's ChildGroups section, row 0 → `ingest`.
         s.browser.detail_focus = DetailFocus::Section {
             idx: 1,
-            rows: [0, 0, 0, 0],
+            rows: [0, 0, 0, 0, 0],
             x_offsets: [0; MAX_DETAIL_SECTIONS],
         };
 
