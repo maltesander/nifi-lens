@@ -251,6 +251,27 @@ impl ViewKeyHandler for BrowserHandler {
                             tracer_followup: None,
                         });
                     }
+                    // Connections (Processor detail): jump to opposite endpoint.
+                    if sections.0.get(idx) == Some(&DetailSection::Connections) {
+                        let proc_id = match state.browser.details.get(&arena_idx) {
+                            Some(NodeDetail::Processor(p)) => p.id.clone(),
+                            _ => return Some(UpdateResult::default()),
+                        };
+                        let edges = state.browser.connections_for_processor(&proc_id);
+                        let Some(edge) = edges.get(rows[idx]) else {
+                            return Some(UpdateResult::default());
+                        };
+                        let intent =
+                            super::PendingIntent::Goto(crate::intent::CrossLink::OpenInBrowser {
+                                component_id: edge.opposite_id.clone(),
+                                group_id: edge.opposite_group_id.clone(),
+                            });
+                        return Some(UpdateResult {
+                            redraw: true,
+                            intent: Some(intent),
+                            tracer_followup: None,
+                        });
+                    }
                     // On the ChildGroups section, drill into the selected child PG.
                     if sections.0.get(idx) == Some(&DetailSection::ChildGroups) {
                         let pg_id = match state.browser.details.get(&arena_idx) {
@@ -2418,5 +2439,103 @@ mod tests {
             "Descend on non-resolvable property row must be a silent no-op, got {:?}",
             result.intent
         );
+    }
+
+    #[test]
+    fn descend_on_focused_connections_row_emits_open_in_browser_for_opposite() {
+        use crate::client::{NodeKind, NodeStatusSummary, ProcessorDetail};
+        use crate::intent::CrossLink;
+        use crate::view::browser::state::{
+            DetailFocus, DetailSection, DetailSections, MAX_DETAIL_SECTIONS, NodeDetail, TreeNode,
+        };
+
+        let (mut s, _c) = fresh_browser_on_processor();
+        // Add an outbound connection from the "gen" processor (arena 1).
+        s.browser.nodes.push(TreeNode {
+            parent: Some(0),
+            children: vec![],
+            kind: NodeKind::Connection,
+            id: "c-out".into(),
+            group_id: "root".into(),
+            name: "gen→sink".into(),
+            status_summary: NodeStatusSummary::Connection {
+                fill_percent: 0,
+                flow_files_queued: 0,
+                queued_display: "0".into(),
+                source_id: "gen".into(),
+                source_name: "Gen".into(),
+                destination_id: "sink".into(),
+                destination_name: "Sink".into(),
+            },
+        });
+        // And a Processor node for the "sink" so the group_id resolves.
+        s.browser.nodes.push(TreeNode {
+            parent: Some(0),
+            children: vec![],
+            kind: NodeKind::Processor,
+            id: "sink".into(),
+            group_id: "sink-pg".into(),
+            name: "Sink".into(),
+            status_summary: NodeStatusSummary::Processor {
+                run_status: "Running".into(),
+            },
+        });
+        crate::view::browser::state::rebuild_visible(&mut s.browser);
+        // Make sure we're still on gen (arena 1).
+        s.browser.selected = s
+            .browser
+            .visible
+            .iter()
+            .position(|&i| i == 1)
+            .expect("gen visible");
+
+        // Seed a minimal ProcessorDetail.
+        s.browser.details.insert(
+            1,
+            NodeDetail::Processor(ProcessorDetail {
+                id: "gen".into(),
+                name: "Gen".into(),
+                type_name: "".into(),
+                bundle: "".into(),
+                run_status: "RUNNING".into(),
+                scheduling_strategy: "".into(),
+                scheduling_period: "".into(),
+                concurrent_tasks: 1,
+                run_duration_ms: 0,
+                penalty_duration: "".into(),
+                yield_duration: "".into(),
+                bulletin_level: "".into(),
+                properties: vec![],
+                validation_errors: vec![],
+            }),
+        );
+
+        // Focus the Connections section. Resolve its index so we don't
+        // depend on the exact section order.
+        let sections = DetailSections::for_node_detail(NodeKind::Processor, false);
+        let conn_idx = sections
+            .0
+            .iter()
+            .position(|x| *x == DetailSection::Connections)
+            .expect("Processor has Connections section");
+        s.browser.detail_focus = DetailFocus::Section {
+            idx: conn_idx,
+            rows: [0; MAX_DETAIL_SECTIONS],
+            x_offsets: [0; MAX_DETAIL_SECTIONS],
+        };
+
+        let result = BrowserHandler::handle_focus(&mut s, crate::input::FocusAction::Descend)
+            .expect("Descend must be handled");
+
+        match result.intent {
+            Some(crate::app::state::PendingIntent::Goto(CrossLink::OpenInBrowser {
+                component_id,
+                group_id,
+            })) => {
+                assert_eq!(component_id, "sink");
+                assert_eq!(group_id, "sink-pg");
+            }
+            other => panic!("expected Goto(OpenInBrowser {{ sink }}), got {other:?}"),
+        }
     }
 }
