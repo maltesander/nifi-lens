@@ -123,6 +123,23 @@ impl DerefMut for NifiClient {
 }
 
 impl NifiClient {
+    /// Construct a `NifiClient` directly from parts.
+    ///
+    /// Only available in `#[cfg(test)]`. Production code always goes through
+    /// `NifiClient::connect` so that authentication and version detection run.
+    #[cfg(test)]
+    pub(crate) fn from_parts(
+        inner: DynamicClient,
+        context_name: impl Into<String>,
+        detected_version: Version,
+    ) -> Self {
+        Self {
+            inner,
+            context_name: context_name.into(),
+            detected_version,
+        }
+    }
+
     /// Build, authenticate, detect version, and return a connected client.
     pub async fn connect(ctx: &ResolvedContext) -> Result<Self, NifiLensError> {
         tracing::debug!(context = %ctx.name, url = %ctx.url, "connecting");
@@ -437,5 +454,5 @@ pub use health::{
 };
 pub use tracer::{
     AttributeTriple, ContentRender, ContentSide, ContentSnapshot, LatestEventsSnapshot,
-    LineagePoll, LineageSnapshot, ProvenanceEventDetail, ProvenanceEventSummary,
+    LineagePoll, LineageSnapshot, PREVIEW_CAP_BYTES, ProvenanceEventDetail, ProvenanceEventSummary,
 };

@@ -15,6 +15,11 @@ use crate::client::NifiClient;
 use crate::client::classify_or_fallback;
 use crate::error::NifiLensError;
 
+/// Preview cap applied to Tracer content fetches. Flowfile bodies
+/// above this threshold return `206 Partial Content`; the UI
+/// renders the truncated slice and flags the truncation.
+pub const PREVIEW_CAP_BYTES: usize = 1 << 20; // 1 MiB
+
 /// Direction of a content claim on a provenance event.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ContentSide {
@@ -423,6 +428,56 @@ impl NifiClient {
             raw,
         })
     }
+
+    /// Fetches the raw content bytes for a provenance event without
+    /// classification. Used by the Save path, which writes bytes to disk
+    /// and does not need a `ContentRender`.
+    ///
+    /// Maps `GET /nifi-api/provenance-events/{id}/content/{side}` with
+    /// no `Range` header. Errors are mapped to
+    /// [`NifiLensError::ProvenanceContentFetchFailed`], same as
+    /// `provenance_content`.
+    pub async fn provenance_content_raw(
+        &self,
+        event_id: i64,
+        side: ContentSide,
+    ) -> Result<Vec<u8>, NifiLensError> {
+        tracing::debug!(
+            context = %self.context_name(),
+            event_id,
+            side = side.as_str(),
+            "fetching provenance event content (raw, uncapped)",
+        );
+
+        let id_str = event_id.to_string();
+        let events_api = self.inner.provenanceevents();
+        let cluster_node_id = self.inner.cluster_node_id();
+
+        let bytes = match side {
+            ContentSide::Input => {
+                events_api
+                    .get_input_content(&id_str, cluster_node_id, None)
+                    .await
+            }
+            ContentSide::Output => {
+                events_api
+                    .get_output_content(&id_str, cluster_node_id, None)
+                    .await
+            }
+        }
+        .map_err(|err| {
+            classify_or_fallback(self.context_name(), Box::new(err), |source| {
+                NifiLensError::ProvenanceContentFetchFailed {
+                    context: self.context_name().to_string(),
+                    event_id,
+                    side: side.as_str(),
+                    source,
+                }
+            })
+        })?;
+
+        Ok(bytes)
+    }
 }
 
 /// Classifies raw bytes into a [`ContentRender`] variant.
@@ -595,5 +650,54 @@ mod tests {
         let events = nodes_to_events(vec![node]);
         assert_eq!(events.len(), 1);
         assert_eq!(events[0].event_id, 0);
+    }
+
+    /// Build a `NifiClient` backed by a wiremock `MockServer`.
+    ///
+    /// Mounts a `/nifi-api/flow/about` stub returning version `2.6.0` so that
+    /// `detect_version` succeeds. The caller mounts additional stubs before
+    /// (or after) calling this helper.
+    async fn test_client(server: &wiremock::MockServer) -> crate::client::NifiClient {
+        wiremock::Mock::given(wiremock::matchers::method("GET"))
+            .and(wiremock::matchers::path("/nifi-api/flow/about"))
+            .respond_with(
+                wiremock::ResponseTemplate::new(200).set_body_json(
+                    serde_json::json!({"about": {"version": "2.6.0", "title": "NiFi"}}),
+                ),
+            )
+            .mount(server)
+            .await;
+
+        let inner = nifi_rust_client::NifiClientBuilder::new(&server.uri())
+            .expect("builder")
+            .build_dynamic()
+            .expect("dynamic client");
+        inner.detect_version().await.expect("detect_version");
+        let version = semver::Version::parse("2.6.0").expect("parse");
+        crate::client::NifiClient::from_parts(inner, "test", version)
+    }
+
+    #[tokio::test]
+    async fn provenance_content_raw_fetches_body_without_classification() {
+        let server = wiremock::MockServer::start().await;
+        wiremock::Mock::given(wiremock::matchers::method("GET"))
+            .and(wiremock::matchers::path(
+                "/nifi-api/provenance-events/42/content/output",
+            ))
+            .respond_with(
+                wiremock::ResponseTemplate::new(200)
+                    .set_body_bytes(b"hello world" as &[u8])
+                    .insert_header("content-type", "application/octet-stream"),
+            )
+            .expect(1)
+            .mount(&server)
+            .await;
+
+        let client = test_client(&server).await;
+        let bytes = client
+            .provenance_content_raw(42, ContentSide::Output)
+            .await
+            .expect("fetch should succeed");
+        assert_eq!(bytes, b"hello world");
     }
 }
