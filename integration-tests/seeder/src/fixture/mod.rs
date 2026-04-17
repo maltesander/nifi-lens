@@ -1,6 +1,7 @@
 //! Fixture topology definitions.
 
 pub mod backpressure;
+pub mod bulky;
 pub mod healthy;
 pub mod invalid;
 pub mod noisy;
@@ -47,6 +48,7 @@ pub async fn seed(client: &DynamicClient, detected_version: &semver::Version) ->
     noisy::seed(client, &marker_pg_id).await?;
     backpressure::seed(client, &marker_pg_id).await?;
     invalid::seed(client, &marker_pg_id).await?;
+    bulky::seed(client, &marker_pg_id).await?;
 
     let stress_min = semver::Version::new(2, 9, 0);
     if *detected_version >= stress_min {
