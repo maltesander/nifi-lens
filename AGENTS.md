@@ -256,6 +256,18 @@ in the processor Connections section: that data lives on
 status snapshot the tree walker reads. Surfacing them would cost a
 second fetch per connection.
 
+Connection endpoint IDs (`source_id` / `destination_id` on
+`NodeStatusSummary::Connection`) are NOT populated by the recursive
+status endpoint — NiFi leaves those fields null on
+`ConnectionStatusSnapshotDto`. `browser_tree` therefore fires a
+parallel `/process-groups/{pg_id}/connections` fetch per PG after
+the status walk, builds a `connection_id → (source_id,
+destination_id)` map, and backfills the arena's Connection rows.
+Per-PG fetch failures are logged and skipped — affected connections
+simply render without the `→` marker on their endpoints. The extra
+fetches are cheap (one per PG, parallelized with
+`futures::future::join_all`).
+
 ## Dependency on `nifi-rust-client`
 
 `nifi-lens` depends on `nifi-rust-client` with the `dynamic` feature,

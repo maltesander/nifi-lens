@@ -165,6 +165,75 @@ impl NifiClient {
             walk_pg_snapshot(&agg, None, &mut nodes, &mut cs_by_pg);
         }
 
+        // NiFi's `/process-groups/{id}/status?recursive=true` response populates
+        // `connectionStatusSnapshots.{sourceName, destinationName}` but leaves
+        // `sourceId` / `destinationId` as `null`. Backfill them by fetching
+        // `/process-groups/{pg_id}/connections` once per PG in parallel and
+        // merging on connection id. Per-PG failures are logged and skipped —
+        // the corresponding connections render without endpoint IDs (no `→`
+        // marker, no jump target).
+        let pg_ids: Vec<String> = nodes
+            .iter()
+            .filter(|n| matches!(n.kind, NodeKind::ProcessGroup))
+            .map(|n| n.id.clone())
+            .filter(|id| !id.is_empty())
+            .collect();
+        let pgs = self.inner.processgroups();
+        let endpoint_futs = pg_ids
+            .iter()
+            .map(|pg_id| async {
+                let res = pgs.get_connections(pg_id).await;
+                (pg_id.clone(), res)
+            })
+            .collect::<Vec<_>>();
+        let endpoint_results = futures::future::join_all(endpoint_futs).await;
+        let mut endpoints: std::collections::HashMap<String, ConnectionEndpoints> =
+            std::collections::HashMap::new();
+        for (pg_id, res) in endpoint_results {
+            match res {
+                Ok(conns_entity) => {
+                    for entity in conns_entity.connections.unwrap_or_default() {
+                        let Some(conn_id) = entity.id.clone() else {
+                            continue;
+                        };
+                        endpoints.insert(
+                            conn_id,
+                            ConnectionEndpoints {
+                                source_id: entity.source_id.clone().unwrap_or_default(),
+                                destination_id: entity.destination_id.clone().unwrap_or_default(),
+                            },
+                        );
+                    }
+                }
+                Err(err) => {
+                    tracing::warn!(
+                        context = %self.context_name(),
+                        %pg_id,
+                        error = %err,
+                        "browser tree: connection-list fetch failed for PG; \
+                         connections in that PG will render without endpoint IDs"
+                    );
+                }
+            }
+        }
+        for raw in nodes.iter_mut() {
+            if !matches!(raw.kind, NodeKind::Connection) {
+                continue;
+            }
+            let Some(eps) = endpoints.get(&raw.id) else {
+                continue;
+            };
+            if let NodeStatusSummary::Connection {
+                source_id,
+                destination_id,
+                ..
+            } = &mut raw.status_summary
+            {
+                *source_id = eps.source_id.clone();
+                *destination_id = eps.destination_id.clone();
+            }
+        }
+
         Ok(RecursiveSnapshot {
             nodes,
             fetched_at: SystemTime::now(),
@@ -181,6 +250,13 @@ struct CsTreeEntry {
     id: String,
     name: String,
     state: String,
+}
+
+/// Endpoint IDs for a single connection, merged into the tree arena
+/// via `browser_tree`'s per-PG `/process-groups/{id}/connections` fetch.
+struct ConnectionEndpoints {
+    source_id: String,
+    destination_id: String,
 }
 
 /// Recursive walker. Appends the current PG, then all processors, all

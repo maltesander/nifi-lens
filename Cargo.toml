@@ -25,6 +25,7 @@ arboard = "3"
 clap = { version = "4", features = ["derive"] }
 color-eyre = "0.6"
 crossterm = "0.29"
+futures = "0.3"
 humantime-serde = "1.1"
 nifi-rust-client = { version = "0.10.1", features = ["dynamic"] }
 nucleo = "0.5"

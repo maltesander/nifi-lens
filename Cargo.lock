@@ -1682,6 +1682,7 @@ dependencies = [
  "clap",
  "color-eyre",
  "crossterm",
+ "futures",
  "humantime-serde",
  "insta",
  "nifi-rust-client",
