@@ -17,7 +17,7 @@ pub fn render(
     frame: &mut Frame,
     area: Rect,
     d: &PortDetail,
-    _state: &BrowserState,
+    state: &BrowserState,
     bulletins: &VecDeque<BulletinSnapshot>,
     detail_focus: &DetailFocus,
 ) {
@@ -30,7 +30,7 @@ pub fn render(
         .constraints([Constraint::Length(7), Constraint::Fill(1)])
         .split(inner);
 
-    render_identity(frame, rows[0], d);
+    render_identity(frame, rows[0], d, state);
     render_recent_bulletins(frame, rows[1], d, bulletins, detail_focus);
 }
 
@@ -59,11 +59,17 @@ fn state_style(state: &str) -> Style {
     }
 }
 
-fn render_identity(frame: &mut Frame, area: Rect, d: &PortDetail) {
+fn render_identity(frame: &mut Frame, area: Rect, d: &PortDetail, state: &BrowserState) {
     let block = Panel::new(" Identity ").into_block();
     let inner = block.inner(area);
     frame.render_widget(block, area);
-    let parent = d.parent_group_id.as_deref().unwrap_or("(root)");
+    let parent = match d.parent_group_id.as_deref() {
+        Some(raw) => state
+            .resolve_id(raw)
+            .map(|r| r.name)
+            .unwrap_or_else(|| raw.to_string()),
+        None => "(root)".to_string(),
+    };
     let w = inner.width.saturating_sub(18) as usize;
     let comments = if d.comments.is_empty() {
         "—".to_string()
@@ -224,5 +230,45 @@ mod snapshots {
             "port_detail_input_port_renders",
             format!("{}", term.backend())
         );
+    }
+
+    #[test]
+    fn port_detail_parent_group_resolved_to_name() {
+        use crate::client::{NodeKind, NodeStatusSummary};
+        use crate::view::browser::state::TreeNode;
+
+        let pg_uuid = "deadbeef-cafe-f00d-face-b001b001b001";
+        let d = PortDetail {
+            id: "in-1".into(),
+            name: "external-ingest".into(),
+            kind: PortKind::Input,
+            state: "RUNNING".into(),
+            comments: "edge ingress".into(),
+            concurrent_tasks: 3,
+            parent_group_id: Some(pg_uuid.into()),
+        };
+        let mut state = BrowserState::new();
+        state.nodes.push(TreeNode {
+            parent: None,
+            children: vec![],
+            kind: NodeKind::ProcessGroup,
+            id: pg_uuid.into(),
+            group_id: String::new(),
+            name: "ingress-pg".into(),
+            status_summary: NodeStatusSummary::ProcessGroup {
+                running: 0,
+                stopped: 0,
+                invalid: 0,
+                disabled: 0,
+            },
+        });
+        let bulletins: VecDeque<BulletinSnapshot> = VecDeque::new();
+        let mut term = Terminal::new(TestBackend::new(100, 20)).unwrap();
+        term.draw(|f| render(f, f.area(), &d, &state, &bulletins, &DetailFocus::Tree))
+            .unwrap();
+        let out = format!("{}", term.backend());
+        assert!(out.contains("ingress-pg"));
+        assert!(!out.contains(pg_uuid));
+        assert_snapshot!("port_detail_parent_group_resolved_to_name", out);
     }
 }

@@ -74,7 +74,7 @@ pub fn render(
         .split(inner);
 
     let mut idx = 0;
-    render_identity_panel(frame, rows[idx], d);
+    render_identity_panel(frame, rows[idx], d, state);
     idx += 1;
     render_properties_panel(frame, rows[idx], d, state, detail_focus, &sections);
     idx += 1;
@@ -112,12 +112,23 @@ fn state_style(state: &str) -> Style {
     }
 }
 
-fn render_identity_panel(frame: &mut Frame, area: Rect, d: &ControllerServiceDetail) {
+fn render_identity_panel(
+    frame: &mut Frame,
+    area: Rect,
+    d: &ControllerServiceDetail,
+    state: &BrowserState,
+) {
     let block = Panel::new(" Identity ").into_block();
     let inner = block.inner(area);
     frame.render_widget(block, area);
 
-    let parent = d.parent_group_id.as_deref().unwrap_or("(controller)");
+    let parent = match d.parent_group_id.as_deref() {
+        Some(raw) => state
+            .resolve_id(raw)
+            .map(|r| r.name)
+            .unwrap_or_else(|| raw.to_string()),
+        None => "(controller)".to_string(),
+    };
     let w = inner.width.saturating_sub(9) as usize;
     let comments = if d.comments.is_empty() {
         "—".to_string()
@@ -144,7 +155,7 @@ fn render_identity_panel(frame: &mut Frame, area: Rect, d: &ControllerServiceDet
         ]),
         Line::from(vec![
             Span::styled("parent   ", theme::muted()),
-            Span::raw(truncate(parent, w)),
+            Span::raw(truncate(&parent, w)),
         ]),
         Line::from(vec![
             Span::styled("comments ", theme::muted()),
@@ -637,6 +648,48 @@ mod snapshots {
         assert_snapshot!(
             "controller_service_detail_properties_resolvable_uuid_shows_arrow",
             format!("{}", term.backend())
+        );
+    }
+
+    #[test]
+    fn controller_service_detail_parent_group_resolved_to_name() {
+        use crate::client::{NodeKind, NodeStatusSummary};
+        use crate::view::browser::state::TreeNode;
+        let pg_uuid = "deadbeef-cafe-f00d-face-b001b001b001";
+        let (mut d, mut state) = seeded_cs_detail();
+        d.validation_errors.clear();
+        d.parent_group_id = Some(pg_uuid.into());
+        state.nodes.push(TreeNode {
+            parent: None,
+            children: vec![],
+            kind: NodeKind::ProcessGroup,
+            id: pg_uuid.into(),
+            group_id: String::new(),
+            name: "ingest".into(),
+            status_summary: NodeStatusSummary::ProcessGroup {
+                running: 1,
+                stopped: 0,
+                invalid: 0,
+                disabled: 0,
+            },
+        });
+        let bulletins: std::collections::VecDeque<crate::client::BulletinSnapshot> =
+            std::collections::VecDeque::new();
+        let mut term = Terminal::new(TestBackend::new(120, 30)).unwrap();
+        term.draw(|f| render(f, f.area(), &d, &state, &bulletins, &DetailFocus::Tree))
+            .unwrap();
+        let out = format!("{}", term.backend());
+        assert!(
+            out.contains("ingest"),
+            "expected parent PG name 'ingest' in output, got: {out}"
+        );
+        assert!(
+            !out.contains(pg_uuid),
+            "expected UUID {pg_uuid} to be resolved away; got: {out}"
+        );
+        assert_snapshot!(
+            "controller_service_detail_parent_group_resolved_to_name",
+            out
         );
     }
 }
