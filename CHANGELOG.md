@@ -15,6 +15,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   hardcoded cadences (10s/30s/15s/5s). Out-of-band values log a warning
   but are accepted as-is. Events in-flight query polling and Tracer
   content polling stay on their internal cadences.
+- **Browser**: controller services appear as first-class tree nodes under
+  their owning PG, bucketed under a collapsible `⚙ Controller services`
+  folder.
+- **Browser**: queues moved under a collapsible `→ Queues` folder per PG.
+- **Browser**: controller-service detail pane shows comments,
+  `restricted / deprecated / persistsState` flags, a `Referencing
+  components` section (Enter to jump to the referencing component),
+  and a `Recent bulletins` section.
+- **Browser**: input / output ports have a working detail pane
+  (identity + recent bulletins).
 
 ## [0.3.0] — 2026-04-15
 

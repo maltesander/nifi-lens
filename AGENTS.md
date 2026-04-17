@@ -220,6 +220,14 @@ Severity rendering (labels, colors, icons) is consolidated in
 `widget::severity` and `widget::run_icon`; call these helpers rather
 than reintroducing inline `Color::*`/`Modifier::*` constructors.
 
+Folders in the Browser tree are a **reducer-only** construct. The
+client walker emits a flat list of CS / queue / port / processor
+nodes; `apply_tree_snapshot` post-processes each PG's children to
+synthesize `Folder(Queues)` / `Folder(ControllerServices)` arena
+rows and re-parent the leaves. Folders are never cross-link targets,
+never emit detail-fetch requests, and are filtered out of the fuzzy-
+find flow index.
+
 ## Dependency on `nifi-rust-client`
 
 `nifi-lens` depends on `nifi-rust-client` with the `dynamic` feature,

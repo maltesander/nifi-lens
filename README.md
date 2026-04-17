@@ -102,8 +102,17 @@ noisiest components.
 and free-text filters; deduplication collapses repeating errors into a single
 row with an `×N` count. `Enter` on a row jumps to the component in Browser.
 
-**Browser** — Two-pane PG tree with per-node detail. `p` opens a properties
-modal; `c` copies the node id; `g` opens the cross-tab jump menu.
+**Browser** — Two-pane PG tree with per-node detail. Controller services
+appear as first-class tree nodes under their owning PG, bucketed inside a
+`⚙ Controller services (N)` folder; queues get the same treatment under
+a `→ Queues (N)` folder. Folders expand / collapse with `Enter` / `→`
+and collapse with `←`. `p` opens a properties modal (also works on
+controller-service rows); `c` copies the node id; `g` opens the
+cross-tab jump menu. Selecting an input / output port shows its detail
+pane (identity + recent bulletins). The controller-service detail pane
+includes a **Referencing components** section listing the processors,
+reporting tasks, or other services that consume it — press `Enter` on a
+row to jump to that component.
 
 **Events** — Provenance search with a filter bar (time / type / source /
 flowfile UUID / attribute). Results are colored by event type and
@@ -126,8 +135,10 @@ switches the active cluster context, `Shift+F` opens global fuzzy search,
 **Bulletins** — `1`/`2`/`3` toggle severity filters; `Shift+G` cycles
 group-by modes; `Shift+P` pauses auto-scroll; `Shift+M` mutes a source.
 
-**Browser** — `p` for properties modal; `c` to copy; `Shift+F` for
-global fuzzy search.
+**Browser** — `p` for properties modal (processors and controller
+services); `c` to copy; `Enter`/`→` to expand a folder or drill into the
+selected node; `←` to collapse a folder or ascend; `Shift+F` for global
+fuzzy search.
 
 **Events** — `Shift+D`/`T`/`S`/`U`/`A` to edit filters; `Enter` in
 the filter bar to submit.
