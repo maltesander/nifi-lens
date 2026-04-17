@@ -990,6 +990,7 @@ pub fn build_flow_index(state: &BrowserState) -> FlowIndex {
     let entries = state
         .nodes
         .iter()
+        .filter(|n| !matches!(n.kind, NodeKind::Folder(_)))
         .map(|n| {
             let kind_label = match n.kind {
                 NodeKind::ProcessGroup => "PG",
@@ -1446,9 +1447,10 @@ mod tests {
         let mut s = BrowserState::new();
         apply_tree_snapshot(&mut s, demo_snap());
         let idx1 = build_flow_index(&s);
-        // B2 folder synthesis: demo_snap has 5 raw nodes; the reducer
-        // adds one Queues folder under root -> 6 arena entries.
-        assert_eq!(idx1.entries.len(), 6);
+        // B3: folders are filtered out of the fuzzy-find flow index, so
+        // the synthesized Queues folder does not contribute an entry —
+        // we see the 5 raw nodes only.
+        assert_eq!(idx1.entries.len(), 5);
         let shifted = snap(vec![pg("root", None, 2), proc("only", 0, "Running")]);
         apply_tree_snapshot(&mut s, shifted);
         let idx2 = build_flow_index(&s);

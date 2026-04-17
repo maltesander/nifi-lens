@@ -4,9 +4,9 @@ expression: render_to_string(&s)
 ---
 "┌ Browser — last <DUR> ago ───────────────────────────────────────────────────────────────────────────────────────────────┐"
 "│▾  root                           │root                                                                               │"
-"│    ● GenerateFlowFile            │Process Group — root                                                               │"
+"│    ● Generate                    │Process Group — root                                                               │"
 "│  ▸ → Queues (1)                  │                                                                                   │"
-"│                                  │loading…                                                                           │"
+"│  ▸ ⚙ Controller services (1)     │loading…                                                                           │"
 "│                                  │                                                                                   │"
 "│                                  │                                                                                   │"
 "│                                  │                                                                                   │"

@@ -115,6 +115,13 @@ fn render_tree(frame: &mut Frame, area: Rect, state: &BrowserState) {
         let marker: &str = match (&node.kind, is_expanded_pg) {
             (NodeKind::ProcessGroup, true) => "▾ ",
             (NodeKind::ProcessGroup, false) => "▸ ",
+            (NodeKind::Folder(_), _) => {
+                if state.expanded.contains(&arena_idx) {
+                    "▾ "
+                } else {
+                    "▸ "
+                }
+            }
             _ => "  ",
         };
         // Build the glyph span content as an owned String so Processor rows
@@ -463,6 +470,68 @@ mod snapshots {
         insta::with_settings!(
             { filters => vec![(r"last [^\s]+ ago", "last <DUR> ago")] },
             { assert_snapshot!("browser_tree_seeded_root_expanded", render_to_string(&s)); }
+        );
+    }
+
+    #[test]
+    fn browser_tree_renders_queues_and_cs_folders_collapsed() {
+        let mut s = BrowserState::new();
+        let fetched_at = SystemTime::now() - std::time::Duration::from_secs(3);
+        let snap = RecursiveSnapshot {
+            nodes: vec![
+                RawNode {
+                    parent_idx: None,
+                    kind: NodeKind::ProcessGroup,
+                    id: "root".into(),
+                    group_id: "root".into(),
+                    name: "root".into(),
+                    status_summary: NodeStatusSummary::ProcessGroup {
+                        running: 1,
+                        stopped: 0,
+                        invalid: 0,
+                        disabled: 0,
+                    },
+                },
+                RawNode {
+                    parent_idx: Some(0),
+                    kind: NodeKind::Processor,
+                    id: "p".into(),
+                    group_id: "root".into(),
+                    name: "Generate".into(),
+                    status_summary: NodeStatusSummary::Processor {
+                        run_status: "Running".into(),
+                    },
+                },
+                RawNode {
+                    parent_idx: Some(0),
+                    kind: NodeKind::Connection,
+                    id: "c".into(),
+                    group_id: "root".into(),
+                    name: "q1".into(),
+                    status_summary: NodeStatusSummary::Connection {
+                        fill_percent: 0,
+                        flow_files_queued: 0,
+                        queued_display: "0".into(),
+                    },
+                },
+                RawNode {
+                    parent_idx: Some(0),
+                    kind: NodeKind::ControllerService,
+                    id: "cs".into(),
+                    group_id: "root".into(),
+                    name: "pool".into(),
+                    status_summary: NodeStatusSummary::ControllerService {
+                        state: "ENABLED".into(),
+                    },
+                },
+            ],
+            fetched_at,
+        };
+        apply_tree_snapshot(&mut s, snap);
+        s.last_tree_fetched_at = Some(SystemTime::now() - std::time::Duration::from_secs(3));
+        insta::with_settings!(
+            { filters => vec![(r"last [^\s]+ ago", "last <DUR> ago")] },
+            { assert_snapshot!("browser_tree_queues_and_cs_folders_collapsed", render_to_string(&s)); }
         );
     }
 }
