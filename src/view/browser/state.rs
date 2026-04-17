@@ -181,6 +181,30 @@ pub struct BreadcrumbSegment {
     pub arena_idx: usize,
 }
 
+/// Cheap canonical-UUID shape check: 36 chars, hyphens at positions 8,
+/// 13, 18, 23, and the remaining 32 positions are hex. Case-insensitive.
+/// Returns `true` only for RFC-4122-shaped strings; does not validate
+/// version or variant bits.
+// Called by resolve_id (Task 3); suppress dead-code until that lands.
+#[allow(dead_code)]
+pub(crate) fn is_uuid_shape(s: &str) -> bool {
+    if s.len() != 36 {
+        return false;
+    }
+    let bytes = s.as_bytes();
+    for (i, b) in bytes.iter().enumerate() {
+        let is_hyphen_pos = matches!(i, 8 | 13 | 18 | 23);
+        if is_hyphen_pos {
+            if *b != b'-' {
+                return false;
+            }
+        } else if !b.is_ascii_hexdigit() {
+            return false;
+        }
+    }
+    true
+}
+
 impl BrowserState {
     pub fn new() -> Self {
         Self::default()
@@ -2446,5 +2470,38 @@ mod tests {
                 .iter()
                 .all(|n| !matches!(n.kind, NodeKind::Folder(_)))
         );
+    }
+
+    #[test]
+    fn is_uuid_shape_accepts_canonical_uuid() {
+        assert!(super::is_uuid_shape("a1b2c3d4-e5f6-7890-abcd-ef1234567890"));
+    }
+
+    #[test]
+    fn is_uuid_shape_rejects_wrong_length() {
+        assert!(!super::is_uuid_shape("too-short"));
+        assert!(!super::is_uuid_shape(
+            "a1b2c3d4-e5f6-7890-abcd-ef1234567890-extra"
+        ));
+    }
+
+    #[test]
+    fn is_uuid_shape_rejects_missing_hyphens() {
+        // 36 chars but hyphens in wrong positions.
+        assert!(!super::is_uuid_shape(
+            "a1b2c3d4e5f67890abcdef12345678901234"
+        ));
+    }
+
+    #[test]
+    fn is_uuid_shape_rejects_non_hex() {
+        assert!(!super::is_uuid_shape(
+            "Z1b2c3d4-e5f6-7890-abcd-ef1234567890"
+        ));
+    }
+
+    #[test]
+    fn is_uuid_shape_accepts_uppercase_hex() {
+        assert!(super::is_uuid_shape("A1B2C3D4-E5F6-7890-ABCD-EF1234567890"));
     }
 }
