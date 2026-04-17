@@ -1485,4 +1485,74 @@ mod tests {
             _ => panic!("expected SaveEventContent"),
         }
     }
+
+    #[test]
+    fn collect_hints_save_label_shows_full_size_when_content_truncated() {
+        use crate::client::tracer::ProvenanceEventSummary;
+        use crate::client::{ContentRender, ContentSide, LineageSnapshot};
+
+        let mut s = fresh_state();
+        s.current_tab = ViewId::Tracer;
+
+        // 512 MiB output; content pane shows a truncated preview.
+        let total_output_bytes: u64 = 512 << 20;
+        let summary = ProvenanceEventSummary {
+            event_id: 42,
+            event_time_iso: "2026-01-01T00:00:00Z".to_string(),
+            event_type: "CONTENT_MODIFIED".to_string(),
+            component_id: "comp-42".to_string(),
+            component_name: "SomeProcessor".to_string(),
+            component_type: "SomeProcessor".to_string(),
+            group_id: "root".to_string(),
+            flow_file_uuid: "ff-42".to_string(),
+            relationship: None,
+            details: None,
+        };
+        let detail = ProvenanceEventDetail {
+            summary: summary.clone(),
+            attributes: vec![],
+            transit_uri: None,
+            input_available: false,
+            output_available: true,
+            input_size: None,
+            output_size: Some(total_output_bytes),
+        };
+        s.tracer.mode = TracerMode::Lineage(Box::new(LineageView {
+            uuid: "ff-42".to_string(),
+            snapshot: LineageSnapshot {
+                events: vec![summary],
+                percent_completed: 100,
+                finished: true,
+            },
+            selected_event: 0,
+            event_detail: EventDetail::Loaded {
+                event: Box::new(detail),
+                content: ContentPane::Shown {
+                    side: ContentSide::Output,
+                    render: ContentRender::Text {
+                        text: "preview...".to_string(),
+                        pretty_printed: false,
+                    },
+                    bytes_fetched: 1024,
+                    truncated: true,
+                },
+            },
+            loaded_details: std::collections::HashMap::new(),
+            diff_mode: ts::AttributeDiffMode::default(),
+            fetched_at: std::time::SystemTime::now(),
+            focus: ts::LineageFocus::default(),
+            active_detail_tab: ts::DetailTab::default(),
+        }));
+
+        let hints = super::super::collect_hints(&s);
+        let save_hint = hints
+            .iter()
+            .find(|h| h.action.as_ref().contains("fetches full"))
+            .expect("save hint should contain 'fetches full' when content is truncated");
+        assert!(
+            save_hint.action.as_ref().contains("512.0 MiB"),
+            "save hint action should include the human-readable total size; got: {}",
+            save_hint.action
+        );
+    }
 }

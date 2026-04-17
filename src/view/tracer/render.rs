@@ -367,7 +367,20 @@ fn render_lineage_detail_loaded(
             render_attribute_table(frame, rows[2], &event.attributes, view);
         }
         DetailTab::Input | DetailTab::Output => {
-            render_content_panel(frame, rows[2], content, view);
+            let total_size = match content {
+                ContentPane::Shown {
+                    side: ContentSide::Input,
+                    ..
+                }
+                | ContentPane::LoadingInput => event.input_size,
+                ContentPane::Shown {
+                    side: ContentSide::Output,
+                    ..
+                }
+                | ContentPane::LoadingOutput => event.output_size,
+                _ => None,
+            };
+            render_content_panel(frame, rows[2], content, view, total_size);
         }
     }
 }
@@ -531,13 +544,35 @@ fn render_attribute_table(
     frame.render_stateful_widget(table, table_area, &mut ts);
 }
 
-/// Renders the content sub-pane inside a focus-aware [`Panel`].
+/// Formats a byte count as `B`, `KiB`, `MiB`, `GiB`, or `TiB` with
+/// one decimal place above KiB. Integer display for `B`.
+pub(crate) fn human_bytes(n: u64) -> String {
+    const UNITS: &[&str] = &["B", "KiB", "MiB", "GiB", "TiB"];
+    if n < 1024 {
+        return format!("{n} B");
+    }
+    let mut v = n as f64;
+    let mut i = 0;
+    while v >= 1024.0 && i + 1 < UNITS.len() {
+        v /= 1024.0;
+        i += 1;
+    }
+    format!("{v:.1} {}", UNITS[i])
+}
+
+/// Renders the content sub-pane inside a focus-aware `Panel`.
 ///
-/// When `view.focus` is [`LineageFocus::Content`], the panel gains a
+/// When `view.focus` is `LineageFocus::Content`, the panel gains a
 /// thick accent border and displays a `scroll/total` indicator on the
 /// right title, and the caller's layout gives it the majority of the
 /// detail area. Otherwise the panel is a short un-focused strip.
-fn render_content_panel(frame: &mut Frame, area: Rect, content: &ContentPane, view: &LineageView) {
+fn render_content_panel(
+    frame: &mut Frame,
+    area: Rect,
+    content: &ContentPane,
+    view: &LineageView,
+    total_size: Option<u64>,
+) {
     if area.height == 0 {
         return;
     }
@@ -573,7 +608,7 @@ fn render_content_panel(frame: &mut Frame, area: Rect, content: &ContentPane, vi
             side,
             render,
             bytes_fetched,
-            ..
+            truncated,
         } => {
             let side_label = match side {
                 ContentSide::Input => "input",
@@ -585,15 +620,33 @@ fn render_content_panel(frame: &mut Frame, area: Rect, content: &ContentPane, vi
                 ContentRender::Empty => "(empty)".to_string(),
             };
             let total_lines = body.lines().count().max(1);
-            let suffix = format!(" \u{00b7} {side_label} \u{00b7} {bytes_fetched} B ");
+            let suffix = if matches!(render, ContentRender::Empty) {
+                format!(" \u{00b7} {side_label} \u{00b7} empty ")
+            } else if *truncated {
+                let fetched = human_bytes(*bytes_fetched as u64);
+                match total_size {
+                    Some(total) => format!(
+                        " \u{00b7} {side_label} \u{00b7} {fetched} of {} \u{00b7} truncated ",
+                        human_bytes(total),
+                    ),
+                    None => {
+                        format!(" \u{00b7} {side_label} \u{00b7} {fetched} \u{00b7} truncated ")
+                    }
+                }
+            } else {
+                format!(
+                    " \u{00b7} {side_label} \u{00b7} {} ",
+                    human_bytes(*bytes_fetched as u64),
+                )
+            };
             let right = if total_lines > 1 {
                 format!(
                     " {}/{} ",
                     (scroll as usize).min(total_lines - 1) + 1,
-                    total_lines
+                    total_lines,
                 )
             } else {
-                "".to_string()
+                String::new()
             };
             (suffix, right, body, Style::default())
         }
@@ -911,6 +964,26 @@ fn horizontal_center(area: Rect, pct: u16) -> Rect {
 // ── Tests ─────────────────────────────────────────────────────────────────────
 
 #[cfg(test)]
+mod human_bytes_tests {
+    use super::human_bytes;
+
+    #[test]
+    fn formats_bytes() {
+        assert_eq!(human_bytes(0), "0 B");
+        assert_eq!(human_bytes(812), "812 B");
+        assert_eq!(human_bytes(1023), "1023 B");
+    }
+
+    #[test]
+    fn formats_kib_and_up() {
+        assert_eq!(human_bytes(1024), "1.0 KiB");
+        assert_eq!(human_bytes(1 << 20), "1.0 MiB");
+        assert_eq!(human_bytes(1_572_864), "1.5 MiB");
+        assert_eq!(human_bytes(1 << 30), "1.0 GiB");
+    }
+}
+
+#[cfg(test)]
 mod tests {
     use super::render;
     use crate::view::tracer::state::{
@@ -1101,6 +1174,43 @@ mod tests {
             };
         }
         insta::assert_snapshot!("lineage_view_expanded_text_content", snap(&state));
+    }
+
+    #[test]
+    fn content_panel_truncated_title_with_total() {
+        use crate::client::tracer::{ContentRender, ContentSide};
+        use crate::view::tracer::state::{ContentPane, DetailTab, EventDetail, LineageFocus};
+
+        let mut state = TracerState::new();
+        seed_lineage_state(&mut state);
+        if let TracerMode::Lineage(ref mut view) = state.mode {
+            view.active_detail_tab = DetailTab::Output;
+            view.focus = LineageFocus::Content { scroll: 0 };
+            let mut detail = make_lineage_detail(2);
+            // Total output size is 512 MiB; only 1 MiB was fetched.
+            detail.output_size = Some(512 << 20);
+            view.event_detail = EventDetail::Loaded {
+                event: Box::new(detail),
+                content: ContentPane::Shown {
+                    side: ContentSide::Output,
+                    render: ContentRender::Text {
+                        text: "truncated content preview".to_string(),
+                        pretty_printed: false,
+                    },
+                    bytes_fetched: 1 << 20,
+                    truncated: true,
+                },
+            };
+        }
+        let rendered = snap(&state);
+        assert!(
+            rendered.contains("1.0 MiB of 512.0 MiB"),
+            "title should contain '1.0 MiB of 512.0 MiB', got:\n{rendered}"
+        );
+        assert!(
+            rendered.contains("truncated"),
+            "title should contain 'truncated', got:\n{rendered}"
+        );
     }
 
     #[test]

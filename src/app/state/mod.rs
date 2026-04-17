@@ -516,6 +516,8 @@ pub struct PendingSave {
 
 /// Collect the hint spans for the current state, respecting modal priority.
 pub fn collect_hints(state: &AppState) -> Vec<crate::widget::hint_bar::HintSpan> {
+    use std::borrow::Cow;
+
     use crate::input::{AppAction, BrowserVerb, BulletinsVerb, EventsVerb, TracerVerb, Verb};
     use crate::widget::hint_bar::HintSpan;
 
@@ -531,18 +533,18 @@ pub fn collect_hints(state: &AppState) -> Vec<crate::widget::hint_bar::HintSpan>
     if state.text_input_is_active() {
         return vec![
             HintSpan {
-                key: "type",
-                action: "filter",
+                key: Cow::Borrowed("type"),
+                action: Cow::Borrowed("filter"),
                 enabled: true,
             },
             HintSpan {
-                key: "Enter",
-                action: "apply",
+                key: Cow::Borrowed("Enter"),
+                action: Cow::Borrowed("apply"),
                 enabled: true,
             },
             HintSpan {
-                key: "Esc",
-                action: "cancel",
+                key: Cow::Borrowed("Esc"),
+                action: Cow::Borrowed("cancel"),
                 enabled: true,
             },
         ];
@@ -554,21 +556,14 @@ pub fn collect_hints(state: &AppState) -> Vec<crate::widget::hint_bar::HintSpan>
     let ctx = crate::input::HintContext::new(state);
     let mut out: Vec<HintSpan> = Vec::new();
 
-    // Helper — convert a Chord display (String) to a &'static str.
-    // HintSpan fields are &'static str, so we must leak the strings.
-    // The hint bar rebuilds every redraw but chord strings are bounded
-    // by the small set of distinct chords in the app (< 40). Leaking is
-    // acceptable here. A follow-up can convert HintSpan to owned String
-    // if needed.
     fn push_verb<V: crate::input::Verb>(
         out: &mut Vec<HintSpan>,
         v: V,
         ctx: &crate::input::HintContext<'_>,
     ) {
-        let chord_str: &'static str = Box::leak(v.chord().display().into_boxed_str());
         out.push(HintSpan {
-            key: chord_str,
-            action: v.hint(),
+            key: Cow::Owned(v.chord().display()),
+            action: Cow::Borrowed(v.hint()),
             enabled: v.enabled(ctx),
         });
     }
@@ -597,6 +592,45 @@ pub fn collect_hints(state: &AppState) -> Vec<crate::widget::hint_bar::HintSpan>
             for &v in TracerVerb::all() {
                 push_verb(&mut out, v, &ctx);
             }
+            // Override the "save" hint label when the content pane shows a
+            // truncated preview — append "(fetches full <total>)" so the user
+            // knows the save action will re-fetch the complete content.
+            let save_label: Option<Cow<'static, str>> = {
+                use crate::client::ContentSide;
+                use crate::view::tracer::state::{ContentPane, EventDetail, TracerMode};
+                if let TracerMode::Lineage(ref view) = state.tracer.mode
+                    && let EventDetail::Loaded {
+                        event,
+                        content:
+                            ContentPane::Shown {
+                                truncated: true,
+                                side,
+                                ..
+                            },
+                    } = &view.event_detail
+                {
+                    let total_size = match side {
+                        ContentSide::Input => event.input_size,
+                        ContentSide::Output => event.output_size,
+                    };
+                    Some(match total_size {
+                        Some(total) => Cow::Owned(format!(
+                            "save (fetches full {})",
+                            crate::view::tracer::render::human_bytes(total),
+                        )),
+                        None => Cow::Borrowed("save (fetches full)"),
+                    })
+                } else {
+                    None
+                }
+            };
+            // Rewrite the save hint span that was just pushed, but only when
+            // the label differs from the static default (i.e. content is truncated).
+            if let Some(label) = save_label
+                && let Some(span) = out.iter_mut().rev().find(|s| s.action == "save")
+            {
+                span.action = label;
+            }
         }
     }
 
@@ -609,8 +643,8 @@ pub fn collect_hints(state: &AppState) -> Vec<crate::widget::hint_bar::HintSpan>
     // cycling, quit, fuzzy find, context switcher) lives in the help
     // modal.
     out.push(HintSpan {
-        key: "?",
-        action: "help",
+        key: Cow::Borrowed("?"),
+        action: Cow::Borrowed("help"),
         enabled: true,
     });
 
@@ -618,96 +652,98 @@ pub fn collect_hints(state: &AppState) -> Vec<crate::widget::hint_bar::HintSpan>
 }
 
 fn modal_hints(modal: &Modal) -> Vec<crate::widget::hint_bar::HintSpan> {
+    use std::borrow::Cow;
+
     use crate::widget::hint_bar::HintSpan;
     match modal {
         Modal::Help => vec![HintSpan {
-            key: "Esc",
-            action: "close",
+            key: Cow::Borrowed("Esc"),
+            action: Cow::Borrowed("close"),
             enabled: true,
         }],
         Modal::ContextSwitcher(_) => vec![
             HintSpan {
-                key: "\u{2191}/\u{2193}",
-                action: "nav",
+                key: Cow::Borrowed("\u{2191}/\u{2193}"),
+                action: Cow::Borrowed("nav"),
                 enabled: true,
             },
             HintSpan {
-                key: "Enter",
-                action: "switch",
+                key: Cow::Borrowed("Enter"),
+                action: Cow::Borrowed("switch"),
                 enabled: true,
             },
             HintSpan {
-                key: "Esc",
-                action: "cancel",
+                key: Cow::Borrowed("Esc"),
+                action: Cow::Borrowed("cancel"),
                 enabled: true,
             },
         ],
         Modal::FuzzyFind(_) => vec![
             HintSpan {
-                key: "type",
-                action: "filter",
+                key: Cow::Borrowed("type"),
+                action: Cow::Borrowed("filter"),
                 enabled: true,
             },
             HintSpan {
-                key: "Enter",
-                action: "select",
+                key: Cow::Borrowed("Enter"),
+                action: Cow::Borrowed("select"),
                 enabled: true,
             },
             HintSpan {
-                key: "Esc",
-                action: "cancel",
+                key: Cow::Borrowed("Esc"),
+                action: Cow::Borrowed("cancel"),
                 enabled: true,
             },
         ],
         Modal::Properties(_) => vec![
             HintSpan {
-                key: "\u{2191}/\u{2193}",
-                action: "scroll",
+                key: Cow::Borrowed("\u{2191}/\u{2193}"),
+                action: Cow::Borrowed("scroll"),
                 enabled: true,
             },
             HintSpan {
-                key: "Esc",
-                action: "close",
+                key: Cow::Borrowed("Esc"),
+                action: Cow::Borrowed("close"),
                 enabled: true,
             },
         ],
         Modal::ErrorDetail => vec![HintSpan {
-            key: "Esc",
-            action: "close",
+            key: Cow::Borrowed("Esc"),
+            action: Cow::Borrowed("close"),
             enabled: true,
         }],
         Modal::SaveEventContent(_) => vec![
             HintSpan {
-                key: "Enter",
-                action: "confirm",
+                key: Cow::Borrowed("Enter"),
+                action: Cow::Borrowed("confirm"),
                 enabled: true,
             },
             HintSpan {
-                key: "Esc",
-                action: "cancel",
+                key: Cow::Borrowed("Esc"),
+                action: Cow::Borrowed("cancel"),
                 enabled: true,
             },
         ],
         Modal::NodeDetail(_) => vec![HintSpan {
-            key: "Esc",
-            action: "close",
+            key: Cow::Borrowed("Esc"),
+            action: Cow::Borrowed("close"),
             enabled: true,
         }],
         // Task 11 adds full hint spans for the goto menu.
         Modal::GotoMenu(_) => vec![
             HintSpan {
-                key: "\u{2191}/\u{2193}",
-                action: "nav",
+                key: Cow::Borrowed("\u{2191}/\u{2193}"),
+                action: Cow::Borrowed("nav"),
                 enabled: true,
             },
             HintSpan {
-                key: "Enter",
-                action: "goto",
+                key: Cow::Borrowed("Enter"),
+                action: Cow::Borrowed("goto"),
                 enabled: true,
             },
             HintSpan {
-                key: "Esc",
-                action: "cancel",
+                key: Cow::Borrowed("Esc"),
+                action: Cow::Borrowed("cancel"),
                 enabled: true,
             },
         ],

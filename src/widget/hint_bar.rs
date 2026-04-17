@@ -1,5 +1,7 @@
 //! Sticky footer hint bar showing context-sensitive keybindings.
 
+use std::borrow::Cow;
+
 use ratatui::Frame;
 use ratatui::layout::{Alignment, Constraint, Direction, Layout, Rect};
 use ratatui::text::{Line, Span};
@@ -8,13 +10,17 @@ use unicode_width::UnicodeWidthStr;
 
 use crate::theme;
 
+/// Alias for a label that is either a `'static` string literal or an
+/// owned `String` built at runtime (e.g. a dynamic save hint).
+pub type HintLabel = Cow<'static, str>;
+
 /// A single key-action pair displayed in the hint bar.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct HintSpan {
     /// The key or key combination (e.g. `"↑/↓"`, `"Enter"`).
-    pub key: &'static str,
+    pub key: HintLabel,
     /// The action description (e.g. `"nav"`, `"expand"`).
-    pub action: &'static str,
+    pub action: HintLabel,
     /// Disabled spans render in `theme::border_dim()` instead of
     /// `theme::accent()` + `theme::muted()`. They still participate in
     /// width accounting so layout is stable across enable/disable.
@@ -88,7 +94,7 @@ fn build_spans(hints: &[HintSpan]) -> Vec<Span<'static>> {
         } else {
             (theme::border_dim(), theme::border_dim())
         };
-        spans.push(Span::styled(hint.key, key_style));
+        spans.push(Span::styled(hint.key.clone(), key_style));
         spans.push(Span::styled(format!(" {}", hint.action), action_style));
     }
     spans
@@ -162,8 +168,8 @@ mod tests {
     #[test]
     fn single_hint_renders_key_and_action() {
         let hints = [HintSpan {
-            key: "↑/↓",
-            action: "nav",
+            key: Cow::Borrowed("↑/↓"),
+            action: Cow::Borrowed("nav"),
             enabled: true,
         }];
         let spans = build_spans(&hints);
@@ -175,13 +181,13 @@ mod tests {
     fn multiple_hints_separated_by_dot() {
         let hints = [
             HintSpan {
-                key: "↑/↓",
-                action: "nav",
+                key: Cow::Borrowed("↑/↓"),
+                action: Cow::Borrowed("nav"),
                 enabled: true,
             },
             HintSpan {
-                key: "Enter",
-                action: "expand",
+                key: Cow::Borrowed("Enter"),
+                action: Cow::Borrowed("expand"),
                 enabled: true,
             },
         ];
@@ -194,13 +200,13 @@ mod tests {
     fn truncation_when_too_wide() {
         let hints = [
             HintSpan {
-                key: "↑/↓",
-                action: "nav",
+                key: Cow::Borrowed("↑/↓"),
+                action: Cow::Borrowed("nav"),
                 enabled: true,
             },
             HintSpan {
-                key: "Enter",
-                action: "expand",
+                key: Cow::Borrowed("Enter"),
+                action: Cow::Borrowed("expand"),
                 enabled: true,
             },
         ];
@@ -226,13 +232,13 @@ mod tests {
 
         let hints = vec![
             HintSpan {
-                key: "↑/↓",
-                action: "nav",
+                key: Cow::Borrowed("↑/↓"),
+                action: Cow::Borrowed("nav"),
                 enabled: true,
             },
             HintSpan {
-                key: "Enter",
-                action: "open",
+                key: Cow::Borrowed("Enter"),
+                action: Cow::Borrowed("open"),
                 enabled: true,
             },
         ];
@@ -258,23 +264,23 @@ mod tests {
 
         let hints = vec![
             HintSpan {
-                key: "↑/↓",
-                action: "navigation",
+                key: Cow::Borrowed("↑/↓"),
+                action: Cow::Borrowed("navigation"),
                 enabled: true,
             },
             HintSpan {
-                key: "Enter",
-                action: "open selected item",
+                key: Cow::Borrowed("Enter"),
+                action: Cow::Borrowed("open selected item"),
                 enabled: true,
             },
             HintSpan {
-                key: "t",
-                action: "trace lineage",
+                key: Cow::Borrowed("t"),
+                action: Cow::Borrowed("trace lineage"),
                 enabled: true,
             },
             HintSpan {
-                key: "g",
-                action: "goto browser",
+                key: Cow::Borrowed("g"),
+                action: Cow::Borrowed("goto browser"),
                 enabled: true,
             },
         ];
@@ -301,8 +307,8 @@ mod tests {
         use ratatui::backend::TestBackend;
 
         let hints = vec![HintSpan {
-            key: "↑/↓",
-            action: "nav",
+            key: Cow::Borrowed("↑/↓"),
+            action: Cow::Borrowed("nav"),
             enabled: true,
         }];
         let backend = TestBackend::new(5, 1);
@@ -316,13 +322,13 @@ mod tests {
         // Build a minimal span list and inspect the resulting Vec<Span>.
         let hints = vec![
             HintSpan {
-                key: "Enter",
-                action: "drill",
+                key: Cow::Borrowed("Enter"),
+                action: Cow::Borrowed("drill"),
                 enabled: true,
             },
             HintSpan {
-                key: "g b",
-                action: "browser",
+                key: Cow::Borrowed("g b"),
+                action: Cow::Borrowed("browser"),
                 enabled: false,
             },
         ];
