@@ -9,6 +9,7 @@
 pub mod connection;
 pub mod controller_service;
 pub mod pg;
+pub mod port;
 pub mod processor;
 
 use std::time::SystemTime;
@@ -275,7 +276,10 @@ fn render_detail(
                 &state.detail_focus,
             );
         }
-        None | Some(NodeDetail::Port(_)) => {
+        Some(NodeDetail::Port(d)) => {
+            port::render(frame, detail_area, d, state, bulletins, &state.detail_focus);
+        }
+        None => {
             let lines = vec![
                 header_line,
                 Line::from(""),

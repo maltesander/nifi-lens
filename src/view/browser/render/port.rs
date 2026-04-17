@@ -1,0 +1,184 @@
+//! Port detail renderer.
+
+use std::collections::VecDeque;
+
+use ratatui::Frame;
+use ratatui::layout::{Constraint, Direction, Layout, Rect};
+use ratatui::style::{Modifier, Style};
+use ratatui::text::{Line, Span};
+use ratatui::widgets::{Cell, Paragraph, Row, Table, TableState};
+
+use crate::client::{BulletinSnapshot, NodeKind, PortDetail, PortKind};
+use crate::theme;
+use crate::view::browser::state::{BrowserState, DetailFocus, DetailSection, DetailSections};
+use crate::widget::panel::Panel;
+
+pub fn render(
+    frame: &mut Frame,
+    area: Rect,
+    d: &PortDetail,
+    _state: &BrowserState,
+    bulletins: &VecDeque<BulletinSnapshot>,
+    detail_focus: &DetailFocus,
+) {
+    let outer = Panel::new(build_header_title(d)).into_block();
+    let inner = outer.inner(area);
+    frame.render_widget(outer, area);
+
+    let rows = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([Constraint::Length(6), Constraint::Fill(1)])
+        .split(inner);
+
+    render_identity(frame, rows[0], d);
+    render_recent_bulletins(frame, rows[1], d, bulletins, detail_focus);
+}
+
+fn build_header_title(d: &PortDetail) -> Line<'_> {
+    Line::from(vec![
+        Span::raw(" "),
+        Span::styled(d.name.as_str(), theme::accent()),
+        Span::raw(" "),
+        Span::styled("·", theme::muted()),
+        Span::raw(" "),
+        Span::styled(format!("{} port", d.kind.label()), theme::muted()),
+        Span::raw(" "),
+        Span::styled("·", theme::muted()),
+        Span::raw(" "),
+        Span::styled(d.state.as_str(), state_style(&d.state)),
+        Span::raw(" "),
+    ])
+}
+
+fn state_style(state: &str) -> Style {
+    match state {
+        "RUNNING" => theme::success().add_modifier(Modifier::BOLD),
+        "STOPPED" => theme::warning(),
+        "DISABLED" => theme::muted(),
+        _ => theme::info(),
+    }
+}
+
+fn render_identity(frame: &mut Frame, area: Rect, d: &PortDetail) {
+    let block = Panel::new(" Identity ").into_block();
+    let inner = block.inner(area);
+    frame.render_widget(block, area);
+    let parent = d.parent_group_id.as_deref().unwrap_or("(root)");
+    let lines = vec![
+        Line::from(vec![
+            Span::styled("kind            ", theme::muted()),
+            Span::raw(d.kind.label().to_string()),
+        ]),
+        Line::from(vec![
+            Span::styled("state           ", theme::muted()),
+            Span::styled(d.state.clone(), state_style(&d.state)),
+        ]),
+        Line::from(vec![
+            Span::styled("parent group    ", theme::muted()),
+            Span::raw(parent.to_string()),
+        ]),
+        Line::from(vec![
+            Span::styled("concurrent tasks", theme::muted()),
+            Span::raw(format!(" {}", d.concurrent_tasks)),
+        ]),
+    ];
+    frame.render_widget(Paragraph::new(lines), inner);
+}
+
+fn render_recent_bulletins(
+    frame: &mut Frame,
+    area: Rect,
+    d: &PortDetail,
+    bulletins: &VecDeque<BulletinSnapshot>,
+    detail_focus: &DetailFocus,
+) {
+    use crate::widget::severity::{format_severity_label, severity_style};
+    let kind = match d.kind {
+        PortKind::Input => NodeKind::InputPort,
+        PortKind::Output => NodeKind::OutputPort,
+    };
+    let sections = DetailSections::for_node(kind);
+    let my_idx = sections
+        .0
+        .iter()
+        .position(|s| *s == DetailSection::RecentBulletins)
+        .unwrap_or(0);
+    let is_focused = matches!(detail_focus, DetailFocus::Section { idx, .. } if *idx == my_idx);
+    let matching: Vec<_> = bulletins
+        .iter()
+        .rev()
+        .filter(|b| b.source_id == d.id)
+        .collect();
+    let total = matching.len();
+    let panel = Panel::new(" Recent bulletins ")
+        .right(Line::from(format!(" {total} ")))
+        .focused(is_focused)
+        .into_block();
+    let inner = panel.inner(area);
+    frame.render_widget(panel, area);
+
+    let header = Row::new(vec![
+        Cell::from("TIME"),
+        Cell::from("SEV"),
+        Cell::from("MESSAGE"),
+    ])
+    .style(theme::muted().add_modifier(Modifier::BOLD));
+    let rows_data: Vec<Row> = matching
+        .iter()
+        .map(|b| {
+            let sev_label = format_severity_label(&b.level);
+            let sev_style = severity_style(&b.level);
+            let msg = crate::view::bulletins::state::strip_component_prefix(&b.message).to_string();
+            Row::new(vec![
+                Cell::from(b.timestamp_human.clone()),
+                Cell::from(sev_label).style(sev_style),
+                Cell::from(msg),
+            ])
+        })
+        .collect();
+    let widths = [
+        Constraint::Length(22),
+        Constraint::Length(4),
+        Constraint::Fill(1),
+    ];
+    let table = Table::new(rows_data, widths)
+        .header(header)
+        .row_highlight_style(theme::cursor_row());
+    let mut ts = TableState::default();
+    if let DetailFocus::Section { rows, .. } = detail_focus
+        && is_focused
+    {
+        ts.select(Some(rows[my_idx]));
+    }
+    frame.render_stateful_widget(table, inner, &mut ts);
+}
+
+#[cfg(test)]
+mod snapshots {
+    use super::*;
+    use insta::assert_snapshot;
+    use ratatui::Terminal;
+    use ratatui::backend::TestBackend;
+
+    #[test]
+    fn port_detail_input_port_renders() {
+        let d = PortDetail {
+            id: "in-1".into(),
+            name: "external-ingest".into(),
+            kind: PortKind::Input,
+            state: "RUNNING".into(),
+            comments: "accepts from edge agents".into(),
+            concurrent_tasks: 3,
+            parent_group_id: Some("root".into()),
+        };
+        let state = BrowserState::new();
+        let bulletins: VecDeque<BulletinSnapshot> = VecDeque::new();
+        let mut term = Terminal::new(TestBackend::new(100, 20)).unwrap();
+        term.draw(|f| render(f, f.area(), &d, &state, &bulletins, &DetailFocus::Tree))
+            .unwrap();
+        assert_snapshot!(
+            "port_detail_input_port_renders",
+            format!("{}", term.backend())
+        );
+    }
+}
