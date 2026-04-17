@@ -26,6 +26,15 @@ pub struct RawNode {
     pub status_summary: NodeStatusSummary,
 }
 
+/// Synthetic folder kinds emitted only by the reducer to bucket
+/// queue and CS leaves underneath their owning PG. Never produced by
+/// the client walker.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum FolderKind {
+    Queues,
+    ControllerServices,
+}
+
 /// Kind tag for every arena entry. Mirrors the same-named enum in
 /// `view::browser::state`; lives here so the client boundary can build
 /// the arena without pulling in the TUI crate module.
@@ -37,6 +46,7 @@ pub enum NodeKind {
     InputPort,
     OutputPort,
     ControllerService,
+    Folder(FolderKind),
 }
 
 /// Type-specific status fields carried alongside each arena node. Mirrors the
@@ -63,6 +73,9 @@ pub enum NodeStatusSummary {
         state: String,
     },
     Port,
+    Folder {
+        count: u32,
+    },
 }
 
 impl NifiClient {

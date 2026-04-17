@@ -933,6 +933,7 @@ pub fn build_flow_index(state: &BrowserState) -> FlowIndex {
                 NodeKind::InputPort => "InputPort",
                 NodeKind::OutputPort => "OutputPort",
                 NodeKind::ControllerService => "CS",
+                NodeKind::Folder(_) => "Folder",
             };
             let group_path = match n.parent {
                 Some(p) => path_to_root(&state.nodes, p),
@@ -963,6 +964,7 @@ pub fn build_flow_index(state: &BrowserState) -> FlowIndex {
                     fill_percent: *fill_percent,
                 },
                 NodeStatusSummary::Port => StateBadge::Port,
+                NodeStatusSummary::Folder { .. } => StateBadge::Port,
             };
             FlowIndexEntry {
                 id: n.id.clone(),

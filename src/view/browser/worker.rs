@@ -97,6 +97,7 @@ async fn fetch_detail_once(
             .await
             .map(NodeDetail::ControllerService),
         NodeKind::InputPort | NodeKind::OutputPort => return,
+        NodeKind::Folder(_) => return,
     };
     let result = detail.map(|detail| {
         ViewPayload::Browser(BrowserPayload::Detail(Box::new(NodeDetailSnapshot {

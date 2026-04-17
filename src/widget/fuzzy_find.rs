@@ -41,6 +41,7 @@ fn kind_priority(kind: NodeKind) -> u8 {
         NodeKind::Connection => 3,
         NodeKind::InputPort => 4,
         NodeKind::OutputPort => 5,
+        NodeKind::Folder(_) => 6,
     }
 }
 
@@ -300,6 +301,7 @@ fn kind_short_label(kind: NodeKind) -> &'static str {
         NodeKind::ControllerService => "CS",
         NodeKind::InputPort => "In",
         NodeKind::OutputPort => "Out",
+        NodeKind::Folder(_) => "Folder",
     }
 }
 

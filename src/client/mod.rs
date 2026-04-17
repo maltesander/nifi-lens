@@ -426,7 +426,7 @@ pub struct BulletinBoardSnapshot {
 }
 
 pub use browser::{
-    ConnectionDetail, ControllerServiceDetail, ControllerServiceSummary, NodeKind,
+    ConnectionDetail, ControllerServiceDetail, ControllerServiceSummary, FolderKind, NodeKind,
     NodeStatusSummary, ProcessGroupDetail, ProcessorDetail, RawNode, RecursiveSnapshot,
 };
 pub use events::{ProvenancePollResult, ProvenanceQuery, ProvenanceQueryHandle};

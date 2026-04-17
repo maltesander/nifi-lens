@@ -19,7 +19,7 @@ use ratatui::style::Style;
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Borders, Paragraph};
 
-use crate::client::{NodeKind, NodeStatusSummary};
+use crate::client::{FolderKind, NodeKind, NodeStatusSummary};
 use crate::layout;
 use crate::theme;
 use crate::view::browser::state::{BrowserState, FlowIndex, NodeDetail, PgHealth};
@@ -175,6 +175,8 @@ fn kind_glyph(kind: &NodeKind) -> &'static str {
         NodeKind::InputPort => "⇥",
         NodeKind::OutputPort => "⇤",
         NodeKind::ControllerService => "⚙",
+        NodeKind::Folder(FolderKind::Queues) => "→",
+        NodeKind::Folder(FolderKind::ControllerServices) => "⚙",
     }
 }
 
@@ -270,6 +272,8 @@ fn kind_label(kind: &NodeKind) -> &'static str {
         NodeKind::InputPort => "Input Port",
         NodeKind::OutputPort => "Output Port",
         NodeKind::ControllerService => "Controller Service",
+        NodeKind::Folder(FolderKind::Queues) => "Queues",
+        NodeKind::Folder(FolderKind::ControllerServices) => "Controller services",
     }
 }
 
