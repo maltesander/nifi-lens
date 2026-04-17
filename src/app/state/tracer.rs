@@ -681,21 +681,28 @@ fn dispatch_content_fetch_for_active_tab(
     }))
 }
 
-/// Extracts the raw bytes from the Tracer's content pane and builds a
-/// `PendingSave`. Returns `None` if the content pane is not in the
-/// `Shown` state.
-pub(super) fn extract_raw_for_save(
+/// Builds a `PendingSave` referencing the currently-shown content
+/// pane's event id and side. Returns `None` if the content pane is
+/// not in the `Shown` state. The worker re-fetches the full body at
+/// save time rather than re-using the preview's (potentially
+/// truncated) bytes.
+pub(super) fn build_pending_save(
     state: &AppState,
     path: std::path::PathBuf,
 ) -> Option<PendingIntent> {
     use crate::view::tracer::state::{ContentPane, EventDetail, TracerMode};
     if let TracerMode::Lineage(ref view) = state.tracer.mode
-        && let EventDetail::Loaded { ref content, .. } = view.event_detail
-        && let ContentPane::Shown { raw, .. } = content
+        && let EventDetail::Loaded {
+            ref event,
+            ref content,
+            ..
+        } = view.event_detail
+        && let ContentPane::Shown { side, .. } = content
     {
         Some(PendingIntent::SaveEventContent(PendingSave {
             path,
-            raw: std::sync::Arc::clone(raw),
+            event_id: event.summary.event_id,
+            side: *side,
         }))
     } else {
         None
@@ -1036,7 +1043,6 @@ mod tests {
     fn s_saves_only_on_content_tab() {
         use crate::client::tracer::{ContentRender, ContentSide};
         use crate::input::{TracerVerb, ViewVerb};
-        use std::sync::Arc;
 
         let mut s = fresh_state();
         s.current_tab = ViewId::Tracer;
@@ -1071,7 +1077,6 @@ mod tests {
                     },
                     bytes_fetched: 4,
                     truncated: false,
-                    raw: Arc::from(b"data".as_ref()),
                 },
             };
         }
@@ -1218,7 +1223,6 @@ mod tests {
         use crate::client::ContentRender;
         use crate::client::ContentSide as ClientSide;
         use crate::input::FocusAction;
-        use std::sync::Arc;
 
         let mut s = fresh_state();
         s.current_tab = ViewId::Tracer;
@@ -1238,7 +1242,6 @@ mod tests {
                     },
                     bytes_fetched: 2,
                     truncated: false,
-                    raw: Arc::from(b"hi".as_ref()),
                 };
             }
         }
@@ -1416,5 +1419,70 @@ mod tests {
             ts::DetailTab::Attributes,
             "Left cycles back to Attributes"
         );
+    }
+
+    #[test]
+    fn build_pending_save_returns_event_id_and_side() {
+        use crate::app::state::{PendingIntent, PendingSave};
+        use crate::client::tracer::ProvenanceEventDetail;
+        use crate::client::{ContentRender, ContentSide};
+
+        let mut s = fresh_state();
+        s.current_tab = ViewId::Tracer;
+        seed_tracer_with_loaded_detail(&mut s);
+        // Override the loaded detail: event_id 77, output side content shown.
+        if let TracerMode::Lineage(ref mut v) = s.tracer.mode {
+            let summary = crate::client::tracer::ProvenanceEventSummary {
+                event_id: 77,
+                event_time_iso: "2026-01-01T00:00:00Z".to_string(),
+                event_type: "CREATE".to_string(),
+                component_id: "comp-77".to_string(),
+                component_name: "Gen".to_string(),
+                component_type: "GenerateFlowFile".to_string(),
+                group_id: "root".to_string(),
+                flow_file_uuid: "ff-77".to_string(),
+                relationship: None,
+                details: None,
+            };
+            let detail = ProvenanceEventDetail {
+                summary,
+                attributes: vec![],
+                transit_uri: None,
+                input_available: false,
+                output_available: true,
+                input_size: None,
+                output_size: None,
+            };
+            v.event_detail = EventDetail::Loaded {
+                event: Box::new(detail),
+                content: ContentPane::Shown {
+                    side: ContentSide::Output,
+                    render: ContentRender::Text {
+                        text: "hi".to_string(),
+                        pretty_printed: false,
+                    },
+                    bytes_fetched: 2,
+                    truncated: false,
+                },
+            };
+        } else {
+            panic!("expected lineage mode");
+        }
+
+        let path = std::path::PathBuf::from("/tmp/out.bin");
+        let pending =
+            super::build_pending_save(&s, path.clone()).expect("should build pending save");
+        match pending {
+            PendingIntent::SaveEventContent(PendingSave {
+                path: p,
+                event_id,
+                side,
+            }) => {
+                assert_eq!(p, path);
+                assert_eq!(event_id, 77);
+                assert_eq!(side, ContentSide::Output);
+            }
+            _ => panic!("expected SaveEventContent"),
+        }
     }
 }

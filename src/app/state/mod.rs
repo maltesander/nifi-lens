@@ -499,11 +499,15 @@ pub enum PendingIntent {
     Quit,
 }
 
-/// Data needed to write raw content bytes to a file outside the reducer.
+/// Data needed to write raw content bytes to a file outside the
+/// reducer. Fields identify the event whose content should be
+/// re-fetched for the write; the reducer does not cache raw bytes
+/// for this purpose — the worker fetches fresh when the save runs.
 #[derive(Debug)]
 pub struct PendingSave {
     pub path: std::path::PathBuf,
-    pub raw: std::sync::Arc<[u8]>,
+    pub event_id: i64,
+    pub side: crate::client::ContentSide,
 }
 
 // ---------------------------------------------------------------------------
@@ -1397,8 +1401,8 @@ fn handle_key(state: &mut AppState, key: KeyEvent, config: &Config) -> UpdateRes
                     KeyCode::Enter => {
                         // Extract the path before dropping the mutable borrow.
                         let path = std::path::PathBuf::from(&save.path);
-                        // Extract raw bytes from the content pane and build a PendingSave.
-                        let pending = tracer::extract_raw_for_save(state, path);
+                        // Build a PendingSave from the content pane's event id + side.
+                        let pending = tracer::build_pending_save(state, path);
                         state.modal = None;
                         return UpdateResult {
                             redraw: true,

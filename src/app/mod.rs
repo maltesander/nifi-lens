@@ -95,7 +95,13 @@ pub async fn run(
         if let Some(pending) = result.intent {
             match pending {
                 PendingIntent::SaveEventContent(save) => {
-                    crate::view::tracer::worker::spawn_save(tx.clone(), save.path, save.raw);
+                    crate::view::tracer::worker::spawn_save(
+                        client.clone(),
+                        tx.clone(),
+                        save.path,
+                        save.event_id,
+                        save.side,
+                    );
                 }
                 other => {
                     let intent = match other {

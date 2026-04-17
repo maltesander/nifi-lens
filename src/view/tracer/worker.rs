@@ -230,17 +230,45 @@ pub fn spawn_content(
     })
 }
 
-/// Saves raw content bytes to a file path and emits [`TracerPayload::ContentSaved`]
-/// or [`TracerPayload::ContentSaveFailed`].
+/// Re-fetches the full content bytes for `(event_id, side)` and
+/// writes them to `path`. Emits `TracerPayload::ContentSaved` on
+/// success or `TracerPayload::ContentSaveFailed` on fetch or write
+/// error.
 ///
-/// The actual write runs on the blocking thread pool via
+/// The write runs on the blocking thread pool via
 /// `tokio::task::spawn_blocking` so it does not block the `LocalSet`.
-pub fn spawn_save(tx: mpsc::Sender<AppEvent>, path: PathBuf, raw: Arc<[u8]>) -> JoinHandle<()> {
+//
+// TODO(nifi-rust-client): switch to a streaming body API when
+// upstream adds one, so the full response doesn't need to be
+// buffered in memory before writing to disk.
+pub fn spawn_save(
+    client: Arc<RwLock<NifiClient>>,
+    tx: mpsc::Sender<AppEvent>,
+    path: PathBuf,
+    event_id: i64,
+    side: ContentSide,
+) -> JoinHandle<()> {
     tokio::task::spawn_local(async move {
+        let bytes = {
+            let guard = client.read().await;
+            match guard.provenance_content_raw(event_id, side).await {
+                Ok(bytes) => bytes,
+                Err(err) => {
+                    let _ = tx
+                        .send(AppEvent::Data(ViewPayload::Tracer(
+                            TracerPayload::ContentSaveFailed {
+                                path,
+                                error: err.to_string(),
+                            },
+                        )))
+                        .await;
+                    return;
+                }
+            }
+        };
+
         let path_clone = path.clone();
-        let raw_clone = Arc::clone(&raw);
-        let result =
-            tokio::task::spawn_blocking(move || std::fs::write(&path_clone, &*raw_clone)).await;
+        let result = tokio::task::spawn_blocking(move || std::fs::write(&path_clone, &bytes)).await;
 
         let payload = match result {
             Ok(Ok(())) => TracerPayload::ContentSaved { path },

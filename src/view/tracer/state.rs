@@ -381,8 +381,6 @@ pub enum ContentPane {
         render: ContentRender,
         bytes_fetched: usize,
         truncated: bool,
-        /// Raw bytes retained for the optional save-to-file flow.
-        raw: std::sync::Arc<[u8]>,
     },
     /// The content fetch failed.
     Failed(String),
@@ -948,7 +946,6 @@ pub fn apply_payload(state: &mut TracerState, payload: TracerPayload) -> Option<
                     render: snap.render,
                     bytes_fetched: snap.bytes_fetched,
                     truncated: snap.truncated,
-                    raw: snap.raw,
                 };
                 // Reset scroll if the user was already focused on the
                 // content pane — the new payload replaces the old.
@@ -1736,7 +1733,6 @@ mod tests {
             },
             bytes_fetched: 5,
             truncated: false,
-            raw: std::sync::Arc::from(b"hello".as_slice()),
         };
         let followup = apply_payload(&mut state, TracerPayload::Content(snap));
         assert!(followup.is_none());
@@ -1949,7 +1945,6 @@ mod tests {
 
     fn load_content_shown(state: &mut TracerState, body: &str) {
         use crate::client::tracer::{ContentRender, ContentSide};
-        use std::sync::Arc;
         let TracerMode::Lineage(ref mut view) = state.mode else {
             panic!("expected Lineage mode");
         };
@@ -1965,7 +1960,6 @@ mod tests {
                 },
                 bytes_fetched: body.len(),
                 truncated: false,
-                raw: Arc::from(body.as_bytes()),
             };
         } else {
             panic!("detail must be Loaded before loading content");
@@ -2050,7 +2044,6 @@ mod tests {
     #[test]
     fn new_content_payload_resets_scroll_when_focused() {
         use crate::client::tracer::{ContentRender, ContentSide};
-        use std::sync::Arc;
 
         let mut state = TracerState::new();
         seed_lineage(&mut state, &[1]);
@@ -2072,7 +2065,6 @@ mod tests {
                 },
                 bytes_fetched: new_body.len(),
                 truncated: false,
-                raw: Arc::from(new_body.as_bytes()),
             }),
         );
         let TracerMode::Lineage(ref view) = state.mode else {

@@ -1081,7 +1081,6 @@ mod tests {
     fn snapshot_lineage_view_expanded_text_content() {
         use crate::client::tracer::{ContentRender, ContentSide};
         use crate::view::tracer::state::{ContentPane, DetailTab, EventDetail, LineageFocus};
-        use std::sync::Arc;
 
         let mut state = TracerState::new();
         seed_lineage_state(&mut state);
@@ -1098,7 +1097,6 @@ mod tests {
                     },
                     bytes_fetched: 36,
                     truncated: false,
-                    raw: Arc::from(b"{}".as_ref()),
                 },
             };
         }

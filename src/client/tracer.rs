@@ -1,4 +1,3 @@
-// Consumed by Tasks 5–8
 //! Tracer-tab client wrappers and snapshot types.
 //!
 //! Phase 4 forensic flow: paste a flowfile UUID → submit a lineage
@@ -6,7 +5,6 @@
 //! content. All helpers map errors via `classify_or_fallback` so the UI
 //! layer never sees a raw `NifiError`.
 
-use std::sync::Arc;
 use std::time::SystemTime;
 
 use nifi_rust_client::dynamic::types::{LineageDto, LineageEntity, LineageRequestDto};
@@ -118,7 +116,6 @@ pub struct ContentSnapshot {
     pub render: ContentRender,
     pub bytes_fetched: usize,
     pub truncated: bool,
-    pub raw: Arc<[u8]>,
 }
 
 impl NifiClient {
@@ -428,8 +425,6 @@ impl NifiClient {
 
         let bytes_fetched = bytes.len();
         let truncated = matches!(max_bytes, Some(n) if bytes_fetched >= n);
-        // TODO(task-5): remove `raw` entirely; the Arc copy is throwaway while ContentSnapshot.raw still exists.
-        let raw: std::sync::Arc<[u8]> = std::sync::Arc::from(bytes.as_slice());
         let render = classify_content(bytes);
 
         Ok(ContentSnapshot {
@@ -438,7 +433,6 @@ impl NifiClient {
             render,
             bytes_fetched,
             truncated,
-            raw,
         })
     }
 
