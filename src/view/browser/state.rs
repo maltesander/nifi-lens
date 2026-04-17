@@ -59,6 +59,7 @@ pub enum DetailSection {
     ControllerServices,
     ChildGroups,
     ReferencingComponents,
+    Endpoints,
 }
 
 /// Per-node-kind list of focusable sections, in cycle order.
@@ -88,6 +89,7 @@ impl DetailSections {
                 DetailSection::RecentBulletins,
             ]),
             NK::InputPort | NK::OutputPort => DetailSections(&[DetailSection::RecentBulletins]),
+            NK::Connection => DetailSections(&[DetailSection::Endpoints]),
             _ => DetailSections(&[]),
         }
     }
@@ -550,6 +552,7 @@ impl BrowserState {
             (DetailSection::RecentBulletins, NodeDetail::Port(p)) => {
                 bulletins.iter().filter(|b| b.source_id == p.id).count()
             }
+            (DetailSection::Endpoints, NodeDetail::Connection(_)) => 2,
             _ => 0,
         }
     }
@@ -2790,5 +2793,68 @@ mod tests {
         let edges = s.connections_for_processor("proc-A");
         assert_eq!(edges.len(), 1);
         assert_eq!(edges[0].opposite_group_id, "");
+    }
+
+    #[test]
+    fn for_node_connection_returns_endpoints_section() {
+        use crate::client::NodeKind;
+        let s = DetailSections::for_node(NodeKind::Connection);
+        assert_eq!(s.0, &[DetailSection::Endpoints][..]);
+        assert_eq!(s.len(), 1);
+    }
+
+    #[test]
+    fn section_len_endpoints_is_always_two() {
+        use crate::client::{ConnectionDetail, NodeKind, NodeStatusSummary};
+        use crate::view::browser::state::NodeDetail;
+        use std::collections::VecDeque;
+
+        let mut s = BrowserState::new();
+        s.nodes.push(TreeNode {
+            parent: None,
+            children: vec![],
+            kind: NodeKind::Connection,
+            id: "c".into(),
+            group_id: "g".into(),
+            name: "c".into(),
+            status_summary: NodeStatusSummary::Connection {
+                fill_percent: 0,
+                flow_files_queued: 0,
+                queued_display: "0".into(),
+                source_id: "s".into(),
+                source_name: "S".into(),
+                destination_id: "d".into(),
+                destination_name: "D".into(),
+            },
+        });
+        crate::view::browser::state::rebuild_visible(&mut s);
+        s.selected = 0;
+        s.details.insert(
+            0,
+            NodeDetail::Connection(ConnectionDetail {
+                id: "c".into(),
+                name: "c".into(),
+                source_id: "s".into(),
+                source_name: "S".into(),
+                source_type: "PROCESSOR".into(),
+                source_group_id: "g".into(),
+                destination_id: "d".into(),
+                destination_name: "D".into(),
+                destination_type: "PROCESSOR".into(),
+                destination_group_id: "g".into(),
+                selected_relationships: vec![],
+                available_relationships: vec![],
+                back_pressure_object_threshold: 0,
+                back_pressure_data_size_threshold: "".into(),
+                flow_file_expiration: "".into(),
+                load_balance_strategy: "".into(),
+                fill_percent: 0,
+                flow_files_queued: 0,
+                bytes_queued: 0,
+                queued_display: "0".into(),
+            }),
+        );
+        let ring: VecDeque<crate::client::BulletinSnapshot> = VecDeque::new();
+        assert_eq!(s.section_len(DetailSection::Endpoints, &ring), 2);
     }
 }
