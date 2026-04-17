@@ -25,4 +25,4 @@ Never read entire files by default. Survey, locate, then extract.
 4. **Extract with Read (offset + limit)** — once you know the line range, read only that slice.
 5. **Structured data** — use `jq` for JSON, `yq` for YAML; never read raw markup whole.
 6. **Filesystem survey** — use `tree -L 2 -I '.git|target|node_modules'` instead of recursive `ls`.
-7. **Verify edits with diff** — after editing, `diff -u` to confirm changes instead of re-reading.
+7. **Verify edits with diff** — after editing, `git diff -u` to confirm changes instead of re-reading.
