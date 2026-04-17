@@ -303,8 +303,14 @@ impl BrowserState {
         let Some(&arena_idx) = self.visible.get(self.selected) else {
             return;
         };
-        self.pending_detail = Some(arena_idx);
         let node = &self.nodes[arena_idx];
+        if matches!(node.kind, NodeKind::Folder(_)) {
+            // Folders have no detail pane; mark nothing pending.
+            self.pending_detail = None;
+            self.pending_detail_unsent = false;
+            return;
+        }
+        self.pending_detail = Some(arena_idx);
         if let Some(tx) = self.detail_tx.as_ref() {
             let _ = tx.send(DetailRequest {
                 arena_idx,
@@ -326,10 +332,12 @@ impl BrowserState {
         let mut segments = Vec::new();
         let mut cursor = Some(arena_idx);
         while let Some(i) = cursor {
-            segments.push(BreadcrumbSegment {
-                name: self.nodes[i].name.clone(),
-                arena_idx: i,
-            });
+            if !matches!(self.nodes[i].kind, NodeKind::Folder(_)) {
+                segments.push(BreadcrumbSegment {
+                    name: self.nodes[i].name.clone(),
+                    arena_idx: i,
+                });
+            }
             cursor = self.nodes[i].parent;
         }
         segments.reverse();

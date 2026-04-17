@@ -224,6 +224,14 @@ fn render_detail(
         return;
     };
 
+    if matches!(state.nodes[arena_idx].kind, NodeKind::Folder(_)) {
+        // Folder row: just render the breadcrumb (which skips folder
+        // ancestors and in this case evaluates to ancestor-only).
+        let crumb = build_breadcrumb_line(state);
+        frame.render_widget(Paragraph::new(crumb), area);
+        return;
+    }
+
     // Split: 1 line for breadcrumb, rest for detail content.
     let chunks = Layout::default()
         .direction(Direction::Vertical)

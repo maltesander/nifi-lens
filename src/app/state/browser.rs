@@ -307,10 +307,22 @@ impl ViewKeyHandler for BrowserHandler {
                 })
             }
             FocusAction::Right => {
-                // Expand the selected node / move to first child (same as the
-                // old Enter/Right behavior).
-                state.browser.enter_selection();
-                state.browser.emit_detail_request_for_current_selection();
+                // On a folder row: expand it (no descent into sections).
+                // Otherwise: expand the selected node / move to first child
+                // (same as the old Enter/Right behavior).
+                let Some(&arena_idx) = state.browser.visible.get(state.browser.selected) else {
+                    return Some(UpdateResult::default());
+                };
+                if matches!(
+                    state.browser.nodes[arena_idx].kind,
+                    crate::client::NodeKind::Folder(_)
+                ) {
+                    state.browser.expanded.insert(arena_idx);
+                    crate::view::browser::state::rebuild_visible(&mut state.browser);
+                } else {
+                    state.browser.enter_selection();
+                    state.browser.emit_detail_request_for_current_selection();
+                }
                 Some(UpdateResult {
                     redraw: true,
                     intent: None,
@@ -318,9 +330,21 @@ impl ViewKeyHandler for BrowserHandler {
                 })
             }
             FocusAction::Left => {
-                // Collapse the current node or goto its parent.
-                state.browser.backspace_selection();
-                state.browser.emit_detail_request_for_current_selection();
+                // On a folder row: collapse it. Otherwise: collapse the
+                // current node or goto its parent.
+                let Some(&arena_idx) = state.browser.visible.get(state.browser.selected) else {
+                    return Some(UpdateResult::default());
+                };
+                if matches!(
+                    state.browser.nodes[arena_idx].kind,
+                    crate::client::NodeKind::Folder(_)
+                ) {
+                    state.browser.expanded.remove(&arena_idx);
+                    crate::view::browser::state::rebuild_visible(&mut state.browser);
+                } else {
+                    state.browser.backspace_selection();
+                    state.browser.emit_detail_request_for_current_selection();
+                }
                 Some(UpdateResult {
                     redraw: true,
                     intent: None,
@@ -337,6 +361,19 @@ impl ViewKeyHandler for BrowserHandler {
                 let kind = state.browser.nodes[arena_idx].kind;
                 let sections = DetailSections::for_node(kind);
                 use crate::client::NodeKind as NK;
+                if matches!(kind, NK::Folder(_)) {
+                    if state.browser.expanded.contains(&arena_idx) {
+                        state.browser.expanded.remove(&arena_idx);
+                    } else {
+                        state.browser.expanded.insert(arena_idx);
+                    }
+                    crate::view::browser::state::rebuild_visible(&mut state.browser);
+                    return Some(UpdateResult {
+                        redraw: true,
+                        intent: None,
+                        tracer_followup: None,
+                    });
+                }
                 if matches!(kind, NK::ProcessGroup) {
                     state.browser.enter_selection();
                     state.browser.emit_detail_request_for_current_selection();
@@ -1855,6 +1892,78 @@ mod tests {
                 DetailFocus::Section { x_offsets, .. } if x_offsets[0] == 0
             ),
             "Left at 0 must not underflow"
+        );
+    }
+
+    #[test]
+    fn descend_on_folder_toggles_expansion() {
+        use crate::client::{FolderKind, NodeKind, NodeStatusSummary, RawNode, RecursiveSnapshot};
+        use crate::view::browser::state::apply_tree_snapshot;
+
+        let mut s = crate::test_support::fresh_state();
+        apply_tree_snapshot(
+            &mut s.browser,
+            RecursiveSnapshot {
+                nodes: vec![
+                    RawNode {
+                        parent_idx: None,
+                        kind: NodeKind::ProcessGroup,
+                        id: "root".into(),
+                        group_id: "root".into(),
+                        name: "root".into(),
+                        status_summary: NodeStatusSummary::ProcessGroup {
+                            running: 0,
+                            stopped: 0,
+                            invalid: 0,
+                            disabled: 0,
+                        },
+                    },
+                    RawNode {
+                        parent_idx: Some(0),
+                        kind: NodeKind::ControllerService,
+                        id: "cs".into(),
+                        group_id: "root".into(),
+                        name: "pool".into(),
+                        status_summary: NodeStatusSummary::ControllerService {
+                            state: "ENABLED".into(),
+                        },
+                    },
+                ],
+                fetched_at: std::time::SystemTime::now(),
+            },
+        );
+
+        // After apply_tree_snapshot: root is auto-expanded; the CS folder
+        // sits under root. Visible = [root, Folder(CS)]. Selected = 0.
+        // Move cursor onto the folder.
+        s.browser.selected = 1;
+        let arena = s.browser.visible[1];
+        assert!(
+            matches!(
+                s.browser.nodes[arena].kind,
+                NodeKind::Folder(FolderKind::ControllerServices)
+            ),
+            "cursor must land on the CS folder"
+        );
+        assert!(
+            !s.browser.expanded.contains(&arena),
+            "folder starts collapsed"
+        );
+
+        BrowserHandler::handle_focus(&mut s, crate::input::FocusAction::Descend)
+            .expect("Descend on folder should be consumed");
+
+        assert!(
+            s.browser.expanded.contains(&arena),
+            "folder must be expanded after Descend"
+        );
+
+        // Second Descend collapses.
+        BrowserHandler::handle_focus(&mut s, crate::input::FocusAction::Descend)
+            .expect("Descend on folder should be consumed again");
+        assert!(
+            !s.browser.expanded.contains(&arena),
+            "folder must be collapsed after second Descend"
         );
     }
 }
