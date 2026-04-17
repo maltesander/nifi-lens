@@ -5,7 +5,8 @@
 //! ```text
 //! ┌ <name> · controller service · <state> ─┐
 //! │┌ Identity ─────────────────────┐       │
-//! ││ type / bundle / parent        │       │
+//! ││ type / bundle / parent /      │       │
+//! ││ comments / flags              │       │
 //! │└───────────────────────────────┘       │
 //! │┌ Properties  N ────────────────┐       │  ← focusable
 //! ││ KEY              VALUE        │       │
@@ -14,6 +15,12 @@
 //! │┌ Validation errors  N ─────────┐       │  ← optional, shown when errors present
 //! ││ error message 1               │       │
 //! ││ ...                           │       │
+//! │└───────────────────────────────┘       │
+//! │┌ Referencing components  N ────┐       │  ← focusable
+//! ││ STATE  KIND  NAME  THR        │       │
+//! │└───────────────────────────────┘       │
+//! │┌ Recent bulletins  N ──────────┐       │  ← focusable
+//! ││ TIME  SEV  MESSAGE            │       │
 //! │└───────────────────────────────┘       │
 //! └────────────────────────────────────────┘
 //! ```
@@ -37,23 +44,47 @@ pub fn render(
     area: Rect,
     d: &ControllerServiceDetail,
     _state: &BrowserState,
+    bulletins: &std::collections::VecDeque<crate::client::BulletinSnapshot>,
     detail_focus: &DetailFocus,
 ) {
-    // 1. Outer panel: " <name> · controller service · <state> "
     let outer = Panel::new(build_header_title(d)).into_block();
     let inner = outer.inner(area);
     frame.render_widget(outer, area);
 
-    // 2. Inner vertical layout.
-    //    identity: 5 rows (2 borders + 3 content lines)
-    //    properties (and optional validation line): fill
+    let has_validation = !d.validation_errors.is_empty();
+    let sections = DetailSections::for_node_detail(NodeKind::ControllerService, has_validation);
+
+    let mut constraints: Vec<Constraint> = Vec::new();
+    constraints.push(Constraint::Length(7)); // Identity (5 content lines + 2 borders)
+    constraints.push(Constraint::Fill(1)); // Properties
+    if has_validation {
+        let h = (d
+            .validation_errors
+            .len()
+            .min(layout::VALIDATION_ERROR_ROWS_MAX)
+            + 2) as u16;
+        constraints.push(Constraint::Length(h));
+    }
+    constraints.push(Constraint::Fill(1)); // Referencing components
+    constraints.push(Constraint::Length(8)); // Recent bulletins (6 rows + 2 borders)
+
     let rows = Layout::default()
         .direction(Direction::Vertical)
-        .constraints([Constraint::Length(5), Constraint::Fill(1)])
+        .constraints(constraints)
         .split(inner);
 
-    render_identity_panel(frame, rows[0], d);
-    render_properties_and_validation(frame, rows[1], d, detail_focus);
+    let mut idx = 0;
+    render_identity_panel(frame, rows[idx], d);
+    idx += 1;
+    render_properties_panel(frame, rows[idx], d, detail_focus, &sections);
+    idx += 1;
+    if has_validation {
+        render_validation_errors_panel(frame, rows[idx], d, detail_focus, &sections);
+        idx += 1;
+    }
+    render_referencing_components_panel(frame, rows[idx], d, detail_focus, &sections);
+    idx += 1;
+    render_recent_bulletins_panel(frame, rows[idx], d, bulletins, detail_focus, &sections);
 }
 
 /// Build the outer panel title: ` <name> · controller service · <state> `.
@@ -87,81 +118,71 @@ fn render_identity_panel(frame: &mut Frame, area: Rect, d: &ControllerServiceDet
     frame.render_widget(block, area);
 
     let parent = d.parent_group_id.as_deref().unwrap_or("(controller)");
+    let w = inner.width.saturating_sub(9) as usize;
+    let comments = if d.comments.is_empty() {
+        "—".to_string()
+    } else {
+        truncate(&d.comments, w)
+    };
+
+    let flag = |on: bool, label: &str| {
+        if on {
+            Span::styled(label.to_string(), theme::accent())
+        } else {
+            Span::styled(label.to_string(), theme::muted())
+        }
+    };
+
     let lines = vec![
         Line::from(vec![
-            Span::styled("type   ", theme::muted()),
-            Span::raw(truncate(
-                &d.type_name,
-                inner.width.saturating_sub(7) as usize,
-            )),
+            Span::styled("type     ", theme::muted()),
+            Span::raw(truncate(&d.type_name, w)),
         ]),
         Line::from(vec![
-            Span::styled("bundle ", theme::muted()),
-            Span::raw(truncate(&d.bundle, inner.width.saturating_sub(7) as usize)),
+            Span::styled("bundle   ", theme::muted()),
+            Span::raw(truncate(&d.bundle, w)),
         ]),
         Line::from(vec![
-            Span::styled("parent ", theme::muted()),
-            Span::raw(truncate(parent, inner.width.saturating_sub(7) as usize)),
+            Span::styled("parent   ", theme::muted()),
+            Span::raw(truncate(parent, w)),
+        ]),
+        Line::from(vec![
+            Span::styled("comments ", theme::muted()),
+            Span::raw(comments),
+        ]),
+        Line::from(vec![
+            Span::styled("flags    ", theme::muted()),
+            flag(d.restricted, "restricted"),
+            Span::styled(" · ", theme::muted()),
+            flag(d.deprecated, "deprecated"),
+            Span::styled(" · ", theme::muted()),
+            flag(d.persists_state, "persists state"),
         ]),
     ];
     frame.render_widget(Paragraph::new(lines), inner);
-}
-
-/// Renders the Properties sub-panel and, when the CS has validation
-/// errors, a bordered panel listing them below Properties.
-fn render_properties_and_validation(
-    frame: &mut Frame,
-    area: Rect,
-    d: &ControllerServiceDetail,
-    detail_focus: &DetailFocus,
-) {
-    let has_validation = !d.validation_errors.is_empty();
-    let sections = DetailSections::for_node_detail(NodeKind::ControllerService, has_validation);
-    let val_idx = sections
-        .0
-        .iter()
-        .position(|s| *s == DetailSection::ValidationErrors);
-    let is_val_focused = val_idx
-        .is_some_and(|i| matches!(detail_focus, DetailFocus::Section { idx, .. } if *idx == i));
-
-    let constraints: Vec<Constraint> = if has_validation {
-        let panel_height = (d
-            .validation_errors
-            .len()
-            .min(layout::VALIDATION_ERROR_ROWS_MAX)
-            + 2) as u16;
-        vec![Constraint::Fill(1), Constraint::Length(panel_height)]
-    } else {
-        vec![Constraint::Fill(1)]
-    };
-    let chunks = Layout::default()
-        .direction(Direction::Vertical)
-        .constraints(constraints)
-        .split(area);
-
-    let val_x_offset = val_idx
-        .and_then(|i| {
-            if let DetailFocus::Section { x_offsets, .. } = detail_focus {
-                Some(x_offsets[i])
-            } else {
-                None
-            }
-        })
-        .unwrap_or(0);
-
-    render_properties_panel(frame, chunks[0], d, detail_focus);
-    if has_validation {
-        render_validation_errors_panel(frame, chunks[1], d, is_val_focused, val_x_offset);
-    }
 }
 
 fn render_validation_errors_panel(
     frame: &mut Frame,
     area: Rect,
     d: &ControllerServiceDetail,
-    is_focused: bool,
-    x_offset: usize,
+    detail_focus: &DetailFocus,
+    sections: &DetailSections,
 ) {
+    let my_idx = sections
+        .0
+        .iter()
+        .position(|s| *s == DetailSection::ValidationErrors)
+        .unwrap_or(0);
+    let is_focused = matches!(
+        detail_focus,
+        DetailFocus::Section { idx, .. } if *idx == my_idx
+    );
+    let x_offset = match detail_focus {
+        DetailFocus::Section { x_offsets, .. } if is_focused => x_offsets[my_idx],
+        _ => 0,
+    };
+
     let count = d.validation_errors.len();
     let panel = Panel::new(" Validation errors ")
         .right(Line::from(format!(" {count} ")))
@@ -183,11 +204,8 @@ fn render_properties_panel(
     area: Rect,
     d: &ControllerServiceDetail,
     detail_focus: &DetailFocus,
+    sections: &DetailSections,
 ) {
-    let sections = DetailSections::for_node_detail(
-        NodeKind::ControllerService,
-        !d.validation_errors.is_empty(),
-    );
     let props_idx = sections
         .0
         .iter()
@@ -240,6 +258,187 @@ fn render_properties_panel(
         state.select(Some(rows[props_idx]));
     }
     frame.render_stateful_widget(table, inner, &mut state);
+}
+
+fn render_referencing_components_panel(
+    frame: &mut Frame,
+    area: Rect,
+    d: &ControllerServiceDetail,
+    detail_focus: &DetailFocus,
+    sections: &DetailSections,
+) {
+    use crate::client::ReferencingKind;
+    let my_idx = sections
+        .0
+        .iter()
+        .position(|s| *s == DetailSection::ReferencingComponents)
+        .unwrap_or(0);
+    let is_focused = matches!(detail_focus, DetailFocus::Section { idx, .. } if *idx == my_idx);
+    let x_offset = match detail_focus {
+        DetailFocus::Section { x_offsets, .. } if is_focused => x_offsets[my_idx],
+        _ => 0,
+    };
+
+    let total = d.referencing_components.len();
+    let panel = Panel::new(" Referencing components ")
+        .right(Line::from(format!(" {total} ")))
+        .focused(is_focused)
+        .into_block();
+    let inner = panel.inner(area);
+    frame.render_widget(panel, area);
+
+    let header = Row::new(vec![
+        Cell::from("STATE"),
+        Cell::from("KIND"),
+        Cell::from("NAME"),
+        Cell::from("THR"),
+    ])
+    .style(theme::muted().add_modifier(Modifier::BOLD));
+
+    let kind_abbrev = |k: &ReferencingKind| -> &'static str {
+        match k {
+            ReferencingKind::Processor => "PROC",
+            ReferencingKind::ControllerService => "CS",
+            ReferencingKind::ReportingTask => "REPT",
+            ReferencingKind::FlowRegistryClient => "REG",
+            ReferencingKind::ParameterProvider => "PARM",
+            ReferencingKind::Other(_) => "?",
+        }
+    };
+    let state_cell = |kind: &ReferencingKind, state: &str| -> Cell<'static> {
+        match kind {
+            ReferencingKind::Processor => {
+                let (glyph, style) = crate::widget::run_icon::processor_run_icon(state);
+                Cell::from(format!("{glyph} {state}")).style(style)
+            }
+            ReferencingKind::ControllerService => {
+                let style = match state {
+                    "ENABLED" => theme::success(),
+                    "DISABLED" => theme::disabled(),
+                    _ => theme::warning(),
+                };
+                Cell::from(state.to_string()).style(style)
+            }
+            _ => Cell::from(state.to_string()).style(theme::muted()),
+        }
+    };
+
+    let rows_data: Vec<Row> = d
+        .referencing_components
+        .iter()
+        .map(|r| {
+            Row::new(vec![
+                state_cell(&r.kind, &r.state),
+                Cell::from(kind_abbrev(&r.kind)),
+                Cell::from(char_skip(&r.name, x_offset)),
+                Cell::from(r.active_thread_count.to_string()),
+            ])
+        })
+        .collect();
+
+    let widths = [
+        Constraint::Length(12),
+        Constraint::Length(4),
+        Constraint::Fill(1),
+        Constraint::Length(4),
+    ];
+    let table = Table::new(rows_data, widths)
+        .header(header)
+        .row_highlight_style(theme::cursor_row());
+    let mut ts = TableState::default();
+    if let DetailFocus::Section { rows, .. } = detail_focus
+        && is_focused
+    {
+        ts.select(Some(rows[my_idx]));
+    }
+    frame.render_stateful_widget(table, inner, &mut ts);
+}
+
+fn render_recent_bulletins_panel(
+    frame: &mut Frame,
+    area: Rect,
+    d: &ControllerServiceDetail,
+    bulletins: &std::collections::VecDeque<crate::client::BulletinSnapshot>,
+    detail_focus: &DetailFocus,
+    sections: &DetailSections,
+) {
+    use crate::widget::severity::{format_severity_label, severity_style};
+    let my_idx = sections
+        .0
+        .iter()
+        .position(|s| *s == DetailSection::RecentBulletins)
+        .unwrap_or(0);
+    let is_focused = matches!(detail_focus, DetailFocus::Section { idx, .. } if *idx == my_idx);
+    let x_offset = match detail_focus {
+        DetailFocus::Section { x_offsets, .. } if is_focused => x_offsets[my_idx],
+        _ => 0,
+    };
+    let matching: Vec<_> = bulletins
+        .iter()
+        .rev()
+        .filter(|b| b.source_id == d.id)
+        .collect();
+    let total = matching.len();
+
+    let panel = Panel::new(" Recent bulletins ")
+        .right(Line::from(format!(" {total} ")))
+        .focused(is_focused)
+        .into_block();
+    let inner = panel.inner(area);
+    frame.render_widget(panel, area);
+
+    let header = Row::new(vec![
+        Cell::from("TIME"),
+        Cell::from("SEV"),
+        Cell::from("MESSAGE"),
+    ])
+    .style(theme::muted().add_modifier(Modifier::BOLD));
+    let rows_data: Vec<Row> = matching
+        .iter()
+        .map(|b| {
+            let sev = format_severity_label(&b.level);
+            let sev_style = severity_style(&b.level);
+            let msg = crate::view::bulletins::state::strip_component_prefix(&b.message).to_string();
+            Row::new(vec![
+                Cell::from(short_time(&b.timestamp_iso, &b.timestamp_human)),
+                Cell::from(sev).style(sev_style),
+                Cell::from(char_skip(&msg, x_offset)),
+            ])
+        })
+        .collect();
+    let widths = [
+        Constraint::Length(8),
+        Constraint::Length(4),
+        Constraint::Fill(1),
+    ];
+    let table = Table::new(rows_data, widths)
+        .header(header)
+        .row_highlight_style(theme::cursor_row());
+    let mut ts = TableState::default();
+    if let DetailFocus::Section { rows, .. } = detail_focus
+        && is_focused
+    {
+        ts.select(Some(rows[my_idx]));
+    }
+    frame.render_stateful_widget(table, inner, &mut ts);
+}
+
+/// Extract `HH:MM:SS` from an ISO-8601 timestamp, falling back to a
+/// short slice of the human-readable form when the ISO field is empty.
+fn short_time(iso: &str, human: &str) -> String {
+    if iso.len() >= 19 {
+        let t = &iso[11..19];
+        if t.as_bytes().get(2) == Some(&b':') && t.as_bytes().get(5) == Some(&b':') {
+            return t.to_string();
+        }
+    }
+    for i in 0..human.len().saturating_sub(7) {
+        let slice = &human[i..i + 8];
+        if slice.as_bytes()[2] == b':' && slice.as_bytes()[5] == b':' {
+            return slice.to_string();
+        }
+    }
+    "--:--:--".to_string()
 }
 
 fn truncate(s: &str, max: usize) -> String {
@@ -299,9 +498,11 @@ mod snapshots {
 
     fn render_snapshot(detail_focus: &DetailFocus) -> String {
         let (d, state) = seeded_cs_detail();
+        let bulletins: std::collections::VecDeque<crate::client::BulletinSnapshot> =
+            std::collections::VecDeque::new();
         let mut term = Terminal::new(TestBackend::new(120, 30)).unwrap();
         term.draw(|f| {
-            render(f, f.area(), &d, &state, detail_focus);
+            render(f, f.area(), &d, &state, &bulletins, detail_focus);
         })
         .unwrap();
         format!("{}", term.backend())
@@ -322,5 +523,47 @@ mod snapshots {
         };
         let out = render_snapshot(&focus);
         assert_snapshot!("controller_service_detail_properties_focused", out);
+    }
+
+    #[test]
+    fn controller_service_detail_with_referencing_components() {
+        use crate::client::{ReferencingComponent, ReferencingKind};
+        let (mut d, state) = seeded_cs_detail();
+        // Clear validation errors so the section layout is
+        // [Properties, ReferencingComponents, RecentBulletins].
+        d.validation_errors.clear();
+        d.referencing_components = vec![
+            ReferencingComponent {
+                id: "p1".into(),
+                name: "InvokeHTTP".into(),
+                kind: ReferencingKind::Processor,
+                state: "RUNNING".into(),
+                active_thread_count: 2,
+                group_id: "ingest".into(),
+            },
+            ReferencingComponent {
+                id: "cs2".into(),
+                name: "dependent-ssl".into(),
+                kind: ReferencingKind::ControllerService,
+                state: "ENABLED".into(),
+                active_thread_count: 0,
+                group_id: "ingest".into(),
+            },
+        ];
+        let bulletins: std::collections::VecDeque<crate::client::BulletinSnapshot> =
+            std::collections::VecDeque::new();
+        // ReferencingComponents is at idx 1 when there are no validation errors.
+        let focus = DetailFocus::Section {
+            idx: 1,
+            rows: [0, 0, 0, 0, 0],
+            x_offsets: [0; MAX_DETAIL_SECTIONS],
+        };
+        let mut term = Terminal::new(TestBackend::new(120, 32)).unwrap();
+        term.draw(|f| render(f, f.area(), &d, &state, &bulletins, &focus))
+            .unwrap();
+        assert_snapshot!(
+            "controller_service_detail_with_referencing_components",
+            format!("{}", term.backend())
+        );
     }
 }
