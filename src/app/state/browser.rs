@@ -2091,4 +2091,48 @@ mod tests {
             }
         }
     }
+
+    #[test]
+    fn properties_hotkey_opens_modal_on_cs_tree_row() {
+        use crate::app::state::ViewId;
+
+        let mut s = crate::test_support::fresh_state();
+        s.current_tab = ViewId::Browser;
+
+        // Minimal browser arena with one CS node at index 1 under a root PG at 0.
+        s.browser.nodes.clear();
+        s.browser.nodes.push(crate::view::browser::state::TreeNode {
+            parent: None,
+            children: vec![1],
+            kind: NodeKind::ProcessGroup,
+            id: "root".into(),
+            group_id: "root".into(),
+            name: "root".into(),
+            status_summary: NodeStatusSummary::ProcessGroup {
+                running: 0,
+                stopped: 0,
+                invalid: 0,
+                disabled: 0,
+            },
+        });
+        s.browser.nodes.push(crate::view::browser::state::TreeNode {
+            parent: Some(0),
+            children: vec![],
+            kind: NodeKind::ControllerService,
+            id: "cs".into(),
+            group_id: "root".into(),
+            name: "pool".into(),
+            status_summary: NodeStatusSummary::ControllerService {
+                state: "ENABLED".into(),
+            },
+        });
+        s.browser.expanded.insert(0);
+        crate::view::browser::state::rebuild_visible(&mut s.browser);
+        s.browser.selected = s.browser.visible.iter().position(|&i| i == 1).unwrap();
+
+        assert!(
+            s.browser_selection_has_properties(),
+            "p (OpenProperties) must be enabled on a CS tree row"
+        );
+    }
 }
