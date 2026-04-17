@@ -1495,6 +1495,12 @@ fn build_go_crosslink(state: &AppState, target: crate::input::GoTarget) -> Optio
         (ViewId::Browser, GoTarget::Events) => {
             let arena_idx = *state.browser.visible.get(state.browser.selected)?;
             let node = state.browser.nodes.get(arena_idx)?;
+            // Folders are a reducer-only UI construct with a synthetic id;
+            // they never map to a real NiFi component, so they cannot be
+            // cross-link targets.
+            if matches!(node.kind, crate::client::NodeKind::Folder(_)) {
+                return None;
+            }
             Some(CrossLink::GotoEvents {
                 component_id: node.id.clone(),
             })
@@ -1578,6 +1584,10 @@ fn build_goto_subject(
         (ViewId::Browser, GoTarget::Events) => {
             let arena_idx = *state.browser.visible.get(state.browser.selected)?;
             let node = state.browser.nodes.get(arena_idx)?;
+            // Folders are a reducer-only UI construct; no real component to jump to.
+            if matches!(node.kind, crate::client::NodeKind::Folder(_)) {
+                return None;
+            }
             Some(GotoSubject::Component {
                 name: node.name.clone(),
                 id: node.id.clone(),
@@ -2861,6 +2871,61 @@ mod tests {
         s.current_tab = ViewId::Overview;
         s.overview.focus = OverviewFocus::None;
         assert!(build_go_crosslink(&s, crate::input::GoTarget::Browser).is_none());
+    }
+
+    #[test]
+    fn selection_cross_links_empty_on_folder_row() {
+        use crate::client::{FolderKind, NodeKind, NodeStatusSummary, RawNode, RecursiveSnapshot};
+        let mut s = fresh_state();
+        s.current_tab = ViewId::Browser;
+        crate::view::browser::state::apply_tree_snapshot(
+            &mut s.browser,
+            RecursiveSnapshot {
+                nodes: vec![
+                    RawNode {
+                        parent_idx: None,
+                        kind: NodeKind::ProcessGroup,
+                        id: "root".into(),
+                        group_id: "root".into(),
+                        name: "root".into(),
+                        status_summary: NodeStatusSummary::ProcessGroup {
+                            running: 0,
+                            stopped: 0,
+                            invalid: 0,
+                            disabled: 0,
+                        },
+                    },
+                    RawNode {
+                        parent_idx: Some(0),
+                        kind: NodeKind::ControllerService,
+                        id: "cs".into(),
+                        group_id: "root".into(),
+                        name: "pool".into(),
+                        status_summary: NodeStatusSummary::ControllerService {
+                            state: "ENABLED".into(),
+                        },
+                    },
+                ],
+                fetched_at: std::time::SystemTime::now(),
+                cs_fetch_error: None,
+            },
+        );
+        let folder_arena = s
+            .browser
+            .nodes
+            .iter()
+            .position(|n| matches!(n.kind, NodeKind::Folder(FolderKind::ControllerServices)))
+            .unwrap();
+        s.browser.selected = s
+            .browser
+            .visible
+            .iter()
+            .position(|&i| i == folder_arena)
+            .unwrap();
+        assert!(
+            s.selection_cross_links().is_empty(),
+            "folder row must not produce any cross-link targets"
+        );
     }
 
     #[test]
