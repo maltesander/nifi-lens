@@ -11,6 +11,7 @@
 //! │   └── output port "ingest-out"
 //! ├── enrich/ (child PG)
 //! │   ├── input port "enrich-in"
+//! │   ├── ConvertRecord (fixture-json-reader -> fixture-json-writer)
 //! │   ├── UpdateAttribute-enrich
 //! │   ├── UpdateAttribute-cleanup
 //! │   └── LogAttribute-INFO
@@ -24,6 +25,7 @@ use nifi_rust_client::dynamic::{DynamicClient, types};
 use crate::entities::{make_connection, make_pg, make_port, make_processor, props};
 use crate::error::{Result, SeederError};
 use crate::fixture::payload::HEALTHY_INGEST_CUSTOM_TEXT;
+use crate::fixture::services::ServiceIds;
 use crate::state::poll_until;
 
 /// Kind of port used when starting it.
@@ -35,7 +37,11 @@ pub(crate) enum PortKind {
 
 /// Build the complete healthy-pipeline topology under `parent_pg_id` and
 /// start every component in it.
-pub async fn seed(client: &DynamicClient, parent_pg_id: &str) -> Result<()> {
+pub async fn seed(
+    client: &DynamicClient,
+    parent_pg_id: &str,
+    service_ids: &ServiceIds,
+) -> Result<()> {
     tracing::info!("seeding healthy-pipeline");
 
     // Parent PG.
@@ -106,6 +112,22 @@ pub async fn seed(client: &DynamicClient, parent_pg_id: &str) -> Result<()> {
     // Enrich child PG.
     let enrich_pg_id = create_child_pg(client, &healthy_pg_id, "enrich").await?;
     let enrich_in_id = create_input_port(client, &enrich_pg_id, "enrich-in").await?;
+    let convert_id = create_processor(
+        client,
+        &enrich_pg_id,
+        make_processor(
+            "ConvertRecord",
+            "org.apache.nifi.processors.standard.ConvertRecord",
+            props(&[
+                ("Record Reader", &service_ids.json_reader_id),
+                ("Record Writer", &service_ids.json_writer_id),
+            ]),
+            None,
+            vec!["failure"],
+        ),
+        "ConvertRecord",
+    )
+    .await?;
     let enrich_ua_id = create_processor(
         client,
         &enrich_pg_id,
@@ -163,14 +185,26 @@ pub async fn seed(client: &DynamicClient, parent_pg_id: &str) -> Result<()> {
     )
     .await?;
 
+    // enrich_in -> convert_record
     create_connection_in_pg(
         client,
         &enrich_pg_id,
         &enrich_in_id,
         "INPUT_PORT",
-        &enrich_ua_id,
+        &convert_id,
         "PROCESSOR",
         vec![],
+    )
+    .await?;
+    // convert_record -> enrich_ua (success)
+    create_connection_in_pg(
+        client,
+        &enrich_pg_id,
+        &convert_id,
+        "PROCESSOR",
+        &enrich_ua_id,
+        "PROCESSOR",
+        vec!["success"],
     )
     .await?;
     // enrich_ua -> cleanup_ua
@@ -220,6 +254,8 @@ pub async fn seed(client: &DynamicClient, parent_pg_id: &str) -> Result<()> {
     start_processor(client, &cleanup_ua_id).await?;
     wait_for_valid(client, &enrich_ua_id, "UpdateAttribute-enrich").await?;
     start_processor(client, &enrich_ua_id).await?;
+    wait_for_valid(client, &convert_id, "ConvertRecord").await?;
+    start_processor(client, &convert_id).await?;
     start_input_port(client, &enrich_in_id).await?;
 
     // Ingest second.

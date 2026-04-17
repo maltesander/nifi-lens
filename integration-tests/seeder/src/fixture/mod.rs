@@ -24,7 +24,7 @@ use crate::marker::FIXTURE_MARKER_NAME;
 /// is only seeded when the version is >= 2.9.0.
 pub async fn seed(client: &DynamicClient, detected_version: &semver::Version) -> Result<()> {
     tracing::info!("seeding controller services at root");
-    services::seed(client, "root").await?;
+    let service_ids = services::seed(client, "root").await?;
 
     tracing::info!(marker = FIXTURE_MARKER_NAME, "creating fixture marker PG");
     let body = make_pg(FIXTURE_MARKER_NAME);
@@ -44,7 +44,7 @@ pub async fn seed(client: &DynamicClient, detected_version: &semver::Version) ->
             message: "fixture marker PG has no id".into(),
         })?;
 
-    healthy::seed(client, &marker_pg_id).await?;
+    healthy::seed(client, &marker_pg_id, &service_ids).await?;
     noisy::seed(client, &marker_pg_id).await?;
     backpressure::seed(client, &marker_pg_id).await?;
     invalid::seed(client, &marker_pg_id).await?;

@@ -35,6 +35,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- Fixture now wires a `ConvertRecord` processor at the start of
+  `healthy-pipeline/enrich` referencing `fixture-json-reader` and
+  `fixture-json-writer` (both ENABLED at root), so the browser
+  CS-referencing integration test has at least one referenced CS on
+  NiFi 2.6.0 (previously only `stress-pipeline` on 2.9.0 created
+  references, causing the test to fail on the floor version).
 - Fixture marker bumped to `nifilens-fixture-v2`; existing clusters will
   be re-seeded automatically on next run.
 - `ContentSnapshot` no longer carries raw bytes; `ContentPane::Shown`
