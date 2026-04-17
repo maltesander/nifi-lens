@@ -212,6 +212,25 @@ pub struct ResolvedRef {
     pub group_id: String,
 }
 
+/// Direction of a connection edge relative to a given processor.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum EdgeDirection {
+    In,
+    Out,
+}
+
+/// A connection edge touching a specific processor, enriched with display data.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ConnectionEdge {
+    pub connection_id: String,
+    pub connection_name: String,
+    pub direction: EdgeDirection,
+    pub opposite_id: String,
+    pub opposite_name: String,
+    pub opposite_group_id: String,
+    pub queued_display: String,
+}
+
 impl BrowserState {
     pub fn new() -> Self {
         Self::default()
@@ -682,6 +701,58 @@ impl BrowserState {
                 })
             })
             .collect()
+    }
+
+    /// Return every connection edge touching `processor_id`, split into
+    /// inbound (processor is the connection's destination) and outbound
+    /// (processor is the connection's source). Names for the opposite
+    /// endpoint come from the status snapshot; `opposite_group_id` is
+    /// resolved via an arena lookup on `opposite_id` and falls back to
+    /// the empty string when the opposite endpoint isn't in the current
+    /// arena (e.g. remote process group). The `OpenInBrowser` reducer
+    /// does not use `group_id`, so the empty fallback is safe.
+    pub fn connections_for_processor(&self, processor_id: &str) -> Vec<ConnectionEdge> {
+        use crate::client::{NodeKind, NodeStatusSummary};
+        let mut edges = Vec::new();
+        for node in &self.nodes {
+            if !matches!(node.kind, NodeKind::Connection) {
+                continue;
+            }
+            let NodeStatusSummary::Connection {
+                source_id,
+                source_name,
+                destination_id,
+                destination_name,
+                queued_display,
+                ..
+            } = &node.status_summary
+            else {
+                continue;
+            };
+            let (direction, opposite_id, opposite_name) = if source_id == processor_id {
+                (EdgeDirection::Out, destination_id, destination_name)
+            } else if destination_id == processor_id {
+                (EdgeDirection::In, source_id, source_name)
+            } else {
+                continue;
+            };
+            let opposite_group_id = self
+                .nodes
+                .iter()
+                .find(|n| n.id == *opposite_id)
+                .map(|n| n.group_id.clone())
+                .unwrap_or_default();
+            edges.push(ConnectionEdge {
+                connection_id: node.id.clone(),
+                connection_name: node.name.clone(),
+                direction,
+                opposite_id: opposite_id.clone(),
+                opposite_name: opposite_name.clone(),
+                opposite_group_id,
+                queued_display: queued_display.clone(),
+            });
+        }
+        edges
     }
 }
 
@@ -2593,5 +2664,131 @@ mod tests {
             s.resolve_id("   a1b2c3d4-e5f6-7890-abcd-ef1234567890   ")
                 .is_some()
         );
+    }
+
+    #[test]
+    fn connections_for_processor_splits_in_and_out_edges() {
+        use crate::client::{NodeKind, NodeStatusSummary};
+        use crate::view::browser::state::{EdgeDirection, TreeNode};
+
+        let mut s = BrowserState::new();
+        // arena: root PG (0), proc-A (1), proc-B (2),
+        //        conn A→B (3), conn B→A (4)
+        s.nodes.push(TreeNode {
+            parent: None,
+            children: vec![1, 2, 3, 4],
+            kind: NodeKind::ProcessGroup,
+            id: "root".into(),
+            group_id: "root".into(),
+            name: "root".into(),
+            status_summary: NodeStatusSummary::ProcessGroup {
+                running: 0,
+                stopped: 0,
+                invalid: 0,
+                disabled: 0,
+            },
+        });
+        for (id, name) in [("proc-A", "A"), ("proc-B", "B")] {
+            s.nodes.push(TreeNode {
+                parent: Some(0),
+                children: vec![],
+                kind: NodeKind::Processor,
+                id: id.into(),
+                group_id: "root".into(),
+                name: name.into(),
+                status_summary: NodeStatusSummary::Processor {
+                    run_status: "Running".into(),
+                },
+            });
+        }
+        s.nodes.push(TreeNode {
+            parent: Some(0),
+            children: vec![],
+            kind: NodeKind::Connection,
+            id: "conn-ab".into(),
+            group_id: "root".into(),
+            name: "A→B".into(),
+            status_summary: NodeStatusSummary::Connection {
+                fill_percent: 0,
+                flow_files_queued: 3,
+                queued_display: "3 / 1KB".into(),
+                source_id: "proc-A".into(),
+                source_name: "A".into(),
+                destination_id: "proc-B".into(),
+                destination_name: "B".into(),
+            },
+        });
+        s.nodes.push(TreeNode {
+            parent: Some(0),
+            children: vec![],
+            kind: NodeKind::Connection,
+            id: "conn-ba".into(),
+            group_id: "root".into(),
+            name: "B→A".into(),
+            status_summary: NodeStatusSummary::Connection {
+                fill_percent: 0,
+                flow_files_queued: 5,
+                queued_display: "5 / 2KB".into(),
+                source_id: "proc-B".into(),
+                source_name: "B".into(),
+                destination_id: "proc-A".into(),
+                destination_name: "A".into(),
+            },
+        });
+
+        let edges = s.connections_for_processor("proc-A");
+        assert_eq!(edges.len(), 2);
+
+        let out = edges
+            .iter()
+            .find(|e| e.direction == EdgeDirection::Out)
+            .expect("A has outgoing edge A→B");
+        assert_eq!(out.connection_id, "conn-ab");
+        assert_eq!(out.opposite_id, "proc-B");
+        assert_eq!(out.opposite_name, "B");
+        assert_eq!(out.queued_display, "3 / 1KB");
+
+        let inb = edges
+            .iter()
+            .find(|e| e.direction == EdgeDirection::In)
+            .expect("A has incoming edge B→A");
+        assert_eq!(inb.opposite_id, "proc-B");
+        assert_eq!(inb.opposite_name, "B");
+        assert_eq!(inb.queued_display, "5 / 2KB");
+    }
+
+    #[test]
+    fn connections_for_processor_empty_when_processor_has_no_edges() {
+        let s = BrowserState::new();
+        assert!(s.connections_for_processor("unknown-id").is_empty());
+    }
+
+    #[test]
+    fn connections_for_processor_falls_back_to_empty_group_id_for_unresolvable_opposite() {
+        use crate::client::{NodeKind, NodeStatusSummary};
+        use crate::view::browser::state::TreeNode;
+
+        let mut s = BrowserState::new();
+        // Only a connection — neither endpoint exists in the arena.
+        s.nodes.push(TreeNode {
+            parent: None,
+            children: vec![],
+            kind: NodeKind::Connection,
+            id: "conn-x".into(),
+            group_id: "root".into(),
+            name: "x".into(),
+            status_summary: NodeStatusSummary::Connection {
+                fill_percent: 0,
+                flow_files_queued: 0,
+                queued_display: "0".into(),
+                source_id: "proc-A".into(),
+                source_name: "A".into(),
+                destination_id: "proc-B".into(),
+                destination_name: "B".into(),
+            },
+        });
+        let edges = s.connections_for_processor("proc-A");
+        assert_eq!(edges.len(), 1);
+        assert_eq!(edges[0].opposite_group_id, "");
     }
 }
