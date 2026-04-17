@@ -12,6 +12,7 @@
 //! ├── enrich/ (child PG)
 //! │   ├── input port "enrich-in"
 //! │   ├── UpdateAttribute-enrich
+//! │   ├── UpdateAttribute-cleanup
 //! │   └── LogAttribute-INFO
 //! └── (parent-level connection: ingest/ingest-out -> enrich/enrich-in)
 //! ```
@@ -143,6 +144,24 @@ pub async fn seed(client: &DynamicClient, parent_pg_id: &str) -> Result<()> {
         "LogAttribute-INFO",
     )
     .await?;
+    let cleanup_ua_id = create_processor(
+        client,
+        &enrich_pg_id,
+        make_processor(
+            "UpdateAttribute-cleanup",
+            "org.apache.nifi.processors.attributes.UpdateAttribute",
+            // Delete Attributes Expression is a regex over attribute
+            // names. Escaping the dot is required.
+            props(&[(
+                "Delete Attributes Expression",
+                "fixture\\.ingest\\.timestamp",
+            )]),
+            None,
+            vec![],
+        ),
+        "UpdateAttribute-cleanup",
+    )
+    .await?;
 
     create_connection_in_pg(
         client,
@@ -154,10 +173,22 @@ pub async fn seed(client: &DynamicClient, parent_pg_id: &str) -> Result<()> {
         vec![],
     )
     .await?;
+    // enrich_ua -> cleanup_ua
     create_connection_in_pg(
         client,
         &enrich_pg_id,
         &enrich_ua_id,
+        "PROCESSOR",
+        &cleanup_ua_id,
+        "PROCESSOR",
+        vec!["success"],
+    )
+    .await?;
+    // cleanup_ua -> log_attr
+    create_connection_in_pg(
+        client,
+        &enrich_pg_id,
+        &cleanup_ua_id,
         "PROCESSOR",
         &log_attr_id,
         "PROCESSOR",
@@ -185,6 +216,8 @@ pub async fn seed(client: &DynamicClient, parent_pg_id: &str) -> Result<()> {
     // Enrich first.
     wait_for_valid(client, &log_attr_id, "LogAttribute-INFO").await?;
     start_processor(client, &log_attr_id).await?;
+    wait_for_valid(client, &cleanup_ua_id, "UpdateAttribute-cleanup").await?;
+    start_processor(client, &cleanup_ua_id).await?;
     wait_for_valid(client, &enrich_ua_id, "UpdateAttribute-enrich").await?;
     start_processor(client, &enrich_ua_id).await?;
     start_input_port(client, &enrich_in_id).await?;
