@@ -1,0 +1,11 @@
+{
+  "id": "in-1",
+  "component": {
+    "id": "in-1",
+    "name": "external-ingest",
+    "parentGroupId": "root",
+    "state": "RUNNING",
+    "comments": "accepts from edge agents",
+    "concurrentlySchedulableTaskCount": 3
+  }
+}

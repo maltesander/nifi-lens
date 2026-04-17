@@ -378,3 +378,29 @@ async fn browser_pg_detail_unauthorized_maps_to_typed_error() {
         "expected unauthorized/PG detail error, got: {msg}"
     );
 }
+
+#[tokio::test]
+async fn browser_port_detail_parses_input_port() {
+    use nifi_lens::client::{PortDetail, PortKind};
+    let server = MockServer::start().await;
+    stub_login_and_about(&server).await;
+    let body = load_fixture("input_port.json");
+    Mock::given(method("GET"))
+        .and(path("/nifi-api/input-ports/in-1"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(body))
+        .mount(&server)
+        .await;
+
+    let client = NifiClient::connect(&ctx(server.uri())).await.unwrap();
+    let d: PortDetail = client
+        .browser_port_detail("in-1", PortKind::Input)
+        .await
+        .unwrap();
+
+    assert_eq!(d.id, "in-1");
+    assert_eq!(d.name, "external-ingest");
+    assert_eq!(d.kind, PortKind::Input);
+    assert_eq!(d.state, "RUNNING");
+    assert_eq!(d.comments, "accepts from edge agents");
+    assert_eq!(d.concurrent_tasks, 3);
+}

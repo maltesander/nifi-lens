@@ -797,6 +797,102 @@ impl NifiClient {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum PortKind {
+    Input,
+    Output,
+}
+
+impl PortKind {
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::Input => "input",
+            Self::Output => "output",
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct PortDetail {
+    pub id: String,
+    pub name: String,
+    pub kind: PortKind,
+    pub state: String,
+    pub comments: String,
+    pub concurrent_tasks: u32,
+    pub parent_group_id: Option<String>,
+}
+
+impl NifiClient {
+    pub async fn browser_port_detail(
+        &self,
+        port_id: &str,
+        kind: PortKind,
+    ) -> Result<PortDetail, NifiLensError> {
+        tracing::debug!(context = %self.context_name(), %port_id, ?kind, "fetching port detail");
+        let (name, state, comments, concurrent_tasks, parent_group_id) = match kind {
+            PortKind::Input => {
+                let entity = self
+                    .inputports()
+                    .get_input_port(port_id)
+                    .await
+                    .map_err(|err| {
+                        classify_or_fallback(self.context_name(), Box::new(err), |source| {
+                            NifiLensError::PortDetailFailed {
+                                context: self.context_name().to_string(),
+                                id: port_id.to_string(),
+                                kind: "input",
+                                source,
+                            }
+                        })
+                    })?;
+                let c = entity.component.unwrap_or_default();
+                (
+                    c.name.unwrap_or_default(),
+                    c.state.unwrap_or_default(),
+                    c.comments.unwrap_or_default(),
+                    c.concurrently_schedulable_task_count.unwrap_or(0).max(0) as u32,
+                    c.parent_group_id,
+                )
+            }
+            PortKind::Output => {
+                let entity = self
+                    .outputports()
+                    .get_output_port(port_id)
+                    .await
+                    .map_err(|err| {
+                        classify_or_fallback(self.context_name(), Box::new(err), |source| {
+                            NifiLensError::PortDetailFailed {
+                                context: self.context_name().to_string(),
+                                id: port_id.to_string(),
+                                kind: "output",
+                                source,
+                            }
+                        })
+                    })?;
+                let c = entity.component.unwrap_or_default();
+                (
+                    c.name.unwrap_or_default(),
+                    c.state.unwrap_or_default(),
+                    c.comments.unwrap_or_default(),
+                    c.concurrently_schedulable_task_count.unwrap_or(0).max(0) as u32,
+                    c.parent_group_id,
+                )
+            }
+        };
+
+        Ok(PortDetail {
+            id: port_id.to_string(),
+            name,
+            kind,
+            state,
+            comments,
+            concurrent_tasks,
+            parent_group_id,
+        })
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::short_type;
