@@ -200,7 +200,14 @@ pub fn spawn_content(
 ) -> JoinHandle<()> {
     tokio::task::spawn_local(async move {
         let guard = client.read().await;
-        match guard.provenance_content(event_id, side).await {
+        match guard
+            .provenance_content(
+                event_id,
+                side,
+                Some(crate::client::tracer::PREVIEW_CAP_BYTES),
+            )
+            .await
+        {
             Ok(snap) => {
                 let _ = tx
                     .send(AppEvent::Data(ViewPayload::Tracer(TracerPayload::Content(

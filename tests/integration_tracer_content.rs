@@ -104,11 +104,11 @@ async fn integration_tracer_content_text_render() {
         //    404 / unavailable → skip (content may be GC'd).
         //    Only transport errors (non-HTTP) fail the test.
         match client
-            .provenance_content(summary.event_id, ContentSide::Output)
+            .provenance_content(summary.event_id, ContentSide::Output, None)
             .await
         {
             Ok(cs) => {
-                eprintln!("  content fetch ok: {} bytes", cs.total_bytes);
+                eprintln!("  content fetch ok: {} bytes", cs.bytes_fetched);
             }
             Err(NifiLensError::ProvenanceContentFetchFailed { .. }) => {
                 // Could be a 404 (content GC'd) or a 403 (no replay claim).

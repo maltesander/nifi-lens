@@ -265,13 +265,13 @@ async fn provenance_content_input_text_json_is_pretty_printed() {
 
     let client = NifiClient::connect(&ctx(server.uri())).await.unwrap();
     let snap = client
-        .provenance_content(42, ContentSide::Input)
+        .provenance_content(42, ContentSide::Input, None)
         .await
         .unwrap();
 
     assert_eq!(snap.event_id, 42);
     assert_eq!(snap.side, ContentSide::Input);
-    assert_eq!(snap.total_bytes, br#"{"a":1,"b":2}"#.len());
+    assert_eq!(snap.bytes_fetched, br#"{"a":1,"b":2}"#.len());
     match snap.render {
         ContentRender::Text { pretty } => {
             assert!(pretty.contains('\n'), "expected newlines in pretty output");
@@ -300,7 +300,7 @@ async fn provenance_content_input_non_utf8_is_hex_dump() {
 
     let client = NifiClient::connect(&ctx(server.uri())).await.unwrap();
     let snap = client
-        .provenance_content(42, ContentSide::Input)
+        .provenance_content(42, ContentSide::Input, None)
         .await
         .unwrap();
 
@@ -328,7 +328,7 @@ async fn provenance_content_output_not_found_errors() {
 
     let client = NifiClient::connect(&ctx(server.uri())).await.unwrap();
     let err = client
-        .provenance_content(42, ContentSide::Output)
+        .provenance_content(42, ContentSide::Output, None)
         .await
         .unwrap_err();
 

@@ -1068,7 +1068,8 @@ mod tests {
                     render: ContentRender::Text {
                         pretty: "data".to_string(),
                     },
-                    total_bytes: 4,
+                    bytes_fetched: 4,
+                    truncated: false,
                     raw: Arc::from(b"data".as_ref()),
                 },
             };
@@ -1233,7 +1234,8 @@ mod tests {
                     render: ContentRender::Text {
                         pretty: "hi".into(),
                     },
-                    total_bytes: 2,
+                    bytes_fetched: 2,
+                    truncated: false,
                     raw: Arc::from(b"hi".as_ref()),
                 };
             }

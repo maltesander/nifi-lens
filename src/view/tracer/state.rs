@@ -379,7 +379,8 @@ pub enum ContentPane {
     Shown {
         side: ContentSide,
         render: ContentRender,
-        total_bytes: usize,
+        bytes_fetched: usize,
+        truncated: bool,
         /// Raw bytes retained for the optional save-to-file flow.
         raw: std::sync::Arc<[u8]>,
     },
@@ -945,7 +946,8 @@ pub fn apply_payload(state: &mut TracerState, payload: TracerPayload) -> Option<
                 *content = ContentPane::Shown {
                     side: snap.side,
                     render: snap.render,
-                    total_bytes: snap.total_bytes,
+                    bytes_fetched: snap.bytes_fetched,
+                    truncated: snap.truncated,
                     raw: snap.raw,
                 };
                 // Reset scroll if the user was already focused on the
@@ -1731,7 +1733,8 @@ mod tests {
             render: ContentRender::Text {
                 pretty: "hello".to_string(),
             },
-            total_bytes: 5,
+            bytes_fetched: 5,
+            truncated: false,
             raw: std::sync::Arc::from(b"hello".as_slice()),
         };
         let followup = apply_payload(&mut state, TracerPayload::Content(snap));
@@ -1745,7 +1748,7 @@ mod tests {
             EventDetail::Loaded {
                 content: ContentPane::Shown {
                     side: ContentSide::Output,
-                    total_bytes: 5,
+                    bytes_fetched: 5,
                     ..
                 },
                 ..
@@ -1958,7 +1961,8 @@ mod tests {
                 render: ContentRender::Text {
                     pretty: body.to_string(),
                 },
-                total_bytes: body.len(),
+                bytes_fetched: body.len(),
+                truncated: false,
                 raw: Arc::from(body.as_bytes()),
             };
         } else {
@@ -2063,7 +2067,8 @@ mod tests {
                 render: ContentRender::Text {
                     pretty: new_body.to_string(),
                 },
-                total_bytes: new_body.len(),
+                bytes_fetched: new_body.len(),
+                truncated: false,
                 raw: Arc::from(new_body.as_bytes()),
             }),
         );

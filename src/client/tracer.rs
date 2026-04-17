@@ -111,7 +111,8 @@ pub struct ContentSnapshot {
     pub event_id: i64,
     pub side: ContentSide,
     pub render: ContentRender,
-    pub total_bytes: usize,
+    pub bytes_fetched: usize,
+    pub truncated: bool,
     pub raw: Arc<[u8]>,
 }
 
@@ -381,27 +382,31 @@ impl NifiClient {
         &self,
         event_id: i64,
         side: ContentSide,
+        max_bytes: Option<usize>,
     ) -> Result<ContentSnapshot, NifiLensError> {
         tracing::debug!(
             context = %self.context_name(),
             event_id,
             side = side.as_str(),
+            max_bytes = ?max_bytes,
             "fetching provenance event content",
         );
 
         let id_str = event_id.to_string();
         let events_api = self.inner.provenanceevents();
         let cluster_node_id = self.inner.cluster_node_id();
+        let range = max_bytes.map(|n| format!("bytes=0-{}", n.saturating_sub(1)));
+        let range_ref = range.as_deref();
 
         let bytes = match side {
             ContentSide::Input => {
                 events_api
-                    .get_input_content(&id_str, cluster_node_id, None)
+                    .get_input_content(&id_str, cluster_node_id, range_ref)
                     .await
             }
             ContentSide::Output => {
                 events_api
-                    .get_output_content(&id_str, cluster_node_id, None)
+                    .get_output_content(&id_str, cluster_node_id, range_ref)
                     .await
             }
         }
@@ -416,7 +421,8 @@ impl NifiClient {
             })
         })?;
 
-        let total_bytes = bytes.len();
+        let bytes_fetched = bytes.len();
+        let truncated = matches!(max_bytes, Some(n) if bytes_fetched >= n);
         let render = classify_content(&bytes);
         let raw: std::sync::Arc<[u8]> = bytes.into();
 
@@ -424,7 +430,8 @@ impl NifiClient {
             event_id,
             side,
             render,
-            total_bytes,
+            bytes_fetched,
+            truncated,
             raw,
         })
     }
@@ -699,5 +706,94 @@ mod tests {
             .await
             .expect("fetch should succeed");
         assert_eq!(bytes, b"hello world");
+    }
+
+    #[tokio::test]
+    async fn provenance_content_without_cap_does_not_send_range_header() {
+        let server = wiremock::MockServer::start().await;
+
+        // Strict: no request with a Range header should arrive.
+        wiremock::Mock::given(wiremock::matchers::method("GET"))
+            .and(wiremock::matchers::path(
+                "/nifi-api/provenance-events/7/content/input",
+            ))
+            .and(wiremock::matchers::header_exists("range"))
+            .respond_with(wiremock::ResponseTemplate::new(500))
+            .expect(0)
+            .mount(&server)
+            .await;
+
+        wiremock::Mock::given(wiremock::matchers::method("GET"))
+            .and(wiremock::matchers::path(
+                "/nifi-api/provenance-events/7/content/input",
+            ))
+            .respond_with(
+                wiremock::ResponseTemplate::new(200)
+                    .set_body_bytes(b"abcd" as &[u8])
+                    .insert_header("content-type", "text/plain"),
+            )
+            .expect(1)
+            .mount(&server)
+            .await;
+
+        let client = test_client(&server).await;
+        let snap = client
+            .provenance_content(7, ContentSide::Input, None)
+            .await
+            .expect("fetch should succeed");
+        assert_eq!(snap.bytes_fetched, 4);
+        assert!(!snap.truncated);
+    }
+
+    #[tokio::test]
+    async fn provenance_content_with_cap_sends_range_and_marks_truncated() {
+        let server = wiremock::MockServer::start().await;
+        wiremock::Mock::given(wiremock::matchers::method("GET"))
+            .and(wiremock::matchers::path(
+                "/nifi-api/provenance-events/8/content/output",
+            ))
+            .and(wiremock::matchers::header("range", "bytes=0-1023"))
+            .respond_with(
+                wiremock::ResponseTemplate::new(206)
+                    .set_body_bytes(vec![b'x'; 1024])
+                    .insert_header("content-type", "application/octet-stream"),
+            )
+            .expect(1)
+            .mount(&server)
+            .await;
+
+        let client = test_client(&server).await;
+        let snap = client
+            .provenance_content(8, ContentSide::Output, Some(1024))
+            .await
+            .expect("fetch should succeed");
+        assert_eq!(snap.bytes_fetched, 1024);
+        assert!(snap.truncated);
+    }
+
+    #[tokio::test]
+    async fn provenance_content_with_cap_under_body_size_not_truncated() {
+        let server = wiremock::MockServer::start().await;
+        wiremock::Mock::given(wiremock::matchers::method("GET"))
+            .and(wiremock::matchers::path(
+                "/nifi-api/provenance-events/9/content/output",
+            ))
+            .and(wiremock::matchers::header("range", "bytes=0-1023"))
+            .respond_with(
+                wiremock::ResponseTemplate::new(200)
+                    .set_body_bytes(vec![b'x'; 800])
+                    .insert_header("content-type", "application/octet-stream"),
+            )
+            .expect(1)
+            .mount(&server)
+            .await;
+
+        let client = test_client(&server).await;
+        let snap = client
+            .provenance_content(9, ContentSide::Output, Some(1024))
+            .await
+            .expect("fetch should succeed");
+        assert_eq!(snap.bytes_fetched, 800);
+        assert!(!snap.truncated);
     }
 }

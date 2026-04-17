@@ -572,7 +572,7 @@ fn render_content_panel(frame: &mut Frame, area: Rect, content: &ContentPane, vi
         ContentPane::Shown {
             side,
             render,
-            total_bytes,
+            bytes_fetched,
             ..
         } => {
             let side_label = match side {
@@ -585,7 +585,7 @@ fn render_content_panel(frame: &mut Frame, area: Rect, content: &ContentPane, vi
                 ContentRender::Empty => "(empty)".to_string(),
             };
             let total_lines = body.lines().count().max(1);
-            let suffix = format!(" \u{00b7} {side_label} \u{00b7} {total_bytes} B ");
+            let suffix = format!(" \u{00b7} {side_label} \u{00b7} {bytes_fetched} B ");
             let right = if total_lines > 1 {
                 format!(
                     " {}/{} ",
@@ -1095,7 +1095,8 @@ mod tests {
                     render: ContentRender::Text {
                         pretty: "{\n  \"key\": \"value\",\n  \"count\": 42\n}".to_string(),
                     },
-                    total_bytes: 36,
+                    bytes_fetched: 36,
+                    truncated: false,
                     raw: Arc::from(b"{}".as_ref()),
                 },
             };
