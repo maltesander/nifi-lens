@@ -65,8 +65,8 @@ pub fn render(
             + 2) as u16;
         constraints.push(Constraint::Length(h));
     }
-    constraints.push(Constraint::Fill(1)); // Referencing components
-    constraints.push(Constraint::Length(8)); // Recent bulletins (6 rows + 2 borders)
+    constraints.push(Constraint::Length(6)); // Referencing components (2 borders + header + 3 rows)
+    constraints.push(Constraint::Length(6)); // Recent bulletins (2 borders + 4 rows)
 
     let rows = Layout::default()
         .direction(Direction::Vertical)
