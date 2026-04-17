@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.4.0] — 2026-04-17
+
 ### Added
 
 - **Configurable poll intervals** for Overview, Browser, and Bulletins
@@ -582,7 +584,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Bump `nifi-rust-client` from 0.7.0 to 0.8.0.
 
-[Unreleased]: https://github.com/maltesander/nifi-lens/compare/v0.3.0...HEAD
+[Unreleased]: https://github.com/maltesander/nifi-lens/compare/v0.4.0...HEAD
+[0.4.0]: https://github.com/maltesander/nifi-lens/releases/tag/v0.4.0
 [0.3.0]: https://github.com/maltesander/nifi-lens/releases/tag/v0.3.0
 [0.2.0]: https://github.com/maltesander/nifi-lens/releases/tag/v0.2.0
 [0.1.0]: https://github.com/maltesander/nifi-lens/releases/tag/v0.1.0
