@@ -85,9 +85,11 @@ username = "admin"
 password_env = "NIFILENS_DEV_PASSWORD"
 ```
 
-Then:
+The config must be user-only readable — `nifilens` refuses to start
+otherwise. Set permissions, export the password, and launch:
 
 ```bash
+chmod 0600 ~/.config/nifilens/config.toml
 export NIFILENS_DEV_PASSWORD=...
 nifilens
 ```
