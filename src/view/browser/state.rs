@@ -185,8 +185,6 @@ pub struct BreadcrumbSegment {
 /// 13, 18, 23, and the remaining 32 positions are hex. Case-insensitive.
 /// Returns `true` only for RFC-4122-shaped strings; does not validate
 /// version or variant bits.
-// Called by resolve_id (Task 3); suppress dead-code until that lands.
-#[allow(dead_code)]
 pub(crate) fn is_uuid_shape(s: &str) -> bool {
     if s.len() != 36 {
         return false;
@@ -205,9 +203,39 @@ pub(crate) fn is_uuid_shape(s: &str) -> bool {
     true
 }
 
+/// Result of resolving a string to a known arena node.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ResolvedRef {
+    pub arena_idx: usize,
+    pub kind: crate::client::NodeKind,
+    pub name: String,
+    pub group_id: String,
+}
+
 impl BrowserState {
     pub fn new() -> Self {
         Self::default()
+    }
+
+    /// Resolve a string to a known arena node.
+    ///
+    /// Returns `Some` only when the trimmed string is a canonical UUID
+    /// (see `is_uuid_shape`) and matches a `TreeNode.id` present in
+    /// `self.nodes`. Linear scan — O(n) on the arena. Called once per
+    /// renderable row in `→`-annotated sections; cheap compared with
+    /// rendering cost.
+    pub fn resolve_id(&self, raw: &str) -> Option<ResolvedRef> {
+        let s = raw.trim();
+        if !is_uuid_shape(s) {
+            return None;
+        }
+        let (arena_idx, node) = self.nodes.iter().enumerate().find(|(_, n)| n.id == s)?;
+        Some(ResolvedRef {
+            arena_idx,
+            kind: node.kind,
+            name: node.name.clone(),
+            group_id: node.group_id.clone(),
+        })
     }
 
     /// Called from every selection-changing entry point. Resets detail
@@ -2503,5 +2531,67 @@ mod tests {
     #[test]
     fn is_uuid_shape_accepts_uppercase_hex() {
         assert!(super::is_uuid_shape("A1B2C3D4-E5F6-7890-ABCD-EF1234567890"));
+    }
+
+    #[test]
+    fn resolve_id_returns_none_for_non_uuid_string() {
+        let s = BrowserState::new();
+        assert!(s.resolve_id("not-a-uuid").is_none());
+        assert!(s.resolve_id("").is_none());
+        assert!(s.resolve_id("   ").is_none());
+    }
+
+    #[test]
+    fn resolve_id_returns_none_for_uuid_not_in_arena() {
+        let s = BrowserState::new();
+        assert!(
+            s.resolve_id("a1b2c3d4-e5f6-7890-abcd-ef1234567890")
+                .is_none()
+        );
+    }
+
+    #[test]
+    fn resolve_id_returns_ref_for_known_node() {
+        use crate::client::{NodeKind, NodeStatusSummary};
+        let mut s = BrowserState::new();
+        s.nodes.push(TreeNode {
+            parent: None,
+            children: vec![],
+            kind: NodeKind::ControllerService,
+            id: "a1b2c3d4-e5f6-7890-abcd-ef1234567890".into(),
+            group_id: "root-pg".into(),
+            name: "pool".into(),
+            status_summary: NodeStatusSummary::ControllerService {
+                state: "ENABLED".into(),
+            },
+        });
+        let got = s
+            .resolve_id("a1b2c3d4-e5f6-7890-abcd-ef1234567890")
+            .expect("resolve_id returns Some");
+        assert_eq!(got.arena_idx, 0);
+        assert_eq!(got.kind, NodeKind::ControllerService);
+        assert_eq!(got.name, "pool");
+        assert_eq!(got.group_id, "root-pg");
+    }
+
+    #[test]
+    fn resolve_id_trims_whitespace() {
+        use crate::client::{NodeKind, NodeStatusSummary};
+        let mut s = BrowserState::new();
+        s.nodes.push(TreeNode {
+            parent: None,
+            children: vec![],
+            kind: NodeKind::Processor,
+            id: "a1b2c3d4-e5f6-7890-abcd-ef1234567890".into(),
+            group_id: "g".into(),
+            name: "p".into(),
+            status_summary: NodeStatusSummary::Processor {
+                run_status: "Running".into(),
+            },
+        });
+        assert!(
+            s.resolve_id("   a1b2c3d4-e5f6-7890-abcd-ef1234567890   ")
+                .is_some()
+        );
     }
 }
