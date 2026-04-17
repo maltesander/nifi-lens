@@ -16,8 +16,21 @@ search = "## \\[Unreleased\\]"
 replace = "## [Unreleased]\n\n## [{{version}}] — {{date}}"
 exactly = 1
 
+# First-release case: the initial placeholder points at `commits/HEAD`.
+# Fires exactly once — on v0.1.0 — then the line becomes a `compare/...`
+# URL and the next rule takes over for subsequent releases.
 [[pre-release-replacements]]
 file = "CHANGELOG.md"
 search = "\\[Unreleased\\]: https://github.com/maltesander/nifi-lens/commits/HEAD"
+replace = "[Unreleased]: https://github.com/maltesander/nifi-lens/compare/v{{version}}...HEAD\n[{{version}}]: https://github.com/maltesander/nifi-lens/releases/tag/v{{version}}"
+min = 0
+
+# Subsequent-release case: rewrite the `[Unreleased]` compare link to
+# point at the new version, and prepend a `[{version}]` tag link. With
+# `min = 0`, this rule is a silent no-op on first release (when the
+# rule above matches); after that it matches on every release.
+[[pre-release-replacements]]
+file = "CHANGELOG.md"
+search = "\\[Unreleased\\]: https://github.com/maltesander/nifi-lens/compare/v[0-9]+\\.[0-9]+\\.[0-9]+\\.\\.\\.HEAD"
 replace = "[Unreleased]: https://github.com/maltesander/nifi-lens/compare/v{{version}}...HEAD\n[{{version}}]: https://github.com/maltesander/nifi-lens/releases/tag/v{{version}}"
 min = 0
