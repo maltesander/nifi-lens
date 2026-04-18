@@ -68,6 +68,26 @@ pub async fn run(
         .map_err(|source| NifiLensError::TerminalInit { source })?;
 
     while let Some(event) = rx.recv().await {
+        // Cluster-store events are owned by the main loop, not the
+        // per-view reducer: `update_inner` is synchronous and cannot
+        // send a follow-up `ClusterChanged` via `tx`. Intercept those
+        // variants here, apply them to `AppState.cluster`, and fan out
+        // `ClusterChanged` on the same channel so view reducers can
+        // re-derive (Task 1 is a no-op; Tasks 3/5/7 wire reducers).
+        let event = match event {
+            AppEvent::ClusterUpdate(update) => {
+                let endpoint = state.cluster.apply_update(update);
+                if tx.send(AppEvent::ClusterChanged(endpoint)).await.is_err() {
+                    tracing::debug!("channel closed during ClusterChanged fanout");
+                }
+                continue;
+            }
+            AppEvent::ClusterChanged(endpoint) => {
+                tracing::trace!(?endpoint, "cluster changed");
+                continue;
+            }
+            other => other,
+        };
         let result = update(&mut state, event, &config);
 
         // Dispatch tracer followups (e.g. delete a consumed lineage query).
@@ -142,6 +162,7 @@ pub async fn run(
         if state.pending_worker_restart {
             workers.invalidate();
             state.pending_worker_restart = false;
+            state.cluster.spawn_fetchers(client.clone(), tx.clone());
         }
         let bulletins_last_id = state.bulletins.last_id;
         workers.ensure(

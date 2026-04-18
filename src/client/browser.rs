@@ -254,9 +254,10 @@ struct CsTreeEntry {
 
 /// Endpoint IDs for a single connection, merged into the tree arena
 /// via `browser_tree`'s per-PG `/process-groups/{id}/connections` fetch.
-struct ConnectionEndpoints {
-    source_id: String,
-    destination_id: String,
+#[derive(Debug, Clone)]
+pub struct ConnectionEndpoints {
+    pub source_id: String,
+    pub destination_id: String,
 }
 
 /// Recursive walker. Appends the current PG, then all processors, all

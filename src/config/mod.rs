@@ -173,6 +173,8 @@ pub struct PollingConfig {
     pub browser: BrowserPollingConfig,
     #[serde(default)]
     pub bulletins: BulletinsPollingConfig,
+    #[serde(default)]
+    pub cluster: crate::cluster::ClusterPollingConfig,
 }
 
 #[derive(Debug, Clone, Deserialize, PartialEq, Eq)]

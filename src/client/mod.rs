@@ -615,9 +615,9 @@ impl ControllerServiceCounts {
 }
 
 pub use browser::{
-    ConnectionDetail, ControllerServiceDetail, ControllerServiceSummary, FolderKind, NodeKind,
-    NodeStatusSummary, PortDetail, PortKind, ProcessGroupDetail, ProcessorDetail, RawNode,
-    RecursiveSnapshot, ReferencingComponent, ReferencingKind,
+    ConnectionDetail, ConnectionEndpoints, ControllerServiceDetail, ControllerServiceSummary,
+    FolderKind, NodeKind, NodeStatusSummary, PortDetail, PortKind, ProcessGroupDetail,
+    ProcessorDetail, RawNode, RecursiveSnapshot, ReferencingComponent, ReferencingKind,
 };
 pub use events::{ProvenancePollResult, ProvenanceQuery, ProvenanceQueryHandle};
 pub use health::{

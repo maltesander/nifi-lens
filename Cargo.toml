@@ -29,6 +29,7 @@ futures = "0.3"
 humantime-serde = "1.1"
 nifi-rust-client = { version = "0.10.1", features = ["dynamic"] }
 nucleo = "0.5"
+rand = "0.8"
 ratatui = "0.30"
 semver = "1"
 serde = { version = "1", features = ["derive"] }
@@ -47,6 +48,7 @@ uuid = { version = "1", features = ["v4"] }
 [dev-dependencies]
 insta = { version = "1", features = ["filters"] }
 tempfile = "3"
+tokio = { version = "1", features = ["full", "test-util"] }
 wiremock = "0.6"
 
 [build-dependencies]

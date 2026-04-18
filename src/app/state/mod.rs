@@ -166,6 +166,7 @@ pub struct AppState {
     pub status: StatusLine,
     pub timestamp_cfg: crate::timestamp::TimestampConfig,
     pub polling: crate::config::PollingConfig,
+    pub cluster: crate::cluster::ClusterStore,
     pub error_detail: Option<String>,
     pub should_quit: bool,
     /// Set by the context-switch handler so the app loop can force-restart
@@ -205,6 +206,7 @@ impl AppState {
                 tz: config.ui.timestamp_tz,
             },
             polling: config.polling.clone(),
+            cluster: crate::cluster::ClusterStore::new(config.polling.cluster.clone()),
             error_detail: None,
             should_quit: false,
             pending_worker_restart: false,
@@ -967,6 +969,17 @@ fn update_inner(state: &mut AppState, event: AppEvent, config: &Config) -> Updat
             }
         }
         AppEvent::IntentOutcome(outcome) => handle_intent_outcome(state, outcome),
+        // ClusterStore events are intercepted in the async main loop
+        // (`src/app/mod.rs::run`) which owns `tx`; the reducer never
+        // sees them. These arms exist only to keep `update_inner`
+        // exhaustive and provide a graceful no-op if that invariant
+        // ever slips. Task 1 keeps both arms inert — Tasks 3/5/7 may
+        // trigger view-level reducer work on `ClusterChanged`.
+        AppEvent::ClusterUpdate(_) | AppEvent::ClusterChanged(_) => UpdateResult {
+            redraw: false,
+            intent: None,
+            tracer_followup: None,
+        },
         AppEvent::Quit => {
             state.should_quit = true;
             UpdateResult {
@@ -1831,6 +1844,12 @@ fn handle_intent_outcome(
 
             // Signal the app loop to force-restart the current view worker.
             state.pending_worker_restart = true;
+
+            // Tear down cluster fetchers bound to the previous client.
+            // The app loop will respawn them against the new client in
+            // the `pending_worker_restart` branch.
+            state.cluster.shutdown();
+            state.cluster = crate::cluster::ClusterStore::new(state.polling.cluster.clone());
 
             UpdateResult {
                 redraw: true,

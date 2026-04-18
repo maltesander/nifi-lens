@@ -8,6 +8,7 @@
 pub mod app;
 pub mod cli;
 pub mod client;
+pub mod cluster;
 pub mod config;
 pub mod error;
 pub mod event;

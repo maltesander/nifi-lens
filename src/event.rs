@@ -12,6 +12,12 @@ pub enum AppEvent {
     Data(ViewPayload),
     /// Result of an intent dispatch, folded back into AppState by the UI task.
     IntentOutcome(Result<IntentOutcome, NifiLensError>),
+    /// Raw fetcher output from `ClusterStore`. Main loop applies it to
+    /// `AppState.cluster` and follows up with `ClusterChanged`.
+    ClusterUpdate(crate::cluster::ClusterUpdate),
+    /// Emitted by the main loop after `ClusterUpdate` is applied, so
+    /// per-view reducers can re-derive their projections.
+    ClusterChanged(crate::cluster::ClusterEndpoint),
     /// Graceful quit request.
     Quit,
 }
