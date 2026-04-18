@@ -23,48 +23,15 @@ pub enum AppEvent {
 }
 
 /// Data delivered from a view's worker task back into the UI loop.
+///
+/// Task 8 deleted the `Overview` variant — Overview is now a
+/// store-only consumer that reacts to `ClusterChanged` events and
+/// reads projections straight from `state.cluster.snapshot`.
 #[derive(Debug, Clone)]
 pub enum ViewPayload {
-    Overview(OverviewPayload),
     Browser(BrowserPayload),
     Tracer(TracerPayload),
     Events(EventsPayload),
-}
-
-/// Payload variants pushed from the merged Overview worker. After
-/// Phase 3 the Overview worker runs two parallel pollers (PG status @
-/// 10s, system diagnostics @ 30s) and emits one of these variants per
-/// poll. The reducer in `view::overview::state::apply_payload` matches
-/// on the variant.
-#[derive(Debug, Clone)]
-pub enum OverviewPayload {
-    /// Result of the 10-second PG-status poll. Carries the
-    /// pre-Phase-3 set of fields.
-    PgStatus(OverviewPgStatusPayload),
-    /// Result of the 30-second system-diagnostics poll. Includes
-    /// per-node heap, GC, load, and repository fill data.
-    SystemDiag(crate::client::health::SystemDiagSnapshot),
-    /// Aggregate-only fallback when the nodewise system diagnostics
-    /// call failed. Carries the aggregate snapshot plus a warning
-    /// message for the banner.
-    SystemDiagFallback {
-        diag: crate::client::health::SystemDiagSnapshot,
-        warning: String,
-    },
-}
-
-/// Inner payload for the PG-status poll. `root_pg_status`,
-/// `controller_services`, and `bulletin_board` are sourced from
-/// `state.cluster.snapshot` — the Overview worker no longer fetches
-/// them; `ClusterStore` owns those endpoints.
-#[derive(Debug, Clone)]
-pub struct OverviewPgStatusPayload {
-    pub about: crate::client::AboutSnapshot,
-    pub controller: crate::client::ControllerStatusSnapshot,
-    /// Wall-clock time (from `std::time::SystemTime`) when the worker
-    /// assembled this payload. Used by the reducer to anchor the sparkline
-    /// and the "last refresh" label.
-    pub fetched_at: std::time::SystemTime,
 }
 
 /// Payload sent from the Browser detail worker — a single variant

@@ -229,6 +229,141 @@ pub(crate) fn spawn_bulletins(
     })
 }
 
+/// Spawns the system_diagnostics fetch loop. Calls
+/// `system_diagnostics(nodewise=true)` first and transparently falls back
+/// to `system_diagnostics(nodewise=false)` (cluster-aggregate only) when
+/// the nodewise variant fails — older NiFi versions and a handful of
+/// misconfigured clusters reject the nodewise query but still serve the
+/// aggregate. Emits
+/// `AppEvent::ClusterUpdate(ClusterUpdate::SystemDiagnostics(..))` on
+/// every cycle — success or failure — so `EndpointState::apply` can
+/// preserve `last_ok`.
+///
+/// Fallback is **silent-ish**: it logs a `tracing::warn!` on each
+/// nodewise→aggregate transition (tracked via a local `Option<bool>`) so
+/// log-driven debugging can still see the rollover without spamming on
+/// every steady-state aggregate tick. The pre-Task-8 implementation
+/// surfaced the rollover as a transient UI banner via a dedicated
+/// `OverviewPayload::SystemDiagFallback` variant; that banner is
+/// dropped in Task 8 — see the task report.
+pub(crate) fn spawn_system_diagnostics(
+    client: Arc<RwLock<NifiClient>>,
+    tx: mpsc::Sender<AppEvent>,
+    cfg: FetchTaskConfig,
+) -> JoinHandle<()> {
+    tokio::task::spawn_local(async move {
+        let mut next_interval = cfg.base_interval;
+        // `None` before first success, `Some(true)` after a nodewise
+        // success, `Some(false)` after an aggregate-fallback success.
+        // Used to suppress repeat log lines in steady state.
+        let mut last_nodewise: Option<bool> = None;
+        loop {
+            let t0 = Instant::now();
+            // Holding the read guard across the NiFi call is safe: the
+            // sole writer of `client` is the context-switch intent, which
+            // tears down this store before replacing the `NifiClient`.
+            let (result, used_nodewise) = {
+                let guard = client.read().await;
+                match guard.system_diagnostics(true).await {
+                    Ok(snap) => (Ok(snap), Some(true)),
+                    Err(nodewise_err) => {
+                        tracing::warn!(
+                            error = %nodewise_err,
+                            "system_diagnostics(nodewise=true) failed; falling back to aggregate"
+                        );
+                        match guard.system_diagnostics(false).await {
+                            Ok(snap) => (Ok(snap), Some(false)),
+                            Err(agg_err) => {
+                                tracing::warn!(
+                                    error = %agg_err,
+                                    "system_diagnostics aggregate fallback also failed"
+                                );
+                                // Propagate the nodewise error — it is
+                                // the root cause for most operators.
+                                (Err(nodewise_err), None)
+                            }
+                        }
+                    }
+                }
+            };
+            // Log once per transition, not once per tick. This replaces
+            // the pre-Task-8 banner shown via
+            // `OverviewPayload::SystemDiagFallback`.
+            if let Some(nodewise) = used_nodewise
+                && last_nodewise != Some(nodewise)
+            {
+                if nodewise {
+                    tracing::info!("system_diagnostics: switched to nodewise mode");
+                } else {
+                    tracing::warn!("system_diagnostics: using aggregate-only fallback");
+                }
+                last_nodewise = Some(nodewise);
+            }
+            let duration = t0.elapsed();
+            let meta = FetchMeta {
+                fetched_at: t0,
+                fetch_duration: duration,
+                next_interval,
+            };
+            if tx
+                .send(AppEvent::ClusterUpdate(ClusterUpdate::SystemDiagnostics(
+                    result, meta,
+                )))
+                .await
+                .is_err()
+            {
+                tracing::debug!("system_diagnostics fetch: channel closed, exiting");
+                return;
+            }
+
+            next_interval = adaptive_interval(cfg.base_interval, duration, cfg.max_interval);
+            sleep_with_jitter(next_interval, cfg.jitter_percent, &cfg.force).await;
+        }
+    })
+}
+
+/// Spawns the about fetch loop. Emits
+/// `AppEvent::ClusterUpdate(ClusterUpdate::About(..))` on every cycle —
+/// success or failure — so `EndpointState::apply` can preserve
+/// `last_ok`. `about` is slow-moving (NiFi version) so the default
+/// cadence is 5 minutes.
+pub(crate) fn spawn_about(
+    client: Arc<RwLock<NifiClient>>,
+    tx: mpsc::Sender<AppEvent>,
+    cfg: FetchTaskConfig,
+) -> JoinHandle<()> {
+    tokio::task::spawn_local(async move {
+        let mut next_interval = cfg.base_interval;
+        loop {
+            let t0 = Instant::now();
+            // Holding the read guard across the NiFi call is safe: the
+            // sole writer of `client` is the context-switch intent, which
+            // tears down this store before replacing the `NifiClient`.
+            let result = {
+                let guard = client.read().await;
+                guard.about().await
+            };
+            let duration = t0.elapsed();
+            let meta = FetchMeta {
+                fetched_at: t0,
+                fetch_duration: duration,
+                next_interval,
+            };
+            if tx
+                .send(AppEvent::ClusterUpdate(ClusterUpdate::About(result, meta)))
+                .await
+                .is_err()
+            {
+                tracing::debug!("about fetch: channel closed, exiting");
+                return;
+            }
+
+            next_interval = adaptive_interval(cfg.base_interval, duration, cfg.max_interval);
+            sleep_with_jitter(next_interval, cfg.jitter_percent, &cfg.force).await;
+        }
+    })
+}
+
 /// Spawns the connections-by-PG fan-out fetch loop. Unlike the other
 /// per-endpoint fetchers this one consumes a `watch::Receiver<Vec<String>>`
 /// published by `ClusterStore::publish_pg_ids` — the list is rebuilt each

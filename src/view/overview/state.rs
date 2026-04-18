@@ -1,13 +1,10 @@
-//! Pure state for the Overview tab plus the `apply_payload`,
-//! `redraw_components`, and `redraw_bulletin_projections` reducers.
+//! Pure state for the Overview tab plus the `redraw_*` reducers that
+//! mirror projections out of `AppState.cluster.snapshot`.
 //!
-//! Everything here is synchronous and `no_run` safe — the tokio worker in
-//! `super::worker` is the only place that touches the network.
+//! Everything here is synchronous and `no_run` safe — `ClusterStore`
+//! owns every network call; Overview only projects.
 
-use std::time::SystemTime;
-
-use crate::client::{AboutSnapshot, ControllerStatusSnapshot, QueueSnapshot, RootPgStatusSnapshot};
-use crate::event::{OverviewPayload, OverviewPgStatusPayload};
+use crate::client::{ControllerStatusSnapshot, QueueSnapshot, RootPgStatusSnapshot};
 
 pub use crate::client::Severity;
 
@@ -81,30 +78,25 @@ pub enum OverviewFocus {
     Queues,
 }
 
-/// Snapshot of the Overview tab at one point in time. `None` until the
-/// first Overview-worker PG-status poll completes. The `root_pg` and
-/// `cs_counts` projections now live on `OverviewState`, populated by
-/// `redraw_components` from `AppState.cluster.snapshot`.
-#[derive(Debug, Clone, Default)]
-pub struct OverviewSnapshot {
-    pub about: AboutSnapshot,
-    pub controller: ControllerStatusSnapshot,
-    pub fetched_at: Option<SystemTime>,
-}
-
 #[derive(Debug, Default)]
 pub struct OverviewState {
-    pub snapshot: Option<OverviewSnapshot>,
     /// Latest root-PG status, mirrored from the cluster snapshot by
     /// `redraw_components`. `None` until the first `RootPgStatus` fetch
     /// has landed in `AppState.cluster.snapshot`. The renderer reads
-    /// this directly; the Overview worker no longer fetches it.
+    /// this directly.
     pub root_pg: Option<RootPgStatusSnapshot>,
+    /// Latest controller-status snapshot (processor/PG state aggregates,
+    /// version-sync counters), mirrored from the cluster snapshot by
+    /// `redraw_controller_status`. `None` until the first
+    /// `ControllerStatus` fetch has landed. The renderer reads
+    /// `.stale` / `.locally_modified` / `.sync_failure` out of this to
+    /// build the PG versioning slot in the Components panel.
+    pub controller: Option<ControllerStatusSnapshot>,
     /// Latest controller-service counts, mirrored from the cluster
     /// snapshot by `redraw_components`. `None` when the CS fetch has
     /// never succeeded — the CS row in the Components panel degrades
     /// to a "cs list unavailable" chip in that case. The renderer
-    /// reads this directly; the Overview worker no longer fetches it.
+    /// reads this directly.
     pub cs_counts: Option<crate::client::ControllerServiceCounts>,
     pub sparkline: [BulletinBucket; SPARKLINE_MINUTES],
     /// Unix seconds at the start of `sparkline[SPARKLINE_MINUTES-1]` (the
@@ -125,9 +117,11 @@ pub struct OverviewState {
     pub last_sysdiag_refresh: Option<std::time::Instant>,
 
     /// Last observed sysdiag mode. `None` until the first sysdiag
-    /// poll resolves. Driven by the app-level reducer in
-    /// `src/app/state/mod.rs`, not by `apply_payload`, because the
-    /// warn-once banner write is an AppState-level side effect.
+    /// poll resolves. Task 8 made the fetcher task (and not the
+    /// reducer) responsible for detecting nodewise → aggregate
+    /// transitions, so this field is no longer written from the UI
+    /// layer. Reserved for future reintroduction if the in-TUI
+    /// banner returns.
     pub sysdiag_mode: Option<SysdiagMode>,
 
     /// Which panel holds focus. `None` by default.
@@ -177,42 +171,54 @@ impl OverviewState {
     }
 }
 
-/// Fold one poll result into the state. Pure; no I/O.
-pub fn apply_payload(state: &mut OverviewState, payload: OverviewPayload) {
-    match payload {
-        OverviewPayload::PgStatus(pg) => apply_pg_status(state, pg),
-        OverviewPayload::SystemDiag(diag) => apply_system_diagnostics(state, diag),
-        OverviewPayload::SystemDiagFallback { diag, warning: _ } => {
-            // The warning is surfaced via a banner by the AppState dispatch
-            // in P3.T3. For the reducer, both variants update the same
-            // fields the same way.
-            apply_system_diagnostics(state, diag);
-        }
+/// Mirror `controller_status` from the cluster snapshot onto
+/// `OverviewState.controller`. Called from the `ClusterChanged` arm of
+/// the main loop whenever the `ControllerStatus` endpoint updates —
+/// replacing the pre-Task-8 `apply_pg_status` path that rode the
+/// Overview worker's PG-status payload.
+///
+/// Idempotent: invoking it twice with the same snapshot produces the
+/// same `state.overview.controller`. Leaves `controller` as `None` when
+/// the endpoint has never returned successfully (Loading case), so the
+/// renderer can degrade its PG-versioning slot gracefully.
+pub(crate) fn redraw_controller_status(state: &mut crate::app::state::AppState) {
+    state.overview.controller = state.cluster.snapshot.controller_status.latest().cloned();
+    // Refresh-age chip anchors off the most recent PG-level poll. Stays
+    // here (rather than on `last_pg_refresh`, which doubled as the old
+    // PG-status worker's cadence marker) so the Components panel's
+    // version-sync row reflects the same "freshness" as the rest of the
+    // panel.
+    if state.overview.controller.is_some() {
+        state.overview.last_pg_refresh = Some(std::time::Instant::now());
     }
 }
 
-/// Fold one PG-status poll into the existing Overview state.
+/// Mirror `system_diagnostics` from the cluster snapshot onto
+/// `OverviewState.nodes` / `OverviewState.repositories_summary`. Called
+/// from the `ClusterChanged` arm of the main loop whenever the
+/// `SystemDiagnostics` endpoint updates — replacing the pre-Task-8
+/// `apply_system_diagnostics` path.
 ///
-/// The `root_pg` and `controller_services` projections are no longer
-/// sourced from the payload — `ClusterStore` owns those endpoints.
-/// As of Task 7 the bulletin-board fetch also moved to the cluster
-/// store; the sparkline and noisy-components leaderboards are now
-/// rebuilt by `redraw_bulletin_projections` on
-/// `ClusterChanged(Bulletins)`.
-fn apply_pg_status(state: &mut OverviewState, payload: OverviewPgStatusPayload) {
-    let OverviewPgStatusPayload {
-        about,
-        controller,
-        fetched_at,
-    } = payload;
+/// Also writes `state.cluster_summary.connected_nodes` /
+/// `.total_nodes`, which the top-bar identity strip reads. The raw
+/// `NodeDiagnostics` struct has no `status` field distinguishing
+/// connected from disconnected, so both totals equal the node count
+/// — same behavior as the pre-refactor code path in
+/// `src/app/state/mod.rs`.
+pub(crate) fn redraw_sysdiag(state: &mut crate::app::state::AppState) {
+    let Some(diag) = state.cluster.snapshot.system_diagnostics.latest() else {
+        // Pre-first-fetch: leave `nodes` / `repositories_summary`
+        // untouched so the Nodes panel renders its "loading…"
+        // affordance. `cluster_summary` also stays at its initial
+        // `None` so the top-bar shows a dash.
+        return;
+    };
 
-    state.last_pg_refresh = Some(std::time::Instant::now());
-
-    state.snapshot = Some(OverviewSnapshot {
-        about,
-        controller,
-        fetched_at: Some(fetched_at),
-    });
+    crate::client::health::update_nodes(&mut state.overview.nodes, diag);
+    state.overview.repositories_summary = build_repositories_summary(diag);
+    state.overview.last_sysdiag_refresh = Some(std::time::Instant::now());
+    state.cluster_summary.total_nodes = Some(diag.nodes.len());
+    state.cluster_summary.connected_nodes = Some(diag.nodes.len());
 }
 
 /// Re-derive bulletin-facing Overview projections (sparkline, noisy
@@ -386,8 +392,7 @@ pub(crate) fn derive_unhealthy(
 /// the Unhealthy-queues leaderboard, and mirrors `controller_services`
 /// into `state.overview.cs_counts`. Called from the
 /// `AppEvent::ClusterChanged` arm in the main loop (for `RootPgStatus`
-/// and `ControllerServices`) and from `apply_payload` so the
-/// projection stays consistent regardless of which poll lands first.
+/// and `ControllerServices`). Idempotent across repeat invocations.
 ///
 /// Idempotent: invoking it twice with the same snapshot produces the
 /// same `state.overview.root_pg` / `state.overview.unhealthy` /
@@ -429,19 +434,6 @@ pub(crate) fn redraw_components(state: &mut crate::app::state::AppState) {
     }
     state.overview.unhealthy = unhealthy;
     state.overview.root_pg = Some(root_pg.clone());
-}
-
-fn apply_system_diagnostics(
-    state: &mut OverviewState,
-    diag: crate::client::health::SystemDiagSnapshot,
-) {
-    // Build the per-node row set from the diagnostics snapshot.
-    crate::client::health::update_nodes(&mut state.nodes, &diag);
-
-    // Build the cluster-aggregate repository summary (NOT per-node).
-    state.repositories_summary = build_repositories_summary(&diag);
-
-    state.last_sysdiag_refresh = Some(std::time::Instant::now());
 }
 
 /// Compute cluster-aggregate fill percentages from the server-provided
@@ -493,24 +485,51 @@ pub(crate) fn parse_iso_seconds(s: &str) -> Option<i64> {
 mod tests {
     use super::*;
     use crate::client::{
-        AboutSnapshot, BulletinSnapshot, ControllerStatusSnapshot, QueueSnapshot,
-        RootPgStatusSnapshot,
+        BulletinSnapshot, ControllerStatusSnapshot, QueueSnapshot, RootPgStatusSnapshot,
     };
-    use crate::event::{OverviewPayload, OverviewPgStatusPayload};
     use std::time::{Duration, UNIX_EPOCH};
 
     // 2026-04-11T10:14:22Z in unix seconds.
     const T0: u64 = 1_775_902_462;
 
-    fn payload(controller: ControllerStatusSnapshot) -> OverviewPayload {
-        OverviewPayload::PgStatus(OverviewPgStatusPayload {
-            about: AboutSnapshot {
-                version: "2.8.0".into(),
-                title: "NiFi".into(),
+    /// Push a `ControllerStatusSnapshot` into `state.cluster.snapshot` so
+    /// `redraw_controller_status` can mirror it into
+    /// `state.overview.controller`. Replaces the pre-Task-8 path where
+    /// `controller` rode along on `OverviewPgStatusPayload`.
+    fn seed_controller_status(
+        state: &mut crate::app::state::AppState,
+        controller: ControllerStatusSnapshot,
+    ) {
+        use crate::cluster::snapshot::{EndpointState, FetchMeta};
+        use std::time::Instant;
+        state.cluster.snapshot.controller_status = EndpointState::Ready {
+            data: controller,
+            meta: FetchMeta {
+                fetched_at: Instant::now(),
+                fetch_duration: Duration::from_millis(5),
+                next_interval: Duration::from_secs(10),
             },
-            controller,
-            fetched_at: UNIX_EPOCH + Duration::from_secs(T0),
-        })
+        };
+    }
+
+    /// Push a `SystemDiagSnapshot` into `state.cluster.snapshot` so
+    /// `redraw_sysdiag` can mirror node/repo counts into
+    /// `OverviewState`. Replaces the pre-Task-8 `OverviewPayload::SystemDiag`
+    /// arrival path.
+    fn seed_sysdiag(
+        state: &mut crate::app::state::AppState,
+        diag: crate::client::health::SystemDiagSnapshot,
+    ) {
+        use crate::cluster::snapshot::{EndpointState, FetchMeta};
+        use std::time::Instant;
+        state.cluster.snapshot.system_diagnostics = EndpointState::Ready {
+            data: diag,
+            meta: FetchMeta {
+                fetched_at: Instant::now(),
+                fetch_duration: Duration::from_millis(5),
+                next_interval: Duration::from_secs(10),
+            },
+        };
     }
 
     /// Push a `RootPgStatusSnapshot` into `state.cluster.snapshot` so
@@ -601,12 +620,48 @@ mod tests {
     }
 
     #[test]
-    fn apply_populates_snapshot() {
-        let mut state = OverviewState::new();
-        apply_payload(&mut state, payload(ControllerStatusSnapshot::default()));
-        let snap = state.snapshot.as_ref().unwrap();
-        assert_eq!(snap.about.version, "2.8.0");
-        assert!(snap.fetched_at.is_some());
+    fn redraw_controller_status_mirrors_snapshot_into_overview_state() {
+        let mut state = crate::test_support::fresh_state();
+        seed_controller_status(
+            &mut state,
+            ControllerStatusSnapshot {
+                running: 7,
+                stopped: 3,
+                invalid: 0,
+                disabled: 1,
+                stale: 2,
+                locally_modified: 1,
+                sync_failure: 0,
+                up_to_date: 4,
+                ..Default::default()
+            },
+        );
+        redraw_controller_status(&mut state);
+        let c = state
+            .overview
+            .controller
+            .as_ref()
+            .expect("controller must be mirrored after redraw");
+        assert_eq!(c.running, 7);
+        assert_eq!(c.stale, 2);
+        assert!(state.overview.last_pg_refresh.is_some());
+    }
+
+    #[test]
+    fn redraw_controller_status_leaves_state_unchanged_when_loading() {
+        let mut state = crate::test_support::fresh_state();
+        // Seed a stale Some(..) first to prove the reducer leaves it
+        // untouched rather than clobbering it while the cluster is still
+        // loading.
+        state.overview.controller = Some(ControllerStatusSnapshot {
+            running: 99,
+            ..Default::default()
+        });
+        redraw_controller_status(&mut state);
+        // Loading → latest() returns None → clone() returns None → we
+        // overwrite with None; the reducer is "mirror-the-snapshot",
+        // not "preserve stale".
+        assert!(state.overview.controller.is_none());
     }
 
     #[test]
@@ -940,8 +995,11 @@ mod tests {
         assert_eq!(state.focus, OverviewFocus::None);
     }
 
-    #[test]
-    fn apply_system_diagnostics_populates_nodes_and_repositories() {
+    /// Build a two-node SystemDiagSnapshot fixture that the sysdiag
+    /// reducer tests reuse. Mirrors the old
+    /// `apply_system_diagnostics_populates_nodes_and_repositories`
+    /// fixture one-for-one so rendered values stay byte-identical.
+    fn two_node_sysdiag() -> crate::client::health::SystemDiagSnapshot {
         use crate::client::health::{
             GcSnapshot, NodeDiagnostics, RepoUsage, SystemDiagAggregate, SystemDiagSnapshot,
         };
@@ -983,7 +1041,7 @@ mod tests {
             }],
         };
 
-        let diag = SystemDiagSnapshot {
+        SystemDiagSnapshot {
             aggregate: SystemDiagAggregate {
                 content_repos: vec![RepoUsage {
                     identifier: "content".into(),
@@ -1009,19 +1067,45 @@ mod tests {
             },
             nodes: vec![node("node1:8080"), node("node2:8080")],
             fetched_at: Instant::now(),
-        };
+        }
+    }
 
-        let mut state = OverviewState::new();
-        apply_payload(&mut state, OverviewPayload::SystemDiag(diag));
+    #[test]
+    fn redraw_sysdiag_populates_nodes_and_repositories() {
+        let mut state = crate::test_support::fresh_state();
+        seed_sysdiag(&mut state, two_node_sysdiag());
+        redraw_sysdiag(&mut state);
 
-        // The nodes state should have 2 entries.
-        assert_eq!(state.nodes.nodes.len(), 2, "nodes should be populated");
+        // Two nodes.
+        assert_eq!(
+            state.overview.nodes.nodes.len(),
+            2,
+            "nodes should be populated"
+        );
 
-        // Repository aggregates come from the aggregate field.
-        assert_eq!(state.repositories_summary.content_percent, 60);
-        assert_eq!(state.repositories_summary.flowfile_percent, 30);
-        assert_eq!(state.repositories_summary.provenance_percent, 20);
-        assert!(state.last_sysdiag_refresh.is_some());
+        // Repository aggregates from the aggregate field.
+        assert_eq!(state.overview.repositories_summary.content_percent, 60);
+        assert_eq!(state.overview.repositories_summary.flowfile_percent, 30);
+        assert_eq!(state.overview.repositories_summary.provenance_percent, 20);
+        assert!(state.overview.last_sysdiag_refresh.is_some());
+
+        // Top-bar cluster_summary mirror: populated to node count.
+        assert_eq!(state.cluster_summary.total_nodes, Some(2));
+        assert_eq!(state.cluster_summary.connected_nodes, Some(2));
+    }
+
+    #[test]
+    fn redraw_sysdiag_is_noop_when_cluster_loading() {
+        let mut state = crate::test_support::fresh_state();
+        // Seed a stale refresh timestamp to prove the reducer leaves it
+        // alone rather than clobbering it on a Loading snapshot.
+        state.overview.last_sysdiag_refresh = None;
+        redraw_sysdiag(&mut state);
+        assert!(
+            state.overview.last_sysdiag_refresh.is_none(),
+            "last_sysdiag_refresh must stay None when cluster is Loading"
+        );
+        assert_eq!(state.cluster_summary.total_nodes, None);
     }
 
     #[test]

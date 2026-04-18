@@ -16,8 +16,9 @@ use crate::client::{
 use crate::cluster::ClusterEndpoint;
 use crate::cluster::config::ClusterPollingConfig;
 use crate::cluster::fetcher_tasks::{
-    FetchTaskConfig, spawn_bulletins, spawn_connections_by_pg, spawn_controller_services,
-    spawn_controller_status, spawn_root_pg_status,
+    FetchTaskConfig, spawn_about, spawn_bulletins, spawn_connections_by_pg,
+    spawn_controller_services, spawn_controller_status, spawn_root_pg_status,
+    spawn_system_diagnostics,
 };
 use crate::cluster::snapshot::{ClusterSnapshot, FetchMeta};
 use crate::cluster::subscriber::SubscriberRegistry;
@@ -220,6 +221,27 @@ impl ClusterStore {
             bulletins_cursor,
             bulletins_cfg,
         ));
+
+        let sysdiag_cfg = FetchTaskConfig {
+            base_interval: self.config.system_diagnostics,
+            max_interval: self.config.max_interval,
+            jitter_percent: self.config.jitter_percent,
+            force: self.notifies.get(ClusterEndpoint::SystemDiagnostics),
+        };
+        self.handles.push(spawn_system_diagnostics(
+            client.clone(),
+            tx.clone(),
+            sysdiag_cfg,
+        ));
+
+        let about_cfg = FetchTaskConfig {
+            base_interval: self.config.about,
+            max_interval: self.config.max_interval,
+            jitter_percent: self.config.jitter_percent,
+            force: self.notifies.get(ClusterEndpoint::About),
+        };
+        self.handles
+            .push(spawn_about(client.clone(), tx.clone(), about_cfg));
     }
 
     pub fn subscribe(&mut self, endpoint: ClusterEndpoint, view: ViewId) {
@@ -413,6 +435,42 @@ mod tests {
                 assert_eq!(data.process_group_count, 3);
                 assert_eq!(data.processors.running, 5);
             }
+            other => panic!("expected Ready, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn system_diagnostics_update_is_applied() {
+        use crate::client::health::{SystemDiagAggregate, SystemDiagSnapshot};
+        let mut store = ClusterStore::new(ClusterPollingConfig::default(), 5000);
+        let fake = SystemDiagSnapshot {
+            aggregate: SystemDiagAggregate {
+                content_repos: Vec::new(),
+                flowfile_repo: None,
+                provenance_repos: Vec::new(),
+            },
+            nodes: Vec::new(),
+            fetched_at: Instant::now(),
+        };
+        let ep = store.apply_update(ClusterUpdate::SystemDiagnostics(Ok(fake), meta()));
+        assert_eq!(ep, ClusterEndpoint::SystemDiagnostics);
+        assert!(matches!(
+            store.snapshot.system_diagnostics,
+            EndpointState::Ready { .. }
+        ));
+    }
+
+    #[test]
+    fn about_update_is_applied() {
+        let mut store = ClusterStore::new(ClusterPollingConfig::default(), 5000);
+        let fake = crate::client::AboutSnapshot {
+            version: "2.9.0".into(),
+            title: "NiFi".into(),
+        };
+        let ep = store.apply_update(ClusterUpdate::About(Ok(fake), meta()));
+        assert_eq!(ep, ClusterEndpoint::About);
+        match &store.snapshot.about {
+            EndpointState::Ready { data, .. } => assert_eq!(data.version, "2.9.0"),
             other => panic!("expected Ready, got {:?}", other),
         }
     }

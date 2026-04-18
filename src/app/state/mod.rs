@@ -21,8 +21,8 @@ use crate::intent::CrossLink;
 use crate::view::browser::state::{BrowserState, FlowIndex, NodeDetail, rebuild_visible};
 use crate::view::bulletins::state::BulletinsState;
 use crate::view::events::state::EventsState;
+use crate::view::overview::OverviewState;
 use crate::view::overview::state::OverviewFocus;
-use crate::view::overview::{OverviewState, apply_payload as apply_overview_payload};
 use crate::view::tracer::state::TracerState;
 
 // ---------------------------------------------------------------------------
@@ -852,66 +852,6 @@ fn update_inner(state: &mut AppState, event: AppEvent, config: &Config) -> Updat
             intent: None,
             tracer_followup: None,
         },
-        AppEvent::Data(ViewPayload::Overview(payload)) => {
-            // Side-effects on AppState that need fields outside OverviewState
-            // happen here, before delegating to the per-view reducer.
-            //
-            // Populate the cluster_summary placeholder added in Phase 1.
-            // This drives the top-bar identity strip's `nodes N/M`.
-            //
-            // `NodeDiagnostics` has no `status` field that distinguishes
-            // connected from disconnected nodes, so both totals are set to
-            // `diag.nodes.len()` until upstream adds that field.
-            use crate::view::overview::state::SysdiagMode;
-
-            match &payload {
-                crate::event::OverviewPayload::SystemDiag(diag)
-                | crate::event::OverviewPayload::SystemDiagFallback { diag, .. } => {
-                    state.cluster_summary.total_nodes = Some(diag.nodes.len());
-                    state.cluster_summary.connected_nodes = Some(diag.nodes.len());
-                }
-                crate::event::OverviewPayload::PgStatus(_) => {}
-            }
-
-            let new_mode = match &payload {
-                crate::event::OverviewPayload::SystemDiag(_) => Some(SysdiagMode::Nodewise),
-                crate::event::OverviewPayload::SystemDiagFallback { .. } => {
-                    Some(SysdiagMode::Aggregate)
-                }
-                crate::event::OverviewPayload::PgStatus(_) => None,
-            };
-
-            if let (
-                Some(SysdiagMode::Aggregate),
-                crate::event::OverviewPayload::SystemDiagFallback { warning, .. },
-            ) = (new_mode, &payload)
-            {
-                // Only emit the banner when the mode transitions into
-                // Aggregate. Steady-state aggregate polls are silent.
-                let previous = state.overview.sysdiag_mode;
-                let transitioning = !matches!(previous, Some(SysdiagMode::Aggregate));
-                if transitioning {
-                    state.post_warning(warning.clone());
-                }
-            }
-
-            if let Some(mode) = new_mode {
-                state.overview.sysdiag_mode = Some(mode);
-            }
-
-            apply_overview_payload(&mut state.overview, payload);
-            // Refresh the Components / Unhealthy-queues projections from
-            // the cluster snapshot. Kept here so both payload arrival
-            // and `ClusterChanged(RootPgStatus)` go through the same
-            // derivation path.
-            crate::view::overview::state::redraw_components(state);
-            state.last_refresh = Instant::now();
-            UpdateResult {
-                redraw: true,
-                intent: None,
-                tracer_followup: None,
-            }
-        }
         AppEvent::Data(ViewPayload::Browser(payload)) => {
             handle_browser_payload(state, payload);
             state.last_refresh = Instant::now();
@@ -2505,118 +2445,34 @@ mod tests {
     }
 
     #[test]
-    fn overview_sysdiag_payload_populates_cluster_summary() {
-        use crate::event::{OverviewPayload, ViewPayload};
+    fn sysdiag_redraw_populates_cluster_summary() {
+        use crate::cluster::snapshot::{EndpointState, FetchMeta};
+        use std::time::{Duration, Instant};
 
         let mut s = fresh_state();
-        let c = tiny_config();
 
         // Pre-condition: cluster_summary is empty placeholder.
         assert_eq!(s.cluster_summary.connected_nodes, None);
         assert_eq!(s.cluster_summary.total_nodes, None);
 
-        let diag = build_test_sysdiag_with_two_nodes();
+        // Seed the cluster snapshot and invoke `redraw_sysdiag`
+        // directly. The main-loop `ClusterChanged` arm
+        // (`src/app/mod.rs`) routes to this reducer; the reducer test
+        // is the canonical coverage for the projection logic.
+        s.cluster.snapshot.system_diagnostics = EndpointState::Ready {
+            data: build_test_sysdiag_with_two_nodes(),
+            meta: FetchMeta {
+                fetched_at: Instant::now(),
+                fetch_duration: Duration::from_millis(5),
+                next_interval: Duration::from_secs(30),
+            },
+        };
 
-        update(
-            &mut s,
-            AppEvent::Data(ViewPayload::Overview(OverviewPayload::SystemDiag(diag))),
-            &c,
-        );
+        crate::view::overview::state::redraw_sysdiag(&mut s);
 
         assert_eq!(s.cluster_summary.total_nodes, Some(2));
         // NodeDiagnostics has no status field, so connected_nodes equals total.
         assert_eq!(s.cluster_summary.connected_nodes, Some(2));
-    }
-
-    #[test]
-    fn overview_sysdiag_fallback_payload_sets_warning_banner() {
-        use crate::event::{OverviewPayload, ViewPayload};
-
-        let mut s = fresh_state();
-        let c = tiny_config();
-        let diag = build_test_sysdiag_with_two_nodes();
-
-        update(
-            &mut s,
-            AppEvent::Data(ViewPayload::Overview(OverviewPayload::SystemDiagFallback {
-                diag,
-                warning: "nodewise diagnostics unavailable".into(),
-            })),
-            &c,
-        );
-
-        assert!(s.status.banner.is_some());
-        let banner = s.status.banner.unwrap();
-        assert_eq!(banner.severity, BannerSeverity::Warning);
-        assert_eq!(banner.message, "nodewise diagnostics unavailable");
-        // Cluster summary should still be populated even on fallback.
-        assert_eq!(s.cluster_summary.total_nodes, Some(2));
-        assert_eq!(s.cluster_summary.connected_nodes, Some(2));
-    }
-
-    #[test]
-    fn overview_sysdiag_fallback_banner_fires_only_on_mode_transition() {
-        use crate::event::{OverviewPayload, ViewPayload};
-        use crate::view::overview::state::SysdiagMode;
-
-        let mut s = fresh_state();
-        let c = tiny_config();
-        let diag = build_test_sysdiag_with_two_nodes();
-
-        // First fallback payload: mode transitions from None → Aggregate.
-        // Banner must be set.
-        update(
-            &mut s,
-            AppEvent::Data(ViewPayload::Overview(OverviewPayload::SystemDiagFallback {
-                diag: diag.clone(),
-                warning: "nodewise diagnostics unavailable".into(),
-            })),
-            &c,
-        );
-        assert!(s.status.banner.is_some(), "first fallback must set banner");
-        assert_eq!(s.overview.sysdiag_mode, Some(SysdiagMode::Aggregate));
-
-        // User dismisses the banner (simulating Task 4's Esc path).
-        s.status.banner = None;
-
-        // Second fallback payload: mode stays Aggregate → Aggregate.
-        // Banner must NOT be re-armed.
-        update(
-            &mut s,
-            AppEvent::Data(ViewPayload::Overview(OverviewPayload::SystemDiagFallback {
-                diag: diag.clone(),
-                warning: "nodewise diagnostics unavailable".into(),
-            })),
-            &c,
-        );
-        assert!(
-            s.status.banner.is_none(),
-            "second consecutive fallback must not re-arm the banner"
-        );
-
-        // Recovery: a successful SystemDiag payload flips the mode back.
-        update(
-            &mut s,
-            AppEvent::Data(ViewPayload::Overview(OverviewPayload::SystemDiag(
-                diag.clone(),
-            ))),
-            &c,
-        );
-        assert_eq!(s.overview.sysdiag_mode, Some(SysdiagMode::Nodewise));
-
-        // Another fallback after recovery: mode transitions again → re-fires.
-        update(
-            &mut s,
-            AppEvent::Data(ViewPayload::Overview(OverviewPayload::SystemDiagFallback {
-                diag,
-                warning: "nodewise diagnostics unavailable".into(),
-            })),
-            &c,
-        );
-        assert!(
-            s.status.banner.is_some(),
-            "fallback after a recovered Nodewise mode must re-fire the banner"
-        );
     }
 
     #[test]

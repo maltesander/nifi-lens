@@ -95,13 +95,18 @@ pub async fn run(
             }
             AppEvent::ClusterChanged(endpoint) => {
                 use crate::cluster::ClusterEndpoint;
-                // Overview cares about all three read-model endpoints
-                // that feed its Components panel plus Bulletins for
-                // the sparkline + noisy-components leaderboard.
+                // Overview cares about six cluster endpoints (all read-
+                // model fields plus Bulletins for the sparkline +
+                // noisy-components leaderboard). Task 8 added
+                // ControllerStatus, SystemDiagnostics, and About —
+                // previously Overview-worker-owned.
                 let affects_overview = matches!(
                     endpoint,
                     ClusterEndpoint::RootPgStatus
                         | ClusterEndpoint::ControllerServices
+                        | ClusterEndpoint::ControllerStatus
+                        | ClusterEndpoint::SystemDiagnostics
+                        | ClusterEndpoint::About
                         | ClusterEndpoint::Bulletins
                 );
                 let affects_browser = matches!(
@@ -113,14 +118,32 @@ pub async fn run(
                 let affects_bulletins = matches!(endpoint, ClusterEndpoint::Bulletins);
 
                 if affects_overview {
-                    if matches!(
-                        endpoint,
-                        ClusterEndpoint::RootPgStatus | ClusterEndpoint::ControllerServices
-                    ) {
-                        crate::view::overview::state::redraw_components(&mut state);
-                    }
-                    if affects_bulletins {
-                        crate::view::overview::state::redraw_bulletin_projections(&mut state);
+                    match endpoint {
+                        ClusterEndpoint::RootPgStatus | ClusterEndpoint::ControllerServices => {
+                            crate::view::overview::state::redraw_components(&mut state);
+                        }
+                        ClusterEndpoint::ControllerStatus => {
+                            // Also affects the Components panel
+                            // (process-groups row reads
+                            // stale/modified/sync_err), so refresh
+                            // components too.
+                            crate::view::overview::state::redraw_controller_status(&mut state);
+                            crate::view::overview::state::redraw_components(&mut state);
+                        }
+                        ClusterEndpoint::SystemDiagnostics => {
+                            crate::view::overview::state::redraw_sysdiag(&mut state);
+                        }
+                        ClusterEndpoint::About => {
+                            // `About` has no OverviewState mirror today
+                            // (the NiFi version isn't rendered in
+                            // Overview). Keep the arm so a future
+                            // renderer addition has a wired redraw path
+                            // without a second `ClusterChanged` touch.
+                        }
+                        ClusterEndpoint::Bulletins => {
+                            crate::view::overview::state::redraw_bulletin_projections(&mut state);
+                        }
+                        _ => {}
                     }
                 }
                 if affects_browser {

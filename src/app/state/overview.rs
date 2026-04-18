@@ -120,8 +120,8 @@ impl ViewKeyHandler for OverviewHandler {
 
 #[cfg(test)]
 mod tests {
+    use super::super::ViewKeyHandler;
     use super::super::tests::{fresh_state, tiny_config};
-    use super::super::{ViewKeyHandler, update};
     use super::OverviewHandler;
     use crate::app::state::{Modal, ViewId};
     use crate::client::health::NodeHealthRow;
@@ -383,18 +383,18 @@ mod tests {
     }
 
     #[test]
-    fn overview_data_event_updates_state_and_triggers_redraw() {
-        use crate::client::{AboutSnapshot, ControllerStatusSnapshot};
-        use crate::event::{AppEvent, OverviewPayload, OverviewPgStatusPayload, ViewPayload};
-        use std::time::SystemTime;
+    fn overview_controller_status_redraw_mirrors_snapshot() {
+        use crate::client::ControllerStatusSnapshot;
+        use crate::cluster::snapshot::{EndpointState, FetchMeta};
+        use std::time::{Duration, Instant};
+
+        // After Task 8 Overview is store-only. Seeding the cluster
+        // snapshot directly and invoking the reducer mirrors what the
+        // main loop's `ClusterChanged(ControllerStatus)` arm does.
         let mut s = fresh_state();
-        let c = tiny_config();
-        let payload = OverviewPayload::PgStatus(OverviewPgStatusPayload {
-            about: AboutSnapshot {
-                version: "2.8.0".into(),
-                title: "NiFi".into(),
-            },
-            controller: ControllerStatusSnapshot {
+        let _ = tiny_config();
+        s.cluster.snapshot.controller_status = EndpointState::Ready {
+            data: ControllerStatusSnapshot {
                 running: 7,
                 stopped: 3,
                 invalid: 0,
@@ -407,10 +407,13 @@ mod tests {
                 sync_failure: 0,
                 up_to_date: 0,
             },
-            fetched_at: SystemTime::now(),
-        });
-        let r = update(&mut s, AppEvent::Data(ViewPayload::Overview(payload)), &c);
-        assert!(r.redraw);
-        assert_eq!(s.overview.snapshot.as_ref().unwrap().controller.running, 7);
+            meta: FetchMeta {
+                fetched_at: Instant::now(),
+                fetch_duration: Duration::from_millis(5),
+                next_interval: Duration::from_secs(10),
+            },
+        };
+        crate::view::overview::state::redraw_controller_status(&mut s);
+        assert_eq!(s.overview.controller.as_ref().unwrap().running, 7);
     }
 }

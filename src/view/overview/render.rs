@@ -27,11 +27,11 @@ use ratatui::widgets::{
 };
 
 use super::state::{
-    BulletinBucket, NoisyComponent, OverviewFocus, OverviewSnapshot, OverviewState,
-    SPARKLINE_MINUTES, Severity, UnhealthyQueue,
+    BulletinBucket, NoisyComponent, OverviewFocus, OverviewState, SPARKLINE_MINUTES, Severity,
+    UnhealthyQueue,
 };
 use crate::app::navigation::compute_scroll_window;
-use crate::client::{ControllerServiceCounts, ProcessorStateCounts};
+use crate::client::{ControllerServiceCounts, ControllerStatusSnapshot, ProcessorStateCounts};
 use crate::theme;
 use crate::widget::gauge::fill_bar;
 use crate::widget::panel::Panel;
@@ -109,31 +109,34 @@ fn nodes_zone_height(state: &OverviewState) -> u16 {
 /// services. Display-only; not focusable. Aligned columns: 2-pad +
 /// 20-label + 4-count + 4-gap + repeating 12-slot (8 label + 4 value).
 ///
-/// The root-PG and CS-counts projections are sourced from
-/// `state.root_pg` / `state.cs_counts` — both mirrored from the
-/// cluster snapshot by `redraw_components`. The renderer shows
-/// "loading…" until both the Overview-worker PG-status payload and
-/// the cluster `root_pg_status` fetch have landed. The CS row
+/// All projections are sourced from `OverviewState` fields mirrored
+/// from `AppState.cluster.snapshot` by the `redraw_*` reducers. The
+/// renderer shows "loading…" until both `root_pg_status` and
+/// `controller_status` have landed in the cluster snapshot. The CS row
 /// degrades to "cs list unavailable" when `state.cs_counts` is `None`.
 fn render_components_table(frame: &mut Frame, area: Rect, state: &OverviewState) {
-    let (Some(snap), Some(root_pg)) = (state.snapshot.as_ref(), state.root_pg.as_ref()) else {
+    let (Some(controller), Some(root_pg)) = (state.controller.as_ref(), state.root_pg.as_ref())
+    else {
         let line = Line::from(Span::styled("loading…", theme::muted()));
         frame.render_widget(Paragraph::new(line), area);
         return;
     };
     let lines = vec![
-        pg_row(snap, root_pg),
+        pg_row(controller, root_pg),
         processors_row(&root_pg.processors),
         controller_services_row(state.cs_counts.as_ref()),
     ];
     frame.render_widget(Paragraph::new(lines), area);
 }
 
-fn pg_row(snap: &OverviewSnapshot, root_pg: &crate::client::RootPgStatusSnapshot) -> Line<'static> {
+fn pg_row(
+    controller: &ControllerStatusSnapshot,
+    root_pg: &crate::client::RootPgStatusSnapshot,
+) -> Line<'static> {
     let mut spans = label_and_count("Process groups", root_pg.process_group_count);
-    let stale = snap.controller.stale;
-    let modified = snap.controller.locally_modified;
-    let sync_err = snap.controller.sync_failure;
+    let stale = controller.stale;
+    let modified = controller.locally_modified;
+    let sync_err = controller.sync_failure;
     if stale + modified + sync_err == 0 {
         spans.extend(slot_text("all in sync", theme::muted()));
     } else {
@@ -807,14 +810,11 @@ fn center_rect(pct_x: u16, height: u16, area: Rect) -> Rect {
 #[cfg(test)]
 mod tests {
     use crate::client::{
-        AboutSnapshot, BulletinSnapshot, ControllerStatusSnapshot, QueueSnapshot,
-        RootPgStatusSnapshot,
+        BulletinSnapshot, ControllerStatusSnapshot, QueueSnapshot, RootPgStatusSnapshot,
     };
-    use crate::event::{OverviewPayload, OverviewPgStatusPayload};
-    use crate::view::overview::state::{OverviewState, apply_payload};
+    use crate::view::overview::state::OverviewState;
     use ratatui::Terminal;
     use ratatui::backend::TestBackend;
-    use std::time::{Duration, UNIX_EPOCH};
 
     // 2026-04-11T10:14:22Z in unix seconds. Same constant as the reducer
     // tests so time-dependent rendering stays deterministic. Verified
@@ -835,6 +835,39 @@ mod tests {
     fn seed_root_pg(state: &mut OverviewState, root_pg: RootPgStatusSnapshot) {
         state.unhealthy = crate::view::overview::state::derive_unhealthy(&root_pg);
         state.root_pg = Some(root_pg);
+    }
+
+    /// Mirror what `redraw_controller_status` would do: write the
+    /// supplied snapshot into `state.controller`. Replaces the pre-Task-8
+    /// `apply_payload(PgStatus(..))` path in render tests.
+    fn seed_controller_status(state: &mut OverviewState, controller: ControllerStatusSnapshot) {
+        state.controller = Some(controller);
+    }
+
+    /// Mirror what `redraw_sysdiag` would do: write the `nodes` /
+    /// `repositories_summary` projections without threading an
+    /// `&mut AppState`. Replaces the pre-Task-8
+    /// `apply_payload(SystemDiag(..))` path in render tests.
+    fn seed_sysdiag(state: &mut OverviewState, diag: &crate::client::health::SystemDiagSnapshot) {
+        use crate::view::overview::state::RepositoriesSummary;
+        crate::client::health::update_nodes(&mut state.nodes, diag);
+        let avg = |repos: &[crate::client::health::RepoUsage]| -> u32 {
+            if repos.is_empty() {
+                0
+            } else {
+                repos.iter().map(|r| r.utilization_percent).sum::<u32>() / repos.len() as u32
+            }
+        };
+        let agg = &diag.aggregate;
+        state.repositories_summary = RepositoriesSummary {
+            content_percent: avg(&agg.content_repos),
+            flowfile_percent: agg
+                .flowfile_repo
+                .as_ref()
+                .map(|r| r.utilization_percent)
+                .unwrap_or(0),
+            provenance_percent: avg(&agg.provenance_repos),
+        };
     }
 
     /// Render-test shim: build the sparkline + noisy-components
@@ -940,12 +973,9 @@ mod tests {
     #[test]
     fn snapshot_healthy_cluster() {
         let mut state = OverviewState::new();
-        let payload = OverviewPayload::PgStatus(OverviewPgStatusPayload {
-            about: AboutSnapshot {
-                version: "2.8.0".into(),
-                title: "NiFi".into(),
-            },
-            controller: ControllerStatusSnapshot {
+        seed_controller_status(
+            &mut state,
+            ControllerStatusSnapshot {
                 running: 42,
                 stopped: 3,
                 invalid: 0,
@@ -958,9 +988,7 @@ mod tests {
                 sync_failure: 0,
                 up_to_date: 0,
             },
-            fetched_at: UNIX_EPOCH + Duration::from_secs(T0),
-        });
-        apply_payload(&mut state, payload);
+        );
         // Render reads `state.root_pg` and `state.cs_counts` directly
         // — seed the projections that `redraw_components` would
         // normally populate from the cluster snapshot.
@@ -1005,12 +1033,9 @@ mod tests {
     fn snapshot_drift() {
         use crate::client::{ControllerServiceCounts, ProcessorStateCounts};
         let mut state = OverviewState::new();
-        let payload = OverviewPayload::PgStatus(OverviewPgStatusPayload {
-            about: AboutSnapshot {
-                version: "2.8.0".into(),
-                title: "NiFi".into(),
-            },
-            controller: ControllerStatusSnapshot {
+        seed_controller_status(
+            &mut state,
+            ControllerStatusSnapshot {
                 running: 42,
                 stopped: 3,
                 invalid: 0,
@@ -1021,9 +1046,7 @@ mod tests {
                 up_to_date: 4,
                 ..Default::default()
             },
-            fetched_at: UNIX_EPOCH + Duration::from_secs(T0),
-        });
-        apply_payload(&mut state, payload);
+        );
         seed_root_pg(
             &mut state,
             RootPgStatusSnapshot {
@@ -1050,15 +1073,7 @@ mod tests {
     #[test]
     fn snapshot_cs_unavailable() {
         let mut state = OverviewState::new();
-        let payload = OverviewPayload::PgStatus(OverviewPgStatusPayload {
-            about: AboutSnapshot {
-                version: "2.8.0".into(),
-                title: "NiFi".into(),
-            },
-            controller: ControllerStatusSnapshot::default(),
-            fetched_at: UNIX_EPOCH + Duration::from_secs(T0),
-        });
-        apply_payload(&mut state, payload);
+        seed_controller_status(&mut state, ControllerStatusSnapshot::default());
         seed_root_pg(&mut state, RootPgStatusSnapshot::default());
         // `state.cs_counts` is left as the default `None` to exercise
         // the "cs list unavailable" degradation path.
@@ -1104,12 +1119,9 @@ mod tests {
                 timestamp_human: String::new(),
             })
             .collect();
-        let payload = OverviewPayload::PgStatus(OverviewPgStatusPayload {
-            about: AboutSnapshot {
-                version: "2.8.0".into(),
-                title: "NiFi".into(),
-            },
-            controller: ControllerStatusSnapshot {
+        seed_controller_status(
+            &mut state,
+            ControllerStatusSnapshot {
                 running: 20,
                 stopped: 10,
                 invalid: 2,
@@ -1122,9 +1134,7 @@ mod tests {
                 sync_failure: 0,
                 up_to_date: 0,
             },
-            fetched_at: UNIX_EPOCH + Duration::from_secs(T0),
-        });
-        apply_payload(&mut state, payload);
+        );
         // Hand-build the bulletin-derived projections matching the
         // pre-Task-7 output.
         seed_bulletin_projections_from_bulletins(&mut state, &bulletins, T0 as i64);
@@ -1164,32 +1174,25 @@ mod tests {
 
         let mut state = OverviewState::new();
 
-        // First a PG-status payload so the processor info line has data.
-        apply_payload(
+        // Seed controller_status so the processor info line has data.
+        seed_controller_status(
             &mut state,
-            OverviewPayload::PgStatus(OverviewPgStatusPayload {
-                about: AboutSnapshot {
-                    version: "2.9.0".into(),
-                    title: "NiFi".into(),
-                },
-                controller: ControllerStatusSnapshot {
-                    running: 42,
-                    stopped: 3,
-                    invalid: 0,
-                    disabled: 1,
-                    active_threads: 5,
-                    flow_files_queued: 120,
-                    bytes_queued: 4096,
-                    stale: 0,
-                    locally_modified: 0,
-                    sync_failure: 0,
-                    up_to_date: 0,
-                },
-                fetched_at: UNIX_EPOCH + Duration::from_secs(T0),
-            }),
+            ControllerStatusSnapshot {
+                running: 42,
+                stopped: 3,
+                invalid: 0,
+                disabled: 1,
+                active_threads: 5,
+                flow_files_queued: 120,
+                bytes_queued: 4096,
+                stale: 0,
+                locally_modified: 0,
+                sync_failure: 0,
+                up_to_date: 0,
+            },
         );
 
-        // Then a SystemDiag payload with two nodes. Fixture copied from the
+        // Then a two-node sysdiag projection. Fixture mirrors the
         // reducer test in src/view/overview/state.rs.
         let node = |address: &str| NodeDiagnostics {
             address: address.into(),
@@ -1226,36 +1229,34 @@ mod tests {
                 utilization_percent: 20,
             }],
         };
-        apply_payload(
-            &mut state,
-            OverviewPayload::SystemDiag(SystemDiagSnapshot {
-                aggregate: SystemDiagAggregate {
-                    content_repos: vec![RepoUsage {
-                        identifier: "content".into(),
-                        used_bytes: 60,
-                        total_bytes: 100,
-                        free_bytes: 40,
-                        utilization_percent: 60,
-                    }],
-                    flowfile_repo: Some(RepoUsage {
-                        identifier: "flowfile".into(),
-                        used_bytes: 30,
-                        total_bytes: 100,
-                        free_bytes: 70,
-                        utilization_percent: 30,
-                    }),
-                    provenance_repos: vec![RepoUsage {
-                        identifier: "provenance".into(),
-                        used_bytes: 20,
-                        total_bytes: 100,
-                        free_bytes: 80,
-                        utilization_percent: 20,
-                    }],
-                },
-                nodes: vec![node("node1:8080"), node("node2:8080")],
-                fetched_at: Instant::now(),
-            }),
-        );
+        let diag = SystemDiagSnapshot {
+            aggregate: SystemDiagAggregate {
+                content_repos: vec![RepoUsage {
+                    identifier: "content".into(),
+                    used_bytes: 60,
+                    total_bytes: 100,
+                    free_bytes: 40,
+                    utilization_percent: 60,
+                }],
+                flowfile_repo: Some(RepoUsage {
+                    identifier: "flowfile".into(),
+                    used_bytes: 30,
+                    total_bytes: 100,
+                    free_bytes: 70,
+                    utilization_percent: 30,
+                }),
+                provenance_repos: vec![RepoUsage {
+                    identifier: "provenance".into(),
+                    used_bytes: 20,
+                    total_bytes: 100,
+                    free_bytes: 80,
+                    utilization_percent: 20,
+                }],
+            },
+            nodes: vec![node("node1:8080"), node("node2:8080")],
+            fetched_at: Instant::now(),
+        };
+        seed_sysdiag(&mut state, &diag);
         seed_root_pg(
             &mut state,
             RootPgStatusSnapshot {
@@ -1387,36 +1388,34 @@ mod tests {
             }],
         };
 
-        apply_payload(
-            &mut state,
-            OverviewPayload::SystemDiag(SystemDiagSnapshot {
-                aggregate: SystemDiagAggregate {
-                    content_repos: vec![RepoUsage {
-                        identifier: "c".into(),
-                        used_bytes: 10,
-                        total_bytes: 100,
-                        free_bytes: 90,
-                        utilization_percent: 10,
-                    }],
-                    flowfile_repo: Some(RepoUsage {
-                        identifier: "f".into(),
-                        used_bytes: 10,
-                        total_bytes: 100,
-                        free_bytes: 90,
-                        utilization_percent: 10,
-                    }),
-                    provenance_repos: vec![RepoUsage {
-                        identifier: "p".into(),
-                        used_bytes: 10,
-                        total_bytes: 100,
-                        free_bytes: 90,
-                        utilization_percent: 10,
-                    }],
-                },
-                nodes: (0..10).map(node).collect(),
-                fetched_at: Instant::now(),
-            }),
-        );
+        let diag = SystemDiagSnapshot {
+            aggregate: SystemDiagAggregate {
+                content_repos: vec![RepoUsage {
+                    identifier: "c".into(),
+                    used_bytes: 10,
+                    total_bytes: 100,
+                    free_bytes: 90,
+                    utilization_percent: 10,
+                }],
+                flowfile_repo: Some(RepoUsage {
+                    identifier: "f".into(),
+                    used_bytes: 10,
+                    total_bytes: 100,
+                    free_bytes: 90,
+                    utilization_percent: 10,
+                }),
+                provenance_repos: vec![RepoUsage {
+                    identifier: "p".into(),
+                    used_bytes: 10,
+                    total_bytes: 100,
+                    free_bytes: 90,
+                    utilization_percent: 10,
+                }],
+            },
+            nodes: (0..10).map(node).collect(),
+            fetched_at: Instant::now(),
+        };
+        seed_sysdiag(&mut state, &diag);
         state.nodes.selected = 9;
 
         let output = render_to_string(&state);
@@ -1441,37 +1440,28 @@ mod tests {
 
     #[test]
     fn noisy_panel_scrolls_to_selected() {
-        use crate::client::{AboutSnapshot, ControllerStatusSnapshot, RootPgStatusSnapshot};
-        use crate::event::{OverviewPayload, OverviewPgStatusPayload};
-        use crate::view::overview::state::{NoisyComponent, Severity as OvSev, apply_payload};
-        use std::time::{Duration, UNIX_EPOCH};
+        use crate::client::{ControllerStatusSnapshot, RootPgStatusSnapshot};
+        use crate::view::overview::state::{NoisyComponent, Severity as OvSev};
 
         let mut state = OverviewState::new();
         state.focus = crate::view::overview::state::OverviewFocus::Noisy;
 
-        // Populate with a PG-status payload so the layout renders properly.
-        apply_payload(
+        // Populate enough state for the layout to render properly.
+        seed_controller_status(
             &mut state,
-            OverviewPayload::PgStatus(OverviewPgStatusPayload {
-                about: AboutSnapshot {
-                    version: "2.8.0".into(),
-                    title: "NiFi".into(),
-                },
-                controller: ControllerStatusSnapshot {
-                    running: 1,
-                    stopped: 0,
-                    invalid: 0,
-                    disabled: 0,
-                    active_threads: 0,
-                    flow_files_queued: 0,
-                    bytes_queued: 0,
-                    stale: 0,
-                    locally_modified: 0,
-                    sync_failure: 0,
-                    up_to_date: 0,
-                },
-                fetched_at: UNIX_EPOCH + Duration::from_secs(T0),
-            }),
+            ControllerStatusSnapshot {
+                running: 1,
+                stopped: 0,
+                invalid: 0,
+                disabled: 0,
+                active_threads: 0,
+                flow_files_queued: 0,
+                bytes_queued: 0,
+                stale: 0,
+                locally_modified: 0,
+                sync_failure: 0,
+                up_to_date: 0,
+            },
         );
         seed_root_pg(&mut state, RootPgStatusSnapshot::default());
 
@@ -1530,12 +1520,7 @@ mod tests {
 
     #[test]
     fn queues_panel_scrolls_to_selected() {
-        use crate::client::{
-            AboutSnapshot, ControllerStatusSnapshot, QueueSnapshot, RootPgStatusSnapshot,
-        };
-        use crate::event::{OverviewPayload, OverviewPgStatusPayload};
-        use crate::view::overview::state::apply_payload;
-        use std::time::{Duration, UNIX_EPOCH};
+        use crate::client::{ControllerStatusSnapshot, QueueSnapshot, RootPgStatusSnapshot};
 
         let mut state = OverviewState::new();
         state.focus = crate::view::overview::state::OverviewFocus::Queues;
@@ -1563,28 +1548,21 @@ mod tests {
             })
             .collect();
 
-        apply_payload(
+        seed_controller_status(
             &mut state,
-            OverviewPayload::PgStatus(OverviewPgStatusPayload {
-                about: AboutSnapshot {
-                    version: "2.8.0".into(),
-                    title: "NiFi".into(),
-                },
-                controller: ControllerStatusSnapshot {
-                    running: 1,
-                    stopped: 0,
-                    invalid: 0,
-                    disabled: 0,
-                    active_threads: 0,
-                    flow_files_queued: 0,
-                    bytes_queued: 0,
-                    stale: 0,
-                    locally_modified: 0,
-                    sync_failure: 0,
-                    up_to_date: 0,
-                },
-                fetched_at: UNIX_EPOCH + Duration::from_secs(T0),
-            }),
+            ControllerStatusSnapshot {
+                running: 1,
+                stopped: 0,
+                invalid: 0,
+                disabled: 0,
+                active_threads: 0,
+                flow_files_queued: 0,
+                bytes_queued: 0,
+                stale: 0,
+                locally_modified: 0,
+                sync_failure: 0,
+                up_to_date: 0,
+            },
         );
         seed_root_pg(
             &mut state,

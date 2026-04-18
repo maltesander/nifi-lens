@@ -5,7 +5,9 @@
 //! the Bulletins worker (5s cadence). Phase 3's Browser worker and
 //! Phase 4's Tracer worker plug into the same pattern. Task 7 retired
 //! the Bulletins worker — Bulletins now subscribes to the cluster-owned
-//! `BulletinRing` and has no per-view task.
+//! `BulletinRing` and has no per-view task. Task 8 retired the Overview
+//! worker the same way: Overview subscribes to six cluster endpoints
+//! and projects them into `OverviewState` via the `redraw_*` reducers.
 
 use std::sync::Arc;
 
@@ -65,7 +67,7 @@ impl WorkerRegistry {
         tx: &mpsc::Sender<AppEvent>,
         browser: &mut crate::view::browser::state::BrowserState,
         cluster: &mut crate::cluster::ClusterStore,
-        polling: &crate::config::PollingConfig,
+        _polling: &crate::config::PollingConfig,
     ) {
         if matches!(&self.current, Some((existing, _)) if *existing == view) {
             return;
@@ -89,6 +91,15 @@ impl WorkerRegistry {
                         crate::cluster::ClusterEndpoint::ControllerServices,
                         ViewId::Overview,
                     );
+                    cluster.unsubscribe(
+                        crate::cluster::ClusterEndpoint::ControllerStatus,
+                        ViewId::Overview,
+                    );
+                    cluster.unsubscribe(
+                        crate::cluster::ClusterEndpoint::SystemDiagnostics,
+                        ViewId::Overview,
+                    );
+                    cluster.unsubscribe(crate::cluster::ClusterEndpoint::About, ViewId::Overview);
                     cluster
                         .unsubscribe(crate::cluster::ClusterEndpoint::Bulletins, ViewId::Overview);
                 }
@@ -123,11 +134,11 @@ impl WorkerRegistry {
         }
         let handle = match view {
             ViewId::Overview => {
-                tracing::debug!(?view, "worker registry: spawning overview worker");
-                // Subscribe for cluster-wide endpoints Overview consumes.
-                // Additional endpoints (ControllerStatus, SystemDiagnostics,
-                // About) move into the cluster store in later tasks and
-                // will be subscribed here then.
+                tracing::debug!(?view, "worker registry: overview is store-only");
+                // Task 8: Overview has no per-view worker. It subscribes
+                // to six cluster-wide endpoints and projects each into
+                // `OverviewState` via the `redraw_*` reducers wired in
+                // the `ClusterChanged` arm.
                 cluster.subscribe(
                     crate::cluster::ClusterEndpoint::RootPgStatus,
                     ViewId::Overview,
@@ -136,15 +147,19 @@ impl WorkerRegistry {
                     crate::cluster::ClusterEndpoint::ControllerServices,
                     ViewId::Overview,
                 );
+                cluster.subscribe(
+                    crate::cluster::ClusterEndpoint::ControllerStatus,
+                    ViewId::Overview,
+                );
+                cluster.subscribe(
+                    crate::cluster::ClusterEndpoint::SystemDiagnostics,
+                    ViewId::Overview,
+                );
+                cluster.subscribe(crate::cluster::ClusterEndpoint::About, ViewId::Overview);
                 // Overview's sparkline + noisy-components panel reads
                 // from the shared bulletins ring.
                 cluster.subscribe(crate::cluster::ClusterEndpoint::Bulletins, ViewId::Overview);
-                Some(crate::view::overview::worker::spawn(
-                    client.clone(),
-                    tx.clone(),
-                    polling.overview.pg_status,
-                    polling.overview.sysdiag,
-                ))
+                None
             }
             ViewId::Bulletins => {
                 tracing::debug!(

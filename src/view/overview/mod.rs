@@ -1,17 +1,22 @@
 //! Overview tab: cluster health dashboard.
 //!
-//! - `state` holds a pure reducer (testable without a terminal).
+//! - `state` holds pure reducers (testable without a terminal).
 //! - `render` draws the snapshot into a ratatui frame.
-//! - `worker` spawns the polling task that feeds the reducer.
+//!
+//! Task 8 retired the per-view worker — Overview is now store-only.
+//! Its projections (`root_pg`, `cs_counts`, `controller`, `nodes`,
+//! `repositories_summary`, bulletin sparkline, noisy components,
+//! unhealthy queues) are mirrored from `AppState.cluster.snapshot`
+//! by the `redraw_*` reducers in [`state`], which the main loop invokes
+//! on every `ClusterChanged` variant Overview cares about.
 
 pub mod render;
 pub mod state;
-pub mod worker;
 
 use ratatui::Frame;
 use ratatui::layout::Rect;
 
-pub use state::{OverviewState, apply_payload};
+pub use state::OverviewState;
 
 pub fn render(frame: &mut Frame, area: Rect, state: &OverviewState) {
     render::render(frame, area, state);
