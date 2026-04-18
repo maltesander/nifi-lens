@@ -102,9 +102,12 @@ the bottom shows relevant keybindings for the current view.
 
 Five top-level tabs, each targeting a specific operational question.
 
-**Overview** — Cluster health at a glance: component counts, bulletin-rate
-sparkline, queue backpressure, repository fill, per-node health strips, and
-noisiest components.
+**Overview** — Cluster health at a glance: a **Components panel** (top)
+showing a three-row table of process groups (count, version-sync drift,
+input/output port counts), processors (per-state counts), and controller
+services (per-state counts); plus a bulletin-rate sparkline, queue
+backpressure, repository fill, per-node health strips, and noisiest
+components.
 
 **Bulletins** — Live cluster-wide bulletin tail. Severity, component-type,
 and free-text filters; deduplication collapses repeating errors into a single

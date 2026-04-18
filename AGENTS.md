@@ -171,6 +171,25 @@ cross-cutting key-handling dispatch is a single touch, not five.
 Default level `info`; `--debug` raises to `debug`. **Never** writes to
 stdout or stderr while the TUI is active.
 
+### Overview Components panel
+
+The top panel of the Overview tab is a 3-row aligned table titled
+`Components`: **Process groups** / **Processors** / **Controller
+services**. Each row carries a total count plus per-type detail
+(per-state counts for processors and CSes; version-sync drift +
+input/output port counts for PGs). The PG row collapses its
+versioning slot to `all in sync` when no PG is stale, locally
+modified, or sync-failed; otherwise it expands to three numeric
+slots. Display-only — no focus, no selection.
+
+**Data sources:** processor / PG / port counts are derived from the
+existing recursive `root_pg_status` walk. Version-sync counts come
+from `controller_status` (already fetched). Controller-service counts
+require one additional fetch per Overview poll —
+`get_controller_services_from_group("root", false, true, false, None)`.
+That fetch is **non-fatal**: failure degrades the CS row to a
+`cs list unavailable` chip while the other rows still render.
+
 ### Bulletins ring buffer
 
 The Bulletins tab holds a rolling in-memory window of recently-seen

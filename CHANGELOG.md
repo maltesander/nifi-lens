@@ -9,6 +9,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **Overview**: top panel renamed from `Processors` to `Components` and
+  expanded into a three-row table (process groups, processors,
+  controller services). PG row shows version-sync drift counts (or
+  `all in sync` when healthy) and input/output port counts. CS row
+  shows per-state counts; degrades to a `cs list unavailable` chip
+  when the new `/flow/process-groups/root/controller-services` fetch
+  fails. Drops the always-near-zero `THREADS` field.
+
 - **Overview**: nodes panel now lists cluster nodes sorted
   alphabetically by `host:port` (case-insensitive) instead of in the
   order returned by `/system-diagnostics`.
