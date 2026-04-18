@@ -1115,6 +1115,35 @@ impl PropertiesModalState {
     }
 }
 
+/// One row of the properties modal table. Computed per frame from
+/// the processor or CS detail's `properties` list.
+#[derive(Debug, Clone)]
+pub struct PropertyRow<'a> {
+    pub key: &'a str,
+    pub value: &'a str,
+    /// `Some(arena_idx)` when the value is a UUID-shaped string that
+    /// resolves to a known arena node (renderable `→`). `None`
+    /// otherwise.
+    pub resolves_to: Option<usize>,
+}
+
+/// Classify each property row against the browser arena. Callers
+/// (renderer + reducer) share this so the `→` marker and the
+/// Descend cross-link agree on resolvability.
+pub fn property_rows<'a>(
+    state: &BrowserState,
+    props: &'a [(String, String)],
+) -> Vec<PropertyRow<'a>> {
+    props
+        .iter()
+        .map(|(k, v)| PropertyRow {
+            key: k.as_str(),
+            value: v.as_str(),
+            resolves_to: state.resolve_id(v).map(|r| r.arena_idx),
+        })
+        .collect()
+}
+
 /// Build a fresh `FlowIndex` from the arena. Walks parent pointers to
 /// produce each node's group path (e.g. `"root/ingest/enrich"`). PGs,
 /// processors, connections, ports, and controller services are all
@@ -2963,5 +2992,35 @@ mod tests {
         let s = PropertiesModalState::new(42);
         assert_eq!(s.arena_idx, 42);
         assert_eq!(s.selected, 0);
+    }
+
+    #[test]
+    fn property_rows_marks_uuid_values_that_resolve() {
+        let mut s = BrowserState::new();
+        // Seed a CS node at arena index 0 so its id can be a resolvable UUID.
+        let cs_uuid = "7f3e1c22-1111-4444-8888-abcdef012345".to_string();
+        s.nodes.push(TreeNode {
+            parent: None,
+            children: vec![],
+            kind: crate::client::NodeKind::ControllerService,
+            id: cs_uuid.clone(),
+            group_id: "root".into(),
+            name: "fixture-json-reader".into(),
+            status_summary: crate::client::NodeStatusSummary::ControllerService {
+                state: "ENABLED".into(),
+            },
+        });
+
+        let props = vec![
+            ("Log Level".to_string(), "info".to_string()),
+            ("Record Reader".to_string(), cs_uuid.clone()),
+            ("Record Reader Alt".to_string(), "not-a-uuid".to_string()),
+        ];
+
+        let rows = property_rows(&s, &props);
+        assert_eq!(rows.len(), 3);
+        assert_eq!(rows[0].resolves_to, None);
+        assert_eq!(rows[1].resolves_to, Some(0));
+        assert_eq!(rows[2].resolves_to, None);
     }
 }
