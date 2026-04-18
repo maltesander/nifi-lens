@@ -870,14 +870,88 @@ mod tests {
                     bytes_queued: 512,
                     queued_display: "40 / 512 B".into(),
                 }],
+                process_group_count: 5,
+                input_port_count: 2,
+                output_port_count: 1,
+                processors: crate::client::ProcessorStateCounts {
+                    running: 42,
+                    stopped: 3,
+                    invalid: 0,
+                    disabled: 1,
+                },
+            },
+            bulletin_board: BulletinBoardSnapshot::default(),
+            cs_counts: Some(crate::client::ControllerServiceCounts {
+                enabled: 12,
+                disabled: 0,
+                invalid: 0,
+            }),
+            fetched_at: UNIX_EPOCH + Duration::from_secs(T0),
+        });
+        apply_payload(&mut state, payload);
+        insta::assert_snapshot!("overview_healthy", render_to_string(&state));
+    }
+
+    #[test]
+    fn snapshot_drift() {
+        use crate::client::{ControllerServiceCounts, ProcessorStateCounts};
+        let mut state = OverviewState::new();
+        let payload = OverviewPayload::PgStatus(OverviewPgStatusPayload {
+            about: AboutSnapshot {
+                version: "2.8.0".into(),
+                title: "NiFi".into(),
+            },
+            controller: ControllerStatusSnapshot {
+                running: 42,
+                stopped: 3,
+                invalid: 0,
+                disabled: 1,
+                stale: 1,
+                locally_modified: 2,
+                sync_failure: 0,
+                up_to_date: 4,
                 ..Default::default()
             },
+            root_pg: RootPgStatusSnapshot {
+                process_group_count: 7,
+                input_port_count: 2,
+                output_port_count: 1,
+                processors: ProcessorStateCounts {
+                    running: 42,
+                    stopped: 3,
+                    invalid: 0,
+                    disabled: 1,
+                },
+                ..Default::default()
+            },
+            bulletin_board: BulletinBoardSnapshot::default(),
+            cs_counts: Some(ControllerServiceCounts {
+                enabled: 12,
+                disabled: 0,
+                invalid: 0,
+            }),
+            fetched_at: UNIX_EPOCH + Duration::from_secs(T0),
+        });
+        apply_payload(&mut state, payload);
+        insta::assert_snapshot!("overview_drift", render_to_string(&state));
+    }
+
+    #[test]
+    fn snapshot_cs_unavailable() {
+        let mut state = OverviewState::new();
+        let payload = OverviewPayload::PgStatus(OverviewPgStatusPayload {
+            about: AboutSnapshot {
+                version: "2.8.0".into(),
+                title: "NiFi".into(),
+            },
+            controller: ControllerStatusSnapshot::default(),
+            root_pg: RootPgStatusSnapshot::default(),
             bulletin_board: BulletinBoardSnapshot::default(),
             cs_counts: None,
             fetched_at: UNIX_EPOCH + Duration::from_secs(T0),
         });
         apply_payload(&mut state, payload);
-        insta::assert_snapshot!("overview_healthy", render_to_string(&state));
+        insta::assert_snapshot!("overview_cs_unavailable", render_to_string(&state));
     }
 
     #[test]
@@ -935,10 +1009,22 @@ mod tests {
                 flow_files_queued: 50_000,
                 bytes_queued: 8_000_000,
                 connections: queues,
-                ..Default::default()
+                process_group_count: 4,
+                input_port_count: 0,
+                output_port_count: 0,
+                processors: crate::client::ProcessorStateCounts {
+                    running: 20,
+                    stopped: 10,
+                    invalid: 2,
+                    disabled: 0,
+                },
             },
             bulletin_board: BulletinBoardSnapshot { bulletins },
-            cs_counts: None,
+            cs_counts: Some(crate::client::ControllerServiceCounts {
+                enabled: 6,
+                disabled: 1,
+                invalid: 1,
+            }),
             fetched_at: UNIX_EPOCH + Duration::from_secs(T0),
         });
         apply_payload(&mut state, payload);
@@ -979,10 +1065,22 @@ mod tests {
                     flow_files_queued: 120,
                     bytes_queued: 4096,
                     connections: vec![],
-                    ..Default::default()
+                    process_group_count: 5,
+                    input_port_count: 2,
+                    output_port_count: 1,
+                    processors: crate::client::ProcessorStateCounts {
+                        running: 42,
+                        stopped: 3,
+                        invalid: 0,
+                        disabled: 1,
+                    },
                 },
                 bulletin_board: BulletinBoardSnapshot::default(),
-                cs_counts: None,
+                cs_counts: Some(crate::client::ControllerServiceCounts {
+                    enabled: 12,
+                    disabled: 0,
+                    invalid: 0,
+                }),
                 fetched_at: UNIX_EPOCH + Duration::from_secs(T0),
             }),
         );

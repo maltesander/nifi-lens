@@ -2,8 +2,10 @@
 source: src/view/overview/render.rs
 expression: render_to_string(&state)
 ---
-"┌ Processors ──────────────────────────────────────────────────────────────────────────────────────┐"
-"│RUNNING 20   STOPPED 10   INVALID 2   DISABLED 0   THREADS 17                                     │"
+"┌ Components ──────────────────────────────────────────────────────────────────────────────────────┐"
+"│  Process groups         4    all in sync   INPUTS     0  OUTPUTS    0                            │"
+"│  Processors            32    RUNNING   20  STOPPED   10  INVALID    2  DISABLED   0              │"
+"│  Controller services    8    ENABLED    6  DISABLED   1  INVALID    1                            │"
 "└──────────────────────────────────────────────────────────────────────────────────────────────────┘"
 "┌ Nodes ───────────────────────────────────────────────────────────────────────────────────────────┐"
 "│  loading system diagnostics…                                                                     │"
@@ -23,7 +25,5 @@ expression: render_to_string(&state)
 "│ 97%  q2                                Generate → Proc2                                  9200    │"
 "│ 96%  q3                                Generate → Proc3                                  9300    │"
 "│ 95%  q4                                Generate → Proc4                                  9400    │"
-"│                                                                                                  │"
-"│                                                                                                  │"
 "│                                                                                                  │"
 "└──────────────────────────────────────────────────────────────────────────────────────────────────┘"

@@ -3,7 +3,7 @@ source: src/view/overview/render.rs
 expression: render_to_string(&state)
 ---
 "┌ Components ──────────────────────────────────────────────────────────────────────────────────────┐"
-"│  Process groups         5    all in sync   INPUTS     2  OUTPUTS    1                            │"
+"│  Process groups         7    STALE      1  MODIFIED   2  SYNC-ERR   0  INPUTS     2  OUTPUTS    1│"
 "│  Processors            46    RUNNING   42  STOPPED    3  INVALID    0  DISABLED   1              │"
 "│  Controller services   12    ENABLED   12  DISABLED   0  INVALID    0                            │"
 "└──────────────────────────────────────────────────────────────────────────────────────────────────┘"
@@ -20,7 +20,7 @@ expression: render_to_string(&state)
 "└────────────────────────────────────────────────┘└────────────────────────────────────────────────┘"
 "┌ Unhealthy queues ────────────────────────────────────────────────────────────────────────────────┐"
 "│fill  queue                             src → dst                                         ffiles  │"
-"│ 12%  ingest → enrich                   Generate → Enrich                                 40      │"
+"│                                        no queues reported yet                                    │"
 "│                                                                                                  │"
 "│                                                                                                  │"
 "│                                                                                                  │"
