@@ -286,12 +286,20 @@ fn build_terminal() -> Result<Terminal<CrosstermBackend<Stdout>>, NifiLensError>
     Terminal::new(backend).map_err(|source| NifiLensError::TerminalInit { source })
 }
 
+/// Spawn the terminal-input polling task.
+///
+/// Runs on a dedicated OS thread, NOT on the tokio runtime: `crossterm::
+/// event::poll` is a blocking syscall that never yields. Parking it on
+/// a tokio worker would delay — and in quiet-terminal scenarios, hang —
+/// runtime shutdown, because the task never reaches an await point for
+/// the runtime to cooperatively cancel. The OS thread is detached; when
+/// `main` returns, the process exits and the kernel reaps it.
 fn spawn_input_task(tx: mpsc::Sender<AppEvent>) {
-    tokio::spawn(async move {
+    std::thread::spawn(move || {
         loop {
             if let Ok(true) = crossterm::event::poll(std::time::Duration::from_millis(100))
                 && let Ok(event) = crossterm::event::read()
-                && tx.send(AppEvent::Input(event)).await.is_err()
+                && tx.blocking_send(AppEvent::Input(event)).is_err()
             {
                 return;
             }
