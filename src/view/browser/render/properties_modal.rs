@@ -93,16 +93,10 @@ fn render_table(
         })
         .collect();
 
-    let table = Table::new(
-        rows,
-        [
-            Constraint::Length(layout::DETAIL_LABEL_COL_WIDTH),
-            Constraint::Min(1),
-        ],
-    )
-    .header(header)
-    .column_spacing(1)
-    .row_highlight_style(theme::cursor_row());
+    let table = Table::new(rows, layout::detail_row_constraints())
+        .header(header)
+        .column_spacing(1)
+        .row_highlight_style(theme::cursor_row());
 
     let mut ts = TableState::default();
     ts.select(Some(selected));
