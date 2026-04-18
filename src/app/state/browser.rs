@@ -2538,4 +2538,104 @@ mod tests {
             other => panic!("expected Goto(OpenInBrowser {{ sink }}), got {other:?}"),
         }
     }
+
+    #[test]
+    fn properties_modal_down_arrow_advances_selection() {
+        use crate::client::ProcessorDetail;
+        use crate::view::browser::state::{NodeDetail, PropertiesModalState};
+        let (mut s, c) = seeded_browser_state();
+        // Seed processor detail with 3 properties.
+        s.browser.details.insert(
+            1,
+            NodeDetail::Processor(ProcessorDetail {
+                id: "gen".into(),
+                name: "Gen".into(),
+                type_name: "x".into(),
+                bundle: String::new(),
+                run_status: "Running".into(),
+                scheduling_strategy: String::new(),
+                scheduling_period: String::new(),
+                concurrent_tasks: 1,
+                run_duration_ms: 0,
+                penalty_duration: String::new(),
+                yield_duration: String::new(),
+                bulletin_level: String::new(),
+                properties: vec![
+                    ("K1".into(), "v1".into()),
+                    ("K2".into(), "v2".into()),
+                    ("K3".into(), "v3".into()),
+                ],
+                validation_errors: vec![],
+            }),
+        );
+        s.modal = Some(Modal::Properties(PropertiesModalState::new(1)));
+
+        update(&mut s, key(KeyCode::Down, KeyModifiers::NONE), &c);
+        let Some(Modal::Properties(ps)) = &s.modal else {
+            panic!()
+        };
+        assert_eq!(ps.selected, 1);
+
+        update(&mut s, key(KeyCode::Down, KeyModifiers::NONE), &c);
+        update(&mut s, key(KeyCode::Down, KeyModifiers::NONE), &c); // past end — must clamp
+        let Some(Modal::Properties(ps)) = &s.modal else {
+            panic!()
+        };
+        assert_eq!(ps.selected, 2);
+
+        update(&mut s, key(KeyCode::Up, KeyModifiers::NONE), &c);
+        let Some(Modal::Properties(ps)) = &s.modal else {
+            panic!()
+        };
+        assert_eq!(ps.selected, 1);
+    }
+
+    #[test]
+    fn properties_modal_page_and_home_end() {
+        use crate::client::ProcessorDetail;
+        use crate::view::browser::state::{NodeDetail, PropertiesModalState};
+        let (mut s, c) = seeded_browser_state();
+        // Seed processor with 20 properties so PageDown actually moves a page.
+        let props: Vec<(String, String)> = (0..20)
+            .map(|i| (format!("K{i}"), format!("v{i}")))
+            .collect();
+        s.browser.details.insert(
+            1,
+            NodeDetail::Processor(ProcessorDetail {
+                id: "gen".into(),
+                name: "Gen".into(),
+                type_name: "x".into(),
+                bundle: String::new(),
+                run_status: "Running".into(),
+                scheduling_strategy: String::new(),
+                scheduling_period: String::new(),
+                concurrent_tasks: 1,
+                run_duration_ms: 0,
+                penalty_duration: String::new(),
+                yield_duration: String::new(),
+                bulletin_level: String::new(),
+                properties: props,
+                validation_errors: vec![],
+            }),
+        );
+        s.modal = Some(Modal::Properties(PropertiesModalState::new(1)));
+
+        update(&mut s, key(KeyCode::End, KeyModifiers::NONE), &c);
+        let Some(Modal::Properties(ps)) = &s.modal else {
+            panic!()
+        };
+        assert_eq!(ps.selected, 19);
+
+        update(&mut s, key(KeyCode::Home, KeyModifiers::NONE), &c);
+        let Some(Modal::Properties(ps)) = &s.modal else {
+            panic!()
+        };
+        assert_eq!(ps.selected, 0);
+
+        update(&mut s, key(KeyCode::PageDown, KeyModifiers::NONE), &c);
+        let Some(Modal::Properties(ps)) = &s.modal else {
+            panic!()
+        };
+        assert_eq!(ps.selected, 10);
+    }
 }

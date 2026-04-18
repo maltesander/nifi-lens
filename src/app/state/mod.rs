@@ -19,7 +19,7 @@ use crate::config::Config;
 use crate::event::{AppEvent, IntentOutcome, ViewPayload};
 use crate::intent::CrossLink;
 use crate::view::browser::state::{
-    BrowserState, FlowIndex, apply_tree_snapshot, build_flow_index, rebuild_visible,
+    BrowserState, FlowIndex, NodeDetail, apply_tree_snapshot, build_flow_index, rebuild_visible,
 };
 use crate::view::bulletins::state::BulletinsState;
 use crate::view::events::state::EventsState;
@@ -1361,10 +1361,68 @@ fn handle_key(state: &mut AppState, key: KeyEvent, config: &Config) -> UpdateRes
                 }
             }
             Modal::Properties(ps) => {
-                let _ = ps; // silence unused warning until Task 3
+                use crate::app::navigation::{CursorRef, ListNavigation};
+
+                // Resolve current property list length for navigation bounds.
+                // The renderer re-resolves the same (name, props) pair each
+                // frame, so this is the authoritative length for clamping.
+                let props_len: usize = match state.browser.details.get(&ps.arena_idx) {
+                    Some(NodeDetail::Processor(p)) => p.properties.len(),
+                    Some(NodeDetail::ControllerService(c)) => c.properties.len(),
+                    _ => 0,
+                };
+
                 match key.code {
-                    KeyCode::Esc | KeyCode::Char('e') => {
+                    KeyCode::Esc | KeyCode::Char('p') => {
                         state.modal = None;
+                        return UpdateResult {
+                            redraw: true,
+                            intent: None,
+                            tracer_followup: None,
+                        };
+                    }
+                    KeyCode::Up => {
+                        CursorRef::new(&mut ps.selected, props_len).move_up();
+                        return UpdateResult {
+                            redraw: true,
+                            intent: None,
+                            tracer_followup: None,
+                        };
+                    }
+                    KeyCode::Down => {
+                        CursorRef::new(&mut ps.selected, props_len).move_down();
+                        return UpdateResult {
+                            redraw: true,
+                            intent: None,
+                            tracer_followup: None,
+                        };
+                    }
+                    KeyCode::PageUp => {
+                        CursorRef::new(&mut ps.selected, props_len).page_up(10);
+                        return UpdateResult {
+                            redraw: true,
+                            intent: None,
+                            tracer_followup: None,
+                        };
+                    }
+                    KeyCode::PageDown => {
+                        CursorRef::new(&mut ps.selected, props_len).page_down(10);
+                        return UpdateResult {
+                            redraw: true,
+                            intent: None,
+                            tracer_followup: None,
+                        };
+                    }
+                    KeyCode::Home => {
+                        CursorRef::new(&mut ps.selected, props_len).goto_first();
+                        return UpdateResult {
+                            redraw: true,
+                            intent: None,
+                            tracer_followup: None,
+                        };
+                    }
+                    KeyCode::End => {
+                        CursorRef::new(&mut ps.selected, props_len).goto_last();
                         return UpdateResult {
                             redraw: true,
                             intent: None,
@@ -2536,29 +2594,6 @@ mod tests {
             _ => panic!("expected ContextSwitcher"),
         };
         assert!(after_up < before, "Up still works");
-    }
-
-    // NOTE: This test covered the old scroll_up/scroll_down/page_up/page_down
-    // methods on PropertiesModalState. Those methods were removed in the
-    // `selected`-index refactor. The full arrow-key navigation is re-tested
-    // in Task 3 once the reducer arm is rewritten with CursorRef. The stub
-    // only responds to Esc; all other keys are no-ops.
-    #[test]
-    fn properties_modal_esc_closes_modal_stub() {
-        use crate::app::state::Modal;
-        use crate::view::browser::state::PropertiesModalState;
-
-        let mut s = fresh_state();
-        let c = tiny_config();
-        s.modal = Some(Modal::Properties(PropertiesModalState::new(1)));
-
-        // Down is a no-op in the stub.
-        update(&mut s, key(KeyCode::Down, KeyModifiers::NONE), &c);
-        assert!(s.modal.is_some(), "Down should not close the modal");
-
-        // Esc closes it.
-        update(&mut s, key(KeyCode::Esc, KeyModifiers::NONE), &c);
-        assert!(s.modal.is_none(), "Esc must close Properties modal");
     }
 
     #[test]
