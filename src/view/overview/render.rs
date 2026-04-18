@@ -109,10 +109,12 @@ fn nodes_zone_height(state: &OverviewState) -> u16 {
 /// services. Display-only; not focusable. Aligned columns: 2-pad +
 /// 20-label + 4-count + 4-gap + repeating 12-slot (8 label + 4 value).
 ///
-/// The root-PG projection is sourced from `state.root_pg` — mirrored
-/// from the cluster snapshot by `redraw_components`. The renderer
-/// shows "loading…" until both the Overview-worker PG-status payload
-/// and the cluster `root_pg_status` fetch have landed.
+/// The root-PG and CS-counts projections are sourced from
+/// `state.root_pg` / `state.cs_counts` — both mirrored from the
+/// cluster snapshot by `redraw_components`. The renderer shows
+/// "loading…" until both the Overview-worker PG-status payload and
+/// the cluster `root_pg_status` fetch have landed. The CS row
+/// degrades to "cs list unavailable" when `state.cs_counts` is `None`.
 fn render_components_table(frame: &mut Frame, area: Rect, state: &OverviewState) {
     let (Some(snap), Some(root_pg)) = (state.snapshot.as_ref(), state.root_pg.as_ref()) else {
         let line = Line::from(Span::styled("loading…", theme::muted()));
@@ -122,7 +124,7 @@ fn render_components_table(frame: &mut Frame, area: Rect, state: &OverviewState)
     let lines = vec![
         pg_row(snap, root_pg),
         processors_row(&root_pg.processors),
-        controller_services_row(snap.cs_counts.as_ref()),
+        controller_services_row(state.cs_counts.as_ref()),
     ];
     frame.render_widget(Paragraph::new(lines), area);
 }
@@ -863,17 +865,12 @@ mod tests {
                 up_to_date: 0,
             },
             bulletin_board: BulletinBoardSnapshot::default(),
-            cs_counts: Some(crate::client::ControllerServiceCounts {
-                enabled: 12,
-                disabled: 0,
-                invalid: 0,
-            }),
             fetched_at: UNIX_EPOCH + Duration::from_secs(T0),
         });
         apply_payload(&mut state, payload);
-        // Render reads `state.root_pg` directly — seed the projection
-        // that `redraw_components` would normally populate from the
-        // cluster snapshot.
+        // Render reads `state.root_pg` and `state.cs_counts` directly
+        // — seed the projections that `redraw_components` would
+        // normally populate from the cluster snapshot.
         seed_root_pg(
             &mut state,
             RootPgStatusSnapshot {
@@ -901,6 +898,11 @@ mod tests {
                 },
             },
         );
+        state.cs_counts = Some(crate::client::ControllerServiceCounts {
+            enabled: 12,
+            disabled: 0,
+            invalid: 0,
+        });
         insta::assert_snapshot!("overview_healthy", render_to_string(&state));
     }
 
@@ -925,11 +927,6 @@ mod tests {
                 ..Default::default()
             },
             bulletin_board: BulletinBoardSnapshot::default(),
-            cs_counts: Some(ControllerServiceCounts {
-                enabled: 12,
-                disabled: 0,
-                invalid: 0,
-            }),
             fetched_at: UNIX_EPOCH + Duration::from_secs(T0),
         });
         apply_payload(&mut state, payload);
@@ -948,6 +945,11 @@ mod tests {
                 ..Default::default()
             },
         );
+        state.cs_counts = Some(ControllerServiceCounts {
+            enabled: 12,
+            disabled: 0,
+            invalid: 0,
+        });
         insta::assert_snapshot!("overview_drift", render_to_string(&state));
     }
 
@@ -961,11 +963,12 @@ mod tests {
             },
             controller: ControllerStatusSnapshot::default(),
             bulletin_board: BulletinBoardSnapshot::default(),
-            cs_counts: None,
             fetched_at: UNIX_EPOCH + Duration::from_secs(T0),
         });
         apply_payload(&mut state, payload);
         seed_root_pg(&mut state, RootPgStatusSnapshot::default());
+        // `state.cs_counts` is left as the default `None` to exercise
+        // the "cs list unavailable" degradation path.
         insta::assert_snapshot!("overview_cs_unavailable", render_to_string(&state));
     }
 
@@ -1021,11 +1024,6 @@ mod tests {
                 up_to_date: 0,
             },
             bulletin_board: BulletinBoardSnapshot { bulletins },
-            cs_counts: Some(crate::client::ControllerServiceCounts {
-                enabled: 6,
-                disabled: 1,
-                invalid: 1,
-            }),
             fetched_at: UNIX_EPOCH + Duration::from_secs(T0),
         });
         apply_payload(&mut state, payload);
@@ -1046,6 +1044,11 @@ mod tests {
                 },
             },
         );
+        state.cs_counts = Some(crate::client::ControllerServiceCounts {
+            enabled: 6,
+            disabled: 1,
+            invalid: 1,
+        });
         insta::assert_snapshot!("overview_unhealthy", render_to_string(&state));
     }
 
@@ -1080,11 +1083,6 @@ mod tests {
                     up_to_date: 0,
                 },
                 bulletin_board: BulletinBoardSnapshot::default(),
-                cs_counts: Some(crate::client::ControllerServiceCounts {
-                    enabled: 12,
-                    disabled: 0,
-                    invalid: 0,
-                }),
                 fetched_at: UNIX_EPOCH + Duration::from_secs(T0),
             }),
         );
@@ -1173,6 +1171,11 @@ mod tests {
                 },
             },
         );
+        state.cs_counts = Some(crate::client::ControllerServiceCounts {
+            enabled: 12,
+            disabled: 0,
+            invalid: 0,
+        });
 
         insta::assert_snapshot!("overview_with_nodes", render_to_string(&state));
     }
@@ -1366,7 +1369,6 @@ mod tests {
                     up_to_date: 0,
                 },
                 bulletin_board: BulletinBoardSnapshot::default(),
-                cs_counts: None,
                 fetched_at: UNIX_EPOCH + Duration::from_secs(T0),
             }),
         );
@@ -1482,7 +1484,6 @@ mod tests {
                     up_to_date: 0,
                 },
                 bulletin_board: BulletinBoardSnapshot::default(),
-                cs_counts: None,
                 fetched_at: UNIX_EPOCH + Duration::from_secs(T0),
             }),
         );

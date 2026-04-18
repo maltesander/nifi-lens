@@ -16,7 +16,7 @@ use crate::client::{
 use crate::cluster::ClusterEndpoint;
 use crate::cluster::config::ClusterPollingConfig;
 use crate::cluster::fetcher_tasks::{
-    FetchTaskConfig, spawn_controller_status, spawn_root_pg_status,
+    FetchTaskConfig, spawn_controller_services, spawn_controller_status, spawn_root_pg_status,
 };
 use crate::cluster::snapshot::{ClusterSnapshot, FetchMeta};
 use crate::cluster::subscriber::SubscriberRegistry;
@@ -139,6 +139,18 @@ impl ClusterStore {
         };
         self.handles
             .push(spawn_root_pg_status(client.clone(), tx.clone(), pg_cfg));
+
+        let cs_cfg = FetchTaskConfig {
+            base_interval: self.config.controller_services,
+            max_interval: self.config.max_interval,
+            jitter_percent: self.config.jitter_percent,
+            force: self.notifies.get(ClusterEndpoint::ControllerServices),
+        };
+        self.handles.push(spawn_controller_services(
+            client.clone(),
+            tx.clone(),
+            cs_cfg,
+        ));
     }
 
     pub fn subscribe(&mut self, endpoint: ClusterEndpoint, view: ViewId) {
@@ -271,6 +283,27 @@ mod tests {
         assert_eq!(ep, ClusterEndpoint::ControllerStatus);
         match &store.snapshot.controller_status {
             EndpointState::Ready { data, .. } => assert_eq!(data.running, 1),
+            other => panic!("expected Ready, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn controller_services_update_is_applied() {
+        let mut store = ClusterStore::new(ClusterPollingConfig::default());
+        let fake_cs = ControllerServiceCounts {
+            enabled: 4,
+            disabled: 1,
+            invalid: 2,
+        };
+        let ep = store.apply_update(ClusterUpdate::ControllerServices(Ok(fake_cs), meta()));
+        assert_eq!(ep, ClusterEndpoint::ControllerServices);
+        match &store.snapshot.controller_services {
+            EndpointState::Ready { data, .. } => {
+                assert_eq!(data.enabled, 4);
+                assert_eq!(data.disabled, 1);
+                assert_eq!(data.invalid, 2);
+                assert_eq!(data.total(), 7);
+            }
             other => panic!("expected Ready, got {:?}", other),
         }
     }

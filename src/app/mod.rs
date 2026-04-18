@@ -90,7 +90,8 @@ pub async fn run(
             AppEvent::ClusterChanged(endpoint) => {
                 let mut affects_overview = false;
                 match endpoint {
-                    crate::cluster::ClusterEndpoint::RootPgStatus => {
+                    crate::cluster::ClusterEndpoint::RootPgStatus
+                    | crate::cluster::ClusterEndpoint::ControllerServices => {
                         crate::view::overview::state::redraw_components(&mut state);
                         // Task 6 wires the Browser arena recompute here.
                         affects_overview = true;

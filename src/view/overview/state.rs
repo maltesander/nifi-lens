@@ -81,14 +81,13 @@ pub enum OverviewFocus {
 }
 
 /// Snapshot of the Overview tab at one point in time. `None` until the
-/// first Overview-worker PG-status poll completes. The `root_pg`
-/// projection now lives on `OverviewState::root_pg`, populated by
-/// `redraw_components` from `AppState.cluster.snapshot.root_pg_status`.
+/// first Overview-worker PG-status poll completes. The `root_pg` and
+/// `cs_counts` projections now live on `OverviewState`, populated by
+/// `redraw_components` from `AppState.cluster.snapshot`.
 #[derive(Debug, Clone, Default)]
 pub struct OverviewSnapshot {
     pub about: AboutSnapshot,
     pub controller: ControllerStatusSnapshot,
-    pub cs_counts: Option<crate::client::ControllerServiceCounts>,
     pub fetched_at: Option<SystemTime>,
 }
 
@@ -100,6 +99,12 @@ pub struct OverviewState {
     /// has landed in `AppState.cluster.snapshot`. The renderer reads
     /// this directly; the Overview worker no longer fetches it.
     pub root_pg: Option<RootPgStatusSnapshot>,
+    /// Latest controller-service counts, mirrored from the cluster
+    /// snapshot by `redraw_components`. `None` when the CS fetch has
+    /// never succeeded — the CS row in the Components panel degrades
+    /// to a "cs list unavailable" chip in that case. The renderer
+    /// reads this directly; the Overview worker no longer fetches it.
+    pub cs_counts: Option<crate::client::ControllerServiceCounts>,
     pub sparkline: [BulletinBucket; SPARKLINE_MINUTES],
     /// Unix seconds at the start of `sparkline[SPARKLINE_MINUTES-1]` (the
     /// newest bucket). `None` until the first PG-status poll lands. Aligned
@@ -197,7 +202,6 @@ fn apply_pg_status(state: &mut OverviewState, payload: OverviewPgStatusPayload) 
         about,
         controller,
         bulletin_board,
-        cs_counts,
         fetched_at,
     } = payload;
 
@@ -332,7 +336,6 @@ fn apply_pg_status(state: &mut OverviewState, payload: OverviewPgStatusPayload) 
     state.snapshot = Some(OverviewSnapshot {
         about,
         controller,
-        cs_counts,
         fetched_at: Some(fetched_at),
     });
 }
@@ -352,16 +355,30 @@ pub(crate) fn derive_unhealthy(
         .collect()
 }
 
-/// Re-derive Overview projections that depend on `root_pg_status`:
-/// mirrors the latest snapshot into `state.overview.root_pg` and
-/// rebuilds the Unhealthy-queues leaderboard. Called from the
-/// `AppEvent::ClusterChanged(RootPgStatus)` arm in the main loop and
-/// from `apply_payload` so the projection stays consistent regardless
-/// of which poll lands first.
+/// Re-derive Overview projections that depend on the cluster snapshot:
+/// mirrors `root_pg_status` into `state.overview.root_pg`, rebuilds
+/// the Unhealthy-queues leaderboard, and mirrors `controller_services`
+/// into `state.overview.cs_counts`. Called from the
+/// `AppEvent::ClusterChanged` arm in the main loop (for `RootPgStatus`
+/// and `ControllerServices`) and from `apply_payload` so the
+/// projection stays consistent regardless of which poll lands first.
 ///
 /// Idempotent: invoking it twice with the same snapshot produces the
-/// same `state.overview.root_pg` / `state.overview.unhealthy`.
+/// same `state.overview.root_pg` / `state.overview.unhealthy` /
+/// `state.overview.cs_counts`.
+///
+/// `state.overview.cs_counts` is `Some(..)` when the cluster snapshot
+/// has observed at least one successful CS fetch (including stale
+/// `last_ok` after a subsequent failure). It is `None` while the
+/// endpoint is still `Loading` or has only ever failed — the renderer
+/// treats that as "cs list unavailable". "Zero CSes" is distinct from
+/// "unavailable": a successful fetch with all zero counts still
+/// yields `Some(ControllerServiceCounts { .. })`.
 pub(crate) fn redraw_components(state: &mut crate::app::state::AppState) {
+    // Mirror controller-service counts regardless of whether
+    // `root_pg_status` has landed — the two endpoints are independent.
+    state.overview.cs_counts = state.cluster.snapshot.controller_services.latest().cloned();
+
     let Some(root_pg) = state.cluster.snapshot.root_pg_status.latest() else {
         // Pre-first-fetch: leave `root_pg` as `None` and `unhealthy`
         // untouched. The Components panel renders its "loading…"
@@ -468,7 +485,6 @@ mod tests {
             },
             controller,
             bulletin_board: BulletinBoardSnapshot { bulletins },
-            cs_counts: None,
             fetched_at: UNIX_EPOCH + Duration::from_secs(T0),
         })
     }
@@ -481,6 +497,26 @@ mod tests {
         use std::time::Instant;
         state.cluster.snapshot.root_pg_status = EndpointState::Ready {
             data: root_pg,
+            meta: FetchMeta {
+                fetched_at: Instant::now(),
+                fetch_duration: Duration::from_millis(5),
+                next_interval: Duration::from_secs(10),
+            },
+        };
+    }
+
+    /// Push a `ControllerServiceCounts` into `state.cluster.snapshot` so
+    /// `redraw_components` can mirror it into `state.overview.cs_counts`.
+    /// Replaces the pre-Task-4 path where `cs_counts` rode along on
+    /// `OverviewPgStatusPayload`.
+    fn seed_cs_counts(
+        state: &mut crate::app::state::AppState,
+        counts: crate::client::ControllerServiceCounts,
+    ) {
+        use crate::cluster::snapshot::{EndpointState, FetchMeta};
+        use std::time::Instant;
+        state.cluster.snapshot.controller_services = EndpointState::Ready {
+            data: counts,
             meta: FetchMeta {
                 fetched_at: Instant::now(),
                 fetch_duration: Duration::from_millis(5),
@@ -528,7 +564,6 @@ mod tests {
             },
             controller: ControllerStatusSnapshot::default(),
             bulletin_board: BulletinBoardSnapshot { bulletins },
-            cs_counts: None,
             fetched_at: UNIX_EPOCH + Duration::from_secs(fetched_secs),
         })
     }
@@ -546,23 +581,46 @@ mod tests {
     }
 
     #[test]
-    fn apply_populates_cs_counts() {
+    fn redraw_components_mirrors_cs_counts_into_overview_state() {
         use crate::client::ControllerServiceCounts;
-        let mut state = OverviewState::new();
-        let mut p = match payload(ControllerStatusSnapshot::default(), vec![], vec![]) {
-            OverviewPayload::PgStatus(p) => p,
-            _ => unreachable!(),
-        };
-        p.cs_counts = Some(ControllerServiceCounts {
-            enabled: 5,
-            disabled: 1,
-            invalid: 0,
-        });
-        apply_payload(&mut state, OverviewPayload::PgStatus(p));
-        let snap = state.snapshot.as_ref().unwrap();
-        let cs = snap.cs_counts.as_ref().unwrap();
+        let mut state = crate::test_support::fresh_state();
+        seed_cs_counts(
+            &mut state,
+            ControllerServiceCounts {
+                enabled: 5,
+                disabled: 1,
+                invalid: 0,
+            },
+        );
+        redraw_components(&mut state);
+        let cs = state
+            .overview
+            .cs_counts
+            .as_ref()
+            .expect("cs_counts must be mirrored after redraw");
         assert_eq!(cs.enabled, 5);
         assert_eq!(cs.disabled, 1);
+    }
+
+    #[test]
+    fn redraw_components_leaves_cs_counts_none_when_cluster_loading() {
+        // Pre-first-fetch: `cluster.snapshot.controller_services` is in
+        // `Loading`. `redraw_components` must mirror that to
+        // `state.overview.cs_counts = None` so the renderer shows
+        // "cs list unavailable".
+        let mut state = crate::test_support::fresh_state();
+        // Seed a stale Some(..) first to prove the reducer clears it
+        // when the cluster has no successful fetch yet.
+        state.overview.cs_counts = Some(crate::client::ControllerServiceCounts {
+            enabled: 99,
+            disabled: 0,
+            invalid: 0,
+        });
+        redraw_components(&mut state);
+        assert!(
+            state.overview.cs_counts.is_none(),
+            "cs_counts must be cleared when cluster snapshot is Loading"
+        );
     }
 
     #[test]

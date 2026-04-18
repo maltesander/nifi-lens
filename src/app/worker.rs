@@ -116,6 +116,10 @@ impl WorkerRegistry {
                         crate::cluster::ClusterEndpoint::RootPgStatus,
                         ViewId::Overview,
                     );
+                    cluster.unsubscribe(
+                        crate::cluster::ClusterEndpoint::ControllerServices,
+                        ViewId::Overview,
+                    );
                 }
                 ViewId::Browser => {
                     browser.detail_tx = None;
@@ -128,11 +132,15 @@ impl WorkerRegistry {
             ViewId::Overview => {
                 tracing::debug!(?view, "worker registry: spawning overview worker");
                 // Subscribe for cluster-wide endpoints Overview consumes.
-                // Additional endpoints (ControllerStatus, ControllerServices,
-                // SystemDiagnostics, About) move into the cluster store in
-                // later tasks and will be subscribed here then.
+                // Additional endpoints (ControllerStatus, SystemDiagnostics,
+                // About) move into the cluster store in later tasks and
+                // will be subscribed here then.
                 cluster.subscribe(
                     crate::cluster::ClusterEndpoint::RootPgStatus,
+                    ViewId::Overview,
+                );
+                cluster.subscribe(
+                    crate::cluster::ClusterEndpoint::ControllerServices,
                     ViewId::Overview,
                 );
                 Some(crate::view::overview::worker::spawn(

@@ -54,18 +54,15 @@ pub enum OverviewPayload {
     },
 }
 
-/// Inner payload for the PG-status poll. `root_pg_status` is sourced
-/// from `state.cluster.snapshot.root_pg_status` — the Overview worker
-/// no longer fetches it; `ClusterStore` owns that endpoint.
+/// Inner payload for the PG-status poll. `root_pg_status` and
+/// `controller_services` are sourced from `state.cluster.snapshot` —
+/// the Overview worker no longer fetches them; `ClusterStore` owns
+/// those endpoints.
 #[derive(Debug, Clone)]
 pub struct OverviewPgStatusPayload {
     pub about: crate::client::AboutSnapshot,
     pub controller: crate::client::ControllerStatusSnapshot,
     pub bulletin_board: crate::client::BulletinBoardSnapshot,
-    /// Per-state controller-service counts. `None` when the CS fetch
-    /// failed — the CS row in the Components panel degrades to a
-    /// "cs list unavailable" chip in that case.
-    pub cs_counts: Option<crate::client::ControllerServiceCounts>,
     /// Wall-clock time (from `std::time::SystemTime`) when the worker
     /// assembled this payload. Used by the reducer to anchor the sparkline
     /// and the "last refresh" label.

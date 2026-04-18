@@ -408,7 +408,6 @@ mod tests {
                 up_to_date: 0,
             },
             bulletin_board: BulletinBoardSnapshot::default(),
-            cs_counts: None,
             fetched_at: SystemTime::now(),
         });
         let r = update(&mut s, AppEvent::Data(ViewPayload::Overview(payload)), &c);
