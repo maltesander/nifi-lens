@@ -343,7 +343,7 @@ pub struct AboutSnapshot {
 }
 
 /// Global component counts pulled from `flow().get_controller_status()`.
-/// Used by the Overview tab's "component counts" strip.
+/// Used by the Overview tab's "Components" panel.
 #[derive(Debug, Clone, Default)]
 pub struct ControllerStatusSnapshot {
     pub running: u32,
@@ -353,6 +353,15 @@ pub struct ControllerStatusSnapshot {
     pub active_threads: u32,
     pub flow_files_queued: u32,
     pub bytes_queued: u64,
+    /// Versioned PGs whose registry version has been superseded.
+    pub stale: u32,
+    /// Versioned PGs with uncommitted local edits.
+    pub locally_modified: u32,
+    /// Versioned PGs that failed to reach the registry on the last check.
+    pub sync_failure: u32,
+    /// Versioned PGs that match the registry version (kept for completeness; the panel
+    /// derives this as a residual from `total - (stale + locally_modified + sync_failure)`).
+    pub up_to_date: u32,
 }
 
 impl ControllerStatusSnapshot {
@@ -368,6 +377,10 @@ impl ControllerStatusSnapshot {
             active_threads: dto.active_thread_count.unwrap_or(0).max(0) as u32,
             flow_files_queued: dto.flow_files_queued.unwrap_or(0).max(0) as u32,
             bytes_queued: dto.bytes_queued.unwrap_or(0).max(0) as u64,
+            stale: dto.stale_count.unwrap_or(0).max(0) as u32,
+            locally_modified: dto.locally_modified_count.unwrap_or(0).max(0) as u32,
+            sync_failure: dto.sync_failure_count.unwrap_or(0).max(0) as u32,
+            up_to_date: dto.up_to_date_count.unwrap_or(0).max(0) as u32,
         }
     }
 }
@@ -491,5 +504,20 @@ mod controller_status_snapshot_tests {
         assert_eq!(snap.active_threads, 3);
         assert_eq!(snap.flow_files_queued, 100);
         assert_eq!(snap.bytes_queued, 2048);
+    }
+
+    #[test]
+    fn from_dto_populates_version_sync_counts() {
+        let mut dto = nifi_rust_client::dynamic::types::ControllerStatusDto::default();
+        dto.stale_count = Some(1);
+        dto.locally_modified_count = Some(2);
+        dto.sync_failure_count = Some(0);
+        dto.up_to_date_count = Some(4);
+
+        let snap = ControllerStatusSnapshot::from_dto(&dto);
+        assert_eq!(snap.stale, 1);
+        assert_eq!(snap.locally_modified, 2);
+        assert_eq!(snap.sync_failure, 0);
+        assert_eq!(snap.up_to_date, 4);
     }
 }
