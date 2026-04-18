@@ -137,10 +137,12 @@ fn push_section_lines(lines: &mut Vec<Line<'static>>, sections: &[HelpSection]) 
 
 /// Render the help modal into `area` for the given active view.
 ///
-/// Modal is centered, `80` cols × `26` rows, two columns split
-/// 50/50. Left is general, right is tab-specific.
+/// Modal is centered, `80` cols × `27` rows, two columns split
+/// 50/50. Left is general, right is tab-specific. The extra row
+/// beyond the raw section count accommodates the `focus next / prev
+/// pane` label wrapping at the 40-col column width.
 pub fn render(frame: &mut Frame, area: Rect, active_view: ViewId) {
-    let modal = center(area, 80, 26);
+    let modal = center(area, 80, 27);
     frame.render_widget(Clear, modal);
 
     let block = Block::default()
