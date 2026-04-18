@@ -308,6 +308,9 @@ Jumpable surfaces:
 - Processor / Controller Service detail: `Properties` rows whose value
   is a UUID pointing to a known arena node (typically CS references).
 - Processor detail: the `Connections` section (→ opposite endpoint).
+- Process Group detail: the `Controller services` section (→ owned
+  CS). The CS is always a child of the current PG in the arena, so
+  the intent uses the PG's id as `group_id`.
 - Controller Service & Port Identity panels resolve `parent` /
   `parent group` UUIDs to the owning PG's name (display only — parent
   is always reachable via Left/Ascend).

@@ -277,6 +277,30 @@ impl ViewKeyHandler for BrowserHandler {
                             tracer_followup: None,
                         });
                     }
+                    // On the ControllerServices section of a PG, emit a
+                    // Goto intent so the Browser jumps to the selected CS.
+                    // CSes in a PG detail are always children of that PG in
+                    // the arena, so we use the PG's id as the group_id.
+                    if sections.0.get(idx) == Some(&DetailSection::ControllerServices) {
+                        let Some(NodeDetail::ProcessGroup(d)) =
+                            state.browser.details.get(&arena_idx)
+                        else {
+                            return Some(UpdateResult::default());
+                        };
+                        let Some(cs) = d.controller_services.get(rows[idx]) else {
+                            return Some(UpdateResult::default());
+                        };
+                        let intent =
+                            super::PendingIntent::Goto(crate::intent::CrossLink::OpenInBrowser {
+                                component_id: cs.id.clone(),
+                                group_id: d.id.clone(),
+                            });
+                        return Some(UpdateResult {
+                            redraw: true,
+                            intent: Some(intent),
+                            tracer_followup: None,
+                        });
+                    }
                     // On the ChildGroups section, drill into the selected child PG.
                     if sections.0.get(idx) == Some(&DetailSection::ChildGroups) {
                         let pg_id = match state.browser.details.get(&arena_idx) {
@@ -2225,6 +2249,114 @@ mod tests {
             other => {
                 panic!("Descend on ref-components row must emit Goto(OpenInBrowser), got {other:?}")
             }
+        }
+    }
+
+    #[test]
+    fn descend_on_pg_controller_service_emits_goto() {
+        use crate::app::state::PendingIntent;
+        use crate::client::{ControllerServiceSummary, ProcessGroupDetail};
+        use crate::intent::CrossLink;
+        use crate::view::browser::state::{
+            DetailFocus, DetailSection, DetailSections, MAX_DETAIL_SECTIONS, NodeDetail,
+        };
+
+        let mut s = crate::test_support::fresh_state();
+        // Minimal arena: root PG at 0, selected PG "ingest" at 1, owned CS at 2.
+        s.browser.nodes.clear();
+        s.browser.nodes.push(crate::view::browser::state::TreeNode {
+            parent: None,
+            children: vec![1],
+            kind: NodeKind::ProcessGroup,
+            id: "root".into(),
+            group_id: "root".into(),
+            name: "root".into(),
+            status_summary: NodeStatusSummary::ProcessGroup {
+                running: 0,
+                stopped: 0,
+                invalid: 0,
+                disabled: 0,
+            },
+        });
+        s.browser.nodes.push(crate::view::browser::state::TreeNode {
+            parent: Some(0),
+            children: vec![2],
+            kind: NodeKind::ProcessGroup,
+            id: "ingest".into(),
+            group_id: "root".into(),
+            name: "ingest".into(),
+            status_summary: NodeStatusSummary::ProcessGroup {
+                running: 0,
+                stopped: 0,
+                invalid: 0,
+                disabled: 0,
+            },
+        });
+        s.browser.nodes.push(crate::view::browser::state::TreeNode {
+            parent: Some(1),
+            children: vec![],
+            kind: NodeKind::ControllerService,
+            id: "cs1".into(),
+            group_id: "ingest".into(),
+            name: "pool".into(),
+            status_summary: NodeStatusSummary::ControllerService {
+                state: "ENABLED".into(),
+            },
+        });
+        s.browser.expanded.insert(0);
+        s.browser.expanded.insert(1);
+        crate::view::browser::state::rebuild_visible(&mut s.browser);
+        s.browser.selected = s.browser.visible.iter().position(|&i| i == 1).unwrap();
+
+        let pg = ProcessGroupDetail {
+            id: "ingest".into(),
+            name: "ingest".into(),
+            parent_group_id: Some("root".into()),
+            running: 0,
+            stopped: 0,
+            invalid: 0,
+            disabled: 0,
+            active_threads: 0,
+            flow_files_queued: 0,
+            bytes_queued: 0,
+            queued_display: "0".into(),
+            controller_services: vec![ControllerServiceSummary {
+                id: "cs1".into(),
+                name: "pool".into(),
+                type_short: "T".into(),
+                state: "ENABLED".into(),
+            }],
+        };
+        s.browser.details.insert(1, NodeDetail::ProcessGroup(pg));
+
+        let sections = DetailSections::for_node(NodeKind::ProcessGroup);
+        let cs_idx = sections
+            .0
+            .iter()
+            .position(|sec| *sec == DetailSection::ControllerServices)
+            .expect("PG sections must include ControllerServices");
+        let mut rows = [0usize; MAX_DETAIL_SECTIONS];
+        rows[cs_idx] = 0;
+        s.browser.detail_focus = DetailFocus::Section {
+            idx: cs_idx,
+            rows,
+            x_offsets: [0; MAX_DETAIL_SECTIONS],
+        };
+
+        let r = BrowserHandler::handle_focus(&mut s, crate::input::FocusAction::Descend)
+            .expect("descend must produce a result");
+
+        match r.intent {
+            Some(PendingIntent::Goto(CrossLink::OpenInBrowser {
+                component_id,
+                group_id,
+            })) => {
+                assert_eq!(component_id, "cs1");
+                assert_eq!(group_id, "ingest");
+            }
+            other => panic!(
+                "Descend on PG controller-services row must emit Goto(OpenInBrowser), got {other:?}"
+            ),
         }
     }
 

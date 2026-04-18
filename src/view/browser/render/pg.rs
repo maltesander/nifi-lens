@@ -49,7 +49,7 @@ pub fn render(
         .split(inner);
 
     render_identity_panel(frame, rows[0], d);
-    render_controller_services_panel(frame, rows[1], d, detail_focus);
+    render_controller_services_panel(frame, rows[1], d, state, detail_focus);
     render_child_groups_panel(frame, rows[2], d, state, detail_focus);
     render_recent_bulletins_panel(frame, rows[3], d, bulletins, detail_focus);
 }
@@ -99,6 +99,7 @@ fn render_controller_services_panel(
     frame: &mut Frame,
     area: Rect,
     d: &ProcessGroupDetail,
+    state: &BrowserState,
     detail_focus: &DetailFocus,
 ) {
     let sections = DetailSections::for_node(NodeKind::ProcessGroup);
@@ -141,9 +142,14 @@ fn render_controller_services_panel(
         .controller_services
         .iter()
         .map(|cs: &ControllerServiceSummary| {
+            let name = if state.resolve_id(&cs.id).is_some() {
+                format!("{}  →", cs.name)
+            } else {
+                cs.name.clone()
+            };
             Row::new(vec![
                 Cell::from(cs.state.clone()).style(cs_state_style(&cs.state)),
-                Cell::from(cs.name.clone()),
+                Cell::from(name),
                 Cell::from(char_skip(&cs.type_short, x_offset)),
             ])
         })
@@ -447,6 +453,85 @@ mod snapshots {
         assert_snapshot!(
             "pg_detail_child_groups_focused",
             format!("{}", terminal.backend())
+        );
+    }
+
+    #[test]
+    fn pg_detail_controller_services_show_arrow_when_resolvable() {
+        use crate::client::NodeStatusSummary;
+        use crate::view::browser::state::TreeNode;
+
+        // Seed a PG whose CSes carry UUID-shaped ids (real NiFi shape),
+        // then seed arena nodes at those same ids so `resolve_id` succeeds.
+        let cs1_uuid = "11111111-2222-3333-4444-555555555555";
+        let cs2_uuid = "66666666-7777-8888-9999-aaaaaaaaaaaa";
+        let d = ProcessGroupDetail {
+            id: "ingest".into(),
+            name: "ingest".into(),
+            parent_group_id: Some("root".into()),
+            running: 3,
+            stopped: 1,
+            invalid: 0,
+            disabled: 0,
+            active_threads: 1,
+            flow_files_queued: 4,
+            bytes_queued: 2048,
+            queued_display: "4 / 2 KB".into(),
+            controller_services: vec![
+                ControllerServiceSummary {
+                    id: cs1_uuid.into(),
+                    name: "http-pool".into(),
+                    type_short: "StandardRestrictedSSLContextService".into(),
+                    state: "ENABLED".into(),
+                },
+                ControllerServiceSummary {
+                    id: cs2_uuid.into(),
+                    name: "kafka-brokers".into(),
+                    type_short: "Kafka3ConnectionService".into(),
+                    state: "DISABLED".into(),
+                },
+            ],
+        };
+        let mut state = BrowserState::new();
+        state.nodes.push(TreeNode {
+            parent: None,
+            children: vec![],
+            kind: NodeKind::ControllerService,
+            id: cs1_uuid.into(),
+            group_id: "ingest".into(),
+            name: "http-pool".into(),
+            status_summary: NodeStatusSummary::ControllerService {
+                state: "ENABLED".into(),
+            },
+        });
+        state.nodes.push(TreeNode {
+            parent: None,
+            children: vec![],
+            kind: NodeKind::ControllerService,
+            id: cs2_uuid.into(),
+            group_id: "ingest".into(),
+            name: "kafka-brokers".into(),
+            status_summary: NodeStatusSummary::ControllerService {
+                state: "DISABLED".into(),
+            },
+        });
+        let bulletins: VecDeque<BulletinSnapshot> = VecDeque::new();
+        let mut terminal = Terminal::new(TestBackend::new(100, 24)).unwrap();
+        terminal
+            .draw(|f| render(f, f.area(), &d, &state, &bulletins, &DetailFocus::Tree))
+            .unwrap();
+        let out = format!("{}", terminal.backend());
+        assert!(
+            out.contains("http-pool  →"),
+            "expected arrow on resolvable CS row, got: {out}"
+        );
+        assert!(
+            out.contains("kafka-brokers  →"),
+            "expected arrow on second resolvable CS row, got: {out}"
+        );
+        assert_snapshot!(
+            "pg_detail_controller_services_show_arrow_when_resolvable",
+            out
         );
     }
 
