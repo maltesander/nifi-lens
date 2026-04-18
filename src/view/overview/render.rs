@@ -30,8 +30,8 @@ use super::state::{
     BulletinBucket, NoisyComponent, OverviewFocus, OverviewSnapshot, OverviewState,
     SPARKLINE_MINUTES, Severity, UnhealthyQueue,
 };
-use crate::client::{ControllerServiceCounts, ProcessorStateCounts};
 use crate::app::navigation::compute_scroll_window;
+use crate::client::{ControllerServiceCounts, ProcessorStateCounts};
 use crate::theme;
 use crate::widget::gauge::fill_bar;
 use crate::widget::panel::Panel;
@@ -137,9 +137,17 @@ fn pg_row(snap: &OverviewSnapshot) -> Line<'static> {
         spans.extend(slot("SYNC-ERR", sync_err, theme::error()));
     }
     spans.extend(slot_gap());
-    spans.extend(slot("INPUTS", snap.root_pg.input_port_count, theme::muted()));
+    spans.extend(slot(
+        "INPUTS",
+        snap.root_pg.input_port_count,
+        theme::muted(),
+    ));
     spans.extend(slot_gap());
-    spans.extend(slot("OUTPUTS", snap.root_pg.output_port_count, theme::muted()));
+    spans.extend(slot(
+        "OUTPUTS",
+        snap.root_pg.output_port_count,
+        theme::muted(),
+    ));
     Line::from(spans)
 }
 
