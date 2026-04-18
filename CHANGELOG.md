@@ -42,6 +42,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   pane). A fixed detail strip below the table shows the selected
   row's full value so long values stay readable.
 
+### Fixed
+
+- **Bulletins**: `Shift+R` (clear filters) now also clears the
+  session-scoped mute list. Previously muted sources could only be
+  unmuted by restarting the binary, because muted rows are hidden and
+  could not be reselected to toggle `Shift+M` off.
+
 ### Removed
 
 - Per-view Overview, Browser, and Bulletins worker tasks — replaced by

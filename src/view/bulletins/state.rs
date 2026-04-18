@@ -436,6 +436,7 @@ impl BulletinsState {
     pub fn clear_filters(&mut self) {
         let prev = self.selected_ring_index();
         self.filters = FilterState::default();
+        self.mutes.clear();
         self.reconcile_selection(prev);
     }
 
@@ -1044,18 +1045,20 @@ mod tests {
     }
 
     #[test]
-    fn clear_filters_resets_all_four_dimensions() {
+    fn clear_filters_resets_all_four_dimensions_and_mutes() {
         let mut s = seed(100, vec![b_full(1, "INFO", "PROCESSOR", "A", "m")]);
         s.toggle_error();
         s.toggle_warning();
         s.cycle_component_type();
         s.filters.text = "xyz".into();
+        s.mutes.insert("src-1".into());
         s.clear_filters();
         assert!(s.filters.show_error);
         assert!(s.filters.show_warning);
         assert!(s.filters.show_info);
         assert_eq!(s.filters.component_type, None);
         assert_eq!(s.filters.text, "");
+        assert!(s.mutes.is_empty());
     }
 
     #[test]
