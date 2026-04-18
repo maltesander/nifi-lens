@@ -3,18 +3,13 @@
 
 use ratatui::Frame;
 use ratatui::layout::{Constraint, Layout, Rect};
-use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
-use ratatui::widgets::{Block, Borders, Cell, Clear, Paragraph, Row, Table, Wrap};
+use ratatui::widgets::{Block, Borders, Cell, Clear, Paragraph, Row, Table, TableState, Wrap};
 
-use crate::app::navigation::compute_scroll_window;
 use crate::layout;
 use crate::theme;
 use crate::view::browser::state::{BrowserState, NodeDetail, PropertiesModalState, property_rows};
 
-/// Property column width. Matches the padding the old modal used
-/// (`{k:30}`) so downstream screenshots stay comparable.
-const KEY_COL_WIDTH: u16 = 30;
 /// Fixed height of the detail strip (including its top separator).
 const DETAIL_STRIP_HEIGHT: u16 = 3;
 
@@ -79,12 +74,10 @@ fn render_table(
 ) {
     let rows_data = property_rows(state, props);
 
-    // Reserve 1 row for the header.
-    let visible_rows = area.height.saturating_sub(1) as usize;
-    let window = compute_scroll_window(selected, rows_data.len(), visible_rows);
-
     // Value column width = total inner width − key column − 1 gap.
-    let value_col_width = area.width.saturating_sub(KEY_COL_WIDTH + 1);
+    let value_col_width = area
+        .width
+        .saturating_sub(layout::DETAIL_LABEL_COL_WIDTH + 1);
 
     let header = Row::new(vec![
         Cell::from(Span::styled("Property", theme::muted())),
@@ -93,29 +86,27 @@ fn render_table(
 
     let rows: Vec<Row> = rows_data
         .iter()
-        .enumerate()
-        .skip(window.offset)
-        .take(visible_rows)
-        .map(|(i, pr)| {
+        .map(|pr| {
             let key_cell = Cell::from(pr.key.to_string());
-            let value_cell = value_cell(pr, value_col_width);
-            let row = Row::new(vec![key_cell, value_cell]);
-            if i == selected {
-                row.style(Style::default().add_modifier(Modifier::REVERSED))
-            } else {
-                row
-            }
+            let val_cell = value_cell(pr, value_col_width);
+            Row::new(vec![key_cell, val_cell])
         })
         .collect();
 
     let table = Table::new(
         rows,
-        [Constraint::Length(KEY_COL_WIDTH), Constraint::Min(1)],
+        [
+            Constraint::Length(layout::DETAIL_LABEL_COL_WIDTH),
+            Constraint::Min(1),
+        ],
     )
     .header(header)
-    .column_spacing(1);
+    .column_spacing(1)
+    .row_highlight_style(theme::cursor_row());
 
-    frame.render_widget(table, area);
+    let mut ts = TableState::default();
+    ts.select(Some(selected));
+    frame.render_stateful_widget(table, area, &mut ts);
 }
 
 /// Build a value cell. Truncates with ellipsis and appends a
