@@ -12,9 +12,17 @@ use tokio::sync::Notify;
 
 /// Next-interval formula per spec §Scale Protection strategy A:
 /// `clamp(2.0 * last_dur, base, max)`.
+///
+/// When `base > max` (e.g. `about` polls every 5 min while the shared
+/// `max_interval` is 60 s), adaptive scaling is disabled for that
+/// endpoint and the result pins to `base`. Without this guard,
+/// `Duration::clamp(base, max)` panics on the `assert!(min <= max)`
+/// inside the stdlib — the fetcher task dies every tick and the panic
+/// message leaks to stderr, corrupting the TUI alt-screen.
 pub fn adaptive_interval(base: Duration, last_dur: Duration, max: Duration) -> Duration {
+    let effective_max = base.max(max);
     let doubled = last_dur.saturating_mul(2);
-    doubled.clamp(base, max)
+    doubled.clamp(base, effective_max)
 }
 
 /// Sleep for `interval * (1.0 ± jitter_percent/100)`. Returns
@@ -67,6 +75,24 @@ mod tests {
         let base = Duration::from_secs(10);
         let max = Duration::from_secs(60);
         assert_eq!(adaptive_interval(base, Duration::from_secs(120), max), max);
+    }
+
+    // Regression: the `about` endpoint has `base = 5m` while the shared
+    // `max_interval = 60s`, so `base > max`. `Duration::clamp(base, max)`
+    // panics when `base > max`, which killed the fetcher task every tick
+    // and leaked the panic message to stderr, corrupting the TUI.
+    #[test]
+    fn adaptive_interval_handles_base_exceeding_max() {
+        let base = Duration::from_secs(300);
+        let max = Duration::from_secs(60);
+        // Must not panic. Adaptive scaling is disabled when base > max:
+        // result pins to `base`.
+        assert_eq!(
+            adaptive_interval(base, Duration::from_millis(50), max),
+            base
+        );
+        assert_eq!(adaptive_interval(base, Duration::from_secs(200), max), base);
+        assert_eq!(adaptive_interval(base, Duration::from_secs(500), max), base);
     }
 
     #[tokio::test(flavor = "current_thread", start_paused = true)]
