@@ -161,6 +161,8 @@ impl ClusterStore {
             max_interval: self.config.max_interval,
             jitter_percent: self.config.jitter_percent,
             force: self.notifies.get(ClusterEndpoint::ControllerStatus),
+            gated: false,
+            subscriber_counter: self.subscribers.counter(ClusterEndpoint::ControllerStatus),
         };
         self.handles.push(spawn_controller_status(
             client.clone(),
@@ -173,6 +175,8 @@ impl ClusterStore {
             max_interval: self.config.max_interval,
             jitter_percent: self.config.jitter_percent,
             force: self.notifies.get(ClusterEndpoint::RootPgStatus),
+            gated: true,
+            subscriber_counter: self.subscribers.counter(ClusterEndpoint::RootPgStatus),
         };
         self.handles
             .push(spawn_root_pg_status(client.clone(), tx.clone(), pg_cfg));
@@ -182,6 +186,10 @@ impl ClusterStore {
             max_interval: self.config.max_interval,
             jitter_percent: self.config.jitter_percent,
             force: self.notifies.get(ClusterEndpoint::ControllerServices),
+            gated: true,
+            subscriber_counter: self
+                .subscribers
+                .counter(ClusterEndpoint::ControllerServices),
         };
         self.handles.push(spawn_controller_services(
             client.clone(),
@@ -194,6 +202,8 @@ impl ClusterStore {
             max_interval: self.config.max_interval,
             jitter_percent: self.config.jitter_percent,
             force: self.notifies.get(ClusterEndpoint::ConnectionsByPg),
+            gated: true,
+            subscriber_counter: self.subscribers.counter(ClusterEndpoint::ConnectionsByPg),
         };
         self.handles.push(spawn_connections_by_pg(
             client.clone(),
@@ -207,6 +217,8 @@ impl ClusterStore {
             max_interval: self.config.max_interval,
             jitter_percent: self.config.jitter_percent,
             force: self.notifies.get(ClusterEndpoint::Bulletins),
+            gated: false,
+            subscriber_counter: self.subscribers.counter(ClusterEndpoint::Bulletins),
         };
         // Initialize the bulletin-fetch cursor from whatever the ring
         // already observed. On fresh startup this is `None` → 0 → the
@@ -227,6 +239,8 @@ impl ClusterStore {
             max_interval: self.config.max_interval,
             jitter_percent: self.config.jitter_percent,
             force: self.notifies.get(ClusterEndpoint::SystemDiagnostics),
+            gated: false,
+            subscriber_counter: self.subscribers.counter(ClusterEndpoint::SystemDiagnostics),
         };
         self.handles.push(spawn_system_diagnostics(
             client.clone(),
@@ -239,6 +253,8 @@ impl ClusterStore {
             max_interval: self.config.max_interval,
             jitter_percent: self.config.jitter_percent,
             force: self.notifies.get(ClusterEndpoint::About),
+            gated: false,
+            subscriber_counter: self.subscribers.counter(ClusterEndpoint::About),
         };
         self.handles
             .push(spawn_about(client.clone(), tx.clone(), about_cfg));

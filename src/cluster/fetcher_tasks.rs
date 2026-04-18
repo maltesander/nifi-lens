@@ -13,7 +13,7 @@ use tokio::sync::{Notify, RwLock, mpsc, watch};
 use tokio::task::JoinHandle;
 
 use crate::client::{ConnectionEndpointIds, ConnectionEndpoints, NifiClient};
-use crate::cluster::fetcher::{adaptive_interval, sleep_with_jitter};
+use crate::cluster::fetcher::{adaptive_interval, sleep_with_jitter, subscribers_present};
 use crate::cluster::snapshot::FetchMeta;
 use crate::cluster::store::ClusterUpdate;
 use crate::error::NifiLensError;
@@ -22,11 +22,18 @@ use crate::event::AppEvent;
 /// Per-task configuration handed to each `spawn_*` function. `force` is
 /// the endpoint-local `Arc<Notify>` the UI task signals on force
 /// refresh or first-subscriber.
+///
+/// `gated` marks endpoints whose fetch loops park when `subscriber_counter`
+/// reports zero. The gate runs at the top of each loop iteration — on
+/// `gated: false` endpoints the guard is a cheap constant check that
+/// always evaluates false, so always-on fetchers see no behavior change.
 pub(crate) struct FetchTaskConfig {
     pub base_interval: Duration,
     pub max_interval: Duration,
     pub jitter_percent: u8,
     pub force: Arc<Notify>,
+    pub gated: bool,
+    pub subscriber_counter: Arc<std::sync::atomic::AtomicUsize>,
 }
 
 /// Spawns the controller_status fetch loop. Emits
@@ -41,6 +48,14 @@ pub(crate) fn spawn_controller_status(
     tokio::task::spawn_local(async move {
         let mut next_interval = cfg.base_interval;
         loop {
+            if cfg.gated && !subscribers_present(&cfg.subscriber_counter) {
+                // Park until a subscriber arrives (0→1 transition wakes
+                // `force` via `ClusterStore::subscribe`) or an explicit
+                // force refresh. The immediate re-check at the loop top
+                // is what makes both paths correct.
+                cfg.force.notified().await;
+                continue;
+            }
             let t0 = Instant::now();
             // Holding the read guard across the NiFi call is safe: the
             // sole writer of `client` is the context-switch intent, which
@@ -87,6 +102,10 @@ pub(crate) fn spawn_root_pg_status(
     tokio::task::spawn_local(async move {
         let mut next_interval = cfg.base_interval;
         loop {
+            if cfg.gated && !subscribers_present(&cfg.subscriber_counter) {
+                cfg.force.notified().await;
+                continue;
+            }
             let t0 = Instant::now();
             // Holding the read guard across the NiFi call is safe: the
             // sole writer of `client` is the context-switch intent, which
@@ -133,6 +152,10 @@ pub(crate) fn spawn_controller_services(
     tokio::task::spawn_local(async move {
         let mut next_interval = cfg.base_interval;
         loop {
+            if cfg.gated && !subscribers_present(&cfg.subscriber_counter) {
+                cfg.force.notified().await;
+                continue;
+            }
             let t0 = Instant::now();
             // Holding the read guard across the NiFi call is safe: the
             // sole writer of `client` is the context-switch intent, which
@@ -186,6 +209,10 @@ pub(crate) fn spawn_bulletins(
     tokio::task::spawn_local(async move {
         let mut next_interval = cfg.base_interval;
         loop {
+            if cfg.gated && !subscribers_present(&cfg.subscriber_counter) {
+                cfg.force.notified().await;
+                continue;
+            }
             let t0 = Instant::now();
             let after = cursor.load(Ordering::Relaxed);
             let after_opt = if after > 0 { Some(after) } else { None };
@@ -258,6 +285,10 @@ pub(crate) fn spawn_system_diagnostics(
         // Used to suppress repeat log lines in steady state.
         let mut last_nodewise: Option<bool> = None;
         loop {
+            if cfg.gated && !subscribers_present(&cfg.subscriber_counter) {
+                cfg.force.notified().await;
+                continue;
+            }
             let t0 = Instant::now();
             // Holding the read guard across the NiFi call is safe: the
             // sole writer of `client` is the context-switch intent, which
@@ -335,6 +366,10 @@ pub(crate) fn spawn_about(
     tokio::task::spawn_local(async move {
         let mut next_interval = cfg.base_interval;
         loop {
+            if cfg.gated && !subscribers_present(&cfg.subscriber_counter) {
+                cfg.force.notified().await;
+                continue;
+            }
             let t0 = Instant::now();
             // Holding the read guard across the NiFi call is safe: the
             // sole writer of `client` is the context-switch intent, which
@@ -387,6 +422,15 @@ pub(crate) fn spawn_connections_by_pg(
     tokio::task::spawn_local(async move {
         let mut next_interval = cfg.base_interval;
         loop {
+            if cfg.gated && !subscribers_present(&cfg.subscriber_counter) {
+                // Park until a subscriber arrives or a force refresh.
+                // Distinct from the three-way select! at the loop bottom
+                // — the select wakes on arbitrary force events *while*
+                // subscribers are present; this gate wakes specifically
+                // on the 0→1 `notify_one` issued by `subscribe`.
+                cfg.force.notified().await;
+                continue;
+            }
             let pg_ids = pg_ids_rx.borrow_and_update().clone();
             if pg_ids.is_empty() {
                 // No PGs known yet (or the flow has none). Wait for a

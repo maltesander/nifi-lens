@@ -106,4 +106,83 @@ mod tests {
         counter.fetch_add(1, Ordering::Relaxed);
         assert!(subscribers_present(&counter));
     }
+
+    #[tokio::test(flavor = "current_thread", start_paused = true)]
+    async fn gated_fetch_parks_until_subscribed() {
+        use std::sync::Arc;
+        use std::sync::atomic::AtomicUsize;
+
+        let local = tokio::task::LocalSet::new();
+        local
+            .run_until(async {
+                let force = Arc::new(Notify::new());
+                let counter = Arc::new(AtomicUsize::new(0));
+                let fire_count = Arc::new(AtomicUsize::new(0));
+
+                let task = {
+                    let force = force.clone();
+                    let counter = counter.clone();
+                    let fire_count = fire_count.clone();
+                    tokio::task::spawn_local(async move {
+                        loop {
+                            if !subscribers_present(&counter) {
+                                force.notified().await;
+                                continue;
+                            }
+                            fire_count.fetch_add(1, Ordering::Relaxed);
+                            sleep_with_jitter(Duration::from_secs(10), 20, &force).await;
+                        }
+                    })
+                };
+
+                // Advance 30s with no subscribers — task must park.
+                tokio::time::advance(Duration::from_secs(30)).await;
+                tokio::task::yield_now().await;
+                assert_eq!(fire_count.load(Ordering::Relaxed), 0);
+
+                // Subscribe (0→1) — fetch fires.
+                counter.fetch_add(1, Ordering::Relaxed);
+                force.notify_one();
+                tokio::task::yield_now().await;
+                assert_eq!(fire_count.load(Ordering::Relaxed), 1);
+
+                task.abort();
+            })
+            .await;
+    }
+
+    #[tokio::test(flavor = "current_thread", start_paused = true)]
+    async fn ungated_fetch_fires_without_subscribers() {
+        use std::sync::Arc;
+        use std::sync::atomic::AtomicUsize;
+
+        let local = tokio::task::LocalSet::new();
+        local
+            .run_until(async {
+                let force = Arc::new(Notify::new());
+                let fire_count = Arc::new(AtomicUsize::new(0));
+
+                let task = {
+                    let force = force.clone();
+                    let fire_count = fire_count.clone();
+                    tokio::task::spawn_local(async move {
+                        loop {
+                            // Not gated — skip the guard entirely.
+                            fire_count.fetch_add(1, Ordering::Relaxed);
+                            sleep_with_jitter(Duration::from_secs(10), 20, &force).await;
+                        }
+                    })
+                };
+
+                // Fire at t=0, advance to t=12s (clears the 20% jitter
+                // upper bound of 12s), expect at least 2 fires.
+                tokio::task::yield_now().await;
+                tokio::time::advance(Duration::from_secs(12)).await;
+                tokio::task::yield_now().await;
+                assert!(fire_count.load(Ordering::Relaxed) >= 2);
+
+                task.abort();
+            })
+            .await;
+    }
 }
