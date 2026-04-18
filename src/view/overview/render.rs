@@ -807,8 +807,8 @@ fn center_rect(pct_x: u16, height: u16, area: Rect) -> Rect {
 #[cfg(test)]
 mod tests {
     use crate::client::{
-        AboutSnapshot, BulletinBoardSnapshot, BulletinSnapshot, ControllerStatusSnapshot,
-        QueueSnapshot, RootPgStatusSnapshot,
+        AboutSnapshot, BulletinSnapshot, ControllerStatusSnapshot, QueueSnapshot,
+        RootPgStatusSnapshot,
     };
     use crate::event::{OverviewPayload, OverviewPgStatusPayload};
     use crate::view::overview::state::{OverviewState, apply_payload};
@@ -835,6 +835,100 @@ mod tests {
     fn seed_root_pg(state: &mut OverviewState, root_pg: RootPgStatusSnapshot) {
         state.unhealthy = crate::view::overview::state::derive_unhealthy(&root_pg);
         state.root_pg = Some(root_pg);
+    }
+
+    /// Render-test shim: build the sparkline + noisy-components
+    /// projections that `redraw_bulletin_projections` would produce
+    /// against the cluster ring, without constructing a full
+    /// `AppState`. Keeps the pre-Task-7 snapshot expectations stable
+    /// for snapshot tests that feed bulletins as a vector.
+    fn seed_bulletin_projections_from_bulletins(
+        state: &mut OverviewState,
+        bulletins: &[BulletinSnapshot],
+        fetched_secs: i64,
+    ) {
+        use super::super::state::{SPARKLINE_MINUTES, parse_iso_seconds};
+        use std::collections::HashMap;
+
+        // Sparkline — mirror the bulk of `redraw_bulletin_projections`.
+        let epoch_secs = state
+            .sparkline_epoch_secs
+            .unwrap_or_else(|| (fetched_secs / 60) * 60);
+        let minutes_elapsed = ((fetched_secs - epoch_secs) / 60).max(0) as usize;
+        let new_epoch = if minutes_elapsed > 0 {
+            let shift = minutes_elapsed.min(SPARKLINE_MINUTES);
+            state.sparkline.rotate_left(shift);
+            for i in (SPARKLINE_MINUTES - shift)..SPARKLINE_MINUTES {
+                state.sparkline[i] = super::BulletinBucket::default();
+            }
+            epoch_secs + (minutes_elapsed as i64 * 60)
+        } else {
+            epoch_secs
+        };
+        state.sparkline_epoch_secs = Some(new_epoch);
+
+        for b in bulletins {
+            let Some(ts) = parse_iso_seconds(&b.timestamp_iso) else {
+                continue;
+            };
+            let age_secs = fetched_secs - ts;
+            if age_secs < 0 {
+                continue;
+            }
+            let minute = (age_secs / 60) as usize;
+            if minute >= SPARKLINE_MINUTES {
+                continue;
+            }
+            let bucket = &mut state.sparkline[SPARKLINE_MINUTES - 1 - minute];
+            bucket.count = bucket.count.saturating_add(1);
+            let sev = super::Severity::parse(&b.level);
+            match sev {
+                super::Severity::Error => {
+                    bucket.error_count = bucket.error_count.saturating_add(1);
+                }
+                super::Severity::Warning => {
+                    bucket.warning_count = bucket.warning_count.saturating_add(1);
+                }
+                super::Severity::Info => {
+                    bucket.info_count = bucket.info_count.saturating_add(1);
+                }
+                super::Severity::Unknown => {}
+            }
+            if sev > bucket.max_severity {
+                bucket.max_severity = sev;
+            }
+        }
+
+        // Noisy components.
+        let mut by_source: HashMap<String, super::NoisyComponent> = HashMap::new();
+        for b in bulletins {
+            if b.source_id.is_empty() {
+                continue;
+            }
+            let entry =
+                by_source
+                    .entry(b.source_id.clone())
+                    .or_insert_with(|| super::NoisyComponent {
+                        source_id: b.source_id.clone(),
+                        source_name: b.source_name.clone(),
+                        group_id: b.group_id.clone(),
+                        ..super::NoisyComponent::default()
+                    });
+            entry.count = entry.count.saturating_add(1);
+            let sev = super::Severity::parse(&b.level);
+            if sev > entry.max_severity {
+                entry.max_severity = sev;
+            }
+        }
+        let mut noisy: Vec<super::NoisyComponent> = by_source.into_values().collect();
+        noisy.sort_by(|a, b| {
+            b.count
+                .cmp(&a.count)
+                .then_with(|| b.max_severity.cmp(&a.max_severity))
+                .then_with(|| a.source_name.cmp(&b.source_name))
+        });
+        noisy.truncate(super::super::state::TOP_NOISY);
+        state.noisy = noisy;
     }
 
     #[test]
@@ -864,7 +958,6 @@ mod tests {
                 sync_failure: 0,
                 up_to_date: 0,
             },
-            bulletin_board: BulletinBoardSnapshot::default(),
             fetched_at: UNIX_EPOCH + Duration::from_secs(T0),
         });
         apply_payload(&mut state, payload);
@@ -928,7 +1021,6 @@ mod tests {
                 up_to_date: 4,
                 ..Default::default()
             },
-            bulletin_board: BulletinBoardSnapshot::default(),
             fetched_at: UNIX_EPOCH + Duration::from_secs(T0),
         });
         apply_payload(&mut state, payload);
@@ -964,7 +1056,6 @@ mod tests {
                 title: "NiFi".into(),
             },
             controller: ControllerStatusSnapshot::default(),
-            bulletin_board: BulletinBoardSnapshot::default(),
             fetched_at: UNIX_EPOCH + Duration::from_secs(T0),
         });
         apply_payload(&mut state, payload);
@@ -990,7 +1081,13 @@ mod tests {
                 queued_display: format!("{}k / 1 MB", 9 + i),
             })
             .collect();
-        let bulletins = (0..6)
+        // Pre-Task-7 the bulletins rode on the PG-status payload and
+        // drove sparkline+noisy via `apply_payload`. Task 7 moved that
+        // path to `redraw_bulletin_projections` on `&mut AppState`.
+        // This render test drives `OverviewState` directly, so we
+        // pre-populate the projections that the reducer would have
+        // built, keeping the rendered output stable.
+        let bulletins: Vec<BulletinSnapshot> = (0..6)
             .map(|i| BulletinSnapshot {
                 id: i,
                 level: if i % 2 == 0 {
@@ -1025,10 +1122,12 @@ mod tests {
                 sync_failure: 0,
                 up_to_date: 0,
             },
-            bulletin_board: BulletinBoardSnapshot { bulletins },
             fetched_at: UNIX_EPOCH + Duration::from_secs(T0),
         });
         apply_payload(&mut state, payload);
+        // Hand-build the bulletin-derived projections matching the
+        // pre-Task-7 output.
+        seed_bulletin_projections_from_bulletins(&mut state, &bulletins, T0 as i64);
         seed_root_pg(
             &mut state,
             RootPgStatusSnapshot {
@@ -1086,7 +1185,6 @@ mod tests {
                     sync_failure: 0,
                     up_to_date: 0,
                 },
-                bulletin_board: BulletinBoardSnapshot::default(),
                 fetched_at: UNIX_EPOCH + Duration::from_secs(T0),
             }),
         );
@@ -1343,9 +1441,7 @@ mod tests {
 
     #[test]
     fn noisy_panel_scrolls_to_selected() {
-        use crate::client::{
-            AboutSnapshot, BulletinBoardSnapshot, ControllerStatusSnapshot, RootPgStatusSnapshot,
-        };
+        use crate::client::{AboutSnapshot, ControllerStatusSnapshot, RootPgStatusSnapshot};
         use crate::event::{OverviewPayload, OverviewPgStatusPayload};
         use crate::view::overview::state::{NoisyComponent, Severity as OvSev, apply_payload};
         use std::time::{Duration, UNIX_EPOCH};
@@ -1374,7 +1470,6 @@ mod tests {
                     sync_failure: 0,
                     up_to_date: 0,
                 },
-                bulletin_board: BulletinBoardSnapshot::default(),
                 fetched_at: UNIX_EPOCH + Duration::from_secs(T0),
             }),
         );
@@ -1436,8 +1531,7 @@ mod tests {
     #[test]
     fn queues_panel_scrolls_to_selected() {
         use crate::client::{
-            AboutSnapshot, BulletinBoardSnapshot, ControllerStatusSnapshot, QueueSnapshot,
-            RootPgStatusSnapshot,
+            AboutSnapshot, ControllerStatusSnapshot, QueueSnapshot, RootPgStatusSnapshot,
         };
         use crate::event::{OverviewPayload, OverviewPgStatusPayload};
         use crate::view::overview::state::apply_payload;
@@ -1489,7 +1583,6 @@ mod tests {
                     sync_failure: 0,
                     up_to_date: 0,
                 },
-                bulletin_board: BulletinBoardSnapshot::default(),
                 fetched_at: UNIX_EPOCH + Duration::from_secs(T0),
             }),
         );

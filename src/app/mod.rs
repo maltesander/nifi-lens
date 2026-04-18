@@ -51,12 +51,10 @@ pub async fn run(
     // `pending_worker_restart` branch.
     state.cluster.spawn_fetchers(client.clone(), tx.clone());
     let mut workers = WorkerRegistry::new();
-    let bulletins_last_id = state.bulletins.last_id;
     workers.ensure(
         state.current_tab,
         &client,
         &tx,
-        bulletins_last_id,
         &mut state.browser,
         &mut state.cluster,
         &state.polling,
@@ -97,9 +95,14 @@ pub async fn run(
             }
             AppEvent::ClusterChanged(endpoint) => {
                 use crate::cluster::ClusterEndpoint;
+                // Overview cares about all three read-model endpoints
+                // that feed its Components panel plus Bulletins for
+                // the sparkline + noisy-components leaderboard.
                 let affects_overview = matches!(
                     endpoint,
-                    ClusterEndpoint::RootPgStatus | ClusterEndpoint::ControllerServices
+                    ClusterEndpoint::RootPgStatus
+                        | ClusterEndpoint::ControllerServices
+                        | ClusterEndpoint::Bulletins
                 );
                 let affects_browser = matches!(
                     endpoint,
@@ -107,9 +110,18 @@ pub async fn run(
                         | ClusterEndpoint::ControllerServices
                         | ClusterEndpoint::ConnectionsByPg
                 );
+                let affects_bulletins = matches!(endpoint, ClusterEndpoint::Bulletins);
 
                 if affects_overview {
-                    crate::view::overview::state::redraw_components(&mut state);
+                    if matches!(
+                        endpoint,
+                        ClusterEndpoint::RootPgStatus | ClusterEndpoint::ControllerServices
+                    ) {
+                        crate::view::overview::state::redraw_components(&mut state);
+                    }
+                    if affects_bulletins {
+                        crate::view::overview::state::redraw_bulletin_projections(&mut state);
+                    }
                 }
                 if affects_browser {
                     // `rebuild_arena_from_cluster` needs `&mut AppState`
@@ -126,10 +138,14 @@ pub async fn run(
                         &snap_snapshot,
                     );
                 }
+                if affects_bulletins {
+                    crate::view::bulletins::state::redraw_bulletins(&mut state);
+                }
 
                 let active = state.current_tab;
                 let should_redraw = (affects_overview && active == ViewId::Overview)
-                    || (affects_browser && active == ViewId::Browser);
+                    || (affects_browser && active == ViewId::Browser)
+                    || (affects_bulletins && active == ViewId::Bulletins);
                 if should_redraw {
                     terminal
                         .draw(|f| ui::render(f, &state))
@@ -215,12 +231,10 @@ pub async fn run(
             state.pending_worker_restart = false;
             state.cluster.spawn_fetchers(client.clone(), tx.clone());
         }
-        let bulletins_last_id = state.bulletins.last_id;
         workers.ensure(
             state.current_tab,
             &client,
             &tx,
-            bulletins_last_id,
             &mut state.browser,
             &mut state.cluster,
             &state.polling,

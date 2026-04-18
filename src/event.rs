@@ -26,7 +26,6 @@ pub enum AppEvent {
 #[derive(Debug, Clone)]
 pub enum ViewPayload {
     Overview(OverviewPayload),
-    Bulletins(BulletinsPayload),
     Browser(BrowserPayload),
     Tracer(TracerPayload),
     Events(EventsPayload),
@@ -54,28 +53,17 @@ pub enum OverviewPayload {
     },
 }
 
-/// Inner payload for the PG-status poll. `root_pg_status` and
-/// `controller_services` are sourced from `state.cluster.snapshot` —
-/// the Overview worker no longer fetches them; `ClusterStore` owns
-/// those endpoints.
+/// Inner payload for the PG-status poll. `root_pg_status`,
+/// `controller_services`, and `bulletin_board` are sourced from
+/// `state.cluster.snapshot` — the Overview worker no longer fetches
+/// them; `ClusterStore` owns those endpoints.
 #[derive(Debug, Clone)]
 pub struct OverviewPgStatusPayload {
     pub about: crate::client::AboutSnapshot,
     pub controller: crate::client::ControllerStatusSnapshot,
-    pub bulletin_board: crate::client::BulletinBoardSnapshot,
     /// Wall-clock time (from `std::time::SystemTime`) when the worker
     /// assembled this payload. Used by the reducer to anchor the sparkline
     /// and the "last refresh" label.
-    pub fetched_at: std::time::SystemTime,
-}
-
-/// One poll cycle's worth of data for the Bulletins tab. Composed inside
-/// the worker from a single `bulletin_board(after_id, limit)` call.
-#[derive(Debug, Clone)]
-pub struct BulletinsPayload {
-    pub bulletins: Vec<crate::client::BulletinSnapshot>,
-    /// Wall-clock time when the worker assembled this payload. Used by
-    /// the renderer for the "last Ns ago" label.
     pub fetched_at: std::time::SystemTime,
 }
 

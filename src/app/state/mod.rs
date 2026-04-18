@@ -204,7 +204,10 @@ impl AppState {
                 tz: config.ui.timestamp_tz,
             },
             polling: config.polling.clone(),
-            cluster: crate::cluster::ClusterStore::new(config.polling.cluster.clone()),
+            cluster: crate::cluster::ClusterStore::new(
+                config.polling.cluster.clone(),
+                config.bulletins.ring_size,
+            ),
             error_detail: None,
             should_quit: false,
             pending_worker_restart: false,
@@ -902,15 +905,6 @@ fn update_inner(state: &mut AppState, event: AppEvent, config: &Config) -> Updat
             // and `ClusterChanged(RootPgStatus)` go through the same
             // derivation path.
             crate::view::overview::state::redraw_components(state);
-            state.last_refresh = Instant::now();
-            UpdateResult {
-                redraw: true,
-                intent: None,
-                tracer_followup: None,
-            }
-        }
-        AppEvent::Data(ViewPayload::Bulletins(payload)) => {
-            crate::view::bulletins::state::apply_payload(&mut state.bulletins, payload);
             state.last_refresh = Instant::now();
             UpdateResult {
                 redraw: true,
@@ -1840,7 +1834,8 @@ fn handle_intent_outcome(
             // The app loop will respawn them against the new client in
             // the `pending_worker_restart` branch.
             state.cluster.shutdown();
-            state.cluster = crate::cluster::ClusterStore::new(state.polling.cluster.clone());
+            state.cluster =
+                crate::cluster::ClusterStore::new(state.polling.cluster.clone(), ring_cap);
 
             UpdateResult {
                 redraw: true,

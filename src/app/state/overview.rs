@@ -384,7 +384,7 @@ mod tests {
 
     #[test]
     fn overview_data_event_updates_state_and_triggers_redraw() {
-        use crate::client::{AboutSnapshot, BulletinBoardSnapshot, ControllerStatusSnapshot};
+        use crate::client::{AboutSnapshot, ControllerStatusSnapshot};
         use crate::event::{AppEvent, OverviewPayload, OverviewPgStatusPayload, ViewPayload};
         use std::time::SystemTime;
         let mut s = fresh_state();
@@ -407,7 +407,6 @@ mod tests {
                 sync_failure: 0,
                 up_to_date: 0,
             },
-            bulletin_board: BulletinBoardSnapshot::default(),
             fetched_at: SystemTime::now(),
         });
         let r = update(&mut s, AppEvent::Data(ViewPayload::Overview(payload)), &c);

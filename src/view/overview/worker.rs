@@ -59,23 +59,19 @@ pub fn spawn(
 
 async fn pg_status_payload(client: &Arc<RwLock<NifiClient>>) -> Result<ViewPayload, NifiLensError> {
     let guard = client.read().await;
-    // The three fetches run in parallel — same pattern as browser_tree.
-    // `root_pg_status` and `controller_services` are polled separately
+    // The remaining two fetches run in parallel. `root_pg_status`,
+    // `controller_services`, and `bulletin_board` are polled separately
     // by `ClusterStore`; the reducer reads those from
     // `state.cluster.snapshot`.
     let about_fut = guard.about();
     let controller_fut = guard.controller_status();
-    let bulletin_fut = guard.bulletin_board(None, Some(200));
-    let (about_res, controller_res, bulletin_res) =
-        tokio::join!(about_fut, controller_fut, bulletin_fut);
+    let (about_res, controller_res) = tokio::join!(about_fut, controller_fut);
     let about = about_res?;
     let controller = controller_res?;
-    let bulletin_board = bulletin_res?;
     Ok(ViewPayload::Overview(OverviewPayload::PgStatus(
         OverviewPgStatusPayload {
             about,
             controller,
-            bulletin_board,
             fetched_at: SystemTime::now(),
         },
     )))

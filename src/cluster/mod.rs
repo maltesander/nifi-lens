@@ -9,7 +9,7 @@ pub mod store;
 pub mod subscriber;
 
 pub use config::ClusterPollingConfig;
-pub use snapshot::{ClusterSnapshot, EndpointState, FetchMeta};
+pub use snapshot::{BulletinRing, ClusterSnapshot, EndpointState, FetchMeta};
 pub use store::{ClusterStore, ClusterUpdate, SubscriberId};
 pub use subscriber::SubscriberRegistry;
 

@@ -1,14 +1,15 @@
 //! Pure state for the Bulletins tab.
 //!
-//! Everything here is synchronous and no-I/O. The tokio worker in
-//! `super::worker` is the only place that touches the network.
+//! Everything here is synchronous and no-I/O. The fetcher lives in
+//! `ClusterStore` — `redraw_bulletins` mirrors its ring + meta into
+//! `BulletinsState` on every `ClusterChanged(Bulletins)` event.
 
 use std::collections::{HashSet, VecDeque};
-use std::time::SystemTime;
+use std::time::{Duration, SystemTime};
 
 use crate::app::navigation::ListNavigation;
+use crate::app::state::AppState;
 use crate::client::BulletinSnapshot;
-use crate::event::BulletinsPayload;
 
 /// Strip NiFi's `ComponentName[id=<uuid>] ` boilerplate prefix from a
 /// bulletin message. NiFi emits this prefix on every bulletin; it eats
@@ -120,9 +121,14 @@ pub fn recent_for_group_id<'a>(
 
 #[derive(Debug)]
 pub struct BulletinsState {
+    /// Rendered view of the cluster-owned `BulletinRing`. Mirrored by
+    /// `redraw_bulletins` on every `ClusterChanged(Bulletins)` event —
+    /// the canonical ring lives at `AppState.cluster.snapshot.bulletins`.
+    /// The copy lets render helpers and Browser's detail sub-panels
+    /// keep a `&VecDeque<BulletinSnapshot>` handle (via `&state.bulletins.ring`)
+    /// without needing to take an extra parameter.
     pub ring: VecDeque<BulletinSnapshot>,
     pub ring_capacity: usize,
-    pub last_id: Option<i64>,
     pub last_fetched_at: Option<SystemTime>,
     pub filters: FilterState,
     /// Session-scoped mute list. `row_matches` filters out any bulletin
@@ -275,7 +281,6 @@ impl BulletinsState {
         Self {
             ring: VecDeque::with_capacity(ring_capacity),
             ring_capacity,
-            last_id: None,
             last_fetched_at: None,
             filters: FilterState::default(),
             mutes: HashSet::new(),
@@ -649,47 +654,63 @@ impl BulletinsState {
     }
 }
 
-/// Fold one poll result into the state. Pure; no I/O.
-pub fn apply_payload(state: &mut BulletinsState, payload: BulletinsPayload) {
-    let cursor = state.last_id.unwrap_or(i64::MIN);
-    let mut max_seen = cursor;
-    let before_len = state.ring.len();
+/// Mirror the cluster-owned `BulletinRing` into `BulletinsState`,
+/// advancing the new-since-pause badge and keeping the selection
+/// anchored on the same logical row. Called from the `ClusterChanged(Bulletins)`
+/// arm in `src/app/mod.rs` after `ClusterStore` merges a fresh batch.
+///
+/// Semantics (preserved from the pre-Task-7 `apply_payload`):
+/// - The canonical ring is `state.cluster.snapshot.bulletins.buf`;
+///   `state.bulletins.ring` is a one-way mirror.
+/// - `new_since_pause` counts only bulletins added since the last
+///   mirror that match the current filters (paused mode).
+/// - `auto_scroll` snaps `selected` to the newest group after mirroring.
+/// - `last_fetched_at` is derived from the cluster meta's `Instant`
+///   anchor (converted into wall-clock via the elapsed delta so the
+///   renderer can reuse its existing `SystemTime::now() - fetched`
+///   "last Ns ago" formula).
+pub fn redraw_bulletins(state: &mut AppState) {
+    let cluster_ring = &state.cluster.snapshot.bulletins;
+    let before_ids: HashSet<i64> = state.bulletins.ring.iter().map(|b| b.id).collect();
 
-    for b in payload.bulletins {
-        if b.id <= cursor {
-            continue;
-        }
-        if b.id > max_seen {
-            max_seen = b.id;
-        }
-        state.ring.push_back(b);
-    }
+    // Recompute the mirror from scratch — cluster-ring is the source
+    // of truth. Copy-then-mutate is cheap: at the default ring_size of
+    // 5000, one `BulletinSnapshot` clone is a few hundred bytes.
+    let mut new_ring: VecDeque<BulletinSnapshot> = VecDeque::with_capacity(cluster_ring.buf.len());
+    new_ring.extend(cluster_ring.buf.iter().cloned());
 
-    // Count matching new rows for the +N badge BEFORE drop-oldest so we
-    // don't double-count rows that fall off the front.
+    // Count matching *new* rows for the +N badge (paused mode) BEFORE
+    // swapping the mirror so filter predicates evaluate against the
+    // current state's mute/filter set.
     let mut new_matching = 0u32;
-    if !state.auto_scroll {
-        for b in state.ring.iter().skip(before_len) {
-            if state.row_matches(b) {
+    if !state.bulletins.auto_scroll {
+        for b in new_ring.iter() {
+            if !before_ids.contains(&b.id) && state.bulletins.row_matches(b) {
                 new_matching = new_matching.saturating_add(1);
             }
         }
     }
 
-    while state.ring.len() > state.ring_capacity {
-        state.ring.pop_front();
-    }
-    if max_seen > cursor {
-        state.last_id = Some(max_seen);
-    }
-    state.last_fetched_at = Some(payload.fetched_at);
+    state.bulletins.ring = new_ring;
 
-    if state.auto_scroll {
-        let max = state.grouped_view().len().saturating_sub(1);
-        state.selected = max;
-        state.new_since_pause = 0;
+    // Derive a `SystemTime` anchor for the renderer. The cluster meta
+    // records the fetch request start as a monotonic `Instant`; we map
+    // it to wall-clock by subtracting the elapsed delta from `now`.
+    // The `min(86400s)` clamp prevents a degenerate elapsed value
+    // (e.g. from a test harness with a manipulated clock) producing an
+    // underflow on the `SystemTime - Duration` subtraction.
+    if let Some(meta) = cluster_ring.meta.as_ref() {
+        state.bulletins.last_fetched_at =
+            Some(SystemTime::now() - meta.fetched_at.elapsed().min(Duration::from_secs(86400)));
+    }
+
+    if state.bulletins.auto_scroll {
+        let max = state.bulletins.grouped_view().len().saturating_sub(1);
+        state.bulletins.selected = max;
+        state.bulletins.new_since_pause = 0;
     } else {
-        state.new_since_pause = state.new_since_pause.saturating_add(new_matching);
+        state.bulletins.new_since_pause =
+            state.bulletins.new_since_pause.saturating_add(new_matching);
     }
 }
 
@@ -715,72 +736,177 @@ mod tests {
         }
     }
 
-    fn payload(bulletins: Vec<BulletinSnapshot>) -> BulletinsPayload {
-        BulletinsPayload {
-            bulletins,
-            fetched_at: UNIX_EPOCH + Duration::from_secs(T0),
+    /// Test-only helper that mimics the pre-Task-7 `apply_payload` on
+    /// a bare `BulletinsState`. Production code goes through
+    /// `redraw_bulletins(&mut AppState)`; these reducer-shape tests
+    /// don't need the full `AppState` stack.
+    fn apply_payload_test(state: &mut BulletinsState, bulletins: Vec<BulletinSnapshot>) {
+        let before_len = state.ring.len();
+        let existing_ids: HashSet<i64> = state.ring.iter().map(|b| b.id).collect();
+        for bulletin in bulletins {
+            if existing_ids.contains(&bulletin.id) {
+                continue;
+            }
+            state.ring.push_back(bulletin);
+        }
+        let mut new_matching = 0u32;
+        if !state.auto_scroll {
+            for bulletin in state.ring.iter().skip(before_len) {
+                if state.row_matches(bulletin) {
+                    new_matching = new_matching.saturating_add(1);
+                }
+            }
+        }
+        while state.ring.len() > state.ring_capacity {
+            state.ring.pop_front();
+        }
+        state.last_fetched_at = Some(UNIX_EPOCH + Duration::from_secs(T0));
+        if state.auto_scroll {
+            let max = state.grouped_view().len().saturating_sub(1);
+            state.selected = max;
+            state.new_since_pause = 0;
+        } else {
+            state.new_since_pause = state.new_since_pause.saturating_add(new_matching);
         }
     }
 
     #[test]
     fn apply_payload_seeds_empty_ring_with_initial_batch() {
         let mut s = BulletinsState::with_capacity(100);
-        apply_payload(
-            &mut s,
-            payload(vec![b(1, "INFO"), b(2, "WARN"), b(3, "ERROR")]),
-        );
+        apply_payload_test(&mut s, vec![b(1, "INFO"), b(2, "WARN"), b(3, "ERROR")]);
         assert_eq!(s.ring.len(), 3);
         assert_eq!(s.ring[0].id, 1);
         assert_eq!(s.ring[2].id, 3);
-        assert_eq!(s.last_id, Some(3));
         assert!(s.last_fetched_at.is_some());
     }
 
     #[test]
     fn apply_payload_dedups_on_id() {
+        // Cursor-based dedup is now the cluster ring's job; this shim
+        // just filters out ids already in the mirror, matching render
+        // expectations.
         let mut s = BulletinsState::with_capacity(100);
-        apply_payload(&mut s, payload(vec![b(1, "INFO"), b(2, "INFO")]));
-        apply_payload(&mut s, payload(vec![b(2, "INFO"), b(3, "INFO")]));
+        apply_payload_test(&mut s, vec![b(1, "INFO"), b(2, "INFO")]);
+        apply_payload_test(&mut s, vec![b(2, "INFO"), b(3, "INFO")]);
         assert_eq!(s.ring.len(), 3);
-        assert_eq!(s.last_id, Some(3));
     }
 
     #[test]
     fn apply_payload_drops_oldest_at_capacity() {
         let mut s = BulletinsState::with_capacity(4);
-        apply_payload(
-            &mut s,
-            payload(vec![b(1, "INFO"), b(2, "INFO"), b(3, "INFO")]),
-        );
-        apply_payload(
-            &mut s,
-            payload(vec![b(4, "INFO"), b(5, "INFO"), b(6, "INFO")]),
-        );
+        apply_payload_test(&mut s, vec![b(1, "INFO"), b(2, "INFO"), b(3, "INFO")]);
+        apply_payload_test(&mut s, vec![b(4, "INFO"), b(5, "INFO"), b(6, "INFO")]);
         assert_eq!(s.ring.len(), 4);
         assert_eq!(s.ring.front().unwrap().id, 3);
         assert_eq!(s.ring.back().unwrap().id, 6);
     }
 
     #[test]
-    fn apply_payload_advances_last_id_monotonically() {
+    fn apply_payload_empty_batch_is_noop_except_for_fetched_at() {
         let mut s = BulletinsState::with_capacity(100);
-        apply_payload(&mut s, payload(vec![b(10, "INFO")]));
-        assert_eq!(s.last_id, Some(10));
-        // Stale batch (server reordered or wrapped): cursor stays at 10.
-        apply_payload(&mut s, payload(vec![b(5, "INFO")]));
-        assert_eq!(s.last_id, Some(10));
-        // New bulletins above the cursor: advances.
-        apply_payload(&mut s, payload(vec![b(11, "INFO"), b(15, "INFO")]));
-        assert_eq!(s.last_id, Some(15));
+        apply_payload_test(&mut s, vec![]);
+        assert!(s.ring.is_empty());
+        assert!(s.last_fetched_at.is_some());
     }
 
     #[test]
-    fn apply_payload_empty_batch_is_noop_except_for_fetched_at() {
-        let mut s = BulletinsState::with_capacity(100);
-        apply_payload(&mut s, payload(vec![]));
-        assert!(s.ring.is_empty());
-        assert_eq!(s.last_id, None);
-        assert!(s.last_fetched_at.is_some());
+    fn redraw_bulletins_mirrors_cluster_ring_into_view_state() {
+        use crate::cluster::snapshot::FetchMeta;
+        use std::time::Instant;
+        let mut state = crate::test_support::fresh_state();
+        // Seed the cluster ring with 3 bulletins + meta.
+        state
+            .cluster
+            .snapshot
+            .bulletins
+            .merge(vec![b(1, "INFO"), b(2, "WARN"), b(3, "ERROR")]);
+        state.cluster.snapshot.bulletins.meta = Some(FetchMeta {
+            fetched_at: Instant::now(),
+            fetch_duration: Duration::from_millis(5),
+            next_interval: Duration::from_secs(5),
+        });
+        crate::view::bulletins::state::redraw_bulletins(&mut state);
+        assert_eq!(state.bulletins.ring.len(), 3);
+        assert_eq!(state.bulletins.ring[0].id, 1);
+        assert_eq!(state.bulletins.ring[2].id, 3);
+        assert!(state.bulletins.last_fetched_at.is_some());
+    }
+
+    #[test]
+    fn redraw_bulletins_advances_new_since_pause_when_paused() {
+        use crate::cluster::snapshot::FetchMeta;
+        use std::time::Instant;
+        let mut state = crate::test_support::fresh_state();
+        state.bulletins.auto_scroll = false;
+        // First mirror: 2 bulletins.
+        state
+            .cluster
+            .snapshot
+            .bulletins
+            .merge(vec![b(1, "INFO"), b(2, "INFO")]);
+        state.cluster.snapshot.bulletins.meta = Some(FetchMeta {
+            fetched_at: Instant::now(),
+            fetch_duration: Duration::from_millis(5),
+            next_interval: Duration::from_secs(5),
+        });
+        crate::view::bulletins::state::redraw_bulletins(&mut state);
+        let badge_after_first = state.bulletins.new_since_pause;
+
+        // Second mirror: 2 more bulletins — the badge advances by the
+        // newly matching rows only.
+        state
+            .cluster
+            .snapshot
+            .bulletins
+            .merge(vec![b(3, "INFO"), b(4, "INFO")]);
+        crate::view::bulletins::state::redraw_bulletins(&mut state);
+        assert!(
+            state.bulletins.new_since_pause > badge_after_first,
+            "new_since_pause must grow as fresh matching rows arrive"
+        );
+    }
+
+    #[test]
+    fn redraw_bulletins_with_grouping_preserves_render_time_dedup() {
+        use crate::cluster::snapshot::FetchMeta;
+        use std::time::Instant;
+        let mut state = crate::test_support::fresh_state();
+        // Three bulletins sharing source+message stem collapse to one
+        // grouped row under the default `SourceAndMessage` mode.
+        let shared = BulletinSnapshot {
+            id: 0,
+            level: "ERROR".into(),
+            message: "Proc[id=p] same stem".into(),
+            source_id: "src-same".into(),
+            source_name: "Proc".into(),
+            source_type: "PROCESSOR".into(),
+            group_id: "g".into(),
+            timestamp_iso: "2026-04-11T10:14:22Z".into(),
+            timestamp_human: String::new(),
+        };
+        let build = |id: i64| BulletinSnapshot {
+            id,
+            ..shared.clone()
+        };
+        state
+            .cluster
+            .snapshot
+            .bulletins
+            .merge(vec![build(1), build(2), build(3)]);
+        state.cluster.snapshot.bulletins.meta = Some(FetchMeta {
+            fetched_at: Instant::now(),
+            fetch_duration: Duration::from_millis(5),
+            next_interval: Duration::from_secs(5),
+        });
+        crate::view::bulletins::state::redraw_bulletins(&mut state);
+        assert_eq!(state.bulletins.ring.len(), 3);
+        let groups = state.bulletins.grouped_view();
+        assert_eq!(
+            groups.len(),
+            1,
+            "render-time dedup must fold repeating stems into one group"
+        );
+        assert_eq!(groups[0].count, 3);
     }
 
     fn b_full(
@@ -805,7 +931,7 @@ mod tests {
 
     fn seed(capacity: usize, rows: Vec<BulletinSnapshot>) -> BulletinsState {
         let mut s = BulletinsState::with_capacity(capacity);
-        apply_payload(&mut s, payload(rows));
+        apply_payload_test(&mut s, rows);
         s
     }
 
@@ -1018,19 +1144,19 @@ mod tests {
     fn auto_scroll_on_keeps_selection_at_bottom() {
         let mut s = BulletinsState::with_capacity(100);
         s.auto_scroll = true;
-        apply_payload(&mut s, payload(vec![b(1, "INFO"), b(2, "INFO")]));
+        apply_payload_test(&mut s, vec![b(1, "INFO"), b(2, "INFO")]);
         assert_eq!(s.selected, 1);
-        apply_payload(&mut s, payload(vec![b(3, "INFO"), b(4, "INFO")]));
+        apply_payload_test(&mut s, vec![b(3, "INFO"), b(4, "INFO")]);
         assert_eq!(s.selected, 3);
     }
 
     #[test]
     fn auto_scroll_off_counts_new_since_pause() {
         let mut s = BulletinsState::with_capacity(100);
-        apply_payload(&mut s, payload(vec![b(1, "INFO"), b(2, "INFO")]));
+        apply_payload_test(&mut s, vec![b(1, "INFO"), b(2, "INFO")]);
         s.auto_scroll = false;
         s.selected = 0;
-        apply_payload(&mut s, payload(vec![b(3, "INFO"), b(4, "INFO")]));
+        apply_payload_test(&mut s, vec![b(3, "INFO"), b(4, "INFO")]);
         assert_eq!(s.new_since_pause, 2);
         assert_eq!(s.selected, 0);
     }
@@ -1038,25 +1164,19 @@ mod tests {
     #[test]
     fn auto_scroll_off_ignores_non_matching_for_badge() {
         let mut s = BulletinsState::with_capacity(100);
-        apply_payload(
-            &mut s,
-            payload(vec![b_full(1, "INFO", "PROCESSOR", "A", "m")]),
-        );
+        apply_payload_test(&mut s, vec![b_full(1, "INFO", "PROCESSOR", "A", "m")]);
         s.auto_scroll = false;
         s.toggle_info();
         s.toggle_warning();
         // Only ERROR is visible now.
-        apply_payload(
-            &mut s,
-            payload(vec![b_full(2, "INFO", "PROCESSOR", "B", "m")]),
-        );
+        apply_payload_test(&mut s, vec![b_full(2, "INFO", "PROCESSOR", "B", "m")]);
         assert_eq!(s.new_since_pause, 0);
     }
 
     #[test]
     fn g_and_end_resume_auto_scroll_and_clear_badge() {
         let mut s = BulletinsState::with_capacity(100);
-        apply_payload(&mut s, payload(vec![b(1, "INFO"), b(2, "INFO")]));
+        apply_payload_test(&mut s, vec![b(1, "INFO"), b(2, "INFO")]);
         s.auto_scroll = false;
         s.new_since_pause = 7;
         s.selected = 0;
@@ -1069,7 +1189,7 @@ mod tests {
     #[test]
     fn p_toggles_auto_scroll_without_goto() {
         let mut s = BulletinsState::with_capacity(100);
-        apply_payload(&mut s, payload(vec![b(1, "INFO"), b(2, "INFO")]));
+        apply_payload_test(&mut s, vec![b(1, "INFO"), b(2, "INFO")]);
         s.selected = 0;
         s.auto_scroll = true;
         s.toggle_pause();
@@ -1082,10 +1202,7 @@ mod tests {
     #[test]
     fn upward_navigation_pauses_auto_scroll() {
         let mut s = BulletinsState::with_capacity(100);
-        apply_payload(
-            &mut s,
-            payload(vec![b(1, "INFO"), b(2, "INFO"), b(3, "INFO")]),
-        );
+        apply_payload_test(&mut s, vec![b(1, "INFO"), b(2, "INFO"), b(3, "INFO")]);
         assert_eq!(s.selected, 2);
         assert!(s.auto_scroll);
         s.move_selection_up();
@@ -1138,9 +1255,9 @@ mod tests {
     fn grouped_view_collapses_same_source_run() {
         // Build a seed with three bulletins sharing source_id "src-same".
         let mut s = BulletinsState::with_capacity(100);
-        apply_payload(
+        apply_payload_test(
             &mut s,
-            payload(vec![
+            vec![
                 BulletinSnapshot {
                     id: 1,
                     level: "ERROR".into(),
@@ -1174,7 +1291,7 @@ mod tests {
                     timestamp_iso: "2026-04-11T10:14:24Z".into(),
                     timestamp_human: String::new(),
                 },
-            ]),
+            ],
         );
         s.group_mode = GroupMode::Source;
         let out = s.grouped_view();
@@ -1200,10 +1317,7 @@ mod tests {
             timestamp_iso: "2026-04-11T10:14:22Z".into(),
             timestamp_human: String::new(),
         };
-        apply_payload(
-            &mut s,
-            payload(vec![mk(1, "src-a"), mk(2, "src-b"), mk(3, "src-a")]),
-        );
+        apply_payload_test(&mut s, vec![mk(1, "src-a"), mk(2, "src-b"), mk(3, "src-a")]);
         s.group_mode = GroupMode::Source;
         let out = s.grouped_view();
         // Non-consecutive dedup: src-a (ring_idx 0+2) folds into one group.
@@ -1232,10 +1346,7 @@ mod tests {
             timestamp_iso: "2026-04-11T10:14:22Z".into(),
             timestamp_human: String::new(),
         };
-        apply_payload(
-            &mut s,
-            payload(vec![mk(1, "ERROR"), mk(2, "INFO"), mk(3, "ERROR")]),
-        );
+        apply_payload_test(&mut s, vec![mk(1, "ERROR"), mk(2, "INFO"), mk(3, "ERROR")]);
         s.group_mode = GroupMode::Source;
         // All three share source_id; grouping folds them to one.
         assert_eq!(s.grouped_view().len(), 1);
@@ -1269,16 +1380,16 @@ mod tests {
             timestamp_iso: format!("2026-04-11T10:14:{:02}Z", id),
             timestamp_human: String::new(),
         };
-        apply_payload(
+        apply_payload_test(
             &mut s,
-            payload(vec![
+            vec![
                 mk(1, "src-a"),
                 mk(2, "src-a"),
                 mk(3, "src-b"),
                 mk(4, "src-c"),
                 mk(5, "src-c"),
                 mk(6, "src-c"),
-            ]),
+            ],
         );
         s.auto_scroll = false;
         s
@@ -1552,7 +1663,7 @@ mod tests {
                 timestamp_human: String::new(),
             },
         ];
-        apply_payload(&mut s, payload(rows));
+        apply_payload_test(&mut s, rows);
         assert_eq!(s.group_mode, GroupMode::SourceAndMessage);
         let rows = s.grouped_view();
         // Two unique groups: src-1/"same stem" ×3, src-2/"other stem" ×1.
@@ -1594,7 +1705,7 @@ mod tests {
                 timestamp_human: String::new(),
             },
         ];
-        apply_payload(&mut s, payload(rows));
+        apply_payload_test(&mut s, rows);
         let rows = s.grouped_view();
         assert_eq!(rows.len(), 1, "Source mode collapses different stems");
         assert_eq!(rows[0].count, 2);
@@ -1608,7 +1719,7 @@ mod tests {
             b(1, "INFO"),
             b(2, "INFO"), // note: `b()` test helper gives different source_ids
         ];
-        apply_payload(&mut s, payload(rows));
+        apply_payload_test(&mut s, rows);
         let rows = s.grouped_view();
         assert_eq!(rows.len(), 2);
         assert!(rows.iter().all(|g| g.count == 1));
@@ -1653,7 +1764,7 @@ mod tests {
                 timestamp_human: String::new(),
             },
         ];
-        apply_payload(&mut s, payload(rows));
+        apply_payload_test(&mut s, rows);
         let rows = s.grouped_view();
         // Old code would have produced 3 groups (P, Q, P). New dedup
         // collapses P across the interruption → 2 groups.
@@ -1776,7 +1887,7 @@ mod tests {
                 timestamp_human: String::new(),
             },
         ];
-        apply_payload(&mut s, payload(rows));
+        apply_payload_test(&mut s, rows);
         s.selected = 0;
         let d = s.group_details().expect("group exists");
         assert_eq!(d.count, 2);
@@ -1837,7 +1948,7 @@ mod tests {
                 timestamp_human: String::new(),
             },
         ];
-        apply_payload(&mut s, payload(rows));
+        apply_payload_test(&mut s, rows);
         let hits = recent_for_source_id(&s.ring, "p1", 2);
         assert_eq!(hits.len(), 2);
         assert_eq!(hits[0].id, 4, "newest first");
@@ -1847,7 +1958,7 @@ mod tests {
     #[test]
     fn recent_for_source_id_limit_zero_returns_empty() {
         let mut s = BulletinsState::with_capacity(100);
-        apply_payload(&mut s, payload(vec![b(1, "INFO")]));
+        apply_payload_test(&mut s, vec![b(1, "INFO")]);
         let hits = recent_for_source_id(&s.ring, "src-1", 0);
         assert!(hits.is_empty());
     }
@@ -1855,7 +1966,7 @@ mod tests {
     #[test]
     fn recent_for_source_id_no_match_returns_empty() {
         let mut s = BulletinsState::with_capacity(100);
-        apply_payload(&mut s, payload(vec![b(1, "INFO"), b(2, "INFO")]));
+        apply_payload_test(&mut s, vec![b(1, "INFO"), b(2, "INFO")]);
         let hits = recent_for_source_id(&s.ring, "nonexistent", 10);
         assert!(hits.is_empty());
     }
@@ -1898,7 +2009,7 @@ mod tests {
                 timestamp_human: String::new(),
             },
         ];
-        apply_payload(&mut s, payload(rows));
+        apply_payload_test(&mut s, rows);
         let hits = recent_for_group_id(&s.ring, "noisy", 10);
         assert_eq!(hits.len(), 2);
         assert_eq!(hits[0].id, 3, "newest first");

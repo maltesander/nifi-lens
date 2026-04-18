@@ -3,7 +3,7 @@
 //! even when the latest fetch failed, so views render with a staleness
 //! chip rather than blanking out.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, VecDeque};
 use std::time::{Duration, Instant};
 
 use crate::client::health::SystemDiagSnapshot;
@@ -82,6 +82,58 @@ impl<T: Clone> EndpointState<T> {
     }
 }
 
+/// Rolling append-only ring of bulletins. Unlike the other cluster
+/// endpoints — which use `EndpointState<T>` — bulletins merge each
+/// successful fetch into a capacity-bounded `VecDeque` so the Overview
+/// sparkline and the Bulletins tab can see history beyond the latest
+/// batch. The cursor (`last_id`) is owned here so the fetcher task
+/// resumes correctly across restarts / context switches.
+#[derive(Debug, Default, Clone)]
+pub struct BulletinRing {
+    /// Bulletins in monotonic arrival order (front = oldest).
+    pub buf: VecDeque<BulletinSnapshot>,
+    /// Upper bound on `buf.len()`. Sourced from
+    /// `config.bulletins.ring_size` at store construction.
+    pub capacity: usize,
+    /// Maximum bulletin id observed so far. `None` until the first
+    /// non-empty batch lands. The fetcher uses this as the `after_id`
+    /// cursor for its next call.
+    pub last_id: Option<i64>,
+    /// Metadata from the most recent fetch (success or failure).
+    /// `None` until the first fetch completes.
+    pub meta: Option<FetchMeta>,
+    /// Human-readable error string from the most recent *failing*
+    /// fetch. Cleared on the next successful fetch.
+    pub last_error: Option<String>,
+}
+
+impl BulletinRing {
+    pub fn new(capacity: usize) -> Self {
+        Self {
+            buf: VecDeque::new(),
+            capacity,
+            last_id: None,
+            meta: None,
+            last_error: None,
+        }
+    }
+
+    /// Merge one fetch batch into the ring. Advances `last_id` to the
+    /// maximum id seen, appends new bulletins, and trims from the front
+    /// when over `capacity`.
+    pub fn merge(&mut self, batch: Vec<BulletinSnapshot>) {
+        for b in batch {
+            if Some(b.id) > self.last_id {
+                self.last_id = Some(b.id);
+            }
+            self.buf.push_back(b);
+            while self.buf.len() > self.capacity {
+                self.buf.pop_front();
+            }
+        }
+    }
+}
+
 /// The cluster snapshot. Holds the raw client-level snapshot types
 /// (already normalized by `NifiClient`) — views project from these.
 #[derive(Debug, Default, Clone)]
@@ -92,7 +144,19 @@ pub struct ClusterSnapshot {
     pub controller_services: EndpointState<ControllerServicesSnapshot>,
     pub system_diagnostics: EndpointState<SystemDiagSnapshot>,
     pub connections_by_pg: HashMap<String, EndpointState<ConnectionEndpoints>>,
-    pub bulletins: EndpointState<Vec<BulletinSnapshot>>,
+    pub bulletins: BulletinRing,
+}
+
+impl ClusterSnapshot {
+    /// Construct a fresh snapshot whose `BulletinRing` is sized for the
+    /// configured `bulletins.ring_size`. Every other endpoint remains
+    /// at its default (`Loading`).
+    pub fn with_bulletins_capacity(bulletins_capacity: usize) -> Self {
+        Self {
+            bulletins: BulletinRing::new(bulletins_capacity),
+            ..Self::default()
+        }
+    }
 }
 
 #[cfg(test)]

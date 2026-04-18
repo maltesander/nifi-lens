@@ -1,4 +1,5 @@
-//! Pure state for the Overview tab plus the `apply_payload` reducer.
+//! Pure state for the Overview tab plus the `apply_payload`,
+//! `redraw_components`, and `redraw_bulletin_projections` reducers.
 //!
 //! Everything here is synchronous and `no_run` safe — the tokio worker in
 //! `super::worker` is the only place that touches the network.
@@ -191,64 +192,97 @@ pub fn apply_payload(state: &mut OverviewState, payload: OverviewPayload) {
 }
 
 /// Fold one PG-status poll into the existing Overview state.
-/// Pre-Phase-3 this was the entire body of `apply_payload`.
 ///
-/// The `root_pg` projection is no longer sourced from the payload —
-/// `ClusterStore` owns that endpoint. `redraw_components` rebuilds it
-/// from `AppState.cluster.snapshot.root_pg_status` whenever either
-/// this reducer or `ClusterChanged(RootPgStatus)` fires.
+/// The `root_pg` and `controller_services` projections are no longer
+/// sourced from the payload — `ClusterStore` owns those endpoints.
+/// As of Task 7 the bulletin-board fetch also moved to the cluster
+/// store; the sparkline and noisy-components leaderboards are now
+/// rebuilt by `redraw_bulletin_projections` on
+/// `ClusterChanged(Bulletins)`.
 fn apply_pg_status(state: &mut OverviewState, payload: OverviewPgStatusPayload) {
     let OverviewPgStatusPayload {
         about,
         controller,
-        bulletin_board,
         fetched_at,
     } = payload;
 
-    // Sparkline: rolling 15-minute bulletin-rate chart.
-    //
-    // sparkline[0] is the OLDEST minute; sparkline[SPARKLINE_MINUTES-1] is
-    // the NEWEST minute. The array accumulates across polls instead of being
-    // replaced each time, so that a system producing >200 bulletins/minute
-    // (which would cause all fetched bulletins to fall in the same second)
-    // still builds up a meaningful rate history over time.
-    //
-    // Mechanics:
-    //   1. `sparkline_epoch_secs` tracks the Unix-second start of the current
-    //      newest bucket.  On the first poll it is initialised to the
-    //      minute-floor of `fetched_at`.
-    //   2. When one or more full minutes have elapsed since the epoch, the
-    //      array is rotated left by that many positions (old data slides toward
-    //      index 0 and falls off; new zero-filled buckets appear at the tail).
-    //   3. Only bulletins with id > `last_bulletin_id` (i.e. bulletins not yet
-    //      counted) are accumulated.  On the very first poll
-    //      `last_bulletin_id` is None, so every bulletin in the current board
-    //      is treated as new — this provides an immediate historical backfill.
+    state.last_pg_refresh = Some(std::time::Instant::now());
+
+    state.snapshot = Some(OverviewSnapshot {
+        about,
+        controller,
+        fetched_at: Some(fetched_at),
+    });
+}
+
+/// Re-derive bulletin-facing Overview projections (sparkline, noisy
+/// components leaderboard) from the cluster-owned `BulletinRing`.
+/// Called from the `ClusterChanged(Bulletins)` arm in the main loop.
+///
+/// Sparkline: rolling 15-minute bulletin-rate chart.
+///
+/// `sparkline[0]` is the OLDEST minute; `sparkline[SPARKLINE_MINUTES-1]` is
+/// the NEWEST minute. The array accumulates across batches instead of
+/// being replaced each time, so that a system producing >200 bulletins/minute
+/// still builds up a meaningful rate history over time.
+///
+/// Mechanics:
+///   1. `sparkline_epoch_secs` tracks the Unix-second start of the current
+///      newest bucket. On the first mirror it is initialised to the
+///      minute-floor of the ring's meta fetched-at.
+///   2. When one or more full minutes have elapsed since the epoch, the
+///      array is rotated left by that many positions.
+///   3. Only bulletins with id > `last_bulletin_id` are accumulated, so
+///      the projection is idempotent across redraws.
+pub(crate) fn redraw_bulletin_projections(state: &mut crate::app::state::AppState) {
+    redraw_bulletin_projections_at(state, std::time::SystemTime::now());
+}
+
+/// Test-seam variant of [`redraw_bulletin_projections`] that accepts an
+/// explicit wall-clock anchor for the sparkline. Production code always
+/// passes `SystemTime::now()`; unit tests pin a fixed anchor so the
+/// "age of each bulletin" derivation is stable across runs.
+pub(crate) fn redraw_bulletin_projections_at(
+    state: &mut crate::app::state::AppState,
+    fetched_at: std::time::SystemTime,
+) {
+    let ring = &state.cluster.snapshot.bulletins;
+    // Nothing to do before the first successful fetch has provided a
+    // meta stamp. The cluster-ring buf can still be empty with a meta
+    // (a successful fetch returned zero bulletins) — but the sparkline
+    // anchor needs *some* wall-clock marker, which we only know after
+    // the first fetch has populated the ring's meta.
+    if ring.meta.is_none() {
+        return;
+    }
+
     let fetched_secs = fetched_at
         .duration_since(std::time::UNIX_EPOCH)
         .map(|d| d.as_secs() as i64)
         .unwrap_or(0);
 
     // Step 1: initialise or advance the epoch.
-    let epoch_secs = state
+    let overview = &mut state.overview;
+    let epoch_secs = overview
         .sparkline_epoch_secs
         .unwrap_or_else(|| (fetched_secs / 60) * 60);
     let minutes_elapsed = ((fetched_secs - epoch_secs) / 60).max(0) as usize;
     let new_epoch = if minutes_elapsed > 0 {
         let shift = minutes_elapsed.min(SPARKLINE_MINUTES);
-        state.sparkline.rotate_left(shift);
+        overview.sparkline.rotate_left(shift);
         for i in (SPARKLINE_MINUTES - shift)..SPARKLINE_MINUTES {
-            state.sparkline[i] = BulletinBucket::default();
+            overview.sparkline[i] = BulletinBucket::default();
         }
         epoch_secs + (minutes_elapsed as i64 * 60)
     } else {
         epoch_secs
     };
-    state.sparkline_epoch_secs = Some(new_epoch);
+    overview.sparkline_epoch_secs = Some(new_epoch);
 
-    // Step 2: accumulate only new bulletins.
-    let cursor = state.last_bulletin_id.unwrap_or(i64::MIN);
-    for b in &bulletin_board.bulletins {
+    // Step 2: accumulate only new bulletins (above the previously
+    // observed cursor).
+    let cursor = overview.last_bulletin_id.unwrap_or(i64::MIN);
+    for b in ring.buf.iter() {
         if b.id <= cursor {
             continue;
         }
@@ -263,7 +297,7 @@ fn apply_pg_status(state: &mut OverviewState, payload: OverviewPgStatusPayload) 
         if minute >= SPARKLINE_MINUTES {
             continue;
         }
-        let bucket = &mut state.sparkline[SPARKLINE_MINUTES - 1 - minute];
+        let bucket = &mut overview.sparkline[SPARKLINE_MINUTES - 1 - minute];
         bucket.count = bucket.count.saturating_add(1);
         let sev = Severity::parse(&b.level);
         match sev {
@@ -283,13 +317,13 @@ fn apply_pg_status(state: &mut OverviewState, payload: OverviewPgStatusPayload) 
         }
     }
 
-    // Noisy components: aggregate counts by source_id across *this poll's*
-    // bulletins. Phase 1 is snapshot-style — not a running tally — because
-    // that keeps the reducer pure and matches the "current noise" reading
-    // the spec asks for.
+    // Noisy components: aggregate counts by source_id across the entire
+    // ring — unlike the pre-Task-7 implementation (per-poll snapshot),
+    // the ring already gives a bounded window, so "noisy across the
+    // current history" is the natural semantic.
     use std::collections::HashMap;
     let mut by_source: HashMap<String, NoisyComponent> = HashMap::new();
-    for b in &bulletin_board.bulletins {
+    for b in ring.buf.iter() {
         if b.source_id.is_empty() {
             continue;
         }
@@ -315,29 +349,21 @@ fn apply_pg_status(state: &mut OverviewState, payload: OverviewPgStatusPayload) 
             .then_with(|| a.source_name.cmp(&b.source_name))
     });
     noisy.truncate(TOP_NOISY);
-    state.noisy = noisy;
-    if !state.noisy.is_empty() {
-        state.noisy_selected = state.noisy_selected.min(state.noisy.len() - 1);
+    overview.noisy = noisy;
+    if !overview.noisy.is_empty() {
+        overview.noisy_selected = overview.noisy_selected.min(overview.noisy.len() - 1);
     } else {
-        state.noisy_selected = 0;
+        overview.noisy_selected = 0;
     }
 
-    // Advance the bulletin-id cursor (informational — Phase 2 will actually
-    // use this for the Bulletins tab's `after-id` paging).
-    if let Some(max) = bulletin_board.bulletins.iter().map(|b| b.id).max() {
-        state.last_bulletin_id = Some(match state.last_bulletin_id {
+    // Advance the bulletin-id cursor so the next redraw is idempotent
+    // for the bulletins already folded into the sparkline.
+    if let Some(max) = ring.buf.iter().map(|b| b.id).max() {
+        overview.last_bulletin_id = Some(match overview.last_bulletin_id {
             Some(existing) => existing.max(max),
             None => max,
         });
     }
-
-    state.last_pg_refresh = Some(std::time::Instant::now());
-
-    state.snapshot = Some(OverviewSnapshot {
-        about,
-        controller,
-        fetched_at: Some(fetched_at),
-    });
 }
 
 /// Build the Unhealthy-queues leaderboard from a root-PG snapshot.
@@ -452,7 +478,7 @@ fn avg_repo_percent(repos: &[crate::client::health::RepoUsage]) -> u32 {
 /// Parse an ISO-8601 / RFC-3339 timestamp into seconds since the UNIX epoch.
 /// Returns `None` if the input is empty or unparseable — the reducer then
 /// silently drops that bulletin from the sparkline.
-fn parse_iso_seconds(s: &str) -> Option<i64> {
+pub(crate) fn parse_iso_seconds(s: &str) -> Option<i64> {
     if s.is_empty() {
         return None;
     }
@@ -467,8 +493,8 @@ fn parse_iso_seconds(s: &str) -> Option<i64> {
 mod tests {
     use super::*;
     use crate::client::{
-        AboutSnapshot, BulletinBoardSnapshot, BulletinSnapshot, ControllerStatusSnapshot,
-        QueueSnapshot, RootPgStatusSnapshot,
+        AboutSnapshot, BulletinSnapshot, ControllerStatusSnapshot, QueueSnapshot,
+        RootPgStatusSnapshot,
     };
     use crate::event::{OverviewPayload, OverviewPgStatusPayload};
     use std::time::{Duration, UNIX_EPOCH};
@@ -476,22 +502,13 @@ mod tests {
     // 2026-04-11T10:14:22Z in unix seconds.
     const T0: u64 = 1_775_902_462;
 
-    fn payload(
-        controller: ControllerStatusSnapshot,
-        _queues: Vec<QueueSnapshot>,
-        bulletins: Vec<BulletinSnapshot>,
-    ) -> OverviewPayload {
-        // `_queues` was fed into `root_pg.connections` before Task 3;
-        // the payload no longer carries `root_pg`, so queue-dependent
-        // tests seed `cluster.snapshot.root_pg_status` directly via
-        // `seed_root_pg` below.
+    fn payload(controller: ControllerStatusSnapshot) -> OverviewPayload {
         OverviewPayload::PgStatus(OverviewPgStatusPayload {
             about: AboutSnapshot {
                 version: "2.8.0".into(),
                 title: "NiFi".into(),
             },
             controller,
-            bulletin_board: BulletinBoardSnapshot { bulletins },
             fetched_at: UNIX_EPOCH + Duration::from_secs(T0),
         })
     }
@@ -536,6 +553,25 @@ mod tests {
         };
     }
 
+    /// Merge bulletins into the cluster snapshot's `BulletinRing` and
+    /// seed its meta so `redraw_bulletin_projections` has a fetched-at
+    /// anchor. Test-only: simulates what `spawn_bulletins` +
+    /// `apply_update` do in production.
+    fn seed_bulletins(
+        state: &mut crate::app::state::AppState,
+        bulletins: Vec<BulletinSnapshot>,
+        _fetched_secs: u64,
+    ) {
+        use crate::cluster::snapshot::FetchMeta;
+        use std::time::Instant;
+        state.cluster.snapshot.bulletins.merge(bulletins);
+        state.cluster.snapshot.bulletins.meta = Some(FetchMeta {
+            fetched_at: Instant::now(),
+            fetch_duration: Duration::from_millis(5),
+            next_interval: Duration::from_secs(10),
+        });
+    }
+
     fn q(id: &str, pct: u32) -> QueueSnapshot {
         QueueSnapshot {
             id: id.into(),
@@ -564,28 +600,10 @@ mod tests {
         }
     }
 
-    /// Like `payload` but with a custom `fetched_at` offset (seconds from
-    /// `UNIX_EPOCH`).  Used by multi-poll tests that need to simulate elapsed
-    /// wall-clock time between polls.
-    fn payload_at(bulletins: Vec<BulletinSnapshot>, fetched_secs: u64) -> OverviewPayload {
-        OverviewPayload::PgStatus(OverviewPgStatusPayload {
-            about: AboutSnapshot {
-                version: "2.8.0".into(),
-                title: "NiFi".into(),
-            },
-            controller: ControllerStatusSnapshot::default(),
-            bulletin_board: BulletinBoardSnapshot { bulletins },
-            fetched_at: UNIX_EPOCH + Duration::from_secs(fetched_secs),
-        })
-    }
-
     #[test]
     fn apply_populates_snapshot() {
         let mut state = OverviewState::new();
-        apply_payload(
-            &mut state,
-            payload(ControllerStatusSnapshot::default(), vec![], vec![]),
-        );
+        apply_payload(&mut state, payload(ControllerStatusSnapshot::default()));
         let snap = state.snapshot.as_ref().unwrap();
         assert_eq!(snap.about.version, "2.8.0");
         assert!(snap.fetched_at.is_some());
@@ -653,9 +671,15 @@ mod tests {
         assert_eq!(state.overview.unhealthy[9].fill_percent, 91);
     }
 
+    /// Fixed wall-clock anchor used by sparkline tests (same as the old
+    /// T0 constant, just reified as a `SystemTime`).
+    fn t0_anchor() -> std::time::SystemTime {
+        UNIX_EPOCH + Duration::from_secs(T0)
+    }
+
     #[test]
     fn sparkline_buckets_bulletins_by_minute() {
-        let mut state = OverviewState::new();
+        let mut state = crate::test_support::fresh_state();
         // fetched_at = 10:14:22Z. Bulletin at 10:14:10Z is 12s ago → bucket 0
         // (minute 0 from newest). Bulletin at 10:10:00Z is ~262s ago →
         // minute 4 → bucket SPARKLINE_MINUTES-1-4.
@@ -664,17 +688,15 @@ mod tests {
             bulletin(2, "ERROR", "b", "2026-04-11T10:10:00Z"),
             bulletin(3, "WARN", "a", "2026-04-11T10:14:20Z"),
         ];
-        apply_payload(
-            &mut state,
-            payload(ControllerStatusSnapshot::default(), vec![], bulletins),
-        );
-        let newest = state.sparkline[SPARKLINE_MINUTES - 1];
+        seed_bulletins(&mut state, bulletins, T0);
+        redraw_bulletin_projections_at(&mut state, t0_anchor());
+        let newest = state.overview.sparkline[SPARKLINE_MINUTES - 1];
         assert_eq!(
             newest.count, 2,
             "two bulletins within the most recent minute"
         );
         assert_eq!(newest.max_severity, Severity::Warning);
-        let four_minutes_old = state.sparkline[SPARKLINE_MINUTES - 1 - 4];
+        let four_minutes_old = state.overview.sparkline[SPARKLINE_MINUTES - 1 - 4];
         assert_eq!(four_minutes_old.count, 1);
         assert_eq!(four_minutes_old.max_severity, Severity::Error);
     }
@@ -684,29 +706,21 @@ mod tests {
         // Pin the absolute index orientation: a bulletin aged 0s goes to
         // index SPARKLINE_MINUTES-1, nothing else. A bulletin aged
         // ~14 minutes lands at index 0 (the oldest visible bucket).
-        let mut orientation_state = OverviewState::new();
-        let orientation_bulletins = vec![bulletin(
-            10,
-            "INFO",
-            "z",
-            "2026-04-11T10:14:22Z", // age 0s, exactly fetched_at
-        )];
-        apply_payload(
-            &mut orientation_state,
-            payload(
-                ControllerStatusSnapshot::default(),
-                vec![],
-                orientation_bulletins,
-            ),
+        let mut state = crate::test_support::fresh_state();
+        seed_bulletins(
+            &mut state,
+            vec![bulletin(10, "INFO", "z", "2026-04-11T10:14:22Z")],
+            T0,
         );
+        redraw_bulletin_projections_at(&mut state, t0_anchor());
         assert_eq!(
-            orientation_state.sparkline[SPARKLINE_MINUTES - 1].count,
+            state.overview.sparkline[SPARKLINE_MINUTES - 1].count,
             1,
             "age 0s bulletin must land in the newest bucket (last index)"
         );
         for i in 0..(SPARKLINE_MINUTES - 1) {
             assert_eq!(
-                orientation_state.sparkline[i].count, 0,
+                state.overview.sparkline[i].count, 0,
                 "non-newest buckets must be empty"
             );
         }
@@ -714,49 +728,46 @@ mod tests {
 
     #[test]
     fn sparkline_drops_bulletins_outside_window() {
-        let mut state = OverviewState::new();
+        let mut state = crate::test_support::fresh_state();
         // 30 minutes old — out of window.
-        let bulletins = vec![bulletin(1, "INFO", "a", "2026-04-11T09:44:22Z")];
-        apply_payload(
+        seed_bulletins(
             &mut state,
-            payload(ControllerStatusSnapshot::default(), vec![], bulletins),
+            vec![bulletin(1, "INFO", "a", "2026-04-11T09:44:22Z")],
+            T0,
         );
-        assert!(state.sparkline.iter().all(|b| b.count == 0));
+        redraw_bulletin_projections_at(&mut state, t0_anchor());
+        assert!(state.overview.sparkline.iter().all(|b| b.count == 0));
     }
 
     #[test]
     fn sparkline_does_not_double_count_bulletins_across_polls() {
         // Simulate two polls 10 seconds apart where the second poll still
         // returns the same bulletin (id=1) alongside a genuinely new one
-        // (id=2).  Only id=2 should increment the newest bucket.
-        let mut state = OverviewState::new();
+        // (id=2). Only id=2 should increment the newest bucket.
+        let mut state = crate::test_support::fresh_state();
 
-        // Poll 1 at T0: one bulletin in the current minute.
-        apply_payload(
+        // Poll 1 at T0: one bulletin in the current minute. The cluster
+        // ring dedups by id, so calling merge() twice with overlapping
+        // ids only stores the first occurrence — simulating NiFi's
+        // after-id paging behavior.
+        seed_bulletins(
             &mut state,
-            payload_at(
-                vec![bulletin(1, "INFO", "a", "2026-04-11T10:14:20Z")],
-                T0, // 10:14:22Z
-            ),
+            vec![bulletin(1, "INFO", "a", "2026-04-11T10:14:20Z")],
+            T0,
         );
-        assert_eq!(state.sparkline[SPARKLINE_MINUTES - 1].count, 1);
+        redraw_bulletin_projections_at(&mut state, t0_anchor());
+        assert_eq!(state.overview.sparkline[SPARKLINE_MINUTES - 1].count, 1);
 
-        // Poll 2 at T0+10s: bulletin id=1 is still on the board (NiFi hasn't
-        // evicted it), plus a brand-new id=2.
-        apply_payload(
+        // Poll 2 at T0+10s: id=2 is brand new; id=1 is a repeat that the
+        // merge() below skips because BulletinRing already has it.
+        seed_bulletins(
             &mut state,
-            payload_at(
-                vec![
-                    bulletin(1, "INFO", "a", "2026-04-11T10:14:20Z"),
-                    bulletin(2, "WARN", "b", "2026-04-11T10:14:30Z"),
-                ],
-                T0 + 10,
-            ),
+            vec![bulletin(2, "WARN", "b", "2026-04-11T10:14:30Z")],
+            T0 + 10,
         );
-        // Bucket 14 should have count 2 (id=1 from poll 1, id=2 from poll 2),
-        // NOT 3 (which would happen if id=1 were counted twice).
+        redraw_bulletin_projections_at(&mut state, UNIX_EPOCH + Duration::from_secs(T0 + 10));
         assert_eq!(
-            state.sparkline[SPARKLINE_MINUTES - 1].count,
+            state.overview.sparkline[SPARKLINE_MINUTES - 1].count,
             2,
             "id=1 must not be counted again on the second poll"
         );
@@ -765,34 +776,32 @@ mod tests {
     #[test]
     fn sparkline_rolls_window_forward_when_minute_elapses() {
         // Poll 1 at T0 (10:14:22Z): one bulletin lands in bucket 14.
-        let mut state = OverviewState::new();
-        apply_payload(
+        let mut state = crate::test_support::fresh_state();
+        seed_bulletins(
             &mut state,
-            payload_at(vec![bulletin(1, "INFO", "a", "2026-04-11T10:14:20Z")], T0),
+            vec![bulletin(1, "INFO", "a", "2026-04-11T10:14:20Z")],
+            T0,
         );
-        assert_eq!(state.sparkline[SPARKLINE_MINUTES - 1].count, 1);
+        redraw_bulletin_projections_at(&mut state, t0_anchor());
+        assert_eq!(state.overview.sparkline[SPARKLINE_MINUTES - 1].count, 1);
 
         // Poll 2 at T0+70s (10:15:32Z): a full minute has elapsed, so the
-        // window rolls left by 1.  The bulletin from poll 1 (now 72s old →
-        // minute 1) should have moved to bucket 13.  A new bulletin (id=2)
+        // window rolls left by 1. The bulletin from poll 1 (now 72s old →
+        // minute 1) should have moved to bucket 13. A new bulletin (id=2)
         // lands in the fresh bucket 14.
-        apply_payload(
+        seed_bulletins(
             &mut state,
-            payload_at(
-                vec![
-                    bulletin(1, "INFO", "a", "2026-04-11T10:14:20Z"), // old, not re-counted
-                    bulletin(2, "WARN", "b", "2026-04-11T10:15:30Z"), // new
-                ],
-                T0 + 70,
-            ),
+            vec![bulletin(2, "WARN", "b", "2026-04-11T10:15:30Z")],
+            T0 + 70,
         );
+        redraw_bulletin_projections_at(&mut state, UNIX_EPOCH + Duration::from_secs(T0 + 70));
         assert_eq!(
-            state.sparkline[SPARKLINE_MINUTES - 1].count,
+            state.overview.sparkline[SPARKLINE_MINUTES - 1].count,
             1,
             "only id=2 in the new current bucket"
         );
         assert_eq!(
-            state.sparkline[SPARKLINE_MINUTES - 2].count,
+            state.overview.sparkline[SPARKLINE_MINUTES - 2].count,
             1,
             "id=1 from poll 1 rolled into the previous-minute bucket"
         );
@@ -800,7 +809,7 @@ mod tests {
 
     #[test]
     fn noisy_components_ranked_by_count_then_severity() {
-        let mut state = OverviewState::new();
+        let mut state = crate::test_support::fresh_state();
         let bulletins = vec![
             bulletin(1, "INFO", "a", "2026-04-11T10:14:10Z"),
             bulletin(2, "INFO", "a", "2026-04-11T10:14:11Z"),
@@ -809,40 +818,33 @@ mod tests {
             bulletin(5, "INFO", "b", "2026-04-11T10:14:14Z"),
             bulletin(6, "INFO", "c", "2026-04-11T10:14:15Z"),
         ];
-        apply_payload(
-            &mut state,
-            payload(ControllerStatusSnapshot::default(), vec![], bulletins),
-        );
-        assert_eq!(state.noisy[0].source_id, "a");
-        assert_eq!(state.noisy[0].count, 3);
-        assert_eq!(state.noisy[0].max_severity, Severity::Error);
-        assert_eq!(state.noisy[1].source_id, "b");
-        assert_eq!(state.noisy[1].count, 2);
-        assert_eq!(state.noisy[2].source_id, "c");
+        seed_bulletins(&mut state, bulletins, T0);
+        redraw_bulletin_projections_at(&mut state, t0_anchor());
+        assert_eq!(state.overview.noisy[0].source_id, "a");
+        assert_eq!(state.overview.noisy[0].count, 3);
+        assert_eq!(state.overview.noisy[0].max_severity, Severity::Error);
+        assert_eq!(state.overview.noisy[1].source_id, "b");
+        assert_eq!(state.overview.noisy[1].count, 2);
+        assert_eq!(state.overview.noisy[2].source_id, "c");
     }
 
     #[test]
     fn noisy_leaderboard_truncated_to_top_five() {
-        let mut state = OverviewState::new();
+        let mut state = crate::test_support::fresh_state();
         let bulletins: Vec<BulletinSnapshot> = (0..20)
             .map(|i| bulletin(i, "INFO", &format!("s{i}"), "2026-04-11T10:14:10Z"))
             .collect();
-        apply_payload(
-            &mut state,
-            payload(ControllerStatusSnapshot::default(), vec![], bulletins),
-        );
-        assert_eq!(state.noisy.len(), TOP_NOISY);
+        seed_bulletins(&mut state, bulletins, T0);
+        redraw_bulletin_projections_at(&mut state, t0_anchor());
+        assert_eq!(state.overview.noisy.len(), TOP_NOISY);
     }
 
     #[test]
     fn empty_bulletin_timestamp_is_silently_skipped() {
-        let mut state = OverviewState::new();
-        let bulletins = vec![bulletin(1, "INFO", "a", "")];
-        apply_payload(
-            &mut state,
-            payload(ControllerStatusSnapshot::default(), vec![], bulletins),
-        );
-        assert!(state.sparkline.iter().all(|b| b.count == 0));
+        let mut state = crate::test_support::fresh_state();
+        seed_bulletins(&mut state, vec![bulletin(1, "INFO", "a", "")], T0);
+        redraw_bulletin_projections_at(&mut state, t0_anchor());
+        assert!(state.overview.sparkline.iter().all(|b| b.count == 0));
     }
 
     #[test]
@@ -856,61 +858,61 @@ mod tests {
 
     #[test]
     fn last_bulletin_id_monotonically_advances() {
-        let mut state = OverviewState::new();
-        apply_payload(
+        let mut state = crate::test_support::fresh_state();
+        // Merging lower-id batches after a higher-id batch must not
+        // regress the cursor. BulletinRing::merge enforces this, so
+        // each call here mirrors production behavior.
+        seed_bulletins(
             &mut state,
-            payload(
-                ControllerStatusSnapshot::default(),
-                vec![],
-                vec![bulletin(5, "INFO", "a", "2026-04-11T10:14:10Z")],
-            ),
+            vec![bulletin(5, "INFO", "a", "2026-04-11T10:14:10Z")],
+            T0,
         );
-        assert_eq!(state.last_bulletin_id, Some(5));
-        apply_payload(
+        redraw_bulletin_projections_at(&mut state, t0_anchor());
+        assert_eq!(state.overview.last_bulletin_id, Some(5));
+
+        seed_bulletins(
             &mut state,
-            payload(
-                ControllerStatusSnapshot::default(),
-                vec![],
-                vec![bulletin(3, "INFO", "a", "2026-04-11T10:14:11Z")],
-            ),
+            vec![bulletin(3, "INFO", "a", "2026-04-11T10:14:11Z")],
+            T0,
         );
-        assert_eq!(state.last_bulletin_id, Some(5));
-        apply_payload(
+        redraw_bulletin_projections_at(&mut state, t0_anchor());
+        assert_eq!(state.overview.last_bulletin_id, Some(5));
+
+        seed_bulletins(
             &mut state,
-            payload(
-                ControllerStatusSnapshot::default(),
-                vec![],
-                vec![bulletin(9, "INFO", "a", "2026-04-11T10:14:12Z")],
-            ),
+            vec![bulletin(9, "INFO", "a", "2026-04-11T10:14:12Z")],
+            T0,
         );
-        assert_eq!(state.last_bulletin_id, Some(9));
+        redraw_bulletin_projections_at(&mut state, t0_anchor());
+        assert_eq!(state.overview.last_bulletin_id, Some(9));
     }
 
     #[test]
     fn noisy_cursor_clamped_when_data_shrinks() {
-        let mut state = OverviewState::new();
-        state.noisy_selected = 4;
-        // Payload with 2 noisy sources (ids "a" and "b").
-        let bulletins = vec![
-            bulletin(1, "INFO", "a", "2026-04-11T10:14:10Z"),
-            bulletin(2, "INFO", "b", "2026-04-11T10:14:10Z"),
-        ];
-        apply_payload(
+        let mut state = crate::test_support::fresh_state();
+        state.overview.noisy_selected = 4;
+        seed_bulletins(
             &mut state,
-            payload(ControllerStatusSnapshot::default(), vec![], bulletins),
+            vec![
+                bulletin(1, "INFO", "a", "2026-04-11T10:14:10Z"),
+                bulletin(2, "INFO", "b", "2026-04-11T10:14:10Z"),
+            ],
+            T0,
         );
-        assert_eq!(state.noisy_selected, 1, "cursor clamped to len-1 = 1");
+        redraw_bulletin_projections_at(&mut state, t0_anchor());
+        assert_eq!(
+            state.overview.noisy_selected, 1,
+            "cursor clamped to len-1 = 1"
+        );
     }
 
     #[test]
     fn noisy_cursor_reset_to_zero_when_noisy_empty() {
-        let mut state = OverviewState::new();
-        state.noisy_selected = 3;
-        apply_payload(
-            &mut state,
-            payload(ControllerStatusSnapshot::default(), vec![], vec![]),
-        );
-        assert_eq!(state.noisy_selected, 0);
+        let mut state = crate::test_support::fresh_state();
+        state.overview.noisy_selected = 3;
+        seed_bulletins(&mut state, vec![], T0);
+        redraw_bulletin_projections_at(&mut state, t0_anchor());
+        assert_eq!(state.overview.noisy_selected, 0);
     }
 
     #[test]
@@ -1080,6 +1082,18 @@ mod tests {
         assert_eq!(root_pg.processors.running, 5);
         assert_eq!(state.overview.unhealthy.len(), 2);
         assert_eq!(state.overview.unhealthy[0].fill_percent, 95);
+    }
+
+    #[test]
+    fn redraw_bulletin_projections_is_noop_when_ring_meta_absent() {
+        let mut state = crate::test_support::fresh_state();
+        // No meta yet — cluster ring is pre-first-fetch.
+        redraw_bulletin_projections_at(&mut state, t0_anchor());
+        assert!(
+            state.overview.sparkline.iter().all(|b| b.count == 0),
+            "sparkline must stay empty without meta"
+        );
+        assert!(state.overview.noisy.is_empty());
     }
 
     #[test]

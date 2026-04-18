@@ -514,14 +514,10 @@ fn short_time(iso: &str) -> String {
 mod tests {
     use super::render;
     use crate::client::BulletinSnapshot;
-    use crate::event::BulletinsPayload;
-    use crate::view::bulletins::state::{BulletinsState, apply_payload};
+    use crate::view::bulletins::state::BulletinsState;
     use ratatui::Terminal;
     use ratatui::backend::TestBackend;
-    use std::time::{Duration, SystemTime, UNIX_EPOCH};
-
-    // 2026-04-11T10:14:22Z in unix seconds.
-    const T0: u64 = 1_775_902_462;
+    use std::time::{Duration, SystemTime};
 
     fn b(
         id: i64,
@@ -546,20 +542,21 @@ mod tests {
 
     fn seed_state(rows: Vec<BulletinSnapshot>) -> BulletinsState {
         let mut s = BulletinsState::with_capacity(100);
-        apply_payload(
-            &mut s,
-            BulletinsPayload {
-                bulletins: rows,
-                fetched_at: UNIX_EPOCH + Duration::from_secs(T0),
-            },
-        );
+        // Task 7: the production path populates the ring from the
+        // cluster snapshot via `redraw_bulletins(&mut AppState)`.
+        // Render tests construct `BulletinsState` directly, so we seed
+        // the mirror ring by hand AND replicate the auto-scroll
+        // bottom-snap that `redraw_bulletins` performs.
+        for row in rows {
+            s.ring.push_back(row);
+        }
+        if s.auto_scroll {
+            let max = s.grouped_view().len().saturating_sub(1);
+            s.selected = max;
+        }
         // Pin last_fetched_at to a fixed offset from SystemTime::now() so
         // the rendered "last Ns ago" label is width-stable across test
-        // runs. Without this, apply_payload copies the UNIX_EPOCH + T0
-        // timestamp above into last_fetched_at, and the renderer computes
-        // `now - last_fetched_at` which yields a duration whose length
-        // varies with real wall-clock time — shifting the title bar's
-        // trailing-dash count by a character and breaking the snapshot.
+        // runs.
         s.last_fetched_at = Some(SystemTime::now() - Duration::from_secs(3));
         s
     }

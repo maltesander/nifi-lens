@@ -16,8 +16,8 @@ use crate::client::{
 use crate::cluster::ClusterEndpoint;
 use crate::cluster::config::ClusterPollingConfig;
 use crate::cluster::fetcher_tasks::{
-    FetchTaskConfig, spawn_connections_by_pg, spawn_controller_services, spawn_controller_status,
-    spawn_root_pg_status,
+    FetchTaskConfig, spawn_bulletins, spawn_connections_by_pg, spawn_controller_services,
+    spawn_controller_status, spawn_root_pg_status,
 };
 use crate::cluster::snapshot::{ClusterSnapshot, FetchMeta};
 use crate::cluster::subscriber::SubscriberRegistry;
@@ -115,10 +115,15 @@ impl std::fmt::Debug for ClusterStore {
 impl ClusterStore {
     /// Constructs an empty store. Call `spawn_fetchers` to start the
     /// per-endpoint tasks on the current `LocalSet`.
-    pub fn new(config: ClusterPollingConfig) -> Self {
+    ///
+    /// `bulletins_capacity` sizes the cluster-owned `BulletinRing` and
+    /// is sourced from `config.bulletins.ring_size` by callers. Passing
+    /// `0` is technically valid (zero-capacity ring) but makes the ring
+    /// useless — the config loader enforces a 100..=100_000 bound.
+    pub fn new(config: ClusterPollingConfig, bulletins_capacity: usize) -> Self {
         let (pg_ids_tx, pg_ids_rx) = watch::channel(Vec::<String>::new());
         Self {
-            snapshot: ClusterSnapshot::default(),
+            snapshot: ClusterSnapshot::with_bulletins_capacity(bulletins_capacity),
             subscribers: SubscriberRegistry::new(),
             config,
             notifies: NotifyMap::default(),
@@ -195,6 +200,26 @@ impl ClusterStore {
             self.pg_ids_rx.clone(),
             conns_cfg,
         ));
+
+        let bulletins_cfg = FetchTaskConfig {
+            base_interval: self.config.bulletins,
+            max_interval: self.config.max_interval,
+            jitter_percent: self.config.jitter_percent,
+            force: self.notifies.get(ClusterEndpoint::Bulletins),
+        };
+        // Initialize the bulletin-fetch cursor from whatever the ring
+        // already observed. On fresh startup this is `None` → 0 → the
+        // fetcher sends `after_id = None`. On context switch the store
+        // is new and also 0-initialized.
+        let bulletins_cursor = Arc::new(std::sync::atomic::AtomicI64::new(
+            self.snapshot.bulletins.last_id.unwrap_or(0),
+        ));
+        self.handles.push(spawn_bulletins(
+            client.clone(),
+            tx.clone(),
+            bulletins_cursor,
+            bulletins_cfg,
+        ));
     }
 
     pub fn subscribe(&mut self, endpoint: ClusterEndpoint, view: ViewId) {
@@ -241,12 +266,17 @@ impl ClusterStore {
                     .or_default()
                     .apply(result, meta);
             }
-            ClusterUpdate::BulletinsDelta { result, meta } => {
-                // Bulletins merge semantics are task-7 territory; for the
-                // skeleton we replace. Task 7 will swap this for a
-                // cursor-aware merge.
-                self.snapshot.bulletins.apply(result, meta);
-            }
+            ClusterUpdate::BulletinsDelta { result, meta } => match result {
+                Ok(batch) => {
+                    self.snapshot.bulletins.merge(batch);
+                    self.snapshot.bulletins.meta = Some(meta);
+                    self.snapshot.bulletins.last_error = None;
+                }
+                Err(err) => {
+                    self.snapshot.bulletins.last_error = Some(err.to_string());
+                    self.snapshot.bulletins.meta = Some(meta);
+                }
+            },
         }
         endpoint
     }
@@ -293,7 +323,7 @@ mod tests {
 
     #[test]
     fn apply_update_routes_to_correct_field() {
-        let mut store = ClusterStore::new(ClusterPollingConfig::default());
+        let mut store = ClusterStore::new(ClusterPollingConfig::default(), 5000);
         let err = NifiLensError::WritesNotImplemented;
         let ep = store.apply_update(ClusterUpdate::About(Err(err), meta()));
         assert_eq!(ep, ClusterEndpoint::About);
@@ -306,7 +336,7 @@ mod tests {
 
     #[test]
     fn controller_status_update_is_applied() {
-        let mut store = ClusterStore::new(ClusterPollingConfig::default());
+        let mut store = ClusterStore::new(ClusterPollingConfig::default(), 5000);
         let fake_status = ControllerStatusSnapshot {
             running: 1,
             stopped: 0,
@@ -334,7 +364,7 @@ mod tests {
     #[test]
     fn controller_services_update_is_applied() {
         use crate::client::ControllerServiceCounts;
-        let mut store = ClusterStore::new(ClusterPollingConfig::default());
+        let mut store = ClusterStore::new(ClusterPollingConfig::default(), 5000);
         let fake_cs = ControllerServicesSnapshot {
             counts: ControllerServiceCounts {
                 enabled: 4,
@@ -358,7 +388,7 @@ mod tests {
 
     #[test]
     fn root_pg_status_update_is_applied() {
-        let mut store = ClusterStore::new(ClusterPollingConfig::default());
+        let mut store = ClusterStore::new(ClusterPollingConfig::default(), 5000);
         let fake_pg = RootPgStatusSnapshot {
             flow_files_queued: 42,
             bytes_queued: 1024,
@@ -392,7 +422,7 @@ mod tests {
         let local = tokio::task::LocalSet::new();
         local
             .run_until(async {
-                let mut store = ClusterStore::new(ClusterPollingConfig::default());
+                let mut store = ClusterStore::new(ClusterPollingConfig::default(), 5000);
                 let notify = store.notify_for(ClusterEndpoint::RootPgStatus);
                 let flag = std::rc::Rc::new(std::cell::Cell::new(false));
                 let flag_clone = flag.clone();
@@ -422,7 +452,7 @@ mod tests {
         let local = tokio::task::LocalSet::new();
         local
             .run_until(async {
-                let store = ClusterStore::new(ClusterPollingConfig::default());
+                let store = ClusterStore::new(ClusterPollingConfig::default(), 5000);
                 let notify = store.notify_for(ClusterEndpoint::ControllerStatus);
                 let flag = std::rc::Rc::new(std::cell::Cell::new(false));
                 let flag_clone = flag.clone();
@@ -449,7 +479,7 @@ mod tests {
         let local = tokio::task::LocalSet::new();
         local
             .run_until(async {
-                let mut store = ClusterStore::new(ClusterPollingConfig::default());
+                let mut store = ClusterStore::new(ClusterPollingConfig::default(), 5000);
                 // Pretend we spawned something.
                 store.handles.push(tokio::task::spawn_local(async {}));
                 store.shutdown();
@@ -465,7 +495,7 @@ mod tests {
         use crate::client::{ConnectionEndpointIds, ConnectionEndpoints};
         use std::collections::HashMap;
 
-        let mut store = ClusterStore::new(ClusterPollingConfig::default());
+        let mut store = ClusterStore::new(ClusterPollingConfig::default(), 5000);
         let mut by_connection = HashMap::new();
         by_connection.insert(
             "conn-1".to_string(),
@@ -501,7 +531,7 @@ mod tests {
 
     #[test]
     fn publish_pg_ids_mirrors_snapshot_into_watch_channel() {
-        let mut store = ClusterStore::new(ClusterPollingConfig::default());
+        let mut store = ClusterStore::new(ClusterPollingConfig::default(), 5000);
         // Before any RootPgStatus update the watch channel is empty.
         assert!(store.pg_ids_rx.borrow().is_empty());
 
@@ -527,5 +557,95 @@ mod tests {
             vec!["root".to_string(), "child".to_string()],
             "publish_pg_ids must mirror the Ready snapshot's id list"
         );
+    }
+
+    fn fake_bulletin(id: i64) -> BulletinSnapshot {
+        BulletinSnapshot {
+            id,
+            level: "INFO".into(),
+            message: format!("msg-{id}"),
+            source_id: format!("src-{id}"),
+            source_name: format!("Proc-{id}"),
+            source_type: "PROCESSOR".into(),
+            group_id: "root".into(),
+            timestamp_iso: "2026-04-14T00:00:00Z".into(),
+            timestamp_human: String::new(),
+        }
+    }
+
+    #[test]
+    fn bulletins_delta_ok_merges_into_ring() {
+        let mut store = ClusterStore::new(ClusterPollingConfig::default(), 10);
+        // First batch: 3 bulletins.
+        let batch1 = vec![fake_bulletin(1), fake_bulletin(2), fake_bulletin(3)];
+        let ep = store.apply_update(ClusterUpdate::BulletinsDelta {
+            result: Ok(batch1),
+            meta: meta(),
+        });
+        assert_eq!(ep, ClusterEndpoint::Bulletins);
+        assert_eq!(store.snapshot.bulletins.buf.len(), 3);
+        assert_eq!(store.snapshot.bulletins.last_id, Some(3));
+        assert!(store.snapshot.bulletins.meta.is_some());
+        assert!(store.snapshot.bulletins.last_error.is_none());
+
+        // Second batch: 2 more bulletins.
+        let batch2 = vec![fake_bulletin(4), fake_bulletin(5)];
+        store.apply_update(ClusterUpdate::BulletinsDelta {
+            result: Ok(batch2),
+            meta: meta(),
+        });
+        assert_eq!(store.snapshot.bulletins.buf.len(), 5);
+        assert_eq!(store.snapshot.bulletins.last_id, Some(5));
+    }
+
+    #[test]
+    fn bulletins_ring_drops_oldest_at_capacity() {
+        let mut store = ClusterStore::new(ClusterPollingConfig::default(), 3);
+        let batch = vec![
+            fake_bulletin(1),
+            fake_bulletin(2),
+            fake_bulletin(3),
+            fake_bulletin(4),
+            fake_bulletin(5),
+        ];
+        store.apply_update(ClusterUpdate::BulletinsDelta {
+            result: Ok(batch),
+            meta: meta(),
+        });
+        assert_eq!(store.snapshot.bulletins.buf.len(), 3);
+        // Oldest three dropped: only 3, 4, 5 remain.
+        assert_eq!(store.snapshot.bulletins.buf.front().unwrap().id, 3);
+        assert_eq!(store.snapshot.bulletins.buf.back().unwrap().id, 5);
+        assert_eq!(store.snapshot.bulletins.last_id, Some(5));
+    }
+
+    #[test]
+    fn bulletins_delta_err_preserves_ring_sets_last_error() {
+        let mut store = ClusterStore::new(ClusterPollingConfig::default(), 10);
+        // Seed with a successful batch first.
+        store.apply_update(ClusterUpdate::BulletinsDelta {
+            result: Ok(vec![fake_bulletin(1), fake_bulletin(2)]),
+            meta: meta(),
+        });
+        assert_eq!(store.snapshot.bulletins.buf.len(), 2);
+        // Now a failing batch.
+        store.apply_update(ClusterUpdate::BulletinsDelta {
+            result: Err(NifiLensError::WritesNotImplemented),
+            meta: meta(),
+        });
+        assert_eq!(
+            store.snapshot.bulletins.buf.len(),
+            2,
+            "ring must retain prior entries on failure"
+        );
+        assert_eq!(store.snapshot.bulletins.last_id, Some(2));
+        assert!(store.snapshot.bulletins.last_error.is_some());
+        // A subsequent successful batch clears last_error.
+        store.apply_update(ClusterUpdate::BulletinsDelta {
+            result: Ok(vec![fake_bulletin(3)]),
+            meta: meta(),
+        });
+        assert!(store.snapshot.bulletins.last_error.is_none());
+        assert_eq!(store.snapshot.bulletins.last_id, Some(3));
     }
 }

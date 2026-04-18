@@ -189,15 +189,28 @@ mod tests {
     use super::super::update;
     use crate::app::state::{AppState, PendingIntent, ViewId};
     use crate::client::BulletinSnapshot;
-    use crate::event::{AppEvent, BulletinsPayload, ViewPayload};
     use crossterm::event::{KeyCode, KeyModifiers};
-    use std::time::SystemTime;
+
+    /// Merge the given bulletins into the cluster-owned ring and mirror
+    /// them into `state.bulletins` via `redraw_bulletins` — the Task 7
+    /// equivalent of the old `BulletinsPayload` data-event path.
+    fn apply_bulletins(state: &mut AppState, bulletins: Vec<BulletinSnapshot>) {
+        use crate::cluster::snapshot::FetchMeta;
+        use std::time::{Duration, Instant};
+        state.cluster.snapshot.bulletins.merge(bulletins);
+        state.cluster.snapshot.bulletins.meta = Some(FetchMeta {
+            fetched_at: Instant::now(),
+            fetch_duration: Duration::from_millis(5),
+            next_interval: Duration::from_secs(5),
+        });
+        crate::view::bulletins::state::redraw_bulletins(state);
+    }
 
     /// Push one ERROR bulletin into `state.bulletins.ring` directly.
     fn seed_one_bulletin(state: &mut AppState) {
-        let c = tiny_config();
-        let payload = BulletinsPayload {
-            bulletins: vec![BulletinSnapshot {
+        apply_bulletins(
+            state,
+            vec![BulletinSnapshot {
                 id: 1,
                 level: "ERROR".into(),
                 message: "seed[id=a] boom".into(),
@@ -208,14 +221,11 @@ mod tests {
                 timestamp_iso: "2026-04-14T00:00:01Z".into(),
                 timestamp_human: String::new(),
             }],
-            fetched_at: SystemTime::now(),
-        };
-        update(state, AppEvent::Data(ViewPayload::Bulletins(payload)), &c);
+        );
     }
 
     /// Push `n` INFO bulletins with distinct IDs into `state.bulletins.ring`.
     fn seed_multiple_bulletins(state: &mut AppState, n: usize) {
-        let c = tiny_config();
         let bulletins = (1..=(n as i64))
             .map(|i| BulletinSnapshot {
                 id: i,
@@ -229,11 +239,7 @@ mod tests {
                 timestamp_human: String::new(),
             })
             .collect();
-        let payload = BulletinsPayload {
-            bulletins,
-            fetched_at: SystemTime::now(),
-        };
-        update(state, AppEvent::Data(ViewPayload::Bulletins(payload)), &c);
+        apply_bulletins(state, bulletins);
         state.bulletins.auto_scroll = false;
         state.bulletins.selected = 0;
     }
@@ -241,9 +247,9 @@ mod tests {
     #[test]
     fn bulletins_data_event_seeds_ring() {
         let mut s = fresh_state();
-        let c = tiny_config();
-        let payload = BulletinsPayload {
-            bulletins: vec![BulletinSnapshot {
+        apply_bulletins(
+            &mut s,
+            vec![BulletinSnapshot {
                 id: 1,
                 level: "ERROR".into(),
                 message: "m".into(),
@@ -254,10 +260,7 @@ mod tests {
                 timestamp_iso: "2026-04-11T10:14:22Z".into(),
                 timestamp_human: String::new(),
             }],
-            fetched_at: SystemTime::now(),
-        };
-        let r = update(&mut s, AppEvent::Data(ViewPayload::Bulletins(payload)), &c);
-        assert!(r.redraw);
+        );
         assert_eq!(s.bulletins.ring.len(), 1);
     }
 
@@ -320,8 +323,9 @@ mod tests {
         let c = tiny_config();
         s.current_tab = ViewId::Bulletins;
         // Seed one bulletin so there's a selection.
-        let payload = BulletinsPayload {
-            bulletins: vec![BulletinSnapshot {
+        apply_bulletins(
+            &mut s,
+            vec![BulletinSnapshot {
                 id: 1,
                 level: "ERROR".into(),
                 message: "m".into(),
@@ -332,9 +336,7 @@ mod tests {
                 timestamp_iso: "2026-04-11T10:14:22Z".into(),
                 timestamp_human: String::new(),
             }],
-            fetched_at: SystemTime::now(),
-        };
-        update(&mut s, AppEvent::Data(ViewPayload::Bulletins(payload)), &c);
+        );
         let r = update(&mut s, key(KeyCode::Enter, KeyModifiers::NONE), &c);
         match r.intent {
             Some(PendingIntent::Goto(crate::intent::CrossLink::OpenInBrowser {
@@ -414,8 +416,9 @@ mod tests {
         let mut s = fresh_state();
         let c = tiny_config();
         s.current_tab = ViewId::Bulletins;
-        let payload = BulletinsPayload {
-            bulletins: vec![BulletinSnapshot {
+        apply_bulletins(
+            &mut s,
+            vec![BulletinSnapshot {
                 id: 1,
                 level: "ERROR".into(),
                 message: "P[id=a] boom".into(),
@@ -426,9 +429,7 @@ mod tests {
                 timestamp_iso: "2026-04-11T10:14:22Z".into(),
                 timestamp_human: String::new(),
             }],
-            fetched_at: SystemTime::now(),
-        };
-        update(&mut s, AppEvent::Data(ViewPayload::Bulletins(payload)), &c);
+        );
         assert!(s.bulletins.mutes.is_empty());
         update(&mut s, key(KeyCode::Char('M'), KeyModifiers::SHIFT), &c);
         assert!(s.bulletins.mutes.contains("src-muted"));
@@ -469,8 +470,9 @@ mod tests {
         let c = tiny_config();
         s.current_tab = ViewId::Bulletins;
         // Seed two and move selection off the oldest.
-        let payload = BulletinsPayload {
-            bulletins: vec![
+        apply_bulletins(
+            &mut s,
+            vec![
                 BulletinSnapshot {
                     id: 1,
                     level: "INFO".into(),
@@ -494,9 +496,7 @@ mod tests {
                     timestamp_human: String::new(),
                 },
             ],
-            fetched_at: SystemTime::now(),
-        };
-        update(&mut s, AppEvent::Data(ViewPayload::Bulletins(payload)), &c);
+        );
         s.bulletins.auto_scroll = false;
         s.bulletins.selected = 1;
         update(&mut s, key(KeyCode::Home, KeyModifiers::NONE), &c);
@@ -542,8 +542,9 @@ mod tests {
         let c = tiny_config();
         s.current_tab = ViewId::Bulletins;
         // Seed two bulletins so row nav has room to move.
-        let payload = BulletinsPayload {
-            bulletins: vec![
+        apply_bulletins(
+            &mut s,
+            vec![
                 BulletinSnapshot {
                     id: 1,
                     level: "INFO".into(),
@@ -567,9 +568,7 @@ mod tests {
                     timestamp_human: String::new(),
                 },
             ],
-            fetched_at: SystemTime::now(),
-        };
-        update(&mut s, AppEvent::Data(ViewPayload::Bulletins(payload)), &c);
+        );
         s.bulletins.auto_scroll = false;
         s.bulletins.selected = 0;
 

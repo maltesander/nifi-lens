@@ -2,16 +2,15 @@
 //! swaps it on tab change.
 //!
 //! Phase 1 shipped the Overview worker (10s cadence) and Phase 2 added
-//! the Bulletins worker (5s cadence). Browser (Phase 3) and Tracer
-//! (Phase 4) will plug into the same pattern.
+//! the Bulletins worker (5s cadence). Phase 3's Browser worker and
+//! Phase 4's Tracer worker plug into the same pattern. Task 7 retired
+//! the Bulletins worker — Bulletins now subscribes to the cluster-owned
+//! `BulletinRing` and has no per-view task.
 
-use std::future::Future;
 use std::sync::Arc;
-use std::time::Duration;
 
 use tokio::sync::{RwLock, mpsc};
 use tokio::task::JoinHandle;
-use tracing;
 
 use crate::app::state::ViewId;
 use crate::client::NifiClient;
@@ -41,34 +40,6 @@ pub(crate) async fn send_poll_result(
     }
 }
 
-/// Spawn a polling worker on the current `LocalSet` that calls `poll_fn`
-/// every `interval`, shipping results via [`send_poll_result`]. `label`
-/// is used for log output. The closure is `FnMut` so callers like
-/// Bulletins can capture mutable cursor state.
-pub(crate) fn spawn_polling_worker<F, Fut>(
-    interval: Duration,
-    label: &'static str,
-    mut poll_fn: F,
-    tx: mpsc::Sender<AppEvent>,
-) -> JoinHandle<()>
-where
-    F: FnMut() -> Fut + 'static,
-    Fut: Future<Output = Result<ViewPayload, NifiLensError>>,
-{
-    tokio::task::spawn_local(async move {
-        let mut ticker = tokio::time::interval(interval);
-        ticker.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
-        loop {
-            ticker.tick().await;
-            send_poll_result(&tx, label, poll_fn().await).await;
-            if tx.is_closed() {
-                tracing::debug!(worker = label, "channel closed, exiting");
-                return;
-            }
-        }
-    })
-}
-
 #[derive(Default)]
 pub struct WorkerRegistry {
     current: Option<(ViewId, JoinHandle<()>)>,
@@ -87,13 +58,11 @@ impl WorkerRegistry {
     /// `subscribe` on entry into a view and `unsubscribe` on exit so
     /// `ClusterStore` can gate expensive endpoints to only the views
     /// that need them (Task 10).
-    #[allow(clippy::too_many_arguments)]
     pub fn ensure(
         &mut self,
         view: ViewId,
         client: &Arc<RwLock<NifiClient>>,
         tx: &mpsc::Sender<AppEvent>,
-        bulletins_last_id: Option<i64>,
         browser: &mut crate::view::browser::state::BrowserState,
         cluster: &mut crate::cluster::ClusterStore,
         polling: &crate::config::PollingConfig,
@@ -119,6 +88,14 @@ impl WorkerRegistry {
                     cluster.unsubscribe(
                         crate::cluster::ClusterEndpoint::ControllerServices,
                         ViewId::Overview,
+                    );
+                    cluster
+                        .unsubscribe(crate::cluster::ClusterEndpoint::Bulletins, ViewId::Overview);
+                }
+                ViewId::Bulletins => {
+                    cluster.unsubscribe(
+                        crate::cluster::ClusterEndpoint::Bulletins,
+                        ViewId::Bulletins,
                     );
                 }
                 ViewId::Browser => {
@@ -159,6 +136,9 @@ impl WorkerRegistry {
                     crate::cluster::ClusterEndpoint::ControllerServices,
                     ViewId::Overview,
                 );
+                // Overview's sparkline + noisy-components panel reads
+                // from the shared bulletins ring.
+                cluster.subscribe(crate::cluster::ClusterEndpoint::Bulletins, ViewId::Overview);
                 Some(crate::view::overview::worker::spawn(
                     client.clone(),
                     tx.clone(),
@@ -167,13 +147,18 @@ impl WorkerRegistry {
                 ))
             }
             ViewId::Bulletins => {
-                tracing::debug!(?view, "worker registry: spawning bulletins worker");
-                Some(crate::view::bulletins::worker::spawn(
-                    client.clone(),
-                    tx.clone(),
-                    bulletins_last_id,
-                    polling.bulletins.interval,
-                ))
+                tracing::debug!(
+                    ?view,
+                    "worker registry: subscribing bulletins to shared ring"
+                );
+                // Task 7: Bulletins no longer has a per-view worker —
+                // the cluster store polls the shared `BulletinRing` and
+                // `redraw_bulletins` mirrors it into `BulletinsState`.
+                cluster.subscribe(
+                    crate::cluster::ClusterEndpoint::Bulletins,
+                    ViewId::Bulletins,
+                );
+                None
             }
             ViewId::Browser => {
                 tracing::debug!(?view, "worker registry: spawning browser worker");
@@ -242,20 +227,22 @@ mod tests {
     use std::path::PathBuf;
 
     use super::*;
-    use crate::event::BulletinsPayload;
+    use crate::event::EventsPayload;
 
     #[tokio::test]
     async fn send_poll_result_ok_yields_data_event() {
         let (tx, mut rx) = mpsc::channel(4);
-        let payload = ViewPayload::Bulletins(BulletinsPayload {
-            bulletins: Vec::new(),
-            fetched_at: std::time::SystemTime::now(),
+        // Any ViewPayload works for this smoke test; pick Events to
+        // avoid depending on the Bulletins ring fixture.
+        let payload = ViewPayload::Events(EventsPayload::QueryFailed {
+            query_id: None,
+            error: "smoke".into(),
         });
         send_poll_result(&tx, "test", Ok(payload)).await;
         let ev = rx.recv().await.expect("event");
         assert!(
-            matches!(ev, AppEvent::Data(ViewPayload::Bulletins(_))),
-            "expected Data(Bulletins)"
+            matches!(ev, AppEvent::Data(ViewPayload::Events(_))),
+            "expected Data(Events)"
         );
     }
 

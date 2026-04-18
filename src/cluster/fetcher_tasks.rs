@@ -6,6 +6,7 @@
 //! calls them during startup and context switch.
 
 use std::sync::Arc;
+use std::sync::atomic::{AtomicI64, Ordering};
 use std::time::{Duration, Instant};
 
 use tokio::sync::{Notify, RwLock, mpsc, watch};
@@ -157,6 +158,68 @@ pub(crate) fn spawn_controller_services(
                 .is_err()
             {
                 tracing::debug!("controller_services fetch: channel closed, exiting");
+                return;
+            }
+
+            next_interval = adaptive_interval(cfg.base_interval, duration, cfg.max_interval);
+            sleep_with_jitter(next_interval, cfg.jitter_percent, &cfg.force).await;
+        }
+    })
+}
+
+/// Spawns the bulletins fetch loop. Cursor-aware: holds an
+/// `Arc<AtomicI64>` initialized from the ring's `last_id` at spawn time
+/// and advanced to `max(batch_id)` after each successful fetch. Emits
+/// `AppEvent::ClusterUpdate(ClusterUpdate::BulletinsDelta { result, meta })`
+/// on every cycle — the store merges successful batches into the
+/// cluster-owned `BulletinRing` and preserves `last_error` on failure.
+///
+/// Sentinel: a cursor of `0` is treated as "unbounded" and sent as
+/// `after_id = None` to the server. NiFi bulletin ids are positive, so
+/// `0` can stand in for `None` without collision.
+pub(crate) fn spawn_bulletins(
+    client: Arc<RwLock<NifiClient>>,
+    tx: mpsc::Sender<AppEvent>,
+    cursor: Arc<AtomicI64>,
+    cfg: FetchTaskConfig,
+) -> JoinHandle<()> {
+    tokio::task::spawn_local(async move {
+        let mut next_interval = cfg.base_interval;
+        loop {
+            let t0 = Instant::now();
+            let after = cursor.load(Ordering::Relaxed);
+            let after_opt = if after > 0 { Some(after) } else { None };
+            // Holding the read guard across the NiFi call is safe: the
+            // sole writer of `client` is the context-switch intent, which
+            // tears down this store before replacing the `NifiClient`.
+            let result = {
+                let guard = client.read().await;
+                guard.bulletin_board(after_opt, Some(1000)).await
+            };
+            let duration = t0.elapsed();
+            let meta = FetchMeta {
+                // Timestamp the *request*, not the response. On a slow
+                // cluster where fetch_duration is seconds, the data
+                // already represents state at `t0`, not now.
+                fetched_at: t0,
+                fetch_duration: duration,
+                next_interval,
+            };
+            let mapped = result.map(|snap| {
+                if let Some(max) = snap.bulletins.iter().map(|b| b.id).max() {
+                    cursor.store(max.max(after), Ordering::Relaxed);
+                }
+                snap.bulletins
+            });
+            if tx
+                .send(AppEvent::ClusterUpdate(ClusterUpdate::BulletinsDelta {
+                    result: mapped,
+                    meta,
+                }))
+                .await
+                .is_err()
+            {
+                tracing::debug!("bulletins fetch: channel closed, exiting");
                 return;
             }
 

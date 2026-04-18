@@ -2,12 +2,11 @@
 
 pub mod render;
 pub mod state;
-pub mod worker;
 
 use ratatui::Frame;
 use ratatui::layout::Rect;
 
-pub use state::{BulletinsState, apply_payload};
+pub use state::{BulletinsState, redraw_bulletins};
 
 pub fn render(
     frame: &mut Frame,
