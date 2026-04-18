@@ -11,6 +11,7 @@ use crate::client::{
     AboutSnapshot, BulletinSnapshot, ConnectionEndpoints, ControllerServicesSnapshot,
     ControllerStatusSnapshot, RootPgStatusSnapshot,
 };
+use crate::cluster::ClusterEndpoint;
 use crate::error::NifiLensError;
 
 /// Metadata about a single fetch — timing, measured duration, and the
@@ -157,6 +158,44 @@ impl ClusterSnapshot {
             ..Self::default()
         }
     }
+
+    /// Returns the `next_interval` from the latest `FetchMeta` for
+    /// `endpoint`, or `None` if the endpoint has never been polled.
+    /// Used by the F12 debug dump to surface the adaptive-cadence state.
+    ///
+    /// For the fan-out `ConnectionsByPg` endpoint this returns the
+    /// maximum `next_interval` across all per-PG entries — useful as a
+    /// worst-case indicator at a glance.
+    pub fn next_interval_for(&self, endpoint: ClusterEndpoint) -> Option<Duration> {
+        fn meta_of<T>(state: &EndpointState<T>) -> Option<&FetchMeta> {
+            match state {
+                EndpointState::Ready { meta, .. } | EndpointState::Failed { meta, .. } => {
+                    Some(meta)
+                }
+                EndpointState::Loading => None,
+            }
+        }
+        match endpoint {
+            ClusterEndpoint::About => meta_of(&self.about).map(|m| m.next_interval),
+            ClusterEndpoint::ControllerStatus => {
+                meta_of(&self.controller_status).map(|m| m.next_interval)
+            }
+            ClusterEndpoint::RootPgStatus => meta_of(&self.root_pg_status).map(|m| m.next_interval),
+            ClusterEndpoint::ControllerServices => {
+                meta_of(&self.controller_services).map(|m| m.next_interval)
+            }
+            ClusterEndpoint::SystemDiagnostics => {
+                meta_of(&self.system_diagnostics).map(|m| m.next_interval)
+            }
+            ClusterEndpoint::ConnectionsByPg => self
+                .connections_by_pg
+                .values()
+                .filter_map(meta_of)
+                .map(|m| m.next_interval)
+                .max(),
+            ClusterEndpoint::Bulletins => self.bulletins.meta.map(|m| m.next_interval),
+        }
+    }
 }
 
 #[cfg(test)]
@@ -206,5 +245,73 @@ mod tests {
         state.apply(Ok(99), fake_meta());
         assert!(matches!(state, EndpointState::Ready { data: 99, .. }));
         assert_eq!(state.latest(), Some(&99));
+    }
+
+    #[test]
+    fn next_interval_for_returns_none_on_loading() {
+        let snap = ClusterSnapshot::default();
+        assert!(
+            snap.next_interval_for(ClusterEndpoint::RootPgStatus)
+                .is_none()
+        );
+    }
+
+    #[test]
+    fn next_interval_for_returns_meta_interval_on_ready() {
+        let mut snap = ClusterSnapshot::default();
+        let meta = FetchMeta {
+            fetched_at: Instant::now(),
+            fetch_duration: Duration::from_millis(10),
+            next_interval: Duration::from_secs(20),
+        };
+        snap.controller_status
+            .apply(Ok(ControllerStatusSnapshot::default()), meta);
+        assert_eq!(
+            snap.next_interval_for(ClusterEndpoint::ControllerStatus),
+            Some(Duration::from_secs(20)),
+        );
+    }
+
+    #[test]
+    fn next_interval_for_preserves_meta_on_failed() {
+        let mut snap = ClusterSnapshot::default();
+        let meta = FetchMeta {
+            fetched_at: Instant::now(),
+            fetch_duration: Duration::from_millis(5),
+            next_interval: Duration::from_secs(15),
+        };
+        snap.controller_status
+            .apply(Err(NifiLensError::WritesNotImplemented), meta);
+        assert_eq!(
+            snap.next_interval_for(ClusterEndpoint::ControllerStatus),
+            Some(Duration::from_secs(15)),
+        );
+    }
+
+    #[test]
+    fn next_interval_for_connections_returns_max() {
+        let mut snap = ClusterSnapshot::default();
+        let meta_a = FetchMeta {
+            fetched_at: Instant::now(),
+            fetch_duration: Duration::from_millis(5),
+            next_interval: Duration::from_secs(10),
+        };
+        let meta_b = FetchMeta {
+            fetched_at: Instant::now(),
+            fetch_duration: Duration::from_millis(5),
+            next_interval: Duration::from_secs(30),
+        };
+        snap.connections_by_pg
+            .entry("pg_a".into())
+            .or_default()
+            .apply(Ok(ConnectionEndpoints::default()), meta_a);
+        snap.connections_by_pg
+            .entry("pg_b".into())
+            .or_default()
+            .apply(Ok(ConnectionEndpoints::default()), meta_b);
+        assert_eq!(
+            snap.next_interval_for(ClusterEndpoint::ConnectionsByPg),
+            Some(Duration::from_secs(30)),
+        );
     }
 }

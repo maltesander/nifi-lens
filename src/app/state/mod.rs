@@ -940,6 +940,21 @@ fn handle_key(state: &mut AppState, key: KeyEvent, config: &Config) -> UpdateRes
         for (chord, source) in &table {
             tracing::info!(target: "nifi_lens::input", "{chord:12} = {source}");
         }
+        for (endpoint, subs) in state.cluster.subscribers.debug_snapshot() {
+            let subs_list: Vec<String> = subs.iter().map(|s| format!("{:?}", s.0)).collect();
+            tracing::info!(
+                target: "nifi_lens::input",
+                endpoint = %endpoint,
+                subscribers = ?subs_list,
+                subs_count = subs.len(),
+                next_interval_ms = state
+                    .cluster
+                    .snapshot
+                    .next_interval_for(endpoint)
+                    .map(|d| d.as_millis() as u64),
+                "cluster endpoint state"
+            );
+        }
         return UpdateResult::default();
     }
 
