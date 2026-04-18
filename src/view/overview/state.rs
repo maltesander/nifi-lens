@@ -426,6 +426,7 @@ mod tests {
                 flow_files_queued: 0,
                 bytes_queued: 0,
                 connections: queues,
+                ..Default::default()
             },
             bulletin_board: BulletinBoardSnapshot { bulletins },
             fetched_at: UNIX_EPOCH + Duration::from_secs(T0),
@@ -474,6 +475,7 @@ mod tests {
                 flow_files_queued: 0,
                 bytes_queued: 0,
                 connections: vec![],
+                ..Default::default()
             },
             bulletin_board: BulletinBoardSnapshot { bulletins },
             fetched_at: UNIX_EPOCH + Duration::from_secs(fetched_secs),

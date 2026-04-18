@@ -789,6 +789,7 @@ mod tests {
                     bytes_queued: 512,
                     queued_display: "40 / 512 B".into(),
                 }],
+                ..Default::default()
             },
             bulletin_board: BulletinBoardSnapshot::default(),
             fetched_at: UNIX_EPOCH + Duration::from_secs(T0),
@@ -852,6 +853,7 @@ mod tests {
                 flow_files_queued: 50_000,
                 bytes_queued: 8_000_000,
                 connections: queues,
+                ..Default::default()
             },
             bulletin_board: BulletinBoardSnapshot { bulletins },
             fetched_at: UNIX_EPOCH + Duration::from_secs(T0),
@@ -894,6 +896,7 @@ mod tests {
                     flow_files_queued: 120,
                     bytes_queued: 4096,
                     connections: vec![],
+                    ..Default::default()
                 },
                 bulletin_board: BulletinBoardSnapshot::default(),
                 fetched_at: UNIX_EPOCH + Duration::from_secs(T0),
@@ -1278,6 +1281,7 @@ mod tests {
                     flow_files_queued: 0,
                     bytes_queued: 0,
                     connections,
+                    ..Default::default()
                 },
                 bulletin_board: BulletinBoardSnapshot::default(),
                 fetched_at: UNIX_EPOCH + Duration::from_secs(T0),

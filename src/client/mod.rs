@@ -272,18 +272,11 @@ impl NifiClient {
                 })
             })?;
 
-        let mut snapshot = RootPgStatusSnapshot::default();
-        let Some(pg_dto) = entity.process_group_status else {
-            return Ok(snapshot);
-        };
-        if let Some(agg) = &pg_dto.aggregate_snapshot {
-            snapshot.flow_files_queued = agg.flow_files_queued.unwrap_or(0).max(0) as u32;
-            snapshot.bytes_queued = agg.bytes_queued.unwrap_or(0).max(0) as u64;
-            collect_queues(agg, &mut snapshot.connections);
-        }
-        snapshot
-            .connections
-            .sort_by(|a, b| b.fill_percent.cmp(&a.fill_percent));
+        let snapshot = entity
+            .process_group_status
+            .and_then(|pg| pg.aggregate_snapshot)
+            .map(|agg| RootPgStatusSnapshot::from_aggregate(&agg))
+            .unwrap_or_default();
         Ok(snapshot)
     }
 
@@ -402,6 +395,23 @@ pub struct QueueSnapshot {
     pub queued_display: String,
 }
 
+/// Per-state processor counts derived from a recursive
+/// `ProcessGroupStatusSnapshotDto` walk. Unknown run-statuses
+/// are silently dropped.
+#[derive(Debug, Clone, Default)]
+pub struct ProcessorStateCounts {
+    pub running: u32,
+    pub stopped: u32,
+    pub invalid: u32,
+    pub disabled: u32,
+}
+
+impl ProcessorStateCounts {
+    pub fn total(&self) -> u32 {
+        self.running + self.stopped + self.invalid + self.disabled
+    }
+}
+
 /// Recursive process-group status, flattened for the Overview tab.
 /// `connections` is sorted descending by `fill_percent`.
 #[derive(Debug, Clone, Default)]
@@ -409,6 +419,70 @@ pub struct RootPgStatusSnapshot {
     pub flow_files_queued: u32,
     pub bytes_queued: u64,
     pub connections: Vec<QueueSnapshot>,
+    /// Total number of process groups in the flow, root inclusive.
+    pub process_group_count: u32,
+    /// Total input ports across every PG.
+    pub input_port_count: u32,
+    /// Total output ports across every PG.
+    pub output_port_count: u32,
+    /// Per-state processor tally across every PG.
+    pub processors: ProcessorStateCounts,
+}
+
+impl RootPgStatusSnapshot {
+    /// Build a snapshot from the recursive aggregate snapshot returned by
+    /// `flow().get_process_group_status("root", recursive=true)`. Pure; no I/O.
+    pub fn from_aggregate(
+        agg: &nifi_rust_client::dynamic::types::ProcessGroupStatusSnapshotDto,
+    ) -> Self {
+        let mut snap = Self {
+            flow_files_queued: agg.flow_files_queued.unwrap_or(0).max(0) as u32,
+            bytes_queued: agg.bytes_queued.unwrap_or(0).max(0) as u64,
+            ..Self::default()
+        };
+        collect_queues(agg, &mut snap.connections);
+        snap.connections
+            .sort_by(|a, b| b.fill_percent.cmp(&a.fill_percent));
+        collect_counts(agg, &mut snap);
+        snap
+    }
+}
+
+/// Walks the PG tree and tallies PGs, ports, and processors per state into `out`.
+fn collect_counts(
+    snapshot: &nifi_rust_client::dynamic::types::ProcessGroupStatusSnapshotDto,
+    out: &mut RootPgStatusSnapshot,
+) {
+    out.process_group_count += 1;
+    if let Some(ports) = snapshot.input_port_status_snapshots.as_ref() {
+        out.input_port_count += ports.len() as u32;
+    }
+    if let Some(ports) = snapshot.output_port_status_snapshots.as_ref() {
+        out.output_port_count += ports.len() as u32;
+    }
+    if let Some(procs) = snapshot.processor_status_snapshots.as_ref() {
+        for entity in procs {
+            let Some(snap) = entity.processor_status_snapshot.as_ref() else {
+                continue;
+            };
+            // NiFi strings: "Running" / "Stopped" / "Invalid" / "Disabled"
+            // (mixed-case; match exactly to mirror NiFi's API surface).
+            match snap.run_status.as_deref() {
+                Some("Running") => out.processors.running += 1,
+                Some("Stopped") => out.processors.stopped += 1,
+                Some("Invalid") => out.processors.invalid += 1,
+                Some("Disabled") => out.processors.disabled += 1,
+                _ => { /* unknown / "Validating" / null — drop silently */ }
+            }
+        }
+    }
+    if let Some(children) = snapshot.process_group_status_snapshots.as_ref() {
+        for entity in children {
+            if let Some(child) = entity.process_group_status_snapshot.as_ref() {
+                collect_counts(child, out);
+            }
+        }
+    }
 }
 
 /// Bulletin severity in sort order: Info < Warning < Error. `Unknown`
@@ -478,6 +552,67 @@ pub use tracer::{
     AttributeTriple, ContentRender, ContentSide, ContentSnapshot, LatestEventsSnapshot,
     LineagePoll, LineageSnapshot, PREVIEW_CAP_BYTES, ProvenanceEventDetail, ProvenanceEventSummary,
 };
+
+#[cfg(test)]
+mod root_pg_status_snapshot_tests {
+    use super::*;
+    use nifi_rust_client::dynamic::types::{
+        PortStatusSnapshotEntity, ProcessGroupStatusSnapshotDto, ProcessGroupStatusSnapshotEntity,
+        ProcessorStatusSnapshotDto, ProcessorStatusSnapshotEntity,
+    };
+
+    fn proc(state: &str) -> ProcessorStatusSnapshotEntity {
+        let mut snap = ProcessorStatusSnapshotDto::default();
+        snap.run_status = Some(state.into());
+        let mut entity = ProcessorStatusSnapshotEntity::default();
+        entity.processor_status_snapshot = Some(snap);
+        entity
+    }
+
+    fn port() -> PortStatusSnapshotEntity {
+        PortStatusSnapshotEntity::default()
+    }
+
+    #[test]
+    fn walker_tallies_descendants() {
+        // root has: 2 procs (Running, Stopped), 1 input port, 0 output, 1 child PG.
+        // child PG has: 1 proc (Invalid), 0 ports, 0 children.
+        let mut child_pg = ProcessGroupStatusSnapshotDto::default();
+        child_pg.processor_status_snapshots = Some(vec![proc("Invalid")]);
+
+        let mut child_entity = ProcessGroupStatusSnapshotEntity::default();
+        child_entity.process_group_status_snapshot = Some(child_pg);
+
+        let mut root = ProcessGroupStatusSnapshotDto::default();
+        root.processor_status_snapshots = Some(vec![proc("Running"), proc("Stopped")]);
+        root.input_port_status_snapshots = Some(vec![port()]);
+        root.output_port_status_snapshots = None;
+        root.process_group_status_snapshots = Some(vec![child_entity]);
+
+        let snap = RootPgStatusSnapshot::from_aggregate(&root);
+        assert_eq!(snap.process_group_count, 2, "root + 1 child");
+        assert_eq!(snap.input_port_count, 1);
+        assert_eq!(snap.output_port_count, 0);
+        assert_eq!(snap.processors.running, 1);
+        assert_eq!(snap.processors.stopped, 1);
+        assert_eq!(snap.processors.invalid, 1);
+        assert_eq!(snap.processors.disabled, 0);
+    }
+
+    #[test]
+    fn walker_handles_unknown_run_status_gracefully() {
+        let mut root = ProcessGroupStatusSnapshotDto::default();
+        root.processor_status_snapshots = Some(vec![proc("Validating"), proc("Disabled")]);
+
+        let snap = RootPgStatusSnapshot::from_aggregate(&root);
+        assert_eq!(snap.processors.disabled, 1);
+        // Unknown states ("Validating") are silently dropped — they're rare and not surfaced.
+        assert_eq!(
+            snap.processors.running + snap.processors.stopped + snap.processors.invalid,
+            0
+        );
+    }
+}
 
 #[cfg(test)]
 mod controller_status_snapshot_tests {
