@@ -59,17 +59,37 @@ pub fn spawn(
 
 async fn pg_status_payload(client: &Arc<RwLock<NifiClient>>) -> Result<ViewPayload, NifiLensError> {
     let guard = client.read().await;
-    let about = guard.about().await?;
-    let controller = guard.controller_status().await?;
-    let root_pg = guard.root_pg_status().await?;
-    let bulletin_board = guard.bulletin_board(None, Some(200)).await?;
+    // The five fetches run in parallel — same pattern as browser_tree.
+    let about_fut = guard.about();
+    let controller_fut = guard.controller_status();
+    let root_pg_fut = guard.root_pg_status();
+    let bulletin_fut = guard.bulletin_board(None, Some(200));
+    let cs_fut = guard.controller_service_counts();
+    let (about_res, controller_res, root_pg_res, bulletin_res, cs_res) =
+        tokio::join!(about_fut, controller_fut, root_pg_fut, bulletin_fut, cs_fut);
+    let about = about_res?;
+    let controller = controller_res?;
+    let root_pg = root_pg_res?;
+    let bulletin_board = bulletin_res?;
+    // CS list failure is non-fatal — degrades the CS row in the panel
+    // but everything else still renders. Same pattern as browser_tree.
+    let cs_counts = match cs_res {
+        Ok(c) => Some(c),
+        Err(err) => {
+            tracing::warn!(
+                error = %err,
+                "overview worker: controller services list fetch failed; CS row will degrade"
+            );
+            None
+        }
+    };
     Ok(ViewPayload::Overview(OverviewPayload::PgStatus(
         OverviewPgStatusPayload {
             about,
             controller,
             root_pg,
             bulletin_board,
-            cs_counts: None,
+            cs_counts,
             fetched_at: SystemTime::now(),
         },
     )))
