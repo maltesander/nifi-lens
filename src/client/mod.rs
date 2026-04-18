@@ -280,6 +280,33 @@ impl NifiClient {
         Ok(snapshot)
     }
 
+    /// Calls `flow().get_controller_services_from_group("root", false, true, false, None)`
+    /// and tallies the listing into per-state counts. Used by the Overview
+    /// Components panel.
+    pub async fn controller_service_counts(
+        &self,
+    ) -> Result<ControllerServiceCounts, NifiLensError> {
+        tracing::debug!(
+            context = %self.context_name,
+            "fetching /flow/process-groups/root/controller-services?descendant=true"
+        );
+        let listing = self
+            .inner
+            .flow()
+            .get_controller_services_from_group("root", Some(false), Some(true), Some(false), None)
+            .await
+            .map_err(|err| {
+                classify_or_fallback(&self.context_name, Box::new(err), |source| {
+                    NifiLensError::ControllerServicesListFailed {
+                        context: self.context_name.clone(),
+                        id: "root".to_string(),
+                        source,
+                    }
+                })
+            })?;
+        Ok(ControllerServiceCounts::from_listing(&listing))
+    }
+
     /// Calls `flow().get_bulletin_board(after, None, None, None, None, limit)`
     /// and flattens the response for the Overview reducer.
     pub async fn bulletin_board(
@@ -544,6 +571,49 @@ pub struct BulletinBoardSnapshot {
     pub bulletins: Vec<BulletinSnapshot>,
 }
 
+/// Per-state controller-service counts pulled from
+/// `flow().get_controller_services_from_group(root, ancestors=false, descendants=true)`.
+/// Classification priority is `validation_status == "INVALID"` first, then `state`.
+#[derive(Debug, Clone, Default)]
+pub struct ControllerServiceCounts {
+    pub enabled: u32,
+    pub disabled: u32,
+    pub invalid: u32,
+}
+
+impl ControllerServiceCounts {
+    pub fn total(&self) -> u32 {
+        self.enabled + self.disabled + self.invalid
+    }
+
+    /// Tally the listing into per-state buckets. Pure; no I/O.
+    pub fn from_listing(
+        listing: &nifi_rust_client::dynamic::types::ControllerServicesEntity,
+    ) -> Self {
+        let mut out = Self::default();
+        let Some(items) = listing.controller_services.as_ref() else {
+            return out;
+        };
+        for entity in items {
+            let Some(c) = entity.component.as_ref() else {
+                continue;
+            };
+            // Match codebase convention (widget/run_icon.rs): normalize via uppercase.
+            let validation_upper = c.validation_status.as_deref().map(str::to_ascii_uppercase);
+            let state_upper = c.state.as_deref().map(str::to_ascii_uppercase);
+            if validation_upper.as_deref() == Some("INVALID") {
+                out.invalid += 1;
+            } else if state_upper.as_deref() == Some("ENABLED") {
+                out.enabled += 1;
+            } else {
+                // DISABLED, ENABLING, DISABLING, missing state — all collapse here.
+                out.disabled += 1;
+            }
+        }
+        out
+    }
+}
+
 pub use browser::{
     ConnectionDetail, ControllerServiceDetail, ControllerServiceSummary, FolderKind, NodeKind,
     NodeStatusSummary, PortDetail, PortKind, ProcessGroupDetail, ProcessorDetail, RawNode,
@@ -662,5 +732,40 @@ mod controller_status_snapshot_tests {
         assert_eq!(snap.locally_modified, 2);
         assert_eq!(snap.sync_failure, 0);
         assert_eq!(snap.up_to_date, 4);
+    }
+}
+
+#[cfg(test)]
+mod controller_service_counts_tests {
+    use super::*;
+    use nifi_rust_client::dynamic::types::{
+        ControllerServiceDto, ControllerServiceEntity, ControllerServicesEntity,
+    };
+
+    fn cs(state: &str, validation: &str) -> ControllerServiceEntity {
+        let mut dto = ControllerServiceDto::default();
+        dto.state = Some(state.into());
+        dto.validation_status = Some(validation.into());
+        let mut entity = ControllerServiceEntity::default();
+        entity.component = Some(dto);
+        entity
+    }
+
+    #[test]
+    fn tally_classifies_invalid_first_then_state() {
+        let mut listing = ControllerServicesEntity::default();
+        listing.controller_services = Some(vec![
+            cs("ENABLED", "VALID"),
+            cs("ENABLED", "VALID"),
+            cs("DISABLED", "VALID"),
+            cs("DISABLED", "INVALID"), // counted as INVALID, not DISABLED
+            cs("ENABLED", "INVALID"),  // counted as INVALID, not ENABLED
+            cs("ENABLING", "VALIDATING"), // falls through to "other" -> disabled bucket
+        ]);
+        let counts = ControllerServiceCounts::from_listing(&listing);
+        assert_eq!(counts.enabled, 2);
+        assert_eq!(counts.disabled, 2, "1 truly disabled + 1 ENABLING/other");
+        assert_eq!(counts.invalid, 2);
+        assert_eq!(counts.total(), 6);
     }
 }
