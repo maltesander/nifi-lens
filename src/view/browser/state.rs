@@ -1101,35 +1101,17 @@ pub struct PropertiesModalState {
     /// on every frame; if the node is gone after a tree refresh, the
     /// modal will close itself at render time.
     pub arena_idx: usize,
-    pub scroll: usize,
+    /// Selected row in the property list. Clamped at render time
+    /// against the live `props.len()`.
+    pub selected: usize,
 }
 
 impl PropertiesModalState {
     pub fn new(arena_idx: usize) -> Self {
         Self {
             arena_idx,
-            scroll: 0,
+            selected: 0,
         }
-    }
-
-    pub fn scroll_down(&mut self, max: usize) {
-        if self.scroll + 1 < max {
-            self.scroll += 1;
-        }
-    }
-
-    pub fn scroll_up(&mut self) {
-        if self.scroll > 0 {
-            self.scroll -= 1;
-        }
-    }
-
-    pub fn page_down(&mut self, by: usize, max: usize) {
-        self.scroll = (self.scroll + by).min(max.saturating_sub(1));
-    }
-
-    pub fn page_up(&mut self, by: usize) {
-        self.scroll = self.scroll.saturating_sub(by);
     }
 }
 
@@ -2974,5 +2956,12 @@ mod tests {
         );
         let ring: VecDeque<crate::client::BulletinSnapshot> = VecDeque::new();
         assert_eq!(s.section_len(DetailSection::Connections, &ring), 2);
+    }
+
+    #[test]
+    fn properties_modal_state_defaults_selected_to_zero() {
+        let s = PropertiesModalState::new(42);
+        assert_eq!(s.arena_idx, 42);
+        assert_eq!(s.selected, 0);
     }
 }

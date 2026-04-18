@@ -358,7 +358,7 @@ pub fn render_properties_modal(
             Span::raw(v.clone()),
         ]));
     }
-    let start = modal.scroll.min(lines.len().saturating_sub(1));
+    let start = modal.selected.min(lines.len().saturating_sub(1));
     let windowed: Vec<Line> = lines
         .into_iter()
         .skip(start)
