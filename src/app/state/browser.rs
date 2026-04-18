@@ -902,6 +902,40 @@ mod tests {
     }
 
     #[test]
+    fn properties_modal_ctrl_p_does_not_close() {
+        use crate::client::ProcessorDetail;
+        use crate::view::browser::state::{NodeDetail, PropertiesModalState};
+        let (mut s, c) = seeded_browser_state();
+        s.browser.details.insert(
+            1,
+            NodeDetail::Processor(ProcessorDetail {
+                id: "gen".into(),
+                name: "Gen".into(),
+                type_name: "x".into(),
+                bundle: String::new(),
+                run_status: "Running".into(),
+                scheduling_strategy: String::new(),
+                scheduling_period: String::new(),
+                concurrent_tasks: 1,
+                run_duration_ms: 0,
+                penalty_duration: String::new(),
+                yield_duration: String::new(),
+                bulletin_level: String::new(),
+                properties: vec![("K".into(), "v".into())],
+                validation_errors: vec![],
+            }),
+        );
+        s.modal = Some(Modal::Properties(PropertiesModalState::new(1)));
+
+        update(&mut s, key(KeyCode::Char('p'), KeyModifiers::CONTROL), &c);
+
+        assert!(
+            matches!(s.modal, Some(Modal::Properties(_))),
+            "Ctrl+P must NOT dismiss the Properties modal (it's the FuzzyFind Up chord; modifier must be guarded)"
+        );
+    }
+
+    #[test]
     fn t_is_no_longer_a_goto_events_shortcut() {
         // `t` used to emit GotoEvents; that shortcut is retired.
         // Users now navigate via `g` which opens the AppAction::Goto modal.

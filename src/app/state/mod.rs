@@ -1372,8 +1372,8 @@ fn handle_key(state: &mut AppState, key: KeyEvent, config: &Config) -> UpdateRes
                     _ => 0,
                 };
 
-                match key.code {
-                    KeyCode::Esc | KeyCode::Char('p') => {
+                match (key.code, key.modifiers) {
+                    (KeyCode::Esc, _) | (KeyCode::Char('p'), KeyModifiers::NONE) => {
                         state.modal = None;
                         return UpdateResult {
                             redraw: true,
@@ -1381,7 +1381,7 @@ fn handle_key(state: &mut AppState, key: KeyEvent, config: &Config) -> UpdateRes
                             tracer_followup: None,
                         };
                     }
-                    KeyCode::Up => {
+                    (KeyCode::Up, _) => {
                         CursorRef::new(&mut ps.selected, props_len).move_up();
                         return UpdateResult {
                             redraw: true,
@@ -1389,7 +1389,7 @@ fn handle_key(state: &mut AppState, key: KeyEvent, config: &Config) -> UpdateRes
                             tracer_followup: None,
                         };
                     }
-                    KeyCode::Down => {
+                    (KeyCode::Down, _) => {
                         CursorRef::new(&mut ps.selected, props_len).move_down();
                         return UpdateResult {
                             redraw: true,
@@ -1397,7 +1397,7 @@ fn handle_key(state: &mut AppState, key: KeyEvent, config: &Config) -> UpdateRes
                             tracer_followup: None,
                         };
                     }
-                    KeyCode::PageUp => {
+                    (KeyCode::PageUp, _) => {
                         CursorRef::new(&mut ps.selected, props_len).page_up(10);
                         return UpdateResult {
                             redraw: true,
@@ -1405,7 +1405,7 @@ fn handle_key(state: &mut AppState, key: KeyEvent, config: &Config) -> UpdateRes
                             tracer_followup: None,
                         };
                     }
-                    KeyCode::PageDown => {
+                    (KeyCode::PageDown, _) => {
                         CursorRef::new(&mut ps.selected, props_len).page_down(10);
                         return UpdateResult {
                             redraw: true,
@@ -1413,7 +1413,7 @@ fn handle_key(state: &mut AppState, key: KeyEvent, config: &Config) -> UpdateRes
                             tracer_followup: None,
                         };
                     }
-                    KeyCode::Home => {
+                    (KeyCode::Home, _) => {
                         CursorRef::new(&mut ps.selected, props_len).goto_first();
                         return UpdateResult {
                             redraw: true,
@@ -1421,7 +1421,7 @@ fn handle_key(state: &mut AppState, key: KeyEvent, config: &Config) -> UpdateRes
                             tracer_followup: None,
                         };
                     }
-                    KeyCode::End => {
+                    (KeyCode::End, _) => {
                         CursorRef::new(&mut ps.selected, props_len).goto_last();
                         return UpdateResult {
                             redraw: true,
