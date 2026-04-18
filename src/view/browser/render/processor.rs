@@ -60,14 +60,14 @@ pub fn render(
 
     // 2. Inner vertical layout.
     //    identity:    4  (2 borders + 2 content lines)
-    //    properties(+validation): Fill(1)
+    //    properties(+validation): Min(5) — 2 borders + header + ≥2 data rows
     //    connections: 6  (2 borders + header + 3 data rows)
     //    bulletins:   6  (2 borders + 4 content rows)
     let rows = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
             Constraint::Length(4),
-            Constraint::Fill(1),
+            Constraint::Min(5),
             Constraint::Length(6),
             Constraint::Length(6),
         ])
