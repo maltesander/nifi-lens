@@ -58,6 +58,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   logged to `nifilens.log` rather than surfaced in the TUI. Monitor the
   log if you run mixed-version fleets.
 
+### Security
+
+- Bump `rand` to 0.10, resolving [RUSTSEC-2026-0097][rustsec-0097]
+  (soundness advisory for `ThreadRng` under custom loggers).
+
+[rustsec-0097]: https://rustsec.org/advisories/RUSTSEC-2026-0097
+
 ### Breaking (config)
 
 - Per-view polling sections `[polling.overview]`, `[polling.browser]`,

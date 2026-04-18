@@ -29,7 +29,7 @@ futures = "0.3"
 humantime-serde = "1.1"
 nifi-rust-client = { version = "0.10.1", features = ["dynamic"] }
 nucleo = "0.5"
-rand = "0.8"
+rand = "0.10"
 ratatui = "0.30"
 semver = "1"
 serde = { version = "1", features = ["derive"] }

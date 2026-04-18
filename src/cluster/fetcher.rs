@@ -7,7 +7,7 @@
 use std::sync::atomic::Ordering;
 use std::time::Duration;
 
-use rand::Rng;
+use rand::RngExt;
 use tokio::sync::Notify;
 
 /// Next-interval formula per spec §Scale Protection strategy A:
@@ -31,7 +31,7 @@ pub async fn sleep_with_jitter(interval: Duration, jitter_percent: u8, force: &N
     let jitter_frac = f64::from(jitter_percent) / 100.0;
     let lo = 1.0 - jitter_frac;
     let hi = 1.0 + jitter_frac;
-    let factor: f64 = rand::thread_rng().gen_range(lo..=hi);
+    let factor: f64 = rand::rng().random_range(lo..=hi);
     let dur = interval.mul_f64(factor.max(0.0));
     tokio::select! {
         _ = tokio::time::sleep(dur) => {}
