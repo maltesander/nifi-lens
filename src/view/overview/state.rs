@@ -87,6 +87,7 @@ pub struct OverviewSnapshot {
     pub about: AboutSnapshot,
     pub controller: ControllerStatusSnapshot,
     pub root_pg: RootPgStatusSnapshot,
+    pub cs_counts: Option<crate::client::ControllerServiceCounts>,
     pub fetched_at: Option<SystemTime>,
 }
 
@@ -186,6 +187,7 @@ fn apply_pg_status(state: &mut OverviewState, payload: OverviewPgStatusPayload) 
         controller,
         root_pg,
         bulletin_board,
+        cs_counts,
         fetched_at,
     } = payload;
 
@@ -336,6 +338,7 @@ fn apply_pg_status(state: &mut OverviewState, payload: OverviewPgStatusPayload) 
         about,
         controller,
         root_pg,
+        cs_counts,
         fetched_at: Some(fetched_at),
     });
 }
@@ -429,6 +432,7 @@ mod tests {
                 ..Default::default()
             },
             bulletin_board: BulletinBoardSnapshot { bulletins },
+            cs_counts: None,
             fetched_at: UNIX_EPOCH + Duration::from_secs(T0),
         })
     }
@@ -478,6 +482,7 @@ mod tests {
                 ..Default::default()
             },
             bulletin_board: BulletinBoardSnapshot { bulletins },
+            cs_counts: None,
             fetched_at: UNIX_EPOCH + Duration::from_secs(fetched_secs),
         })
     }
@@ -492,6 +497,26 @@ mod tests {
         let snap = state.snapshot.as_ref().unwrap();
         assert_eq!(snap.about.version, "2.8.0");
         assert!(snap.fetched_at.is_some());
+    }
+
+    #[test]
+    fn apply_populates_cs_counts() {
+        use crate::client::ControllerServiceCounts;
+        let mut state = OverviewState::new();
+        let mut p = match payload(ControllerStatusSnapshot::default(), vec![], vec![]) {
+            OverviewPayload::PgStatus(p) => p,
+            _ => unreachable!(),
+        };
+        p.cs_counts = Some(ControllerServiceCounts {
+            enabled: 5,
+            disabled: 1,
+            invalid: 0,
+        });
+        apply_payload(&mut state, OverviewPayload::PgStatus(p));
+        let snap = state.snapshot.as_ref().unwrap();
+        let cs = snap.cs_counts.as_ref().unwrap();
+        assert_eq!(cs.enabled, 5);
+        assert_eq!(cs.disabled, 1);
     }
 
     #[test]

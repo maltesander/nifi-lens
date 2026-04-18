@@ -411,6 +411,7 @@ mod tests {
             },
             root_pg: RootPgStatusSnapshot::default(),
             bulletin_board: BulletinBoardSnapshot::default(),
+            cs_counts: None,
             fetched_at: SystemTime::now(),
         });
         let r = update(&mut s, AppEvent::Data(ViewPayload::Overview(payload)), &c);

@@ -69,6 +69,7 @@ async fn pg_status_payload(client: &Arc<RwLock<NifiClient>>) -> Result<ViewPaylo
             controller,
             root_pg,
             bulletin_board,
+            cs_counts: None,
             fetched_at: SystemTime::now(),
         },
     )))

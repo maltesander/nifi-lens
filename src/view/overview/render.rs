@@ -792,6 +792,7 @@ mod tests {
                 ..Default::default()
             },
             bulletin_board: BulletinBoardSnapshot::default(),
+            cs_counts: None,
             fetched_at: UNIX_EPOCH + Duration::from_secs(T0),
         });
         apply_payload(&mut state, payload);
@@ -856,6 +857,7 @@ mod tests {
                 ..Default::default()
             },
             bulletin_board: BulletinBoardSnapshot { bulletins },
+            cs_counts: None,
             fetched_at: UNIX_EPOCH + Duration::from_secs(T0),
         });
         apply_payload(&mut state, payload);
@@ -899,6 +901,7 @@ mod tests {
                     ..Default::default()
                 },
                 bulletin_board: BulletinBoardSnapshot::default(),
+                cs_counts: None,
                 fetched_at: UNIX_EPOCH + Duration::from_secs(T0),
             }),
         );
@@ -1164,6 +1167,7 @@ mod tests {
                 },
                 root_pg: RootPgStatusSnapshot::default(),
                 bulletin_board: BulletinBoardSnapshot::default(),
+                cs_counts: None,
                 fetched_at: UNIX_EPOCH + Duration::from_secs(T0),
             }),
         );
@@ -1284,6 +1288,7 @@ mod tests {
                     ..Default::default()
                 },
                 bulletin_board: BulletinBoardSnapshot::default(),
+                cs_counts: None,
                 fetched_at: UNIX_EPOCH + Duration::from_secs(T0),
             }),
         );

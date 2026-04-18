@@ -56,6 +56,10 @@ pub struct OverviewPgStatusPayload {
     pub controller: crate::client::ControllerStatusSnapshot,
     pub root_pg: crate::client::RootPgStatusSnapshot,
     pub bulletin_board: crate::client::BulletinBoardSnapshot,
+    /// Per-state controller-service counts. `None` when the CS fetch
+    /// failed — the CS row in the Components panel degrades to a
+    /// "cs list unavailable" chip in that case.
+    pub cs_counts: Option<crate::client::ControllerServiceCounts>,
     /// Wall-clock time (from `std::time::SystemTime`) when the worker
     /// assembled this payload. Used by the reducer to anchor the sparkline
     /// and the "last refresh" label.
