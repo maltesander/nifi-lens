@@ -8,7 +8,7 @@ use std::time::{Duration, Instant};
 
 use crate::client::health::SystemDiagSnapshot;
 use crate::client::{
-    AboutSnapshot, BulletinSnapshot, ConnectionEndpoints, ControllerServiceCounts,
+    AboutSnapshot, BulletinSnapshot, ConnectionEndpoints, ControllerServicesSnapshot,
     ControllerStatusSnapshot, RootPgStatusSnapshot,
 };
 use crate::error::NifiLensError;
@@ -89,7 +89,7 @@ pub struct ClusterSnapshot {
     pub about: EndpointState<AboutSnapshot>,
     pub controller_status: EndpointState<ControllerStatusSnapshot>,
     pub root_pg_status: EndpointState<RootPgStatusSnapshot>,
-    pub controller_services: EndpointState<ControllerServiceCounts>,
+    pub controller_services: EndpointState<ControllerServicesSnapshot>,
     pub system_diagnostics: EndpointState<SystemDiagSnapshot>,
     pub connections_by_pg: HashMap<String, EndpointState<ConnectionEndpoints>>,
     pub bulletins: EndpointState<Vec<BulletinSnapshot>>,

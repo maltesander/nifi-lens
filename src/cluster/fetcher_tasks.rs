@@ -138,7 +138,7 @@ pub(crate) fn spawn_controller_services(
             // tears down this store before replacing the `NifiClient`.
             let result = {
                 let guard = client.read().await;
-                guard.controller_service_counts().await
+                guard.controller_services_snapshot().await
             };
             let duration = t0.elapsed();
             let meta = FetchMeta {

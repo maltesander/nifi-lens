@@ -377,7 +377,14 @@ pub(crate) fn derive_unhealthy(
 pub(crate) fn redraw_components(state: &mut crate::app::state::AppState) {
     // Mirror controller-service counts regardless of whether
     // `root_pg_status` has landed — the two endpoints are independent.
-    state.overview.cs_counts = state.cluster.snapshot.controller_services.latest().cloned();
+    // The cluster snapshot carries a combined counts+members struct; we
+    // only lift `counts` into Overview state (members are Browser-only).
+    state.overview.cs_counts = state
+        .cluster
+        .snapshot
+        .controller_services
+        .latest()
+        .map(|s| s.counts.clone());
 
     let Some(root_pg) = state.cluster.snapshot.root_pg_status.latest() else {
         // Pre-first-fetch: leave `root_pg` as `None` and `unhealthy`
@@ -513,10 +520,14 @@ mod tests {
         state: &mut crate::app::state::AppState,
         counts: crate::client::ControllerServiceCounts,
     ) {
+        use crate::client::ControllerServicesSnapshot;
         use crate::cluster::snapshot::{EndpointState, FetchMeta};
         use std::time::Instant;
         state.cluster.snapshot.controller_services = EndpointState::Ready {
-            data: counts,
+            data: ControllerServicesSnapshot {
+                counts,
+                members: Vec::new(),
+            },
             meta: FetchMeta {
                 fetched_at: Instant::now(),
                 fetch_duration: Duration::from_millis(5),
@@ -1056,6 +1067,7 @@ mod tests {
                 },
                 connections: vec![q("c0", 95), q("c1", 90)],
                 process_group_ids: vec![],
+                nodes: vec![],
             },
         );
         redraw_components(&mut state);

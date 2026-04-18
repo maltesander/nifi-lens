@@ -79,12 +79,15 @@ pub struct BulletinsPayload {
     pub fetched_at: std::time::SystemTime,
 }
 
-/// Payload sent from the Browser worker. Two variants — one for the
-/// full tree refresh (15 s cadence), one for an on-demand per-node
-/// detail fetch.
+/// Payload sent from the Browser detail worker — a single variant
+/// carrying one completed per-node detail fetch.
+///
+/// Task 6 of the central-cluster-store refactor removed the `Tree`
+/// variant: the Browser arena is now rebuilt from
+/// `AppState.cluster.snapshot` whenever any of `RootPgStatus`,
+/// `ControllerServices`, or `ConnectionsByPg` updates arrive.
 #[derive(Debug, Clone)]
 pub enum BrowserPayload {
-    Tree(crate::client::RecursiveSnapshot),
     Detail(Box<crate::view::browser::state::NodeDetailSnapshot>),
 }
 

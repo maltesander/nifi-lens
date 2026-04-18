@@ -8,7 +8,7 @@
 use std::collections::{HashMap, HashSet};
 use std::time::SystemTime;
 
-use tokio::sync::{mpsc, oneshot};
+use tokio::sync::mpsc;
 
 use crate::app::navigation::ListNavigation;
 use crate::client::browser::{
@@ -170,10 +170,6 @@ pub struct BrowserState {
     /// spawned. Cleared back to `None` on tab-switch-out so reducer
     /// pushes become no-ops. Task 13 wires this.
     pub detail_tx: Option<mpsc::UnboundedSender<DetailRequest>>,
-    /// One-shot force-tick channel; a fresh sender on every worker spawn.
-    /// `r` pushes a unit on it; the worker wakes and fetches immediately.
-    /// Task 15 wires this.
-    pub force_tick_tx: Option<oneshot::Sender<()>>,
     /// Phase 7: which focusable sub-section (if any) holds input focus.
     /// Always reset to `Tree` by `reset_detail_focus`, called from every
     /// selection-mutating method on `BrowserState`.
@@ -824,6 +820,121 @@ pub struct NodeDetailSnapshot {
     pub detail: NodeDetail,
 }
 
+/// Task 6 of the central-cluster-store refactor: rebuild the Browser
+/// arena from `AppState.cluster.snapshot` instead of from the retired
+/// `browser_tree` worker fetch. Called from the `ClusterChanged` arm of
+/// the main loop whenever `RootPgStatus`, `ControllerServices`, or
+/// `ConnectionsByPg` updates arrive.
+///
+/// - Reads the flat node list from `snap.root_pg_status.latest()`.
+/// - Attaches CS rows from `snap.controller_services.latest()?.members`
+///   using each member's `parent_group_id` to pick the owning PG.
+/// - Backfills connection endpoint ids from `snap.connections_by_pg`
+///   (NiFi's recursive status leaves `sourceId`/`destinationId` null on
+///   `ConnectionStatusSnapshotDto`; the per-PG `/connections` fan-out
+///   publishes them into the cluster snapshot).
+///
+/// When `snap.root_pg_status` hasn't delivered a successful value yet,
+/// the existing arena is left in place — the Browser UI continues
+/// rendering whatever it had last (Loading placeholder if this is the
+/// very first frame) instead of blanking out mid-frame.
+pub fn rebuild_arena_from_cluster(
+    state: &mut crate::app::state::AppState,
+    snap: &crate::cluster::snapshot::ClusterSnapshot,
+) {
+    let Some(root_pg) = snap.root_pg_status.latest() else {
+        // Pre-first-fetch: leave the existing arena untouched.
+        return;
+    };
+    // Clone the flat nodes from the snapshot so we can mutate them
+    // (backfill connection endpoint ids). One shallow walk; the
+    // allocation is cheap relative to the arena rebuild.
+    let mut nodes: Vec<RawNode> = root_pg.nodes.clone();
+
+    // Backfill connection endpoint ids from `connections_by_pg`. For
+    // each PG's successful fetch, fill in every matching connection's
+    // source/destination ids in `NodeStatusSummary::Connection`. PGs
+    // with no successful fetch are silently skipped — the affected
+    // connections just render without the `→` cross-link marker.
+    let conns: std::collections::HashMap<String, &crate::client::ConnectionEndpointIds> = snap
+        .connections_by_pg
+        .values()
+        .filter_map(crate::cluster::snapshot::EndpointState::latest)
+        .flat_map(|ce| ce.by_connection.iter().map(|(k, v)| (k.clone(), v)))
+        .collect();
+    if !conns.is_empty() {
+        for node in nodes.iter_mut() {
+            if !matches!(node.kind, NodeKind::Connection) {
+                continue;
+            }
+            let Some(endpoints) = conns.get(&node.id) else {
+                continue;
+            };
+            if let NodeStatusSummary::Connection {
+                source_id,
+                destination_id,
+                ..
+            } = &mut node.status_summary
+            {
+                if !endpoints.source_id.is_empty() {
+                    *source_id = endpoints.source_id.clone();
+                }
+                if !endpoints.destination_id.is_empty() {
+                    *destination_id = endpoints.destination_id.clone();
+                }
+            }
+        }
+    }
+
+    // Attach CS rows from the controller-services snapshot. Each member
+    // is appended to the flat node list with `parent_idx` pointing at
+    // the PG that owns it; the folder synthesizer in
+    // `apply_tree_snapshot` buckets all CS children into a synthetic
+    // `Folder(ControllerServices)` node regardless of their position in
+    // the flat arena. Members whose `parent_group_id` doesn't match any
+    // PG in the arena are silently dropped — they'd have no valid
+    // parent row to anchor to.
+    if let Some(cs_snap) = snap.controller_services.latest() {
+        // Index PG id → arena position once up front. The map owns its
+        // keys so the immutable borrow of `nodes` above drops before we
+        // mutate it in the splice loop.
+        let pg_index: std::collections::HashMap<String, usize> = nodes
+            .iter()
+            .enumerate()
+            .filter(|(_, n)| matches!(n.kind, NodeKind::ProcessGroup))
+            .map(|(i, n)| (n.id.clone(), i))
+            .collect();
+        for m in &cs_snap.members {
+            let Some(&pg_idx) = pg_index.get(&m.parent_group_id) else {
+                continue;
+            };
+            nodes.push(RawNode {
+                parent_idx: Some(pg_idx),
+                kind: NodeKind::ControllerService,
+                id: m.id.clone(),
+                group_id: m.parent_group_id.clone(),
+                name: m.name.clone(),
+                status_summary: NodeStatusSummary::ControllerService {
+                    state: m.state.clone(),
+                },
+            });
+        }
+    }
+
+    // `apply_tree_snapshot` owns the arena-construction logic — folder
+    // synthesis, selection preservation, expanded-set translation. We
+    // stay on top of it by handing it a throwaway `RecursiveSnapshot`
+    // built from the assembled flat node list.
+    apply_tree_snapshot(
+        &mut state.browser,
+        RecursiveSnapshot {
+            nodes,
+            fetched_at: SystemTime::now(),
+        },
+    );
+    state.flow_index = Some(build_flow_index(&state.browser));
+}
+
 /// Fold a full recursive tree snapshot into the state. Preserves
 /// expansion and selection across arena rebuilds by matching on
 /// `(id, kind)`. Drops detail entries for nodes that are gone.
@@ -1277,7 +1388,6 @@ mod tests {
         RecursiveSnapshot {
             nodes,
             fetched_at: UNIX_EPOCH,
-            cs_fetch_error: None,
         }
     }
 
@@ -1891,7 +2001,7 @@ mod tests {
         // Root PG → one processor with RUNNING.
         let snap = RecursiveSnapshot {
             fetched_at: UNIX_EPOCH,
-            cs_fetch_error: None,
+
             nodes: vec![
                 RawNode {
                     parent_idx: None,
@@ -1927,7 +2037,7 @@ mod tests {
     fn pg_health_rollup_yellow_when_any_stopped() {
         let snap = RecursiveSnapshot {
             fetched_at: UNIX_EPOCH,
-            cs_fetch_error: None,
+
             nodes: vec![
                 RawNode {
                     parent_idx: None,
@@ -1973,7 +2083,7 @@ mod tests {
     fn pg_health_rollup_red_when_any_invalid_even_if_some_stopped() {
         let snap = RecursiveSnapshot {
             fetched_at: UNIX_EPOCH,
-            cs_fetch_error: None,
+
             nodes: vec![
                 RawNode {
                     parent_idx: None,
@@ -2020,7 +2130,7 @@ mod tests {
         // Root PG → inner PG → processor INVALID.
         let snap = RecursiveSnapshot {
             fetched_at: UNIX_EPOCH,
-            cs_fetch_error: None,
+
             nodes: vec![
                 RawNode {
                     parent_idx: None,
@@ -2070,7 +2180,7 @@ mod tests {
     fn pg_health_rollup_green_for_empty_pg() {
         let snap = RecursiveSnapshot {
             fetched_at: UNIX_EPOCH,
-            cs_fetch_error: None,
+
             nodes: vec![RawNode {
                 parent_idx: None,
                 kind: NodeKind::ProcessGroup,
@@ -2152,7 +2262,6 @@ mod tests {
                 },
             ],
             fetched_at: UNIX_EPOCH,
-            cs_fetch_error: None,
         };
         let mut s = BrowserState::new();
         apply_tree_snapshot(&mut s, snap);
@@ -2201,7 +2310,6 @@ mod tests {
                 },
             ],
             fetched_at: UNIX_EPOCH,
-            cs_fetch_error: None,
         };
         let mut s = BrowserState::new();
         apply_tree_snapshot(&mut s, snap);
@@ -2543,7 +2651,6 @@ mod tests {
                 cs("cs1", Some(0), "ENABLED"),
             ],
             fetched_at: fetched,
-            cs_fetch_error: None,
         };
         let mut s = BrowserState::new();
         apply_tree_snapshot(&mut s, snap);
@@ -2581,7 +2688,6 @@ mod tests {
         let snap = RecursiveSnapshot {
             nodes: vec![pg("root", None, 1), proc("p1", 0, "Running")],
             fetched_at: SystemTime::now(),
-            cs_fetch_error: None,
         };
         let mut s = BrowserState::new();
         apply_tree_snapshot(&mut s, snap);
@@ -3022,5 +3128,130 @@ mod tests {
         assert_eq!(rows[0].resolves_to, None);
         assert_eq!(rows[1].resolves_to, Some(0));
         assert_eq!(rows[2].resolves_to, None);
+    }
+
+    #[test]
+    fn rebuild_arena_from_cluster_uses_snapshot_root_pg() {
+        // Task 6: Browser rebuilds its arena from `ClusterSnapshot`
+        // instead of a dedicated tree fetch. A minimal snapshot with a
+        // Ready `root_pg_status` (containing one root PG node) and a
+        // default-empty `controller_services` must populate
+        // `state.browser.nodes` with the root PG.
+        use crate::cluster::snapshot::{ClusterSnapshot, EndpointState, FetchMeta};
+        use std::time::{Duration, Instant};
+
+        let meta = FetchMeta {
+            fetched_at: Instant::now(),
+            fetch_duration: Duration::from_millis(10),
+            next_interval: Duration::from_secs(10),
+        };
+        let snap = ClusterSnapshot {
+            root_pg_status: EndpointState::Ready {
+                data: crate::test_support::tiny_root_pg_status(),
+                meta,
+            },
+            controller_services: EndpointState::Ready {
+                data: crate::client::ControllerServicesSnapshot::default(),
+                meta,
+            },
+            ..Default::default()
+        };
+
+        let mut state = crate::test_support::fresh_state();
+        rebuild_arena_from_cluster(&mut state, &snap);
+
+        let nodes = &state.browser.nodes;
+        assert_eq!(nodes.len(), 1, "arena must have exactly the root PG node");
+        assert_eq!(nodes[0].id, "root");
+        assert!(matches!(nodes[0].kind, NodeKind::ProcessGroup));
+        assert!(state.flow_index.is_some(), "flow index must be rebuilt");
+    }
+
+    #[test]
+    fn rebuild_arena_on_loading_snapshot_preserves_prior_arena() {
+        // A `Loading` root_pg_status slot (pre-first-fetch) must leave
+        // the existing arena untouched — the Browser UI continues
+        // rendering whatever it had last instead of blanking out.
+        use crate::cluster::snapshot::{ClusterSnapshot, EndpointState, FetchMeta};
+        use std::time::{Duration, Instant};
+
+        let meta = FetchMeta {
+            fetched_at: Instant::now(),
+            fetch_duration: Duration::from_millis(10),
+            next_interval: Duration::from_secs(10),
+        };
+        // Seed a Ready snapshot once so the arena has content.
+        let seeded_snap = ClusterSnapshot {
+            root_pg_status: EndpointState::Ready {
+                data: crate::test_support::tiny_root_pg_status(),
+                meta,
+            },
+            ..Default::default()
+        };
+        let mut state = crate::test_support::fresh_state();
+        rebuild_arena_from_cluster(&mut state, &seeded_snap);
+        let prior_len = state.browser.nodes.len();
+        assert_eq!(prior_len, 1);
+
+        // Now re-run against a default (all-Loading) snapshot.
+        let empty = ClusterSnapshot::default();
+        rebuild_arena_from_cluster(&mut state, &empty);
+        assert_eq!(
+            state.browser.nodes.len(),
+            prior_len,
+            "Loading snapshot must not clear existing arena"
+        );
+    }
+
+    #[test]
+    fn rebuild_arena_is_idempotent_for_same_inputs() {
+        // Two consecutive rebuilds against the same snapshot must
+        // produce the same arena (no double-splicing of CS members, no
+        // stale residue).
+        use crate::cluster::snapshot::{ClusterSnapshot, EndpointState, FetchMeta};
+        use std::time::{Duration, Instant};
+
+        let meta = FetchMeta {
+            fetched_at: Instant::now(),
+            fetch_duration: Duration::from_millis(10),
+            next_interval: Duration::from_secs(10),
+        };
+        let snap = ClusterSnapshot {
+            root_pg_status: EndpointState::Ready {
+                data: crate::test_support::tiny_root_pg_status(),
+                meta,
+            },
+            controller_services: EndpointState::Ready {
+                data: crate::test_support::tiny_controller_services(vec![
+                    crate::client::ControllerServiceMember {
+                        id: "cs-1".into(),
+                        name: "fixture-reader".into(),
+                        state: "ENABLED".into(),
+                        parent_group_id: "root".into(),
+                    },
+                ]),
+                meta,
+            },
+            ..Default::default()
+        };
+
+        let mut state = crate::test_support::fresh_state();
+        rebuild_arena_from_cluster(&mut state, &snap);
+        let first_len = state.browser.nodes.len();
+
+        rebuild_arena_from_cluster(&mut state, &snap);
+        assert_eq!(
+            state.browser.nodes.len(),
+            first_len,
+            "second rebuild must not add duplicate CS rows"
+        );
+        // Exactly one CS row in the arena.
+        let cs_count = state
+            .browser
+            .nodes
+            .iter()
+            .filter(|n| matches!(n.kind, NodeKind::ControllerService))
+            .count();
+        assert_eq!(cs_count, 1, "exactly one CS member spliced");
     }
 }

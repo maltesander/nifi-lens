@@ -281,11 +281,12 @@ impl NifiClient {
     }
 
     /// Calls `flow().get_controller_services_from_group("root", false, true, false, None)`
-    /// and tallies the listing into per-state counts. Used by the Overview
-    /// Components panel.
-    pub async fn controller_service_counts(
+    /// and collapses the listing into a combined counts + per-CS member
+    /// list. Overview reads `.counts`; Browser reads `.members`. Shared
+    /// between the two so only one round trip is made.
+    pub async fn controller_services_snapshot(
         &self,
-    ) -> Result<ControllerServiceCounts, NifiLensError> {
+    ) -> Result<ControllerServicesSnapshot, NifiLensError> {
         tracing::debug!(
             context = %self.context_name,
             "fetching /flow/process-groups/root/controller-services?descendant=true"
@@ -304,7 +305,7 @@ impl NifiClient {
                     }
                 })
             })?;
-        Ok(ControllerServiceCounts::from_listing(&listing))
+        Ok(ControllerServicesSnapshot::from_listing(&listing))
     }
 
     /// Calls `flow().get_bulletin_board(after, None, None, None, None, limit)`
@@ -439,8 +440,13 @@ impl ProcessorStateCounts {
     }
 }
 
-/// Recursive process-group status, flattened for the Overview tab.
-/// `connections` is sorted descending by `fill_percent`.
+/// Recursive process-group status, flattened for the Overview tab and
+/// the Browser arena.
+///
+/// `connections` is sorted descending by `fill_percent` for the Overview
+/// leaderboard; `nodes` is the flat arena-ready DFS walk the Browser tab
+/// rebuilds its tree from (Task 6 of the central-cluster-store refactor —
+/// Browser no longer fetches the recursive status itself).
 #[derive(Debug, Clone, Default)]
 pub struct RootPgStatusSnapshot {
     pub flow_files_queued: u32,
@@ -458,6 +464,14 @@ pub struct RootPgStatusSnapshot {
     /// subtree). Empty / missing ids are skipped. `ClusterStore` reads
     /// this to drive the connections-by-PG fetcher.
     pub process_group_ids: Vec<String>,
+    /// Flat arena-ready node list — one `RawNode` per PG / processor /
+    /// connection / port in DFS order, same shape the old
+    /// `browser_tree` fan-out produced. Does NOT include controller
+    /// services (those are attached by the Browser reducer from the
+    /// separate controller-services snapshot) and does NOT include
+    /// connection endpoint ids (those are backfilled from
+    /// `snapshot.connections_by_pg`).
+    pub nodes: Vec<crate::client::browser::RawNode>,
 }
 
 impl RootPgStatusSnapshot {
@@ -476,6 +490,7 @@ impl RootPgStatusSnapshot {
             .sort_by(|a, b| b.fill_percent.cmp(&a.fill_percent));
         collect_counts(agg, &mut snap);
         collect_pg_ids(agg, &mut snap.process_group_ids);
+        crate::client::browser::walk_pg_nodes(agg, None, &mut snap.nodes);
         snap
     }
 
@@ -644,6 +659,58 @@ impl ControllerServiceCounts {
             }
         }
         out
+    }
+}
+
+/// One controller service's identity plus owning PG. Consumed by the
+/// Browser reducer to attach CS rows to the tree arena; Overview only
+/// reads the `counts` sibling so this list is invisible there.
+#[derive(Debug, Clone, Default)]
+pub struct ControllerServiceMember {
+    pub id: String,
+    pub name: String,
+    pub state: String,
+    pub parent_group_id: String,
+}
+
+/// Combined controller-services payload stored in `ClusterSnapshot`:
+/// the aggregate counts for Overview plus the per-CS member list the
+/// Browser reducer splices into the arena. Extracted from a single
+/// `/flow/controller-services` call so no extra round trips are
+/// required.
+#[derive(Debug, Clone, Default)]
+pub struct ControllerServicesSnapshot {
+    pub counts: ControllerServiceCounts,
+    pub members: Vec<ControllerServiceMember>,
+}
+
+impl ControllerServicesSnapshot {
+    /// Build a snapshot from the raw listing entity. Pure; no I/O.
+    /// Each component without a `parent_group_id` is dropped from
+    /// `members` — the reducer cannot attach it to any PG — but still
+    /// contributes to `counts`.
+    pub fn from_listing(
+        listing: &nifi_rust_client::dynamic::types::ControllerServicesEntity,
+    ) -> Self {
+        let counts = ControllerServiceCounts::from_listing(listing);
+        let mut members = Vec::new();
+        if let Some(items) = listing.controller_services.as_ref() {
+            for entity in items {
+                let Some(c) = entity.component.as_ref() else {
+                    continue;
+                };
+                let Some(pg_id) = c.parent_group_id.clone() else {
+                    continue;
+                };
+                members.push(ControllerServiceMember {
+                    id: c.id.clone().unwrap_or_default(),
+                    name: c.name.clone().unwrap_or_default(),
+                    state: c.state.clone().unwrap_or_default(),
+                    parent_group_id: pg_id,
+                });
+            }
+        }
+        Self { counts, members }
     }
 }
 

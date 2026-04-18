@@ -18,9 +18,7 @@ use crate::NifiLensError;
 use crate::config::Config;
 use crate::event::{AppEvent, IntentOutcome, ViewPayload};
 use crate::intent::CrossLink;
-use crate::view::browser::state::{
-    BrowserState, FlowIndex, NodeDetail, apply_tree_snapshot, build_flow_index, rebuild_visible,
-};
+use crate::view::browser::state::{BrowserState, FlowIndex, NodeDetail, rebuild_visible};
 use crate::view::bulletins::state::BulletinsState;
 use crate::view::events::state::EventsState;
 use crate::view::overview::state::OverviewFocus;
@@ -1805,18 +1803,6 @@ fn build_goto_subject(
 fn handle_browser_payload(state: &mut AppState, payload: crate::event::BrowserPayload) {
     use crate::event::BrowserPayload;
     match payload {
-        BrowserPayload::Tree(snap) => {
-            // Surface the non-fatal CS-list fetch failure as a warning
-            // banner. Captured by `browser_tree` when the descendant-CS
-            // call fails while the base status call succeeded — the tree
-            // still renders, just without CS rows.
-            let cs_fetch_error = snap.cs_fetch_error.clone();
-            apply_tree_snapshot(&mut state.browser, snap);
-            state.flow_index = Some(build_flow_index(&state.browser));
-            if let Some(msg) = cs_fetch_error {
-                state.post_warning(msg);
-            }
-        }
         BrowserPayload::Detail(detail) => {
             crate::view::browser::state::apply_node_detail(&mut state.browser, *detail);
         }
@@ -2081,7 +2067,6 @@ mod tests {
 
     pub(super) fn seeded_browser_state() -> (AppState, Config) {
         use crate::client::{NodeKind, NodeStatusSummary, RawNode, RecursiveSnapshot};
-        use crate::event::{BrowserPayload, ViewPayload};
         use std::time::SystemTime;
 
         let mut s = fresh_state();
@@ -2126,13 +2111,9 @@ mod tests {
                 },
             ],
             fetched_at: SystemTime::now(),
-            cs_fetch_error: None,
         };
-        update(
-            &mut s,
-            AppEvent::Data(ViewPayload::Browser(BrowserPayload::Tree(snap))),
-            &c,
-        );
+        crate::view::browser::state::apply_tree_snapshot(&mut s.browser, snap);
+        s.flow_index = Some(crate::view::browser::state::build_flow_index(&s.browser));
         s.current_tab = ViewId::Browser;
         (s, c)
     }
@@ -3019,7 +3000,6 @@ mod tests {
                     },
                 ],
                 fetched_at: std::time::SystemTime::now(),
-                cs_fetch_error: None,
             },
         );
         let folder_arena = s

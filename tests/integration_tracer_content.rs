@@ -195,9 +195,9 @@ async fn bulky_event_content_is_truncated_with_cap() {
 
         // 1. Discover the GenerateFlowFile processor ID inside bulky-pipeline.
         let snapshot = client
-            .browser_tree()
+            .root_pg_status()
             .await
-            .unwrap_or_else(|e| panic!("browser_tree on {version} failed: {e:?}"));
+            .unwrap_or_else(|e| panic!("root_pg_status on {version} failed: {e:?}"));
 
         let component_id = match find_processor_by_name_in_pg(
             &snapshot.nodes,
@@ -324,9 +324,9 @@ async fn cleanup_processor_reports_deleted_attribute() {
         // 1. Discover the UpdateAttribute-cleanup processor ID inside the
         //    enrich child PG of healthy-pipeline.
         let snapshot = client
-            .browser_tree()
+            .root_pg_status()
             .await
-            .unwrap_or_else(|e| panic!("browser_tree on {version} failed: {e:?}"));
+            .unwrap_or_else(|e| panic!("root_pg_status on {version} failed: {e:?}"));
 
         let component_id = match find_processor_by_name_in_pg(
             &snapshot.nodes,

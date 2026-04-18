@@ -1,17 +1,19 @@
-//! Browser tab polling worker.
+//! Browser tab detail worker.
 //!
-//! Refreshes the full recursive PG tree every 15 seconds and services
-//! on-demand per-node detail fetches from the reducer's side-channel.
-//! The force-tick oneshot lets the `r` keybind skip the interval wait.
+//! Task 6 of the central-cluster-store refactor retired the periodic
+//! tree-poll branch: the Browser arena is now rebuilt from
+//! `AppState.cluster.snapshot` whenever `RootPgStatus`,
+//! `ControllerServices`, or `ConnectionsByPg` updates arrive. This
+//! worker's only remaining job is servicing on-demand per-node detail
+//! fetches the reducer emits via the `detail_tx` side channel.
 //!
 //! Runs under the main-thread `LocalSet` (see `lib::run_inner`) because
 //! `nifi-rust-client`'s dynamic dispatch traits return `!Send` futures.
 
 use std::sync::Arc;
 
-use tokio::sync::{RwLock, mpsc, oneshot};
+use tokio::sync::{RwLock, mpsc};
 use tokio::task::JoinHandle;
-use tokio::time::{Duration, MissedTickBehavior, interval};
 
 use crate::app::worker::send_poll_result;
 use crate::client::NifiClient;
@@ -23,53 +25,16 @@ pub fn spawn(
     client: Arc<RwLock<NifiClient>>,
     tx: mpsc::Sender<AppEvent>,
     mut detail_rx: mpsc::UnboundedReceiver<DetailRequest>,
-    force_rx: oneshot::Receiver<()>,
-    poll_interval: Duration,
 ) -> JoinHandle<()> {
     tokio::task::spawn_local(async move {
-        let mut ticker = interval(poll_interval);
-        ticker.set_missed_tick_behavior(MissedTickBehavior::Delay);
-
-        // Wrap the oneshot in an Option so we can "disarm" it after it
-        // fires — otherwise the select! arm would hot-loop on a closed
-        // receiver.
-        let mut force_rx: Option<oneshot::Receiver<()>> = Some(force_rx);
-
         loop {
-            tokio::select! {
-                _ = ticker.tick() => {
-                    fetch_tree_once(&client, &tx).await;
-                }
-                req = detail_rx.recv() => {
-                    let Some(req) = req else {
-                        tracing::debug!("browser worker: detail channel closed, exiting");
-                        return;
-                    };
-                    fetch_detail_once(&client, &tx, req).await;
-                }
-                res = async {
-                    match force_rx.as_mut() {
-                        Some(rx) => rx.await,
-                        None => std::future::pending().await,
-                    }
-                } => {
-                    force_rx = None;
-                    if res.is_ok() {
-                        fetch_tree_once(&client, &tx).await;
-                    }
-                }
-            }
+            let Some(req) = detail_rx.recv().await else {
+                tracing::debug!("browser worker: detail channel closed, exiting");
+                return;
+            };
+            fetch_detail_once(&client, &tx, req).await;
         }
     })
-}
-
-async fn fetch_tree_once(client: &Arc<RwLock<NifiClient>>, tx: &mpsc::Sender<AppEvent>) {
-    let guard = client.read().await;
-    let result = guard
-        .browser_tree()
-        .await
-        .map(|snap| ViewPayload::Browser(BrowserPayload::Tree(snap)));
-    send_poll_result(tx, "browser tree", result).await;
 }
 
 async fn fetch_detail_once(

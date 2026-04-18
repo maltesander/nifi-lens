@@ -8,6 +8,11 @@
 use semver::Version;
 
 use crate::app::state::AppState;
+use crate::client::{
+    ControllerServiceMember, ControllerServicesSnapshot, ProcessorStateCounts,
+    RootPgStatusSnapshot,
+    browser::{NodeKind, NodeStatusSummary, RawNode},
+};
 use crate::config::{
     AuthConfig, Config, Context, PasswordAuthConfig, PasswordCredentials, VersionStrategy,
 };
@@ -43,4 +48,47 @@ pub(crate) fn tiny_config() -> Config {
 pub(crate) fn fresh_state() -> AppState {
     let c = tiny_config();
     AppState::new("dev".into(), Version::new(2, 9, 0), &c)
+}
+
+/// Construct a minimal `RootPgStatusSnapshot` for Browser reducer tests
+/// that don't care about the aggregate counts. Populates `nodes` with a
+/// single root PG (id `"root"`, name `"root"`) and mirrors that id into
+/// `process_group_ids` so the connections-by-PG watch channel stays in
+/// sync (Task 5 contract).
+pub(crate) fn tiny_root_pg_status() -> RootPgStatusSnapshot {
+    RootPgStatusSnapshot {
+        flow_files_queued: 0,
+        bytes_queued: 0,
+        connections: Vec::new(),
+        process_group_count: 1,
+        input_port_count: 0,
+        output_port_count: 0,
+        processors: ProcessorStateCounts::default(),
+        process_group_ids: vec!["root".into()],
+        nodes: vec![RawNode {
+            parent_idx: None,
+            kind: NodeKind::ProcessGroup,
+            id: "root".into(),
+            group_id: String::new(),
+            name: "root".into(),
+            status_summary: NodeStatusSummary::ProcessGroup {
+                running: 0,
+                stopped: 0,
+                invalid: 0,
+                disabled: 0,
+            },
+        }],
+    }
+}
+
+/// Construct a minimal `ControllerServicesSnapshot` with the given
+/// members. The counts tally follows the same invariant rules as the
+/// production builder.
+pub(crate) fn tiny_controller_services(
+    members: Vec<ControllerServiceMember>,
+) -> ControllerServicesSnapshot {
+    ControllerServicesSnapshot {
+        counts: Default::default(),
+        members,
+    }
 }

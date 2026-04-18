@@ -2,7 +2,7 @@
 
 use nifi_lens::client::{
     ConnectionDetail, ControllerServiceDetail, NifiClient, NodeKind, ProcessGroupDetail,
-    ProcessorDetail, RecursiveSnapshot,
+    ProcessorDetail,
 };
 use nifi_lens::config::{ResolvedAuth, ResolvedContext, VersionStrategy};
 use wiremock::matchers::{method, path, query_param};
@@ -53,7 +53,13 @@ fn load_fixture(name: &str) -> serde_json::Value {
 }
 
 #[tokio::test]
-async fn browser_tree_parses_nested_pgs_into_flat_recursive_snapshot() {
+async fn root_pg_status_parses_nested_pgs_into_flat_node_list() {
+    // Task 6 of the central-cluster-store refactor moved the flat
+    // arena build-out off `browser_tree` and onto `root_pg_status`:
+    // the recursive walker fills `RootPgStatusSnapshot.nodes` so the
+    // Browser reducer can rebuild its arena straight from the cluster
+    // snapshot. This test pins the shape of `nodes` returned by the
+    // same recursive-status fixture the old `browser_tree` test used.
     let server = MockServer::start().await;
     stub_login_and_about(&server).await;
 
@@ -66,7 +72,7 @@ async fn browser_tree_parses_nested_pgs_into_flat_recursive_snapshot() {
         .await;
 
     let client = NifiClient::connect(&ctx(server.uri())).await.unwrap();
-    let snap: RecursiveSnapshot = client.browser_tree().await.expect("ok");
+    let snap = client.root_pg_status().await.expect("ok");
 
     // One root PG + one root processor + one connection + one child PG +
     // its one processor + one input port + one output port = 7 nodes.
@@ -255,7 +261,7 @@ async fn browser_cs_detail_carries_state_and_properties() {
 }
 
 #[tokio::test]
-async fn browser_tree_error_is_mapped_to_typed_nifilens_error() {
+async fn root_pg_status_error_is_mapped_to_typed_nifilens_error() {
     let server = MockServer::start().await;
     stub_login_and_about(&server).await;
 
@@ -266,26 +272,26 @@ async fn browser_tree_error_is_mapped_to_typed_nifilens_error() {
         .await;
 
     let client = NifiClient::connect(&ctx(server.uri())).await.unwrap();
-    let err = client.browser_tree().await.unwrap_err();
+    let err = client.root_pg_status().await.unwrap_err();
     let msg = format!("{err}");
     assert!(
-        msg.contains("browser tree"),
-        "expected BrowserTreeFailed, got: {msg}"
+        msg.to_lowercase().contains("process-group")
+            || msg.to_lowercase().contains("process group"),
+        "expected ProcessGroupStatusFailed, got: {msg}"
     );
 }
 
 #[tokio::test]
-async fn browser_tree_includes_controller_services_under_owning_pgs() {
+async fn controller_services_snapshot_groups_members_by_parent_group_id() {
+    // Task 6: the old `browser_tree` test
+    // `browser_tree_includes_controller_services_under_owning_pgs`
+    // asserted that CS rows were arena-attached under their owning
+    // PG. That splicing now happens in the Browser reducer via
+    // `rebuild_arena_from_cluster`. At the client level the contract
+    // we need is simpler: every CS member must carry its
+    // `parent_group_id` so the reducer has something to splice on.
     let server = MockServer::start().await;
     stub_login_and_about(&server).await;
-
-    let status_body = load_fixture("recursive_tree.json");
-    Mock::given(method("GET"))
-        .and(path("/nifi-api/flow/process-groups/root/status"))
-        .and(query_param("recursive", "true"))
-        .respond_with(ResponseTemplate::new(200).set_body_json(status_body))
-        .mount(&server)
-        .await;
 
     let cs_body = load_fixture("root_cs_list.json");
     Mock::given(method("GET"))
@@ -298,21 +304,15 @@ async fn browser_tree_includes_controller_services_under_owning_pgs() {
         .await;
 
     let client = NifiClient::connect(&ctx(server.uri())).await.unwrap();
-    let snap = client.browser_tree().await.expect("ok");
+    let cs_snap = client.controller_services_snapshot().await.expect("ok");
 
-    // Base tree from recursive_tree.json had 7 nodes; +2 CS rows = 9.
-    assert_eq!(snap.nodes.len(), 9);
-
-    let cs: Vec<_> = snap
-        .nodes
-        .iter()
-        .filter(|n| matches!(n.kind, NodeKind::ControllerService))
-        .collect();
-    assert_eq!(cs.len(), 2);
-    // Each CS must parent to the arena entry for its owning PG.
-    for n in cs {
-        let parent = n.parent_idx.expect("CS must have a parent PG");
-        assert!(matches!(snap.nodes[parent].kind, NodeKind::ProcessGroup));
+    assert_eq!(cs_snap.members.len(), 2);
+    for m in &cs_snap.members {
+        assert!(
+            !m.parent_group_id.is_empty(),
+            "CS member {} must carry a parent_group_id",
+            m.id
+        );
     }
 }
 
@@ -405,44 +405,10 @@ async fn browser_port_detail_parses_input_port() {
     assert_eq!(d.concurrent_tasks, 3);
 }
 
-#[tokio::test]
-async fn browser_tree_cs_fetch_failure_is_non_fatal() {
-    let server = MockServer::start().await;
-    stub_login_and_about(&server).await;
-
-    let status_body = load_fixture("recursive_tree.json");
-    Mock::given(method("GET"))
-        .and(path("/nifi-api/flow/process-groups/root/status"))
-        .and(query_param("recursive", "true"))
-        .respond_with(ResponseTemplate::new(200).set_body_json(status_body))
-        .mount(&server)
-        .await;
-
-    // CS endpoint returns 500 — tree should still render, error captured.
-    Mock::given(method("GET"))
-        .and(path(
-            "/nifi-api/flow/process-groups/root/controller-services",
-        ))
-        .respond_with(ResponseTemplate::new(500).set_body_string("upstream error"))
-        .mount(&server)
-        .await;
-
-    let client = NifiClient::connect(&ctx(server.uri())).await.unwrap();
-    let snap = client
-        .browser_tree()
-        .await
-        .expect("tree fetch must not fail on CS-only failure");
-
-    // 7 nodes (same as the base recursive_tree.json count, no CS).
-    assert_eq!(snap.nodes.len(), 7);
-    assert!(
-        snap.cs_fetch_error.is_some(),
-        "CS fetch error must be captured"
-    );
-    assert!(
-        snap.cs_fetch_error
-            .unwrap()
-            .contains("controller services list fetch failed"),
-        "error message must be human-readable"
-    );
-}
+// Task 6 removed `browser_tree_cs_fetch_failure_is_non_fatal`: the
+// "CS-only failure is non-fatal" contract now lives in
+// `EndpointState::Failed.last_ok` semantics in `ClusterSnapshot`. The
+// two endpoints are fetched independently by the cluster store; the
+// Browser reducer handles a `Loading`/`Failed` CS slot by simply not
+// splicing any CS members into the arena (tested at the reducer level
+// in `src/view/browser/state.rs`).

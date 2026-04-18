@@ -123,7 +123,19 @@ impl WorkerRegistry {
                 }
                 ViewId::Browser => {
                     browser.detail_tx = None;
-                    browser.force_tick_tx = None;
+                    // The three cluster endpoints that feed the Browser
+                    // arena are all released here — while Browser is
+                    // inactive the store can gate (Task 10) the
+                    // connections fan-out so inactive tabs don't drive
+                    // per-PG requests.
+                    cluster.unsubscribe(
+                        crate::cluster::ClusterEndpoint::RootPgStatus,
+                        ViewId::Browser,
+                    );
+                    cluster.unsubscribe(
+                        crate::cluster::ClusterEndpoint::ControllerServices,
+                        ViewId::Browser,
+                    );
                     cluster.unsubscribe(
                         crate::cluster::ClusterEndpoint::ConnectionsByPg,
                         ViewId::Browser,
@@ -165,24 +177,29 @@ impl WorkerRegistry {
             }
             ViewId::Browser => {
                 tracing::debug!(?view, "worker registry: spawning browser worker");
-                // Subscribe the Browser to per-PG connection endpoints.
-                // Task 6 switches the Browser reducer to read these from
-                // the snapshot; Task 10 adds subscriber-gating so the
-                // fetcher only runs while a subscriber is present.
+                // Browser's arena is rebuilt from the cluster snapshot
+                // (Task 6). Subscribe to every endpoint it reads so the
+                // store knows Browser is active — RootPgStatus gives the
+                // PG/processor/connection/port skeleton, ControllerServices
+                // attaches CS rows, ConnectionsByPg backfills endpoint ids.
+                cluster.subscribe(
+                    crate::cluster::ClusterEndpoint::RootPgStatus,
+                    ViewId::Browser,
+                );
+                cluster.subscribe(
+                    crate::cluster::ClusterEndpoint::ControllerServices,
+                    ViewId::Browser,
+                );
                 cluster.subscribe(
                     crate::cluster::ClusterEndpoint::ConnectionsByPg,
                     ViewId::Browser,
                 );
                 let (detail_tx, detail_rx) = mpsc::unbounded_channel();
-                let (force_tx, force_rx) = tokio::sync::oneshot::channel();
                 browser.detail_tx = Some(detail_tx);
-                browser.force_tick_tx = Some(force_tx);
                 Some(crate::view::browser::worker::spawn(
                     client.clone(),
                     tx.clone(),
                     detail_rx,
-                    force_rx,
-                    polling.browser.interval,
                 ))
             }
             ViewId::Events => {

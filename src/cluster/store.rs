@@ -10,7 +10,7 @@ use tokio::task::JoinHandle;
 use crate::app::state::ViewId;
 use crate::client::health::SystemDiagSnapshot;
 use crate::client::{
-    AboutSnapshot, BulletinSnapshot, ConnectionEndpoints, ControllerServiceCounts,
+    AboutSnapshot, BulletinSnapshot, ConnectionEndpoints, ControllerServicesSnapshot,
     ControllerStatusSnapshot, NifiClient, RootPgStatusSnapshot,
 };
 use crate::cluster::ClusterEndpoint;
@@ -33,7 +33,7 @@ pub enum ClusterUpdate {
     About(Result<AboutSnapshot, NifiLensError>, FetchMeta),
     ControllerStatus(Result<ControllerStatusSnapshot, NifiLensError>, FetchMeta),
     RootPgStatus(Result<RootPgStatusSnapshot, NifiLensError>, FetchMeta),
-    ControllerServices(Result<ControllerServiceCounts, NifiLensError>, FetchMeta),
+    ControllerServices(Result<ControllerServicesSnapshot, NifiLensError>, FetchMeta),
     SystemDiagnostics(Result<SystemDiagSnapshot, NifiLensError>, FetchMeta),
     Connections {
         pg_id: String,
@@ -333,20 +333,24 @@ mod tests {
 
     #[test]
     fn controller_services_update_is_applied() {
+        use crate::client::ControllerServiceCounts;
         let mut store = ClusterStore::new(ClusterPollingConfig::default());
-        let fake_cs = ControllerServiceCounts {
-            enabled: 4,
-            disabled: 1,
-            invalid: 2,
+        let fake_cs = ControllerServicesSnapshot {
+            counts: ControllerServiceCounts {
+                enabled: 4,
+                disabled: 1,
+                invalid: 2,
+            },
+            members: Vec::new(),
         };
         let ep = store.apply_update(ClusterUpdate::ControllerServices(Ok(fake_cs), meta()));
         assert_eq!(ep, ClusterEndpoint::ControllerServices);
         match &store.snapshot.controller_services {
             EndpointState::Ready { data, .. } => {
-                assert_eq!(data.enabled, 4);
-                assert_eq!(data.disabled, 1);
-                assert_eq!(data.invalid, 2);
-                assert_eq!(data.total(), 7);
+                assert_eq!(data.counts.enabled, 4);
+                assert_eq!(data.counts.disabled, 1);
+                assert_eq!(data.counts.invalid, 2);
+                assert_eq!(data.counts.total(), 7);
             }
             other => panic!("expected Ready, got {:?}", other),
         }
@@ -369,6 +373,7 @@ mod tests {
                 disabled: 0,
             },
             process_group_ids: vec![],
+            nodes: vec![],
         };
         let ep = store.apply_update(ClusterUpdate::RootPgStatus(Ok(fake_pg.clone()), meta()));
         assert_eq!(ep, ClusterEndpoint::RootPgStatus);
@@ -510,6 +515,7 @@ mod tests {
             output_port_count: 0,
             processors: crate::client::ProcessorStateCounts::default(),
             process_group_ids: vec!["root".into(), "child".into()],
+            nodes: vec![],
         };
         store.apply_update(ClusterUpdate::RootPgStatus(Ok(fake_pg), meta()));
 

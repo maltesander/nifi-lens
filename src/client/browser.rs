@@ -1,5 +1,8 @@
-//! Browser-tab client wrappers. Phase 3 adds the tree fetch and four
+//! Browser-tab client wrappers. Phase 3 added the tree fetch and four
 //! per-node detail fetches used by the Browser tab's hybrid data flow.
+//! Task 6 of the central-cluster-store refactor retired `browser_tree`
+//! in favour of rebuilding the arena from the shared cluster snapshot,
+//! so only the per-node detail wrappers remain here.
 
 use std::time::SystemTime;
 
@@ -7,22 +10,16 @@ use crate::client::NifiClient;
 use crate::client::classify_or_fallback;
 use crate::error::NifiLensError;
 
-/// Flat, arena-ready shape produced by walking the recursive
-/// `ProcessGroupStatusDTO`. Consumers index into `nodes` by `usize`;
-/// parents are referenced via `RawNode::parent_idx`.
+/// Flat, arena-ready container produced by walking the recursive
+/// `ProcessGroupStatusDTO`. Lives on alongside `RootPgStatusSnapshot.nodes`
+/// as a compact test fixture shape — view-reducer tests that need to
+/// feed the arena builder construct a `RecursiveSnapshot` and call
+/// `apply_tree_snapshot` directly rather than assembling a full
+/// `ClusterSnapshot`.
 #[derive(Debug, Clone)]
 pub struct RecursiveSnapshot {
     pub nodes: Vec<RawNode>,
     pub fetched_at: SystemTime,
-    /// Non-fatal error captured when the descendant controller-services
-    /// list fetch failed but the base status call succeeded. The tree
-    /// still renders (without CS rows); the message is surfaced as a
-    /// warning banner by the app-level dispatcher. `None` when the CS
-    /// fetch succeeded.
-    ///
-    /// `String` instead of `NifiLensError` because `NifiLensError` is not
-    /// `Clone`; a one-line message is enough for a banner.
-    pub cs_fetch_error: Option<String>,
 }
 
 #[derive(Debug, Clone)]
@@ -91,107 +88,6 @@ pub enum NodeStatusSummary {
     },
 }
 
-impl NifiClient {
-    /// Recursive `process-groups/root/status` fetch flattened into an
-    /// arena. Matches the Overview tab's existing root-status call but
-    /// emits a richer shape with every processor / connection / port
-    /// individually represented. Concurrently fetches the descendant
-    /// controller services list so CS rows can be attached to the PG
-    /// that owns each one.
-    pub async fn browser_tree(&self) -> Result<RecursiveSnapshot, NifiLensError> {
-        tracing::debug!(
-            context = %self.context_name(),
-            "fetching recursive PG status + descendant controller services (browser tree)"
-        );
-
-        let flow = self.inner.flow();
-        let status_fut = flow.get_process_group_status("root", Some(true), None, None);
-        let cs_fut = flow.get_controller_services_from_group(
-            "root",
-            /* include_ancestor_groups */ Some(false),
-            /* include_descendant_groups */ Some(true),
-            /* include_referencing_components */ Some(false),
-            /* ui_only */ None,
-        );
-        let (status_res, cs_res) = tokio::join!(status_fut, cs_fut);
-
-        let entity = status_res.map_err(|err| {
-            classify_or_fallback(self.context_name(), Box::new(err), |source| {
-                NifiLensError::BrowserTreeFailed {
-                    context: self.context_name().to_string(),
-                    source,
-                }
-            })
-        })?;
-
-        // CS list failure is non-fatal: tree renders without CS. The
-        // error message is captured in `cs_fetch_error` so the app-level
-        // dispatcher can surface a warning banner.
-        let mut cs_by_pg: std::collections::HashMap<String, Vec<CsTreeEntry>> =
-            std::collections::HashMap::new();
-        let mut cs_fetch_error: Option<String> = None;
-        match cs_res {
-            Ok(cs_entity) => {
-                for e in cs_entity.controller_services.unwrap_or_default() {
-                    let Some(c) = e.component else { continue };
-                    let Some(pg_id) = c.parent_group_id.clone() else {
-                        continue;
-                    };
-                    cs_by_pg.entry(pg_id).or_default().push(CsTreeEntry {
-                        id: c.id.unwrap_or_default(),
-                        name: c.name.unwrap_or_default(),
-                        state: c.state.unwrap_or_default(),
-                    });
-                }
-            }
-            Err(err) => {
-                let msg = format!(
-                    "controller services list fetch failed for context {}: {err}",
-                    self.context_name()
-                );
-                tracing::warn!(
-                    context = %self.context_name(),
-                    error = %err,
-                    "browser tree: CS list fetch failed; tree will render without CS"
-                );
-                cs_fetch_error = Some(msg);
-            }
-        }
-
-        let mut nodes: Vec<RawNode> = Vec::new();
-        if let Some(pg_dto) = entity.process_group_status
-            && let Some(agg) = pg_dto.aggregate_snapshot
-        {
-            walk_pg_snapshot(&agg, None, &mut nodes, &mut cs_by_pg);
-        }
-
-        // NOTE: NiFi's `/process-groups/{id}/status?recursive=true` response
-        // populates `connectionStatusSnapshots.{sourceName, destinationName}`
-        // but leaves `sourceId` / `destinationId` as `null`. Previous
-        // revisions fanned out `/process-groups/{id}/connections` per PG
-        // inline to backfill them. That fan-out now lives in
-        // `ClusterStore::spawn_connections_by_pg`; Task 6 will wire the
-        // Browser reducer to read from `snapshot.connections_by_pg` and
-        // re-attach endpoint ids. Until then Connection rows render with
-        // blank endpoint ids (no `→` marker, no cross-link).
-        Ok(RecursiveSnapshot {
-            nodes,
-            fetched_at: SystemTime::now(),
-            cs_fetch_error,
-        })
-    }
-}
-
-/// CS identity grouped by owning PG id, consumed by `walk_pg_snapshot` to
-/// drain matching entries into the arena once the PG row has been
-/// pushed. Owning is intentional: the recursive walker mutates it, so
-/// later calls can't see entries already attached to an earlier PG.
-struct CsTreeEntry {
-    id: String,
-    name: String,
-    state: String,
-}
-
 /// Endpoint IDs for every connection in a single process group, keyed
 /// by connection id. Produced by the `ClusterStore` connections-by-PG
 /// fetcher (one snapshot entry per PG) and merged into the browser
@@ -213,16 +109,20 @@ pub struct ConnectionEndpointIds {
     pub destination_id: String,
 }
 
-/// Recursive walker. Appends the current PG, then all processors, all
-/// connections, all input ports, all output ports, drains any CS rows
-/// whose `parentGroupId` matches this PG, and finally recurses into
-/// child PGs. Child-node parent indices are the arena index of the PG
-/// row that was just pushed.
-fn walk_pg_snapshot(
+/// Recursive walker that appends PG / processor / connection / input port
+/// / output port rows for one PG to `out`, then recurses into child PGs.
+/// Controller-service rows are NOT appended here — the Browser reducer
+/// attaches those from the separate `ControllerServicesSnapshot.members`
+/// list because CS identity/state lives in a different API call.
+///
+/// Child-node parent indices are the arena index of the PG row that was
+/// just pushed. Called by `RootPgStatusSnapshot::from_aggregate` so the
+/// recursive-status fetch populates the browser arena without an extra
+/// call.
+pub fn walk_pg_nodes(
     snap: &nifi_rust_client::dynamic::types::ProcessGroupStatusSnapshotDto,
     parent_idx: Option<usize>,
     out: &mut Vec<RawNode>,
-    cs_by_pg: &mut std::collections::HashMap<String, Vec<CsTreeEntry>>,
 ) {
     let pg_idx = out.len();
     out.push(RawNode {
@@ -321,27 +221,10 @@ fn walk_pg_snapshot(
         }
     }
 
-    // Drain CS entries whose parentGroupId matches this PG. Consumed so
-    // later iterations can't attach the same CS twice.
-    if let Some(pg_id) = snap.id.as_deref()
-        && let Some(cs_list) = cs_by_pg.remove(pg_id)
-    {
-        for cs in cs_list {
-            out.push(RawNode {
-                parent_idx: Some(pg_idx),
-                kind: NodeKind::ControllerService,
-                id: cs.id,
-                group_id: pg_id.to_string(),
-                name: cs.name,
-                status_summary: NodeStatusSummary::ControllerService { state: cs.state },
-            });
-        }
-    }
-
     if let Some(children) = snap.process_group_status_snapshots.as_ref() {
         for entity in children {
             if let Some(child) = entity.process_group_status_snapshot.as_ref() {
-                walk_pg_snapshot(child, Some(pg_idx), out, cs_by_pg);
+                walk_pg_nodes(child, Some(pg_idx), out);
             }
         }
     }

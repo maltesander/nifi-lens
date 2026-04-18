@@ -96,20 +96,41 @@ pub async fn run(
                 continue;
             }
             AppEvent::ClusterChanged(endpoint) => {
-                let mut affects_overview = false;
-                match endpoint {
-                    crate::cluster::ClusterEndpoint::RootPgStatus
-                    | crate::cluster::ClusterEndpoint::ControllerServices => {
-                        crate::view::overview::state::redraw_components(&mut state);
-                        // Task 6 wires the Browser arena recompute here.
-                        affects_overview = true;
-                    }
-                    _ => tracing::trace!(?endpoint, "cluster changed"),
+                use crate::cluster::ClusterEndpoint;
+                let affects_overview = matches!(
+                    endpoint,
+                    ClusterEndpoint::RootPgStatus | ClusterEndpoint::ControllerServices
+                );
+                let affects_browser = matches!(
+                    endpoint,
+                    ClusterEndpoint::RootPgStatus
+                        | ClusterEndpoint::ControllerServices
+                        | ClusterEndpoint::ConnectionsByPg
+                );
+
+                if affects_overview {
+                    crate::view::overview::state::redraw_components(&mut state);
                 }
-                // Only redraw when the active tab's projection actually
-                // depends on the changed endpoint. Other tabs don't read
-                // snapshot data yet (Task 6+ opens that door for Browser).
-                if affects_overview && state.current_tab == ViewId::Overview {
+                if affects_browser {
+                    // `rebuild_arena_from_cluster` needs `&mut AppState`
+                    // (to mutate the Browser arena + flow index) AND a
+                    // read of the cluster snapshot. The snapshot lives
+                    // inside `AppState.cluster`, so we clone it once to
+                    // break the borrow. On a 10k-processor cluster this
+                    // snapshot is a handful of MBs — cheap per update,
+                    // but Task 6's self-review flags this for future
+                    // optimization if profiling shows it.
+                    let snap_snapshot = state.cluster.snapshot.clone();
+                    crate::view::browser::state::rebuild_arena_from_cluster(
+                        &mut state,
+                        &snap_snapshot,
+                    );
+                }
+
+                let active = state.current_tab;
+                let should_redraw = (affects_overview && active == ViewId::Overview)
+                    || (affects_browser && active == ViewId::Browser);
+                if should_redraw {
                     terminal
                         .draw(|f| ui::render(f, &state))
                         .map_err(|source| NifiLensError::TerminalInit { source })?;

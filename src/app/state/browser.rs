@@ -20,12 +20,17 @@ impl ViewKeyHandler for BrowserHandler {
         };
         match bv {
             BrowserVerb::Refresh => {
-                // Consume the force-tick oneshot. The worker wakes and fetches
-                // immediately. Clearing the sender prevents a second press from
-                // panicking.
-                if let Some(tx) = state.browser.force_tick_tx.take() {
-                    let _ = tx.send(());
-                }
+                // Task 6: Browser's arena is rebuilt from the cluster
+                // snapshot, so the old per-worker force-tick oneshot is
+                // gone. Force-refresh now nudges every endpoint the
+                // arena depends on — each per-endpoint `Notify` wakes
+                // the sleeping fetch loop without jitter. A fresh
+                // `ClusterUpdate` → `ClusterChanged` round trip rebuilds
+                // the arena.
+                use crate::cluster::ClusterEndpoint;
+                state.cluster.force(ClusterEndpoint::RootPgStatus);
+                state.cluster.force(ClusterEndpoint::ControllerServices);
+                state.cluster.force(ClusterEndpoint::ConnectionsByPg);
             }
             BrowserVerb::Copy => {
                 // Copy depends on where focus is: row value in detail focus,
@@ -573,7 +578,7 @@ mod tests {
     };
     use crate::client::{NodeKind, NodeStatusSummary, RawNode, RecursiveSnapshot};
     use crate::config::Config;
-    use crate::event::{AppEvent, BrowserPayload, ViewPayload};
+    use crate::event::AppEvent;
     use crate::intent::CrossLink;
     use crate::view::browser::state::{
         FlowIndex, FlowIndexEntry, MAX_DETAIL_SECTIONS, PropertiesModalState,
@@ -582,44 +587,35 @@ mod tests {
     use std::time::SystemTime;
 
     #[test]
-    fn browser_tree_payload_populates_browser_state_and_flow_index() {
+    fn rebuild_arena_from_cluster_populates_browser_state_and_flow_index() {
+        use crate::cluster::snapshot::{EndpointState, FetchMeta};
+        use std::time::{Duration, Instant};
+
         let mut s = fresh_state();
-        let c = tiny_config();
-        let snap = RecursiveSnapshot {
-            nodes: vec![
-                RawNode {
-                    parent_idx: None,
-                    kind: NodeKind::ProcessGroup,
-                    id: "root".into(),
-                    group_id: "root".into(),
-                    name: "NiFi".into(),
-                    status_summary: NodeStatusSummary::ProcessGroup {
-                        running: 1,
-                        stopped: 0,
-                        invalid: 0,
-                        disabled: 0,
-                    },
-                },
-                RawNode {
-                    parent_idx: Some(0),
-                    kind: NodeKind::Processor,
-                    id: "gen".into(),
-                    group_id: "root".into(),
-                    name: "Gen".into(),
-                    status_summary: NodeStatusSummary::Processor {
-                        run_status: "Running".into(),
-                    },
-                },
-            ],
-            fetched_at: SystemTime::now(),
-            cs_fetch_error: None,
+        let meta = FetchMeta {
+            fetched_at: Instant::now(),
+            fetch_duration: Duration::from_millis(10),
+            next_interval: Duration::from_secs(10),
         };
-        let r = update(
-            &mut s,
-            AppEvent::Data(ViewPayload::Browser(BrowserPayload::Tree(snap))),
-            &c,
-        );
-        assert!(r.redraw);
+        let mut root_pg = crate::test_support::tiny_root_pg_status();
+        // Mutate `nodes` to add one processor under the root PG so the
+        // flow-index has two entries.
+        root_pg.nodes.push(RawNode {
+            parent_idx: Some(0),
+            kind: NodeKind::Processor,
+            id: "gen".into(),
+            group_id: "root".into(),
+            name: "Gen".into(),
+            status_summary: NodeStatusSummary::Processor {
+                run_status: "Running".into(),
+            },
+        });
+        s.cluster.snapshot.root_pg_status = EndpointState::Ready {
+            data: root_pg,
+            meta,
+        };
+        let snap = s.cluster.snapshot.clone();
+        crate::view::browser::state::rebuild_arena_from_cluster(&mut s, &snap);
         assert_eq!(s.browser.nodes.len(), 2);
         assert_eq!(s.browser.visible.len(), 2); // root expanded -> 1 child visible
         let idx = s.flow_index.as_ref().expect("FlowIndex built");
@@ -671,13 +667,9 @@ mod tests {
                 },
             ],
             fetched_at: SystemTime::now(),
-            cs_fetch_error: None,
         };
-        update(
-            &mut s,
-            AppEvent::Data(ViewPayload::Browser(BrowserPayload::Tree(snap))),
-            &c,
-        );
+        crate::view::browser::state::apply_tree_snapshot(&mut s.browser, snap);
+        s.flow_index = Some(crate::view::browser::state::build_flow_index(&s.browser));
 
         // Jump to "upd".
         let outcome = Ok(crate::event::IntentOutcome::OpenInBrowserTarget {
@@ -737,13 +729,58 @@ mod tests {
     }
 
     #[test]
-    fn on_browser_tab_r_fires_force_tick() {
-        let (mut s, c) = seeded_browser_state();
-        let (tx, _rx) = tokio::sync::oneshot::channel::<()>();
-        s.browser.force_tick_tx = Some(tx);
-        update(&mut s, key(KeyCode::Char('r'), KeyModifiers::NONE), &c);
-        // Sender consumed; force_tick_tx is cleared.
-        assert!(s.browser.force_tick_tx.is_none());
+    fn on_browser_tab_r_force_notifies_cluster_endpoints() {
+        // Task 6: Browser's arena is rebuilt from the cluster snapshot,
+        // so `r` no longer consumes a per-worker oneshot. Instead it
+        // calls `cluster.force(...)` for every endpoint the arena
+        // depends on; each of those `Arc<Notify>`s wakes its sleeping
+        // fetcher loop. We assert the three per-endpoint notifies fire
+        // by registering a waiter on each and verifying it wakes.
+        let local = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .unwrap();
+        local.block_on(async {
+            use crate::cluster::ClusterEndpoint;
+            let local_set = tokio::task::LocalSet::new();
+            local_set
+                .run_until(async {
+                    let (mut s, c) = seeded_browser_state();
+                    let notifies: Vec<_> = [
+                        ClusterEndpoint::RootPgStatus,
+                        ClusterEndpoint::ControllerServices,
+                        ClusterEndpoint::ConnectionsByPg,
+                    ]
+                    .into_iter()
+                    .map(|ep| s.cluster.notify_for(ep))
+                    .collect();
+                    let flags: Vec<_> = (0..3)
+                        .map(|_| std::rc::Rc::new(std::cell::Cell::new(false)))
+                        .collect();
+                    let waiters: Vec<_> = notifies
+                        .iter()
+                        .zip(flags.iter())
+                        .map(|(notify, flag)| {
+                            let notify = notify.clone();
+                            let flag = flag.clone();
+                            tokio::task::spawn_local(async move {
+                                notify.notified().await;
+                                flag.set(true);
+                            })
+                        })
+                        .collect();
+                    tokio::task::yield_now().await;
+                    update(&mut s, key(KeyCode::Char('r'), KeyModifiers::NONE), &c);
+                    tokio::task::yield_now().await;
+                    for (i, flag) in flags.iter().enumerate() {
+                        assert!(flag.get(), "endpoint #{i} notify did not fire on r");
+                    }
+                    for w in waiters {
+                        w.abort();
+                    }
+                })
+                .await;
+        });
     }
 
     #[test]
@@ -994,13 +1031,9 @@ mod tests {
                 },
             ],
             fetched_at: SystemTime::now(),
-            cs_fetch_error: None,
         };
-        update(
-            &mut s,
-            AppEvent::Data(ViewPayload::Browser(BrowserPayload::Tree(snap))),
-            &c,
-        );
+        crate::view::browser::state::apply_tree_snapshot(&mut s.browser, snap);
+        s.flow_index = Some(crate::view::browser::state::build_flow_index(&s.browser));
         // Expand Pipeline so Generate is visible.
         s.browser.expanded.insert(1);
         crate::view::browser::state::rebuild_visible(&mut s.browser);
@@ -1650,7 +1683,6 @@ mod tests {
     /// the state at arena index 1 as a Processor.
     fn seed_browser_with_processor(s: &mut AppState) {
         use crate::client::{NodeKind, NodeStatusSummary, RawNode, RecursiveSnapshot};
-        use crate::event::{BrowserPayload, ViewPayload};
         use std::time::SystemTime;
 
         let c = tiny_config();
@@ -1681,13 +1713,10 @@ mod tests {
                 },
             ],
             fetched_at: SystemTime::now(),
-            cs_fetch_error: None,
         };
-        update(
-            s,
-            AppEvent::Data(ViewPayload::Browser(BrowserPayload::Tree(snap))),
-            &c,
-        );
+        let _ = c; // config not required now that we bypass `update(...)`.
+        crate::view::browser::state::apply_tree_snapshot(&mut s.browser, snap);
+        s.flow_index = Some(crate::view::browser::state::build_flow_index(&s.browser));
         s.current_tab = ViewId::Browser;
         s.browser.selected = 1; // "gen" Processor
     }
@@ -1696,7 +1725,6 @@ mod tests {
     /// one child PG named "ingest" (arena 1).
     fn seed_browser_with_child_pg(s: &mut AppState) {
         use crate::client::{NodeKind, NodeStatusSummary, RawNode, RecursiveSnapshot};
-        use crate::event::{BrowserPayload, ViewPayload};
         use std::time::SystemTime;
 
         let c = tiny_config();
@@ -1730,13 +1758,10 @@ mod tests {
                 },
             ],
             fetched_at: SystemTime::now(),
-            cs_fetch_error: None,
         };
-        update(
-            s,
-            AppEvent::Data(ViewPayload::Browser(BrowserPayload::Tree(snap))),
-            &c,
-        );
+        let _ = c; // config not required now that we bypass `update(...)`.
+        crate::view::browser::state::apply_tree_snapshot(&mut s.browser, snap);
+        s.flow_index = Some(crate::view::browser::state::build_flow_index(&s.browser));
         s.current_tab = ViewId::Browser;
         // Select root (arena 0) — the parent of the child PG.
         s.browser.selected = 0;
@@ -2064,7 +2089,6 @@ mod tests {
                     },
                 ],
                 fetched_at: std::time::SystemTime::now(),
-                cs_fetch_error: None,
             },
         );
 
