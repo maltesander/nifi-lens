@@ -124,6 +124,10 @@ impl WorkerRegistry {
                 ViewId::Browser => {
                     browser.detail_tx = None;
                     browser.force_tick_tx = None;
+                    cluster.unsubscribe(
+                        crate::cluster::ClusterEndpoint::ConnectionsByPg,
+                        ViewId::Browser,
+                    );
                 }
                 _ => {}
             }
@@ -161,6 +165,14 @@ impl WorkerRegistry {
             }
             ViewId::Browser => {
                 tracing::debug!(?view, "worker registry: spawning browser worker");
+                // Subscribe the Browser to per-PG connection endpoints.
+                // Task 6 switches the Browser reducer to read these from
+                // the snapshot; Task 10 adds subscriber-gating so the
+                // fetcher only runs while a subscriber is present.
+                cluster.subscribe(
+                    crate::cluster::ClusterEndpoint::ConnectionsByPg,
+                    ViewId::Browser,
+                );
                 let (detail_tx, detail_rx) = mpsc::unbounded_channel();
                 let (force_tx, force_rx) = tokio::sync::oneshot::channel();
                 browser.detail_tx = Some(detail_tx);

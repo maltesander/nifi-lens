@@ -4,7 +4,7 @@
 
 use std::sync::Arc;
 
-use tokio::sync::{Notify, RwLock, mpsc};
+use tokio::sync::{Notify, RwLock, mpsc, watch};
 use tokio::task::JoinHandle;
 
 use crate::app::state::ViewId;
@@ -16,7 +16,8 @@ use crate::client::{
 use crate::cluster::ClusterEndpoint;
 use crate::cluster::config::ClusterPollingConfig;
 use crate::cluster::fetcher_tasks::{
-    FetchTaskConfig, spawn_controller_services, spawn_controller_status, spawn_root_pg_status,
+    FetchTaskConfig, spawn_connections_by_pg, spawn_controller_services, spawn_controller_status,
+    spawn_root_pg_status,
 };
 use crate::cluster::snapshot::{ClusterSnapshot, FetchMeta};
 use crate::cluster::subscriber::SubscriberRegistry;
@@ -91,6 +92,14 @@ pub struct ClusterStore {
     config: ClusterPollingConfig,
     notifies: NotifyMap,
     handles: Vec<JoinHandle<()>>,
+    /// Latest PG-id fan-out list published from the UI task whenever
+    /// `RootPgStatus` delivers a successful update. Consumed by the
+    /// connections-by-PG fetcher's three-way `select!`.
+    pg_ids_tx: watch::Sender<Vec<String>>,
+    /// Receiver half retained so `spawn_fetchers` can clone one into the
+    /// connections-by-PG fetcher on each (re)spawn — including context
+    /// switches where the channel would otherwise be unreachable.
+    pg_ids_rx: watch::Receiver<Vec<String>>,
 }
 
 impl std::fmt::Debug for ClusterStore {
@@ -107,12 +116,34 @@ impl ClusterStore {
     /// Constructs an empty store. Call `spawn_fetchers` to start the
     /// per-endpoint tasks on the current `LocalSet`.
     pub fn new(config: ClusterPollingConfig) -> Self {
+        let (pg_ids_tx, pg_ids_rx) = watch::channel(Vec::<String>::new());
         Self {
             snapshot: ClusterSnapshot::default(),
             subscribers: SubscriberRegistry::new(),
             config,
             notifies: NotifyMap::default(),
             handles: Vec::new(),
+            pg_ids_tx,
+            pg_ids_rx,
+        }
+    }
+
+    /// Publish the latest PG-id list (from `snapshot.root_pg_status`) on
+    /// the watch channel so the connections-by-PG fetcher fans out over
+    /// the refreshed set. Called from the main loop right after
+    /// `apply_update` routes a `RootPgStatus` variant, regardless of
+    /// whether any view cares about the overview-side redraw.
+    ///
+    /// No-op when the endpoint has never succeeded. Send errors — which
+    /// only happen when every receiver has been dropped, e.g. before
+    /// `spawn_fetchers` has been called — are ignored.
+    pub fn publish_pg_ids(&self) {
+        let Some(snap) = self.snapshot.root_pg_status.latest() else {
+            return;
+        };
+        let ids = snap.pg_ids();
+        if self.pg_ids_tx.send(ids).is_err() {
+            tracing::trace!("publish_pg_ids: no receivers (fetchers not yet spawned or torn down)");
         }
     }
 
@@ -150,6 +181,19 @@ impl ClusterStore {
             client.clone(),
             tx.clone(),
             cs_cfg,
+        ));
+
+        let conns_cfg = FetchTaskConfig {
+            base_interval: self.config.connections_by_pg,
+            max_interval: self.config.max_interval,
+            jitter_percent: self.config.jitter_percent,
+            force: self.notifies.get(ClusterEndpoint::ConnectionsByPg),
+        };
+        self.handles.push(spawn_connections_by_pg(
+            client.clone(),
+            tx.clone(),
+            self.pg_ids_rx.clone(),
+            conns_cfg,
         ));
     }
 
@@ -324,6 +368,7 @@ mod tests {
                 invalid: 0,
                 disabled: 0,
             },
+            process_group_ids: vec![],
         };
         let ep = store.apply_update(ClusterUpdate::RootPgStatus(Ok(fake_pg.clone()), meta()));
         assert_eq!(ep, ClusterEndpoint::RootPgStatus);
@@ -408,5 +453,73 @@ mod tests {
                 store.shutdown();
             })
             .await;
+    }
+
+    #[test]
+    fn connections_update_is_applied() {
+        use crate::client::{ConnectionEndpointIds, ConnectionEndpoints};
+        use std::collections::HashMap;
+
+        let mut store = ClusterStore::new(ClusterPollingConfig::default());
+        let mut by_connection = HashMap::new();
+        by_connection.insert(
+            "conn-1".to_string(),
+            ConnectionEndpointIds {
+                source_id: "src-1".into(),
+                destination_id: "dst-1".into(),
+            },
+        );
+        let endpoints = ConnectionEndpoints { by_connection };
+        let ep = store.apply_update(ClusterUpdate::Connections {
+            pg_id: "pg-abc".into(),
+            result: Ok(endpoints),
+            meta: meta(),
+        });
+        assert_eq!(ep, ClusterEndpoint::ConnectionsByPg);
+        let entry = store
+            .snapshot
+            .connections_by_pg
+            .get("pg-abc")
+            .expect("pg-abc entry must exist after apply");
+        match entry {
+            EndpointState::Ready { data, .. } => {
+                let pair = data
+                    .by_connection
+                    .get("conn-1")
+                    .expect("conn-1 must be populated");
+                assert_eq!(pair.source_id, "src-1");
+                assert_eq!(pair.destination_id, "dst-1");
+            }
+            other => panic!("expected Ready, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn publish_pg_ids_mirrors_snapshot_into_watch_channel() {
+        let mut store = ClusterStore::new(ClusterPollingConfig::default());
+        // Before any RootPgStatus update the watch channel is empty.
+        assert!(store.pg_ids_rx.borrow().is_empty());
+
+        // Seed a Ready RootPgStatus snapshot by routing an Ok update.
+        let fake_pg = RootPgStatusSnapshot {
+            flow_files_queued: 0,
+            bytes_queued: 0,
+            connections: vec![],
+            process_group_count: 2,
+            input_port_count: 0,
+            output_port_count: 0,
+            processors: crate::client::ProcessorStateCounts::default(),
+            process_group_ids: vec!["root".into(), "child".into()],
+        };
+        store.apply_update(ClusterUpdate::RootPgStatus(Ok(fake_pg), meta()));
+
+        // Publish and observe the watch-channel state.
+        store.publish_pg_ids();
+        let published: Vec<String> = store.pg_ids_rx.borrow().clone();
+        assert_eq!(
+            published,
+            vec!["root".to_string(), "child".to_string()],
+            "publish_pg_ids must mirror the Ready snapshot's id list"
+        );
     }
 }

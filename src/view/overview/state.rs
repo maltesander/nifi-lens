@@ -1055,6 +1055,7 @@ mod tests {
                     disabled: 0,
                 },
                 connections: vec![q("c0", 95), q("c1", 90)],
+                process_group_ids: vec![],
             },
         );
         redraw_components(&mut state);

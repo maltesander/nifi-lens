@@ -454,6 +454,10 @@ pub struct RootPgStatusSnapshot {
     pub output_port_count: u32,
     /// Per-state processor tally across every PG.
     pub processors: ProcessorStateCounts,
+    /// Every PG id in the flow in DFS order (root first, then each
+    /// subtree). Empty / missing ids are skipped. `ClusterStore` reads
+    /// this to drive the connections-by-PG fetcher.
+    pub process_group_ids: Vec<String>,
 }
 
 impl RootPgStatusSnapshot {
@@ -471,7 +475,15 @@ impl RootPgStatusSnapshot {
         snap.connections
             .sort_by(|a, b| b.fill_percent.cmp(&a.fill_percent));
         collect_counts(agg, &mut snap);
+        collect_pg_ids(agg, &mut snap.process_group_ids);
         snap
+    }
+
+    /// Return every PG id in the flow in DFS order (root first, then
+    /// each subtree). Consumed by `ClusterStore::publish_pg_ids` to
+    /// drive the connections-by-PG fetcher fan-out.
+    pub fn pg_ids(&self) -> Vec<String> {
+        self.process_group_ids.clone()
     }
 }
 
@@ -513,6 +525,27 @@ fn collect_counts(
         for entity in children {
             if let Some(child) = entity.process_group_status_snapshot.as_ref() {
                 collect_counts(child, out);
+            }
+        }
+    }
+}
+
+/// DFS-walks the PG tree collecting the `id` of every non-empty PG.
+/// Root is emitted first, then each subtree in order. Consumed by
+/// `RootPgStatusSnapshot::from_aggregate` to populate `process_group_ids`.
+fn collect_pg_ids(
+    snapshot: &nifi_rust_client::dynamic::types::ProcessGroupStatusSnapshotDto,
+    out: &mut Vec<String>,
+) {
+    if let Some(id) = snapshot.id.as_deref()
+        && !id.is_empty()
+    {
+        out.push(id.to_string());
+    }
+    if let Some(children) = snapshot.process_group_status_snapshots.as_ref() {
+        for entity in children {
+            if let Some(child) = entity.process_group_status_snapshot.as_ref() {
+                collect_pg_ids(child, out);
             }
         }
     }
@@ -615,9 +648,10 @@ impl ControllerServiceCounts {
 }
 
 pub use browser::{
-    ConnectionDetail, ConnectionEndpoints, ControllerServiceDetail, ControllerServiceSummary,
-    FolderKind, NodeKind, NodeStatusSummary, PortDetail, PortKind, ProcessGroupDetail,
-    ProcessorDetail, RawNode, RecursiveSnapshot, ReferencingComponent, ReferencingKind,
+    ConnectionDetail, ConnectionEndpointIds, ConnectionEndpoints, ControllerServiceDetail,
+    ControllerServiceSummary, FolderKind, NodeKind, NodeStatusSummary, PortDetail, PortKind,
+    ProcessGroupDetail, ProcessorDetail, RawNode, RecursiveSnapshot, ReferencingComponent,
+    ReferencingKind,
 };
 pub use events::{ProvenancePollResult, ProvenanceQuery, ProvenanceQueryHandle};
 pub use health::{
@@ -689,6 +723,59 @@ mod root_pg_status_snapshot_tests {
             snap.processors.running + snap.processors.stopped + snap.processors.invalid,
             0
         );
+    }
+
+    fn pg_with_id(id: &str) -> ProcessGroupStatusSnapshotDto {
+        let mut dto = ProcessGroupStatusSnapshotDto::default();
+        dto.id = Some(id.into());
+        dto
+    }
+
+    fn pg_entity(dto: ProcessGroupStatusSnapshotDto) -> ProcessGroupStatusSnapshotEntity {
+        let mut entity = ProcessGroupStatusSnapshotEntity::default();
+        entity.process_group_status_snapshot = Some(dto);
+        entity
+    }
+
+    #[test]
+    fn pg_ids_flattens_recursive_snapshot() {
+        // Shape: root → childA → grandchild; root → childB.
+        let grandchild = pg_with_id("grandchild");
+        let mut child_a = pg_with_id("childA");
+        child_a.process_group_status_snapshots = Some(vec![pg_entity(grandchild)]);
+        let child_b = pg_with_id("childB");
+
+        let mut root = pg_with_id("root");
+        root.process_group_status_snapshots = Some(vec![pg_entity(child_a), pg_entity(child_b)]);
+
+        let snap = RootPgStatusSnapshot::from_aggregate(&root);
+        assert_eq!(
+            snap.pg_ids(),
+            vec![
+                "root".to_string(),
+                "childA".to_string(),
+                "grandchild".to_string(),
+                "childB".to_string(),
+            ],
+            "DFS order: root, each subtree in order"
+        );
+    }
+
+    #[test]
+    fn pg_ids_skips_empty_and_missing_ids() {
+        // Root has empty id, child is missing id entirely, grandchild has one.
+        let mut grandchild = ProcessGroupStatusSnapshotDto::default();
+        grandchild.id = Some("gc".into());
+        let mut child = ProcessGroupStatusSnapshotDto::default();
+        child.id = None;
+        child.process_group_status_snapshots = Some(vec![pg_entity(grandchild)]);
+
+        let mut root = ProcessGroupStatusSnapshotDto::default();
+        root.id = Some(String::new());
+        root.process_group_status_snapshots = Some(vec![pg_entity(child)]);
+
+        let snap = RootPgStatusSnapshot::from_aggregate(&root);
+        assert_eq!(snap.pg_ids(), vec!["gc".to_string()]);
     }
 }
 

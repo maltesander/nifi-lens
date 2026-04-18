@@ -82,6 +82,14 @@ pub async fn run(
         let event = match event {
             AppEvent::ClusterUpdate(update) => {
                 let endpoint = state.cluster.apply_update(update);
+                // A fresh RootPgStatus publishes its PG-id list on the
+                // watch channel that feeds the connections-by-PG fetcher.
+                // Kept here (not in the `ClusterChanged` branch) so it
+                // fires on every update — including ones that don't
+                // affect the active tab's projection.
+                if matches!(endpoint, crate::cluster::ClusterEndpoint::RootPgStatus) {
+                    state.cluster.publish_pg_ids();
+                }
                 if tx.send(AppEvent::ClusterChanged(endpoint)).await.is_err() {
                     tracing::debug!("channel closed during ClusterChanged fanout");
                 }

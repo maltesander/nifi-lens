@@ -29,7 +29,8 @@ fn it_context(version: &str) -> ResolvedContext {
 }
 
 #[tokio::test(flavor = "current_thread")]
-#[ignore]
+#[ignore = "Task 6 restores endpoints via cluster snapshot; \
+    browser_tree() no longer backfills endpoint ids"]
 async fn integration_browser_tree_populates_connection_endpoint_ids() {
     for &version in FIXTURE_VERSIONS {
         eprintln!("--- connection endpoints on NiFi {version} ---");

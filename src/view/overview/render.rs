@@ -896,6 +896,7 @@ mod tests {
                     invalid: 0,
                     disabled: 1,
                 },
+                process_group_ids: vec![],
             },
         );
         state.cs_counts = Some(crate::client::ControllerServiceCounts {
@@ -1042,6 +1043,7 @@ mod tests {
                     invalid: 2,
                     disabled: 0,
                 },
+                process_group_ids: vec![],
             },
         );
         state.cs_counts = Some(crate::client::ControllerServiceCounts {
@@ -1169,6 +1171,7 @@ mod tests {
                     invalid: 0,
                     disabled: 1,
                 },
+                process_group_ids: vec![],
             },
         );
         state.cs_counts = Some(crate::client::ControllerServiceCounts {

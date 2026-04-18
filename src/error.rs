@@ -301,6 +301,20 @@ pub enum NifiLensError {
     },
 
     /// See `ClientBuildFailed` for the boxed-source rationale; callers
+    /// must box explicitly. Raised per-PG by the cluster store's
+    /// connections-by-PG fetcher when `/process-groups/{id}/connections`
+    /// fails; per-PG errors are non-fatal — the snapshot's
+    /// `EndpointState::Failed` arm preserves any prior `last_ok`.
+    #[snafu(display(
+        "failed to fetch connections for PG {id:?} for context {context:?}: {source}"
+    ))]
+    PgConnectionsFetchFailed {
+        context: String,
+        id: String,
+        source: Box<dyn std::error::Error + Send + Sync>,
+    },
+
+    /// See `ClientBuildFailed` for the boxed-source rationale; callers
     /// must box explicitly.
     #[snafu(display("failed to fetch processor {id:?} detail for context {context:?}: {source}"))]
     ProcessorDetailFailed {
