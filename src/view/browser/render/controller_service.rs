@@ -56,7 +56,7 @@ pub fn render(
 
     let mut constraints: Vec<Constraint> = Vec::new();
     constraints.push(Constraint::Length(7)); // Identity (5 content lines + 2 borders)
-    constraints.push(Constraint::Fill(1)); // Properties
+    constraints.push(Constraint::Min(5)); // Properties (2 borders + header + ≥2 data rows)
     if has_validation {
         let h = (d
             .validation_errors
@@ -66,7 +66,7 @@ pub fn render(
         constraints.push(Constraint::Length(h));
     }
     constraints.push(Constraint::Length(6)); // Referencing components (2 borders + header + 3 rows)
-    constraints.push(Constraint::Length(6)); // Recent bulletins (2 borders + 4 rows)
+    constraints.push(Constraint::Length(5)); // Recent bulletins (2 borders + header + 2 rows)
 
     let rows = Layout::default()
         .direction(Direction::Vertical)
