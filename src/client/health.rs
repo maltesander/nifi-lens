@@ -204,6 +204,15 @@ pub fn update_nodes(state: &mut NodesState, diag: &SystemDiagSnapshot) {
         })
         .collect();
 
+    // Sort alphabetically by address (case-insensitive) so the Overview
+    // Nodes panel presents a stable, predictable order regardless of how
+    // NiFi returns the node_snapshots array.
+    state.nodes.sort_by(|a, b| {
+        a.node_address
+            .to_lowercase()
+            .cmp(&b.node_address.to_lowercase())
+    });
+
     // Clamp selection to valid range.
     if !state.nodes.is_empty() {
         state.selected = state.selected.min(state.nodes.len() - 1);
@@ -474,6 +483,33 @@ mod tests {
         update_nodes(&mut state, &snap2);
         assert_eq!(state.nodes[0].gc_delta, Some(5));
         assert_eq!(state.nodes[0].gc_collection_count, 15);
+    }
+
+    #[test]
+    fn update_nodes_sorts_nodes_alphabetically_case_insensitive() {
+        let mut state = NodesState::default();
+
+        // Input order deliberately not alphabetical; mix of upper/lower case
+        // distinguishes case-insensitive from the default byte-wise sort
+        // (where uppercase ASCII sorts before lowercase).
+        let snap = diag_snap(
+            Vec::new(),
+            None,
+            Vec::new(),
+            vec![
+                node_diag("Charlie:8080", 1_000, 8_000, 0),
+                node_diag("alpha:8080", 1_000, 8_000, 0),
+                node_diag("Bravo:8080", 1_000, 8_000, 0),
+            ],
+        );
+        update_nodes(&mut state, &snap);
+
+        let addresses: Vec<&str> = state
+            .nodes
+            .iter()
+            .map(|n| n.node_address.as_str())
+            .collect();
+        assert_eq!(addresses, vec!["alpha:8080", "Bravo:8080", "Charlie:8080"]);
     }
 
     #[test]

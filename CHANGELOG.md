@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- **Overview**: nodes panel now lists cluster nodes sorted
+  alphabetically by `host:port` (case-insensitive) instead of in the
+  order returned by `/system-diagnostics`.
+
 ## [0.4.0] — 2026-04-17
 
 ### Added
