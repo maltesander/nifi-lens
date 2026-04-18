@@ -145,15 +145,23 @@ pub async fn run(
                         _ => {}
                     }
                 }
-                if affects_browser {
+                // Browser arena rebuild is gated on Browser actually
+                // being the active tab. On a 10k-processor cluster this
+                // avoids cloning a multi-MB snapshot every 10s once
+                // Browser has been visited — Overview subscribes to
+                // `RootPgStatus` too, so the raw subscriber count isn't
+                // a Browser-specific signal. `current_tab` is the honest
+                // gate: Browser re-entry fires its own force-notify, so
+                // the next `ClusterChanged` after entry still rebuilds.
+                if affects_browser && state.current_tab == ViewId::Browser {
                     // `rebuild_arena_from_cluster` needs `&mut AppState`
                     // (to mutate the Browser arena + flow index) AND a
                     // read of the cluster snapshot. The snapshot lives
                     // inside `AppState.cluster`, so we clone it once to
                     // break the borrow. On a 10k-processor cluster this
                     // snapshot is a handful of MBs — cheap per update,
-                    // but Task 6's self-review flags this for future
-                    // optimization if profiling shows it.
+                    // but only paid while Browser is actually the
+                    // subscriber of its endpoints.
                     let snap_snapshot = state.cluster.snapshot.clone();
                     crate::view::browser::state::rebuild_arena_from_cluster(
                         &mut state,

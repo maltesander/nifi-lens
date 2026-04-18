@@ -240,11 +240,17 @@ password_env = "NIFILENS_PROD_PASSWORD"
   for NiFi proxy deployments.
 - **File permissions** must be `0600`; `nifilens` refuses to start if the
   config is world-readable.
-- **Poll intervals.** Set under `[polling.*]` using humantime (`"10s"`,
-  `"750ms"`). Out-of-band values emit a `tracing::warn!` to the log file
-  but are accepted as-is. Only `overview`, `browser`, and `bulletins`
-  workers honour this; in-flight polling for Events queries and Tracer
-  content stays on the internal cadence.
+- **Poll intervals.** All periodic NiFi fetches are owned by a single
+  central `ClusterStore`; there are no per-view pollers. Cadences live
+  under `[polling.cluster]` and use humantime values (`"10s"`,
+  `"750ms"`). Out-of-band values emit a `tracing::warn!` to the log
+  file but are accepted as-is. Each fetch cycle applies a random
+  ±`jitter_percent/100` jitter and scales its interval adaptively up to
+  `max_interval` when the cluster is slow. Expensive endpoints
+  (`root_pg_status`, `controller_services`, `connections_by_pg`) park
+  entirely when no view subscribes — i.e. while neither Overview nor
+  Browser is the active tab. In-flight polling for Events queries and
+  Tracer content stays on its internal cadence.
 - **CLI overrides:** `nifilens --context stage`, `nifilens --config ./local.toml`.
 - **Version strategy** maps to `nifi-rust-client`'s `VersionResolutionStrategy`.
 
