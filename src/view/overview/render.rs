@@ -3,8 +3,10 @@
 //! Layout 3:
 //!
 //! ```text
-//! ┌─ Processors ──────────────────────────────────────────────────────────────┐
-//! │ RUNNING 42   STOPPED 3   INVALID 0   DISABLED 1   THREADS 5              │ ← processor info panel (3 rows)
+//! ┌─ Components ──────────────────────────────────────────────────────────────┐
+//! │  Process groups         5    all in sync   INPUTS     2  OUTPUTS    1    │ ← components panel (5 rows)
+//! │  Processors            46    RUNNING   42  STOPPED    3  INVALID    0    │
+//! │  Controller services   12    ENABLED   12  DISABLED   0  INVALID    0    │
 //! ├─ Nodes (N connected) ─────────────────────────────────────────────────────┤ ← nodes panel (variable, capped)
 //! │   node-name   heap  N%   gc Nms/5m   load N.N                            │
 //! │   repositories  content  N%   flowfile  N%   provenance  N%              │
@@ -28,6 +30,7 @@ use super::state::{
     BulletinBucket, NoisyComponent, OverviewFocus, OverviewSnapshot, OverviewState,
     SPARKLINE_MINUTES, Severity, UnhealthyQueue,
 };
+use crate::client::{ControllerServiceCounts, ProcessorStateCounts};
 use crate::app::navigation::compute_scroll_window;
 use crate::theme;
 use crate::widget::gauge::fill_bar;
@@ -41,18 +44,18 @@ pub fn render(frame: &mut Frame, area: Rect, state: &OverviewState) {
     let zones = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
-            Constraint::Length(3),            // processors panel (1 row + 2 border)
+            Constraint::Length(5),            // components panel (3 rows + 2 border)
             Constraint::Length(nodes_height), // nodes panel
             Constraint::Length(7),            // bulletins/noisy panel (5 content + 2 border)
             Constraint::Fill(1),              // unhealthy queues panel
         ])
         .split(area);
 
-    // Processors panel
-    let processors_block = Panel::new(" Processors ").into_block();
-    let processors_inner = processors_block.inner(zones[0]);
-    frame.render_widget(processors_block, zones[0]);
-    render_processor_info_line(frame, processors_inner, state.snapshot.as_ref());
+    // Components panel
+    let components_block = Panel::new(" Components ").into_block();
+    let components_inner = components_block.inner(zones[0]);
+    frame.render_widget(components_block, zones[0]);
+    render_components_table(frame, components_inner, state);
 
     // Nodes panel — title shows node count when populated
     let total = state.nodes.nodes.len();
@@ -102,36 +105,106 @@ fn nodes_zone_height(state: &OverviewState) -> u16 {
     needed.clamp(4, 14)
 }
 
-/// Format C — uppercase muted labels with severity-colored values.
-fn render_processor_info_line(frame: &mut Frame, area: Rect, snapshot: Option<&OverviewSnapshot>) {
-    let line = match snapshot {
-        Some(s) => {
-            let c = &s.controller;
-            Line::from(vec![
-                Span::styled("RUNNING", theme::muted()),
-                Span::raw(" "),
-                Span::styled(c.running.to_string(), theme::success()),
-                Span::raw("   "),
-                Span::styled("STOPPED", theme::muted()),
-                Span::raw(" "),
-                Span::styled(c.stopped.to_string(), theme::warning()),
-                Span::raw("   "),
-                Span::styled("INVALID", theme::muted()),
-                Span::raw(" "),
-                Span::styled(c.invalid.to_string(), theme::error()),
-                Span::raw("   "),
-                Span::styled("DISABLED", theme::muted()),
-                Span::raw(" "),
-                Span::styled(c.disabled.to_string(), theme::muted()),
-                Span::raw("   "),
-                Span::styled("THREADS", theme::muted()),
-                Span::raw(" "),
-                Span::styled(c.active_threads.to_string(), theme::accent()),
-            ])
-        }
-        None => Line::from(Span::styled("loading…", theme::muted())),
+/// Three-row Components table — process groups, processors, controller
+/// services. Display-only; not focusable. Aligned columns: 2-pad +
+/// 20-label + 4-count + 4-gap + repeating 12-slot (8 label + 4 value).
+fn render_components_table(frame: &mut Frame, area: Rect, state: &OverviewState) {
+    let Some(snap) = state.snapshot.as_ref() else {
+        let line = Line::from(Span::styled("loading…", theme::muted()));
+        frame.render_widget(Paragraph::new(line), area);
+        return;
     };
-    frame.render_widget(Paragraph::new(line), area);
+    let lines = vec![
+        pg_row(snap),
+        processors_row(&snap.root_pg.processors),
+        controller_services_row(snap.cs_counts.as_ref()),
+    ];
+    frame.render_widget(Paragraph::new(lines), area);
+}
+
+fn pg_row(snap: &OverviewSnapshot) -> Line<'static> {
+    let mut spans = label_and_count("Process groups", snap.root_pg.process_group_count);
+    let stale = snap.controller.stale;
+    let modified = snap.controller.locally_modified;
+    let sync_err = snap.controller.sync_failure;
+    if stale + modified + sync_err == 0 {
+        spans.extend(slot_text("all in sync", theme::muted()));
+    } else {
+        spans.extend(slot("STALE", stale, theme::warning()));
+        spans.extend(slot_gap());
+        spans.extend(slot("MODIFIED", modified, theme::warning()));
+        spans.extend(slot_gap());
+        spans.extend(slot("SYNC-ERR", sync_err, theme::error()));
+    }
+    spans.extend(slot_gap());
+    spans.extend(slot("INPUTS", snap.root_pg.input_port_count, theme::muted()));
+    spans.extend(slot_gap());
+    spans.extend(slot("OUTPUTS", snap.root_pg.output_port_count, theme::muted()));
+    Line::from(spans)
+}
+
+fn processors_row(p: &ProcessorStateCounts) -> Line<'static> {
+    let mut spans = label_and_count("Processors", p.total());
+    spans.extend(slot("RUNNING", p.running, theme::success()));
+    spans.extend(slot_gap());
+    spans.extend(slot("STOPPED", p.stopped, theme::warning()));
+    spans.extend(slot_gap());
+    spans.extend(slot("INVALID", p.invalid, theme::error()));
+    spans.extend(slot_gap());
+    spans.extend(slot("DISABLED", p.disabled, theme::muted()));
+    Line::from(spans)
+}
+
+fn controller_services_row(counts: Option<&ControllerServiceCounts>) -> Line<'static> {
+    match counts {
+        Some(c) => {
+            let mut spans = label_and_count("Controller services", c.total());
+            spans.extend(slot("ENABLED", c.enabled, theme::success()));
+            spans.extend(slot_gap());
+            spans.extend(slot("DISABLED", c.disabled, theme::muted()));
+            spans.extend(slot_gap());
+            spans.extend(slot("INVALID", c.invalid, theme::error()));
+            Line::from(spans)
+        }
+        None => Line::from(vec![
+            Span::raw("  "),
+            Span::raw(format!("{:<20}", "Controller services")),
+            Span::styled(format!("{:>4}", "?"), theme::muted()),
+            Span::raw("    "),
+            Span::styled("cs list unavailable", theme::error()),
+        ]),
+    }
+}
+
+/// Returns `[pad, label-padded-to-20, count-right-aligned-in-4, 4-space-gap]`
+/// — the fixed prefix every row shares.
+fn label_and_count(label: &str, count: u32) -> Vec<Span<'static>> {
+    vec![
+        Span::raw("  "),
+        Span::raw(format!("{:<20}", label)),
+        Span::styled(format!("{:>4}", count), theme::accent()),
+        Span::raw("    "),
+    ]
+}
+
+/// One status slot (12 chars total): label left-aligned in 8, value
+/// right-aligned in 4. Returns 2 spans (label, value) — caller adds the gap.
+fn slot(label: &'static str, value: u32, value_style: Style) -> Vec<Span<'static>> {
+    vec![
+        Span::styled(format!("{:<8}", label), theme::muted()),
+        Span::styled(format!("{:>4}", value), value_style),
+    ]
+}
+
+/// One status slot occupied by a single text chip (e.g. "all in sync"),
+/// padded to 12 chars total to stay aligned with the numeric slots.
+fn slot_text(text: &'static str, style: Style) -> Vec<Span<'static>> {
+    vec![Span::styled(format!("{:<12}", text), style)]
+}
+
+/// Two-space gap between consecutive slots.
+fn slot_gap() -> Vec<Span<'static>> {
+    vec![Span::raw("  ")]
 }
 
 fn render_nodes_zone(frame: &mut Frame, area: Rect, state: &OverviewState) {
