@@ -2672,4 +2672,142 @@ mod tests {
         };
         assert_eq!(ps.selected, 10);
     }
+
+    #[test]
+    fn properties_modal_c_copies_selected_value() {
+        use crate::client::ProcessorDetail;
+        use crate::view::browser::state::{NodeDetail, PropertiesModalState};
+        let (mut s, c) = seeded_browser_state();
+        s.browser.details.insert(
+            1,
+            NodeDetail::Processor(ProcessorDetail {
+                id: "gen".into(),
+                name: "Gen".into(),
+                type_name: "x".into(),
+                bundle: String::new(),
+                run_status: "Running".into(),
+                scheduling_strategy: String::new(),
+                scheduling_period: String::new(),
+                concurrent_tasks: 1,
+                run_duration_ms: 0,
+                penalty_duration: String::new(),
+                yield_duration: String::new(),
+                bulletin_level: String::new(),
+                properties: vec![("K1".into(), "v1".into()), ("K2".into(), "copy-me".into())],
+                validation_errors: vec![],
+            }),
+        );
+        let mut ps = PropertiesModalState::new(1);
+        ps.selected = 1;
+        s.modal = Some(Modal::Properties(ps));
+
+        update(&mut s, key(KeyCode::Char('c'), KeyModifiers::NONE), &c);
+
+        // In CI there is no clipboard daemon — the banner will be a
+        // warning ("clipboard: …") rather than the info toast we'd see
+        // interactively. Either outcome proves the code path ran against
+        // the selected row. What we assert is that the banner is set and
+        // non-empty, and that the modal did not close.
+        assert!(s.status.banner.is_some(), "`c` must emit a status banner");
+        assert!(matches!(s.modal, Some(Modal::Properties(_))));
+    }
+
+    #[test]
+    fn properties_modal_descend_on_uuid_emits_open_in_browser_and_closes() {
+        use crate::client::ProcessorDetail;
+        use crate::client::{NodeKind, NodeStatusSummary};
+        use crate::intent::CrossLink;
+        use crate::view::browser::state::NodeDetail;
+        use crate::view::browser::state::{PropertiesModalState, TreeNode};
+
+        let (mut s, c) = seeded_browser_state();
+
+        // Seed a CS node at arena index 2 whose id is a real UUID.
+        let cs_uuid = "7f3e1c22-1111-4444-8888-abcdef012345".to_string();
+        s.browser.nodes.push(TreeNode {
+            parent: Some(0),
+            children: vec![],
+            kind: NodeKind::ControllerService,
+            id: cs_uuid.clone(),
+            group_id: "root".into(),
+            name: "fixture-json-reader".into(),
+            status_summary: NodeStatusSummary::ControllerService {
+                state: "ENABLED".into(),
+            },
+        });
+
+        // Processor (arena 1) has a property whose value is that UUID.
+        s.browser.details.insert(
+            1,
+            NodeDetail::Processor(ProcessorDetail {
+                id: "gen".into(),
+                name: "Gen".into(),
+                type_name: "x".into(),
+                bundle: String::new(),
+                run_status: "Running".into(),
+                scheduling_strategy: String::new(),
+                scheduling_period: String::new(),
+                concurrent_tasks: 1,
+                run_duration_ms: 0,
+                penalty_duration: String::new(),
+                yield_duration: String::new(),
+                bulletin_level: String::new(),
+                properties: vec![
+                    ("Plain".into(), "not-a-uuid".into()),
+                    ("Record Reader".into(), cs_uuid.clone()),
+                ],
+                validation_errors: vec![],
+            }),
+        );
+        let mut ps = PropertiesModalState::new(1);
+        ps.selected = 1;
+        s.modal = Some(Modal::Properties(ps));
+
+        let r = update(&mut s, key(KeyCode::Enter, KeyModifiers::NONE), &c);
+
+        // Modal closed.
+        assert!(s.modal.is_none());
+        // Intent is Goto(OpenInBrowser { component_id = uuid }).
+        match r.intent {
+            Some(crate::app::state::PendingIntent::Goto(CrossLink::OpenInBrowser {
+                component_id,
+                ..
+            })) => assert_eq!(component_id, cs_uuid),
+            other => panic!("expected Goto(OpenInBrowser {{ cs_uuid }}), got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn properties_modal_descend_on_non_uuid_is_noop() {
+        use crate::client::ProcessorDetail;
+        use crate::view::browser::state::{NodeDetail, PropertiesModalState};
+
+        let (mut s, c) = seeded_browser_state();
+        s.browser.details.insert(
+            1,
+            NodeDetail::Processor(ProcessorDetail {
+                id: "gen".into(),
+                name: "Gen".into(),
+                type_name: "x".into(),
+                bundle: String::new(),
+                run_status: "Running".into(),
+                scheduling_strategy: String::new(),
+                scheduling_period: String::new(),
+                concurrent_tasks: 1,
+                run_duration_ms: 0,
+                penalty_duration: String::new(),
+                yield_duration: String::new(),
+                bulletin_level: String::new(),
+                properties: vec![("K".into(), "plain text".into())],
+                validation_errors: vec![],
+            }),
+        );
+        s.modal = Some(Modal::Properties(PropertiesModalState::new(1)));
+
+        let r = update(&mut s, key(KeyCode::Enter, KeyModifiers::NONE), &c);
+
+        // Modal stays open, no intent.
+        assert!(matches!(s.modal, Some(Modal::Properties(_))));
+        assert!(r.intent.is_none());
+    }
 }

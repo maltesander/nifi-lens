@@ -1429,6 +1429,55 @@ fn handle_key(state: &mut AppState, key: KeyEvent, config: &Config) -> UpdateRes
                             tracer_followup: None,
                         };
                     }
+                    (KeyCode::Char('c'), KeyModifiers::NONE) => {
+                        // Copy the value of the selected property row, if any.
+                        let props: &[(String, String)] =
+                            match state.browser.details.get(&ps.arena_idx) {
+                                Some(NodeDetail::Processor(p)) => &p.properties,
+                                Some(NodeDetail::ControllerService(c)) => &c.properties,
+                                _ => &[],
+                            };
+                        if let Some((_, value)) = props.get(ps.selected) {
+                            let value = value.clone();
+                            let preview: String = value.chars().take(40).collect();
+                            match state.copy_to_clipboard(value) {
+                                Ok(()) => state.post_info(format!("copied: {preview}")),
+                                Err(err) => state.post_warning(format!("clipboard: {err}")),
+                            }
+                        }
+                        return UpdateResult {
+                            redraw: true,
+                            intent: None,
+                            tracer_followup: None,
+                        };
+                    }
+                    (KeyCode::Enter, _) => {
+                        // Descend: if the selected row's value resolves to an arena
+                        // node, close the modal and emit a Goto(OpenInBrowser) intent.
+                        // Non-resolvable rows are a no-op.
+                        let props: Vec<(String, String)> =
+                            match state.browser.details.get(&ps.arena_idx) {
+                                Some(NodeDetail::Processor(p)) => p.properties.clone(),
+                                Some(NodeDetail::ControllerService(c)) => c.properties.clone(),
+                                _ => Vec::new(),
+                            };
+                        let Some((_, value)) = props.get(ps.selected) else {
+                            return UpdateResult::default();
+                        };
+                        let Some(resolved) = state.browser.resolve_id(value) else {
+                            return UpdateResult::default();
+                        };
+                        let intent = PendingIntent::Goto(CrossLink::OpenInBrowser {
+                            component_id: value.trim().to_string(),
+                            group_id: resolved.group_id,
+                        });
+                        state.modal = None;
+                        return UpdateResult {
+                            redraw: true,
+                            intent: Some(intent),
+                            tracer_followup: None,
+                        };
+                    }
                     _ => return UpdateResult::default(),
                 }
             }
