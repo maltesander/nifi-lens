@@ -237,7 +237,7 @@ impl NifiClient {
     /// Calls `flow().get_controller_status()` and flattens the response.
     pub async fn controller_status(&self) -> Result<ControllerStatusSnapshot, NifiLensError> {
         tracing::debug!(context = %self.context_name, "fetching /flow/status");
-        let entity = self
+        let dto = self
             .inner
             .flow()
             .get_controller_status()
@@ -250,15 +250,7 @@ impl NifiClient {
                     }
                 })
             })?;
-        Ok(ControllerStatusSnapshot {
-            running: entity.running_count.unwrap_or(0).max(0) as u32,
-            stopped: entity.stopped_count.unwrap_or(0).max(0) as u32,
-            invalid: entity.invalid_count.unwrap_or(0).max(0) as u32,
-            disabled: entity.disabled_count.unwrap_or(0).max(0) as u32,
-            active_threads: entity.active_thread_count.unwrap_or(0).max(0) as u32,
-            flow_files_queued: entity.flow_files_queued.unwrap_or(0).max(0) as u32,
-            bytes_queued: entity.bytes_queued.unwrap_or(0).max(0) as u64,
-        })
+        Ok(ControllerStatusSnapshot::from_dto(&dto))
     }
 
     /// Calls `flow().get_process_group_status("root", recursive=true)`
@@ -363,6 +355,23 @@ pub struct ControllerStatusSnapshot {
     pub bytes_queued: u64,
 }
 
+impl ControllerStatusSnapshot {
+    /// Build a snapshot from the raw `ControllerStatusDto`. Pure; no I/O.
+    /// All fields are read defensively because every field on the DTO is
+    /// `Option<i32>` / `Option<i64>`.
+    pub fn from_dto(dto: &nifi_rust_client::dynamic::types::ControllerStatusDto) -> Self {
+        Self {
+            running: dto.running_count.unwrap_or(0).max(0) as u32,
+            stopped: dto.stopped_count.unwrap_or(0).max(0) as u32,
+            invalid: dto.invalid_count.unwrap_or(0).max(0) as u32,
+            disabled: dto.disabled_count.unwrap_or(0).max(0) as u32,
+            active_threads: dto.active_thread_count.unwrap_or(0).max(0) as u32,
+            flow_files_queued: dto.flow_files_queued.unwrap_or(0).max(0) as u32,
+            bytes_queued: dto.bytes_queued.unwrap_or(0).max(0) as u64,
+        }
+    }
+}
+
 /// One connection (queue) row as surfaced to the Overview tab.
 /// `fill_percent` is `max(percent_use_count, percent_use_bytes)` so the
 /// leaderboard leads with the queue closest to back-pressure regardless of
@@ -456,3 +465,31 @@ pub use tracer::{
     AttributeTriple, ContentRender, ContentSide, ContentSnapshot, LatestEventsSnapshot,
     LineagePoll, LineageSnapshot, PREVIEW_CAP_BYTES, ProvenanceEventDetail, ProvenanceEventSummary,
 };
+
+#[cfg(test)]
+mod controller_status_snapshot_tests {
+    use super::*;
+
+    #[test]
+    fn from_dto_clamps_negatives_and_handles_missing() {
+        // Test with a default DTO and manually set fields via builder pattern
+        // since ControllerStatusDto is marked #[non_exhaustive].
+        let mut dto = nifi_rust_client::dynamic::types::ControllerStatusDto::default();
+        dto.running_count = Some(7);
+        dto.stopped_count = Some(-1); // NiFi shouldn't, but clamp anyway
+        dto.invalid_count = None;
+        dto.disabled_count = Some(2);
+        dto.active_thread_count = Some(3);
+        dto.flow_files_queued = Some(100);
+        dto.bytes_queued = Some(2048);
+
+        let snap = ControllerStatusSnapshot::from_dto(&dto);
+        assert_eq!(snap.running, 7);
+        assert_eq!(snap.stopped, 0);
+        assert_eq!(snap.invalid, 0);
+        assert_eq!(snap.disabled, 2);
+        assert_eq!(snap.active_threads, 3);
+        assert_eq!(snap.flow_files_queued, 100);
+        assert_eq!(snap.bytes_queued, 2048);
+    }
+}
