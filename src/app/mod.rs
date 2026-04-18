@@ -46,6 +46,10 @@ pub async fn run(
     let mut terminal = build_terminal()?;
 
     let mut state = AppState::new(context_name, detected_version, &config);
+    // Spawn per-endpoint cluster fetchers once at startup. A context
+    // switch tears the store down and respawns inside the main loop's
+    // `pending_worker_restart` branch.
+    state.cluster.spawn_fetchers(client.clone(), tx.clone());
     let mut workers = WorkerRegistry::new();
     let bulletins_last_id = state.bulletins.last_id;
     workers.ensure(

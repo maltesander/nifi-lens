@@ -3,6 +3,7 @@
 
 pub mod config;
 pub mod fetcher;
+pub mod fetcher_tasks;
 pub mod snapshot;
 pub mod store;
 pub mod subscriber;

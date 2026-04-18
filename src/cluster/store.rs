@@ -15,6 +15,7 @@ use crate::client::{
 };
 use crate::cluster::ClusterEndpoint;
 use crate::cluster::config::ClusterPollingConfig;
+use crate::cluster::fetcher_tasks::{FetchTaskConfig, spawn_controller_status};
 use crate::cluster::snapshot::{ClusterSnapshot, FetchMeta};
 use crate::cluster::subscriber::SubscriberRegistry;
 use crate::error::NifiLensError;
@@ -114,13 +115,19 @@ impl ClusterStore {
     }
 
     /// Spawn every per-endpoint fetch task on the current `LocalSet`.
-    /// Task 1 is a no-op; Tasks 2–8 each add one arm.
-    pub fn spawn_fetchers(
-        &mut self,
-        _client: Arc<RwLock<NifiClient>>,
-        _tx: mpsc::Sender<AppEvent>,
-    ) {
-        // Tasks 2–8 populate this.
+    /// Tasks 2–8 each add one arm.
+    pub fn spawn_fetchers(&mut self, client: Arc<RwLock<NifiClient>>, tx: mpsc::Sender<AppEvent>) {
+        let status_cfg = FetchTaskConfig {
+            base_interval: self.config.controller_status,
+            max_interval: self.config.max_interval,
+            jitter_percent: self.config.jitter_percent,
+            force: self.notifies.get(ClusterEndpoint::ControllerStatus),
+        };
+        self.handles.push(spawn_controller_status(
+            client.clone(),
+            tx.clone(),
+            status_cfg,
+        ));
     }
 
     pub fn subscribe(&mut self, endpoint: ClusterEndpoint, view: ViewId) {
@@ -228,6 +235,33 @@ mod tests {
             store.snapshot.controller_status,
             EndpointState::Loading
         ));
+    }
+
+    #[test]
+    fn controller_status_update_is_applied() {
+        let mut store = ClusterStore::new(ClusterPollingConfig::default());
+        let fake_status = ControllerStatusSnapshot {
+            running: 1,
+            stopped: 0,
+            invalid: 0,
+            disabled: 0,
+            active_threads: 0,
+            flow_files_queued: 0,
+            bytes_queued: 0,
+            stale: 0,
+            locally_modified: 0,
+            sync_failure: 0,
+            up_to_date: 0,
+        };
+        let ep = store.apply_update(ClusterUpdate::ControllerStatus(
+            Ok(fake_status.clone()),
+            meta(),
+        ));
+        assert_eq!(ep, ClusterEndpoint::ControllerStatus);
+        match &store.snapshot.controller_status {
+            EndpointState::Ready { data, .. } => assert_eq!(data.running, 1),
+            other => panic!("expected Ready, got {:?}", other),
+        }
     }
 
     #[tokio::test(flavor = "current_thread", start_paused = true)]
