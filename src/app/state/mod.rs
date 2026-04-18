@@ -698,7 +698,17 @@ fn modal_hints(modal: &Modal) -> Vec<crate::widget::hint_bar::HintSpan> {
         Modal::Properties(_) => vec![
             HintSpan {
                 key: Cow::Borrowed("\u{2191}/\u{2193}"),
-                action: Cow::Borrowed("scroll"),
+                action: Cow::Borrowed("nav"),
+                enabled: true,
+            },
+            HintSpan {
+                key: Cow::Borrowed("Enter"),
+                action: Cow::Borrowed("goto"),
+                enabled: true,
+            },
+            HintSpan {
+                key: Cow::Borrowed("c"),
+                action: Cow::Borrowed("copy value"),
                 enabled: true,
             },
             HintSpan {
@@ -748,6 +758,15 @@ fn modal_hints(modal: &Modal) -> Vec<crate::widget::hint_bar::HintSpan> {
             },
         ],
     }
+}
+
+// ---------------------------------------------------------------------------
+// Test helpers
+// ---------------------------------------------------------------------------
+
+#[cfg(test)]
+pub(crate) fn modal_hints_for_test(state: &AppState) -> Vec<crate::widget::hint_bar::HintSpan> {
+    state.modal.as_ref().map(modal_hints).unwrap_or_default()
 }
 
 // ---------------------------------------------------------------------------

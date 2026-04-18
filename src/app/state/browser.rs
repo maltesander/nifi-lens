@@ -2810,4 +2810,20 @@ mod tests {
         assert!(matches!(s.modal, Some(Modal::Properties(_))));
         assert!(r.intent.is_none());
     }
+
+    #[test]
+    fn properties_modal_hint_spans_advertise_new_chords() {
+        use crate::view::browser::state::PropertiesModalState;
+        let (mut s, _c) = seeded_browser_state();
+        s.modal = Some(Modal::Properties(PropertiesModalState::new(1)));
+        let spans = crate::app::state::modal_hints_for_test(&s);
+        let keys: Vec<&str> = spans.iter().map(|h| h.key.as_ref()).collect();
+        assert!(
+            keys.iter()
+                .any(|k| k.contains('↑') || k.contains('\u{2191}'))
+        );
+        assert!(keys.contains(&"Enter"));
+        assert!(keys.contains(&"c"));
+        assert!(keys.contains(&"Esc"));
+    }
 }
