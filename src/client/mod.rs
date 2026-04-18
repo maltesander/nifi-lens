@@ -465,14 +465,20 @@ fn collect_counts(
             let Some(snap) = entity.processor_status_snapshot.as_ref() else {
                 continue;
             };
-            // NiFi strings: "Running" / "Stopped" / "Invalid" / "Disabled"
-            // (mixed-case; match exactly to mirror NiFi's API surface).
-            match snap.run_status.as_deref() {
-                Some("Running") => out.processors.running += 1,
-                Some("Stopped") => out.processors.stopped += 1,
-                Some("Invalid") => out.processors.invalid += 1,
-                Some("Disabled") => out.processors.disabled += 1,
-                _ => { /* unknown / "Validating" / null — drop silently */ }
+            // Normalize case — NiFi's recursive status endpoint emits title-case,
+            // but the component endpoint emits uppercase. Match codebase convention
+            // (see widget/run_icon.rs).
+            match snap
+                .run_status
+                .as_deref()
+                .map(str::to_ascii_uppercase)
+                .as_deref()
+            {
+                Some("RUNNING") => out.processors.running += 1,
+                Some("STOPPED") => out.processors.stopped += 1,
+                Some("INVALID") => out.processors.invalid += 1,
+                Some("DISABLED") => out.processors.disabled += 1,
+                _ => { /* unknown ("VALIDATING") or null — drop silently */ }
             }
         }
     }
@@ -602,7 +608,9 @@ mod root_pg_status_snapshot_tests {
     #[test]
     fn walker_handles_unknown_run_status_gracefully() {
         let mut root = ProcessGroupStatusSnapshotDto::default();
-        root.processor_status_snapshots = Some(vec![proc("Validating"), proc("Disabled")]);
+        // Test case-insensitivity: "disabled" lowercase should still count.
+        // "Validating" should drop silently.
+        root.processor_status_snapshots = Some(vec![proc("Validating"), proc("disabled")]);
 
         let snap = RootPgStatusSnapshot::from_aggregate(&root);
         assert_eq!(snap.processors.disabled, 1);
