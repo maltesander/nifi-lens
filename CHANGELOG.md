@@ -9,6 +9,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **Architecture**: all periodic NiFi polling is now centralized in a
+  single `ClusterStore` (seven per-endpoint fetchers), replacing the
+  per-view worker polls that Overview, Browser, and Bulletins used to
+  run. Overview and Browser now share a single `root_pg_status`,
+  `controller_services`, and per-PG `connections_by_pg` fetch — load
+  reduction is proportional to the number of tabs that previously
+  duplicated these polls.
+- Polling cadences adapt to measured latency (up to `max_interval`,
+  default `60s`) and are jittered by ±`jitter_percent/100` (default
+  20%) to avoid synchronized bursts across endpoints.
+- Three expensive endpoints (`root_pg_status`, `controller_services`,
+  `connections_by_pg`) park when no view subscribes to them — i.e.
+  while neither Overview nor Browser is the active tab.
 - **Overview**: top panel renamed from `Processors` to `Components` and
   expanded into a three-row table (process groups, processors,
   controller services). PG row shows version-sync drift counts (or
@@ -28,6 +41,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   that node in the tree (same cross-link path used by the detail
   pane). A fixed detail strip below the table shows the selected
   row's full value so long values stay readable.
+
+### Removed
+
+- Per-view Overview, Browser, and Bulletins worker tasks — replaced by
+  `ClusterStore` fetchers and `redraw_*` reducers driven off
+  `AppEvent::ClusterChanged`.
+- Sysdiag nodewise → aggregate fallback banner — the transition is now
+  logged to `nifilens.log` rather than surfaced in the TUI. Monitor the
+  log if you run mixed-version fleets.
+
+### Breaking (config)
+
+- Per-view polling sections `[polling.overview]`, `[polling.browser]`,
+  and `[polling.bulletins]` have been replaced by a single
+  `[polling.cluster]` section. See `README.md` for the new shape. There
+  is no back-compat shim: `config.toml` files that still use the old
+  sections will fail to parse.
 
 ## [0.4.0] — 2026-04-17
 

@@ -63,23 +63,56 @@ nifi-lens/
 - **UI loop** runs on the main task. It drains an internal `AppEvent`
   channel, mutates state, and redraws (60 fps cap, only when state changed).
 - **Terminal event task** converts `crossterm::Event` → `AppEvent::Input`.
-- **Per-view data worker tasks** poll the relevant `NifiClient` endpoints
-  and push `AppEvent::Data(view, payload)` into the channel. Workers are
-  spawned on tab activation and cancelled on tab switch via a
-  `WorkerRegistry` (`src/app/worker.rs`) holding at most one
-  `JoinHandle<()>`, so API load is proportional to what the user is
-  actually looking at. Each view's worker resumes from its own cursor on
-  tab re-entry (the Bulletins worker, for example, resumes from
-  `AppState.bulletins.last_id`). Workers run via
-  `tokio::task::spawn_local` on the main-thread `LocalSet` (wired in
-  `src/lib.rs`) because `nifi-rust-client` dynamic traits return `!Send`
-  futures.
+- **Central cluster store** (`src/cluster/ClusterStore`) owns all
+  periodic NiFi polling. One fetcher task per endpoint emits
+  `AppEvent::ClusterUpdate` into the channel; the main loop applies
+  each update to `AppState.cluster.snapshot` and fans out
+  `AppEvent::ClusterChanged(endpoint)` so views can re-derive their
+  projections. Views never poll directly — they subscribe to the
+  endpoints they need.
+- **View-local workers** remain for on-demand detail fetches (Browser
+  `/processors/{id}`, Tracer provenance queries, Events content
+  fetches). They are spawned on tab activation and cancelled on tab
+  switch via a `WorkerRegistry` (`src/app/worker.rs`) holding at most
+  one `JoinHandle<()>`. The same registry also drives
+  `cluster.subscribe(...)` / `unsubscribe(...)` on tab change. Workers
+  run via `tokio::task::spawn_local` on the main-thread `LocalSet`
+  (wired in `src/lib.rs`) because `nifi-rust-client` dynamic traits
+  return `!Send` futures.
 - **Intent dispatcher** handles one-shot actions (trace a UUID, drill into
   a process group, fetch content for an event, submit a provenance
   query). It runs tasks off the runtime and pushes results back via the
   same channel.
 
 State is mutated **only on the UI task**. No locks, no races.
+
+### Central cluster store
+
+`src/cluster/ClusterStore` owns seven endpoint fetchers:
+`root_pg_status`, `controller_services`, `controller_status`,
+`system_diagnostics`, `bulletins`, `connections_by_pg`, `about`. Each
+runs as an independent `tokio::task::spawn_local` future on the main-
+thread `LocalSet`, pushes `AppEvent::ClusterUpdate` on success, and
+sleeps for its (adaptive, jittered) base cadence before the next tick.
+
+Snapshot mutation is main-loop-only: the `ClusterUpdate` arm in
+`src/app/mod.rs` calls `state.cluster.apply_update(...)` and re-emits
+`AppEvent::ClusterChanged(endpoint)`. Views observe the change by
+matching on the endpoint and invoking their `redraw_*` reducers.
+
+Three endpoints are **subscriber-gated** — they park when no view is
+subscribed: `root_pg_status`, `controller_services`,
+`connections_by_pg`. `WorkerRegistry::ensure` calls
+`cluster.subscribe(endpoint, view)` on tab entry and
+`unsubscribe(endpoint, view)` on tab exit.
+
+Context switch: `cluster.shutdown()` aborts every fetcher and the
+store is rebuilt with the new `NifiClient` in the main loop's
+`pending_worker_restart` branch.
+
+Sysdiag nodewise → aggregate fallback is handled inside the
+`system_diagnostics` fetcher (logged to `nifilens.log` on transition;
+no user-facing banner).
 
 ### `nifi-rust-client` integration
 
@@ -156,8 +189,11 @@ when debugging "why doesn't key X do anything".
    type implementing `ViewKeyHandler`.
 4. Add one arm to the `dispatch_handler!` macro in
    `src/app/state/mod.rs`.
-5. If the view has a worker, add a spawn arm to `src/app/worker.rs`'s
-   `WorkerRegistry::ensure`.
+5. If the view needs live cluster data, subscribe to the relevant
+   `ClusterEndpoint`s in `WorkerRegistry::ensure`'s arm for this view,
+   and unsubscribe on tab exit (see the existing Overview / Browser /
+   Bulletins arms in `src/app/worker.rs`). For on-demand detail
+   fetches, spawn a view-local worker as before.
 6. Add a render arm to `src/app/ui.rs`'s render dispatch.
 7. Add a top-bar label (`src/widget/top_bar.rs`).
 
@@ -183,22 +219,27 @@ modified, or sync-failed; otherwise it expands to three numeric
 slots. Display-only — no focus, no selection.
 
 **Data sources:** processor / PG / port counts are derived from the
-existing recursive `root_pg_status` walk. Version-sync counts come
-from `controller_status` (already fetched). Controller-service counts
-require one additional fetch per Overview poll —
-`get_controller_services_from_group("root", false, true, false, None)`.
-That fetch is **non-fatal**: failure degrades the CS row to a
-`cs list unavailable` chip while the other rows still render.
+shared `root_pg_status` snapshot in `ClusterStore`. Version-sync
+counts come from `controller_status` (also in the snapshot).
+Controller-service counts come from a dedicated
+`ClusterEndpoint::ControllerServices` fetcher that runs
+`get_controller_services_from_group("root", false, true, false, None)`
+on its own cadence. That fetch is **non-fatal**: failure degrades the
+CS row to a `cs list unavailable` chip while the other rows still
+render.
 
 ### Bulletins ring buffer
 
 The Bulletins tab holds a rolling in-memory window of recently-seen
 bulletins. The cap is controlled by `[bulletins] ring_size` in
 `config.toml` (default 5000, valid range 100..=100_000). Memory budget
-at the default is ~1–2 MB. The worker polls
-`flow_api().get_bulletin_board(after, limit=1000)` every 5 seconds,
-dedups via the monotonic `id` cursor, and drops from the front when the
-ring exceeds its capacity.
+at the default is ~1–2 MB. The cluster store's bulletins fetcher polls
+`flow_api().get_bulletin_board(after, limit=1000)` on the
+`[polling.cluster] bulletins` cadence (default 5s), dedups via the
+monotonic `id` cursor, and drops from the front when the ring exceeds
+its capacity. Bulletins views subscribe to
+`ClusterEndpoint::Bulletins` and mirror the shared ring into their own
+state via `redraw_bulletins`.
 
 Rows in the list are additionally deduplicated by
 `(source_id, message_stem)` — the reducer strips NiFi's
@@ -210,22 +251,24 @@ into a single row with an `×N` count column. Grouping mode is cycled by
 
 ### Poll intervals
 
-Per-view worker cadences are configurable via the `[polling]` section
-in `config.toml`:
-
-- `[polling.overview] pg_status` (default `"10s"`) and `sysdiag`
-  (default `"30s"`).
-- `[polling.browser] interval` (default `"15s"`).
-- `[polling.bulletins] interval` (default `"5s"`).
+All periodic NiFi fetches are owned by `src/cluster/ClusterStore`.
+Base cadences come from `[polling.cluster]` in `config.toml` (keys:
+`root_pg_status`, `controller_services`, `controller_status`,
+`system_diagnostics`, `bulletins`, `connections_by_pg`, `about`, plus
+the adaptive knobs `max_interval` and `jitter_percent`). The fetcher
+scales intervals adaptively (up to `max_interval`) based on measured
+latency, adds ±`jitter_percent/100` jitter, and parks expensive
+endpoints (`root_pg_status`, `controller_services`,
+`connections_by_pg`) when no view is subscribed.
 
 Values use the humantime format (`"10s"`, `"750ms"`, `"2m"`). The
 loader emits a `tracing::warn!` (into the rotating log file) for
 values outside the recommended range but accepts them as-is — no
-hard rejection. The `AppState::polling` field holds the resolved
-`PollingConfig` and is forwarded to each worker at spawn time by
-`src/app/worker.rs`. Events in-flight query polling and Tracer
-content in-flight polling stay hardcoded — those are internal
-query mechanics, not user cadences.
+hard rejection.
+
+Events in-flight query polling (750 ms) and Tracer content in-flight
+polling (500 ms) stay hardcoded — those are internal query mechanics,
+not user cadences.
 
 ### Visual language
 

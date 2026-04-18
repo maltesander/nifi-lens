@@ -5,7 +5,6 @@ pub mod loader;
 pub mod polling;
 
 use std::path::PathBuf;
-use std::time::Duration;
 
 use serde::Deserialize;
 
@@ -168,74 +167,7 @@ pub struct ResolvedContext {
 #[derive(Debug, Clone, Default, Deserialize, PartialEq, Eq)]
 pub struct PollingConfig {
     #[serde(default)]
-    pub overview: OverviewPollingConfig,
-    #[serde(default)]
-    pub browser: BrowserPollingConfig,
-    #[serde(default)]
-    pub bulletins: BulletinsPollingConfig,
-    #[serde(default)]
     pub cluster: crate::cluster::ClusterPollingConfig,
-}
-
-#[derive(Debug, Clone, Deserialize, PartialEq, Eq)]
-pub struct OverviewPollingConfig {
-    #[serde(default = "default_overview_pg_status", with = "humantime_serde")]
-    pub pg_status: Duration,
-    #[serde(default = "default_overview_sysdiag", with = "humantime_serde")]
-    pub sysdiag: Duration,
-}
-
-impl Default for OverviewPollingConfig {
-    fn default() -> Self {
-        Self {
-            pg_status: default_overview_pg_status(),
-            sysdiag: default_overview_sysdiag(),
-        }
-    }
-}
-
-#[derive(Debug, Clone, Deserialize, PartialEq, Eq)]
-pub struct BrowserPollingConfig {
-    #[serde(default = "default_browser_interval", with = "humantime_serde")]
-    pub interval: Duration,
-}
-
-impl Default for BrowserPollingConfig {
-    fn default() -> Self {
-        Self {
-            interval: default_browser_interval(),
-        }
-    }
-}
-
-#[derive(Debug, Clone, Deserialize, PartialEq, Eq)]
-pub struct BulletinsPollingConfig {
-    #[serde(default = "default_bulletins_interval", with = "humantime_serde")]
-    pub interval: Duration,
-}
-
-impl Default for BulletinsPollingConfig {
-    fn default() -> Self {
-        Self {
-            interval: default_bulletins_interval(),
-        }
-    }
-}
-
-fn default_overview_pg_status() -> Duration {
-    Duration::from_secs(10)
-}
-
-fn default_overview_sysdiag() -> Duration {
-    Duration::from_secs(30)
-}
-
-fn default_browser_interval() -> Duration {
-    Duration::from_secs(15)
-}
-
-fn default_bulletins_interval() -> Duration {
-    Duration::from_secs(5)
 }
 
 #[cfg(test)]
@@ -258,10 +190,13 @@ username = "admin"
 password = "x"
 "#;
         let cfg: Config = toml::from_str(toml_src).expect("parses");
-        assert_eq!(cfg.polling.overview.pg_status, Duration::from_secs(10));
-        assert_eq!(cfg.polling.overview.sysdiag, Duration::from_secs(30));
-        assert_eq!(cfg.polling.browser.interval, Duration::from_secs(15));
-        assert_eq!(cfg.polling.bulletins.interval, Duration::from_secs(5));
+        // Spot-check a couple of cluster cadences match their defaults.
+        assert_eq!(cfg.polling.cluster.root_pg_status, Duration::from_secs(10));
+        assert_eq!(
+            cfg.polling.cluster.system_diagnostics,
+            Duration::from_secs(30)
+        );
+        assert_eq!(cfg.polling.cluster.bulletins, Duration::from_secs(5));
     }
 
     #[test]
@@ -269,15 +204,12 @@ password = "x"
         let toml_src = r#"
 current_context = "dev"
 
-[polling.overview]
-pg_status = "2s"
-sysdiag   = "45s"
-
-[polling.browser]
-interval = "1m"
-
-[polling.bulletins]
-interval = "250ms"
+[polling.cluster]
+root_pg_status      = "2s"
+controller_services = "7s"
+system_diagnostics  = "45s"
+bulletins           = "250ms"
+connections_by_pg   = "1m"
 
 [[contexts]]
 name = "dev"
@@ -289,10 +221,20 @@ username = "admin"
 password = "x"
 "#;
         let cfg: Config = toml::from_str(toml_src).expect("parses");
-        assert_eq!(cfg.polling.overview.pg_status, Duration::from_secs(2));
-        assert_eq!(cfg.polling.overview.sysdiag, Duration::from_secs(45));
-        assert_eq!(cfg.polling.browser.interval, Duration::from_secs(60));
-        assert_eq!(cfg.polling.bulletins.interval, Duration::from_millis(250));
+        assert_eq!(cfg.polling.cluster.root_pg_status, Duration::from_secs(2));
+        assert_eq!(
+            cfg.polling.cluster.controller_services,
+            Duration::from_secs(7)
+        );
+        assert_eq!(
+            cfg.polling.cluster.system_diagnostics,
+            Duration::from_secs(45)
+        );
+        assert_eq!(cfg.polling.cluster.bulletins, Duration::from_millis(250));
+        assert_eq!(
+            cfg.polling.cluster.connections_by_pg,
+            Duration::from_secs(60)
+        );
     }
 
     #[test]
@@ -300,8 +242,8 @@ password = "x"
         let toml_src = r#"
 current_context = "dev"
 
-[polling.overview]
-pg_status = "3s"
+[polling.cluster]
+root_pg_status = "3s"
 
 [[contexts]]
 name = "dev"
@@ -313,10 +255,13 @@ username = "admin"
 password = "x"
 "#;
         let cfg: Config = toml::from_str(toml_src).expect("parses");
-        assert_eq!(cfg.polling.overview.pg_status, Duration::from_secs(3));
-        assert_eq!(cfg.polling.overview.sysdiag, Duration::from_secs(30));
-        assert_eq!(cfg.polling.browser.interval, Duration::from_secs(15));
-        assert_eq!(cfg.polling.bulletins.interval, Duration::from_secs(5));
+        assert_eq!(cfg.polling.cluster.root_pg_status, Duration::from_secs(3));
+        // Unspecified knobs keep their defaults.
+        assert_eq!(
+            cfg.polling.cluster.system_diagnostics,
+            Duration::from_secs(30)
+        );
+        assert_eq!(cfg.polling.cluster.bulletins, Duration::from_secs(5));
     }
 
     #[test]

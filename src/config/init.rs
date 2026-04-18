@@ -77,21 +77,24 @@ insecure_tls = false
 # http_proxy_url  = "http://proxy.internal:3128"
 # https_proxy_url = "http://proxy.internal:3128"
 
-# Poll cadences for background data refresh. Values use the humantime
+# Poll cadences for the central cluster store. Values use the humantime
 # format — examples: "5s", "750ms", "2m", "1h30m". Defaults shown.
+# Cadences scale adaptively up to `max_interval` on slow clusters and
+# are jittered by ±`jitter_percent/100` to avoid synchronized bursts.
 # Out-of-band values (below the cluster-hammering floor or above the
 # ui-feels-stale ceiling) produce a warning in the log file but are
 # accepted as-is.
 #
-# [polling.overview]
-# pg_status = "10s"   # process-group status refresh
-# sysdiag   = "30s"   # system diagnostics refresh
-#
-# [polling.browser]
-# interval  = "15s"   # flow tree refresh
-#
-# [polling.bulletins]
-# interval  = "5s"    # bulletin board poll
+# [polling.cluster]
+# root_pg_status      = "10s"   # recursive PG/processor/connection walk
+# controller_services = "10s"   # root-scoped controller services
+# controller_status   = "10s"   # /flow/status aggregate counters
+# system_diagnostics  = "30s"   # /system-diagnostics (nodewise if available)
+# bulletins           = "5s"    # /flow/bulletin-board cursor poll
+# connections_by_pg   = "15s"   # per-PG connection endpoint backfill
+# about               = "5m"    # /flow/about banner info
+# max_interval        = "60s"   # adaptive cap on slow clusters
+# jitter_percent      = 20      # ±20% jitter on each sleep
 "#;
 
 pub fn write_template(force: bool) -> Result<PathBuf, NifiLensError> {
@@ -152,9 +155,20 @@ mod tests {
     fn template_polling_defaults_when_block_commented() {
         use std::time::Duration;
         let parsed: crate::config::Config = toml::from_str(TEMPLATE).expect("template parses");
-        assert_eq!(parsed.polling.overview.pg_status, Duration::from_secs(10));
-        assert_eq!(parsed.polling.overview.sysdiag, Duration::from_secs(30));
-        assert_eq!(parsed.polling.browser.interval, Duration::from_secs(15));
-        assert_eq!(parsed.polling.bulletins.interval, Duration::from_secs(5));
+        // Spot-check the cluster cadences — the full set is exercised in
+        // `config::polling` and `cluster::config`.
+        assert_eq!(
+            parsed.polling.cluster.root_pg_status,
+            Duration::from_secs(10)
+        );
+        assert_eq!(
+            parsed.polling.cluster.system_diagnostics,
+            Duration::from_secs(30)
+        );
+        assert_eq!(
+            parsed.polling.cluster.connections_by_pg,
+            Duration::from_secs(15)
+        );
+        assert_eq!(parsed.polling.cluster.bulletins, Duration::from_secs(5));
     }
 }

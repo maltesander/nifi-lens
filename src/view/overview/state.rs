@@ -116,14 +116,6 @@ pub struct OverviewState {
     pub last_pg_refresh: Option<std::time::Instant>,
     pub last_sysdiag_refresh: Option<std::time::Instant>,
 
-    /// Last observed sysdiag mode. `None` until the first sysdiag
-    /// poll resolves. Task 8 made the fetcher task (and not the
-    /// reducer) responsible for detecting nodewise → aggregate
-    /// transitions, so this field is no longer written from the UI
-    /// layer. Reserved for future reintroduction if the in-TUI
-    /// banner returns.
-    pub sysdiag_mode: Option<SysdiagMode>,
-
     /// Which panel holds focus. `None` by default.
     pub focus: OverviewFocus,
     /// Selected row index in the Noisy components panel.
@@ -140,17 +132,6 @@ pub struct RepositoriesSummary {
     pub content_percent: u32,
     pub flowfile_percent: u32,
     pub provenance_percent: u32,
-}
-
-/// Whether the last successful system-diagnostics poll came from the
-/// nodewise endpoint or the aggregate-only fallback. Used by the
-/// app-level reducer to fire the "nodewise unavailable" warning banner
-/// only when the mode *transitions* into `Aggregate`, not on every
-/// fallback tick.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum SysdiagMode {
-    Nodewise,
-    Aggregate,
 }
 
 impl OverviewState {

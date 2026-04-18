@@ -67,7 +67,6 @@ impl WorkerRegistry {
         tx: &mpsc::Sender<AppEvent>,
         browser: &mut crate::view::browser::state::BrowserState,
         cluster: &mut crate::cluster::ClusterStore,
-        _polling: &crate::config::PollingConfig,
     ) {
         if matches!(&self.current, Some((existing, _)) if *existing == view) {
             return;

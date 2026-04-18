@@ -57,7 +57,6 @@ pub async fn run(
         &tx,
         &mut state.browser,
         &mut state.cluster,
-        &state.polling,
     );
 
     let dispatcher = Arc::new(IntentDispatcher {
@@ -260,7 +259,6 @@ pub async fn run(
             &tx,
             &mut state.browser,
             &mut state.cluster,
-            &state.polling,
         );
 
         // After ensure(), re-emit any pending Browser detail request that

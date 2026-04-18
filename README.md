@@ -181,17 +181,25 @@ timestamp_format = "short"
 # "utc" or "local". "local" uses the host machine's time zone.
 timestamp_tz = "utc"
 
-# Optional: poll cadences for Overview / Browser / Bulletins workers.
+# Optional: poll cadences for the central cluster store. All periodic
+# NiFi fetches are owned by a single `ClusterStore`; the keys below are
+# the base cadences. The store adaptively scales each interval up to
+# `max_interval` when fetches run slow, adds ±`jitter_percent/100`
+# jitter to each sleep to avoid synchronized bursts across tabs, and
+# parks the three expensive endpoints (`root_pg_status`,
+# `controller_services`, `connections_by_pg`) when no view subscribes
+# to them — i.e. while neither Overview nor Browser is the active tab.
 # Humantime format ("5s", "750ms", "2m"). Defaults shown.
-[polling.overview]
-pg_status = "10s"
-sysdiag   = "30s"
-
-[polling.browser]
-interval  = "15s"
-
-[polling.bulletins]
-interval  = "5s"
+[polling.cluster]
+root_pg_status      = "10s"
+controller_services = "10s"
+controller_status   = "10s"
+system_diagnostics  = "30s"
+bulletins           = "5s"
+connections_by_pg   = "15s"
+about               = "5m"
+max_interval        = "60s"
+jitter_percent      = 20
 
 [[contexts]]
 name = "dev"
