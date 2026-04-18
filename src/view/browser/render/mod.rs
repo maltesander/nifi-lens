@@ -11,6 +11,8 @@ pub mod controller_service;
 pub mod pg;
 pub mod port;
 pub mod processor;
+mod properties_modal;
+pub use properties_modal::render_properties_modal;
 
 use std::time::SystemTime;
 
@@ -21,7 +23,6 @@ use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Borders, Paragraph};
 
 use crate::client::{FolderKind, NodeKind, NodeStatusSummary};
-use crate::layout;
 use crate::theme;
 use crate::view::browser::state::{BrowserState, FlowIndex, NodeDetail, PgHealth};
 
@@ -316,55 +317,6 @@ fn kind_label(kind: &NodeKind) -> &'static str {
         NodeKind::Folder(FolderKind::Queues) => "Queues",
         NodeKind::Folder(FolderKind::ControllerServices) => "Controller services",
     }
-}
-
-/// Render the processor/CS properties modal overlay.
-pub fn render_properties_modal(
-    frame: &mut Frame,
-    area: Rect,
-    modal: &crate::view::browser::state::PropertiesModalState,
-    state: &BrowserState,
-) {
-    let w = area.width.min(layout::BROWSER_DETAIL_MODAL_MAX_WIDTH);
-    let h = area.height.min(layout::BROWSER_DETAIL_MODAL_MAX_HEIGHT);
-    let x = area.x + (area.width - w) / 2;
-    let y = area.y + (area.height - h) / 2;
-    let rect = Rect {
-        x,
-        y,
-        width: w,
-        height: h,
-    };
-
-    let (name, props) = match state.details.get(&modal.arena_idx) {
-        Some(NodeDetail::Processor(p)) => (p.name.clone(), p.properties.clone()),
-        Some(NodeDetail::ControllerService(c)) => (c.name.clone(), c.properties.clone()),
-        _ => (String::new(), Vec::new()),
-    };
-
-    let block = Block::default()
-        .borders(Borders::ALL)
-        .title(format!(" Properties — {name} — esc to close "));
-    let inner = block.inner(rect);
-    frame.render_widget(ratatui::widgets::Clear, rect);
-    frame.render_widget(block, rect);
-
-    let mut lines: Vec<Line> = Vec::new();
-    for (k, v) in props.iter() {
-        let key = format!("{k:30}");
-        lines.push(Line::from(vec![
-            Span::styled(key, theme::muted()),
-            Span::raw(" "),
-            Span::raw(v.clone()),
-        ]));
-    }
-    let start = modal.selected.min(lines.len().saturating_sub(1));
-    let windowed: Vec<Line> = lines
-        .into_iter()
-        .skip(start)
-        .take(inner.height as usize)
-        .collect();
-    frame.render_widget(Paragraph::new(windowed), inner);
 }
 
 #[cfg(test)]

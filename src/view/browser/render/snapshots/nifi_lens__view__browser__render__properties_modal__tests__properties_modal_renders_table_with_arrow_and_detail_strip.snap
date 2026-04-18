@@ -1,0 +1,25 @@
+---
+source: src/view/browser/render/properties_modal.rs
+assertion_line: 264
+expression: rendered
+---
+"     ┌ Properties — Gen — esc to close ───────────────────────────────────────────────────────┐     "
+"     │Property                       Value                                                    │     "
+"     │Log Level                      info                                                     │     "
+"     │Record Reader                  7f3e1c22-1111-4444-8888-abcdef012345 →                   │     "
+"     │Expression                     ${filename:substringBefore('.')}-processed               │     "
+"     │                                                                                        │     "
+"     │                                                                                        │     "
+"     │                                                                                        │     "
+"     │                                                                                        │     "
+"     │                                                                                        │     "
+"     │                                                                                        │     "
+"     │                                                                                        │     "
+"     │                                                                                        │     "
+"     │                                                                                        │     "
+"     │                                                                                        │     "
+"     │                                                                                        │     "
+"     │────────────────────────────────────────────────────────────────────────────────────────│     "
+"     │7f3e1c22-1111-4444-8888-abcdef012345                                                    │     "
+"     │                                                                                        │     "
+"     └ ↕2/3 ──────────────────────────────────────────────────────────────────────────────────┘     "
