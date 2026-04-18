@@ -13,6 +13,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   alphabetically by `host:port` (case-insensitive) instead of in the
   order returned by `/system-diagnostics`.
 
+- **Browser**: the `p` properties popup is now a selectable two-column
+  table. `↑`/`↓` move the selection, `c` copies the focused row's
+  value to the clipboard, and `Enter` on a property whose value is a
+  UUID pointing to a known arena node closes the modal and jumps to
+  that node in the tree (same cross-link path used by the detail
+  pane). A fixed detail strip below the table shows the selected
+  row's full value so long values stay readable.
+
 ## [0.4.0] — 2026-04-17
 
 ### Added
