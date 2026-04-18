@@ -46,9 +46,12 @@ nifi-lens/
     ├── theme.rs              # color / style constants
     ├── timestamp.rs          # TimestampFormat / TimestampTz parsing and formatting
     ├── event.rs              # AppEvent, IntentOutcome, ViewPayload
+    ├── layout.rs              # shared ratatui layout helpers
     ├── test_support.rs       # fresh_state / tiny_config helpers for widget tests
     ├── config/               # schema, loader, init
     ├── client/               # NifiClient wrapper (Deref) + TLS + events
+    ├── cluster/              # ClusterStore + fetcher tasks + snapshot + subscriber
+    ├── input/                # KeyMap + typed action enums (FocusAction, Verb, …)
     ├── app/                  # run loop, per-view state reducers, ui, navigation, worker
     ├── intent/               # Intent enum + IntentDispatcher
     ├── view/                 # per-tab views (overview, bulletins, browser, events, tracer)
@@ -181,8 +184,13 @@ when debugging "why doesn't key X do anything".
 
 ### Adding a new view
 
-1. Create `src/view/<name>/{mod,state,render,worker}.rs` (mirror an
-   existing small view like Events).
+1. Create `src/view/<name>/` with `mod.rs`, `state.rs`, and rendering
+   (either a single `render.rs` or a `render/` submodule for larger
+   views — Browser uses the latter). Add `worker.rs` only if the view
+   needs on-demand detail fetches (Browser, Events, Tracer do;
+   Overview and Bulletins don't — they consume the shared cluster
+   snapshot). Mirror an existing view like Events for the small case
+   or Browser for the render-submodule case.
 2. Add a new `ViewId::<Name>` variant. Update `ViewId::next()` and
    `ViewId::prev()` cycle arms.
 3. Create `src/app/state/<name>.rs` with a `<Name>Handler` zero-sized

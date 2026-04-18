@@ -41,11 +41,13 @@
 - **Bulletin tail** — live cluster-wide log with severity filters, source deduplication, and per-source mute.
 - **Flow browser** — component tree with per-node detail.
   - **Cross-navigation.** Detail rows whose value is a known component
-    (queue endpoints, processor UUID properties, inbound/outbound
-    connections) render a trailing `→` and jump to that component on
-    Enter. Controller Service and Port Identity panels resolve the
-    parent group UUID to the PG name.
-  - **Fuzzy search** `Shift+F` fuzzy search across all known components.
+    render a trailing `→` and jump to it on Enter. Covered surfaces:
+    connection endpoints (FROM/TO), processor / CS property values that
+    are component UUIDs (typically CS references), processor `Connections`
+    section, process-group `Controller services` section. Controller
+    Service and Port Identity panels resolve the parent group UUID to
+    the PG name.
+  - **Fuzzy search** `Shift+F` across all known components.
 - **Provenance events** — filterable cluster-wide event search cross-linked from Bulletins and Browser.
 - **Flowfile tracer** — paste a UUID to trace its full lineage with attribute diffs and content previews (text, JSON, hex).
 - **Multi-cluster** — kubeconfig-style contexts; `Shift+K` to switch clusters; one binary for every NiFi 2.x version.
@@ -182,15 +184,9 @@ timestamp_format = "short"
 # "utc" or "local". "local" uses the host machine's time zone.
 timestamp_tz = "utc"
 
-# Optional: poll cadences for the central cluster store. All periodic
-# NiFi fetches are owned by a single `ClusterStore`; the keys below are
-# the base cadences. The store adaptively scales each interval up to
-# `max_interval` when fetches run slow, adds ±`jitter_percent/100`
-# jitter to each sleep to avoid synchronized bursts across tabs, and
-# parks the three expensive endpoints (`root_pg_status`,
-# `controller_services`, `connections_by_pg`) when no view subscribes
-# to them — i.e. while neither Overview nor Browser is the active tab.
-# Humantime format ("5s", "750ms", "2m"). Defaults shown.
+# Optional: per-endpoint poll cadences. See the "Poll intervals" note
+# below for the full behavior (adaptive scaling, jitter, subscriber
+# gating). Humantime format. Defaults shown.
 [polling.cluster]
 root_pg_status      = "10s"
 controller_services = "10s"
