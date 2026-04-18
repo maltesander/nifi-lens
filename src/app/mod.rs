@@ -17,7 +17,7 @@ use ratatui::Terminal;
 use ratatui::backend::CrosstermBackend;
 use tokio::sync::{RwLock, mpsc};
 
-use crate::app::state::{AppState, PendingIntent, update};
+use crate::app::state::{AppState, PendingIntent, ViewId, update};
 use crate::app::worker::WorkerRegistry;
 use crate::client::NifiClient;
 use crate::config::Config;
@@ -58,6 +58,7 @@ pub async fn run(
         &tx,
         bulletins_last_id,
         &mut state.browser,
+        &mut state.cluster,
         &state.polling,
     );
 
@@ -87,7 +88,23 @@ pub async fn run(
                 continue;
             }
             AppEvent::ClusterChanged(endpoint) => {
-                tracing::trace!(?endpoint, "cluster changed");
+                let mut affects_overview = false;
+                match endpoint {
+                    crate::cluster::ClusterEndpoint::RootPgStatus => {
+                        crate::view::overview::state::redraw_components(&mut state);
+                        // Task 6 wires the Browser arena recompute here.
+                        affects_overview = true;
+                    }
+                    _ => tracing::trace!(?endpoint, "cluster changed"),
+                }
+                // Only redraw when the active tab's projection actually
+                // depends on the changed endpoint. Other tabs don't read
+                // snapshot data yet (Task 6+ opens that door for Browser).
+                if affects_overview && state.current_tab == ViewId::Overview {
+                    terminal
+                        .draw(|f| ui::render(f, &state))
+                        .map_err(|source| NifiLensError::TerminalInit { source })?;
+                }
                 continue;
             }
             other => other,
@@ -175,6 +192,7 @@ pub async fn run(
             &tx,
             bulletins_last_id,
             &mut state.browser,
+            &mut state.cluster,
             &state.polling,
         );
 

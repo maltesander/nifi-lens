@@ -108,22 +108,27 @@ fn nodes_zone_height(state: &OverviewState) -> u16 {
 /// Three-row Components table — process groups, processors, controller
 /// services. Display-only; not focusable. Aligned columns: 2-pad +
 /// 20-label + 4-count + 4-gap + repeating 12-slot (8 label + 4 value).
+///
+/// The root-PG projection is sourced from `state.root_pg` — mirrored
+/// from the cluster snapshot by `redraw_components`. The renderer
+/// shows "loading…" until both the Overview-worker PG-status payload
+/// and the cluster `root_pg_status` fetch have landed.
 fn render_components_table(frame: &mut Frame, area: Rect, state: &OverviewState) {
-    let Some(snap) = state.snapshot.as_ref() else {
+    let (Some(snap), Some(root_pg)) = (state.snapshot.as_ref(), state.root_pg.as_ref()) else {
         let line = Line::from(Span::styled("loading…", theme::muted()));
         frame.render_widget(Paragraph::new(line), area);
         return;
     };
     let lines = vec![
-        pg_row(snap),
-        processors_row(&snap.root_pg.processors),
+        pg_row(snap, root_pg),
+        processors_row(&root_pg.processors),
         controller_services_row(snap.cs_counts.as_ref()),
     ];
     frame.render_widget(Paragraph::new(lines), area);
 }
 
-fn pg_row(snap: &OverviewSnapshot) -> Line<'static> {
-    let mut spans = label_and_count("Process groups", snap.root_pg.process_group_count);
+fn pg_row(snap: &OverviewSnapshot, root_pg: &crate::client::RootPgStatusSnapshot) -> Line<'static> {
+    let mut spans = label_and_count("Process groups", root_pg.process_group_count);
     let stale = snap.controller.stale;
     let modified = snap.controller.locally_modified;
     let sync_err = snap.controller.sync_failure;
@@ -137,17 +142,9 @@ fn pg_row(snap: &OverviewSnapshot) -> Line<'static> {
         spans.extend(slot("SYNC-ERR", sync_err, theme::error()));
     }
     spans.extend(slot_gap());
-    spans.extend(slot(
-        "INPUTS",
-        snap.root_pg.input_port_count,
-        theme::muted(),
-    ));
+    spans.extend(slot("INPUTS", root_pg.input_port_count, theme::muted()));
     spans.extend(slot_gap());
-    spans.extend(slot(
-        "OUTPUTS",
-        snap.root_pg.output_port_count,
-        theme::muted(),
-    ));
+    spans.extend(slot("OUTPUTS", root_pg.output_port_count, theme::muted()));
     Line::from(spans)
 }
 
@@ -829,6 +826,15 @@ mod tests {
         format!("{}", term.backend())
     }
 
+    /// Mirror `redraw_components`'s effect on the `OverviewState`
+    /// (without threading through `&mut AppState`): set `root_pg` and
+    /// derive `unhealthy` via the shared `derive_unhealthy` helper so
+    /// this test path can't drift from the live reducer.
+    fn seed_root_pg(state: &mut OverviewState, root_pg: RootPgStatusSnapshot) {
+        state.unhealthy = crate::view::overview::state::derive_unhealthy(&root_pg);
+        state.root_pg = Some(root_pg);
+    }
+
     #[test]
     fn snapshot_empty_state() {
         let state = OverviewState::new();
@@ -856,7 +862,21 @@ mod tests {
                 sync_failure: 0,
                 up_to_date: 0,
             },
-            root_pg: RootPgStatusSnapshot {
+            bulletin_board: BulletinBoardSnapshot::default(),
+            cs_counts: Some(crate::client::ControllerServiceCounts {
+                enabled: 12,
+                disabled: 0,
+                invalid: 0,
+            }),
+            fetched_at: UNIX_EPOCH + Duration::from_secs(T0),
+        });
+        apply_payload(&mut state, payload);
+        // Render reads `state.root_pg` directly — seed the projection
+        // that `redraw_components` would normally populate from the
+        // cluster snapshot.
+        seed_root_pg(
+            &mut state,
+            RootPgStatusSnapshot {
                 flow_files_queued: 120,
                 bytes_queued: 4096,
                 connections: vec![QueueSnapshot {
@@ -880,15 +900,7 @@ mod tests {
                     disabled: 1,
                 },
             },
-            bulletin_board: BulletinBoardSnapshot::default(),
-            cs_counts: Some(crate::client::ControllerServiceCounts {
-                enabled: 12,
-                disabled: 0,
-                invalid: 0,
-            }),
-            fetched_at: UNIX_EPOCH + Duration::from_secs(T0),
-        });
-        apply_payload(&mut state, payload);
+        );
         insta::assert_snapshot!("overview_healthy", render_to_string(&state));
     }
 
@@ -912,7 +924,18 @@ mod tests {
                 up_to_date: 4,
                 ..Default::default()
             },
-            root_pg: RootPgStatusSnapshot {
+            bulletin_board: BulletinBoardSnapshot::default(),
+            cs_counts: Some(ControllerServiceCounts {
+                enabled: 12,
+                disabled: 0,
+                invalid: 0,
+            }),
+            fetched_at: UNIX_EPOCH + Duration::from_secs(T0),
+        });
+        apply_payload(&mut state, payload);
+        seed_root_pg(
+            &mut state,
+            RootPgStatusSnapshot {
                 process_group_count: 7,
                 input_port_count: 2,
                 output_port_count: 1,
@@ -924,15 +947,7 @@ mod tests {
                 },
                 ..Default::default()
             },
-            bulletin_board: BulletinBoardSnapshot::default(),
-            cs_counts: Some(ControllerServiceCounts {
-                enabled: 12,
-                disabled: 0,
-                invalid: 0,
-            }),
-            fetched_at: UNIX_EPOCH + Duration::from_secs(T0),
-        });
-        apply_payload(&mut state, payload);
+        );
         insta::assert_snapshot!("overview_drift", render_to_string(&state));
     }
 
@@ -945,12 +960,12 @@ mod tests {
                 title: "NiFi".into(),
             },
             controller: ControllerStatusSnapshot::default(),
-            root_pg: RootPgStatusSnapshot::default(),
             bulletin_board: BulletinBoardSnapshot::default(),
             cs_counts: None,
             fetched_at: UNIX_EPOCH + Duration::from_secs(T0),
         });
         apply_payload(&mut state, payload);
+        seed_root_pg(&mut state, RootPgStatusSnapshot::default());
         insta::assert_snapshot!("overview_cs_unavailable", render_to_string(&state));
     }
 
@@ -1005,7 +1020,18 @@ mod tests {
                 sync_failure: 0,
                 up_to_date: 0,
             },
-            root_pg: RootPgStatusSnapshot {
+            bulletin_board: BulletinBoardSnapshot { bulletins },
+            cs_counts: Some(crate::client::ControllerServiceCounts {
+                enabled: 6,
+                disabled: 1,
+                invalid: 1,
+            }),
+            fetched_at: UNIX_EPOCH + Duration::from_secs(T0),
+        });
+        apply_payload(&mut state, payload);
+        seed_root_pg(
+            &mut state,
+            RootPgStatusSnapshot {
                 flow_files_queued: 50_000,
                 bytes_queued: 8_000_000,
                 connections: queues,
@@ -1019,15 +1045,7 @@ mod tests {
                     disabled: 0,
                 },
             },
-            bulletin_board: BulletinBoardSnapshot { bulletins },
-            cs_counts: Some(crate::client::ControllerServiceCounts {
-                enabled: 6,
-                disabled: 1,
-                invalid: 1,
-            }),
-            fetched_at: UNIX_EPOCH + Duration::from_secs(T0),
-        });
-        apply_payload(&mut state, payload);
+        );
         insta::assert_snapshot!("overview_unhealthy", render_to_string(&state));
     }
 
@@ -1060,20 +1078,6 @@ mod tests {
                     locally_modified: 0,
                     sync_failure: 0,
                     up_to_date: 0,
-                },
-                root_pg: RootPgStatusSnapshot {
-                    flow_files_queued: 120,
-                    bytes_queued: 4096,
-                    connections: vec![],
-                    process_group_count: 5,
-                    input_port_count: 2,
-                    output_port_count: 1,
-                    processors: crate::client::ProcessorStateCounts {
-                        running: 42,
-                        stopped: 3,
-                        invalid: 0,
-                        disabled: 1,
-                    },
                 },
                 bulletin_board: BulletinBoardSnapshot::default(),
                 cs_counts: Some(crate::client::ControllerServiceCounts {
@@ -1151,6 +1155,23 @@ mod tests {
                 nodes: vec![node("node1:8080"), node("node2:8080")],
                 fetched_at: Instant::now(),
             }),
+        );
+        seed_root_pg(
+            &mut state,
+            RootPgStatusSnapshot {
+                flow_files_queued: 120,
+                bytes_queued: 4096,
+                connections: vec![],
+                process_group_count: 5,
+                input_port_count: 2,
+                output_port_count: 1,
+                processors: crate::client::ProcessorStateCounts {
+                    running: 42,
+                    stopped: 3,
+                    invalid: 0,
+                    disabled: 1,
+                },
+            },
         );
 
         insta::assert_snapshot!("overview_with_nodes", render_to_string(&state));
@@ -1344,12 +1365,12 @@ mod tests {
                     sync_failure: 0,
                     up_to_date: 0,
                 },
-                root_pg: RootPgStatusSnapshot::default(),
                 bulletin_board: BulletinBoardSnapshot::default(),
                 cs_counts: None,
                 fetched_at: UNIX_EPOCH + Duration::from_secs(T0),
             }),
         );
+        seed_root_pg(&mut state, RootPgStatusSnapshot::default());
 
         // Five noisy components with distinct names. zone[2] inner height=4,
         // visible_rows=3, so selected=4 forces scroll_offset=2. "alfa" scrolls away; "echo" appears.
@@ -1460,16 +1481,19 @@ mod tests {
                     sync_failure: 0,
                     up_to_date: 0,
                 },
-                root_pg: RootPgStatusSnapshot {
-                    flow_files_queued: 0,
-                    bytes_queued: 0,
-                    connections,
-                    ..Default::default()
-                },
                 bulletin_board: BulletinBoardSnapshot::default(),
                 cs_counts: None,
                 fetched_at: UNIX_EPOCH + Duration::from_secs(T0),
             }),
+        );
+        seed_root_pg(
+            &mut state,
+            RootPgStatusSnapshot {
+                flow_files_queued: 0,
+                bytes_queued: 0,
+                connections,
+                ..Default::default()
+            },
         );
         state.queues_selected = 9;
 

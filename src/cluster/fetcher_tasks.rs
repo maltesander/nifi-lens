@@ -72,3 +72,49 @@ pub(crate) fn spawn_controller_status(
         }
     })
 }
+
+/// Spawns the root_pg_status fetch loop. Emits
+/// `AppEvent::ClusterUpdate(ClusterUpdate::RootPgStatus(..))` on every
+/// cycle — success or failure — so the store can preserve `last_ok`
+/// via `EndpointState::apply`.
+pub(crate) fn spawn_root_pg_status(
+    client: Arc<RwLock<NifiClient>>,
+    tx: mpsc::Sender<AppEvent>,
+    cfg: FetchTaskConfig,
+) -> JoinHandle<()> {
+    tokio::task::spawn_local(async move {
+        let mut next_interval = cfg.base_interval;
+        loop {
+            let t0 = Instant::now();
+            // Holding the read guard across the NiFi call is safe: the
+            // sole writer of `client` is the context-switch intent, which
+            // tears down this store before replacing the `NifiClient`.
+            let result = {
+                let guard = client.read().await;
+                guard.root_pg_status().await
+            };
+            let duration = t0.elapsed();
+            let meta = FetchMeta {
+                // Timestamp the *request*, not the response. On a slow
+                // cluster where fetch_duration is seconds, the data
+                // already represents state at `t0`, not now.
+                fetched_at: t0,
+                fetch_duration: duration,
+                next_interval,
+            };
+            if tx
+                .send(AppEvent::ClusterUpdate(ClusterUpdate::RootPgStatus(
+                    result, meta,
+                )))
+                .await
+                .is_err()
+            {
+                tracing::debug!("root_pg_status fetch: channel closed, exiting");
+                return;
+            }
+
+            next_interval = adaptive_interval(cfg.base_interval, duration, cfg.max_interval);
+            sleep_with_jitter(next_interval, cfg.jitter_percent, &cfg.force).await;
+        }
+    })
+}

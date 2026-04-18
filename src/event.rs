@@ -54,13 +54,13 @@ pub enum OverviewPayload {
     },
 }
 
-/// Inner payload for the PG-status poll. Same fields as the pre-Phase-3
-/// `OverviewPayload` struct.
+/// Inner payload for the PG-status poll. `root_pg_status` is sourced
+/// from `state.cluster.snapshot.root_pg_status` — the Overview worker
+/// no longer fetches it; `ClusterStore` owns that endpoint.
 #[derive(Debug, Clone)]
 pub struct OverviewPgStatusPayload {
     pub about: crate::client::AboutSnapshot,
     pub controller: crate::client::ControllerStatusSnapshot,
-    pub root_pg: crate::client::RootPgStatusSnapshot,
     pub bulletin_board: crate::client::BulletinBoardSnapshot,
     /// Per-state controller-service counts. `None` when the CS fetch
     /// failed — the CS row in the Components panel degrades to a

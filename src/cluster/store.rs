@@ -15,7 +15,9 @@ use crate::client::{
 };
 use crate::cluster::ClusterEndpoint;
 use crate::cluster::config::ClusterPollingConfig;
-use crate::cluster::fetcher_tasks::{FetchTaskConfig, spawn_controller_status};
+use crate::cluster::fetcher_tasks::{
+    FetchTaskConfig, spawn_controller_status, spawn_root_pg_status,
+};
 use crate::cluster::snapshot::{ClusterSnapshot, FetchMeta};
 use crate::cluster::subscriber::SubscriberRegistry;
 use crate::error::NifiLensError;
@@ -128,6 +130,15 @@ impl ClusterStore {
             tx.clone(),
             status_cfg,
         ));
+
+        let pg_cfg = FetchTaskConfig {
+            base_interval: self.config.root_pg_status,
+            max_interval: self.config.max_interval,
+            jitter_percent: self.config.jitter_percent,
+            force: self.notifies.get(ClusterEndpoint::RootPgStatus),
+        };
+        self.handles
+            .push(spawn_root_pg_status(client.clone(), tx.clone(), pg_cfg));
     }
 
     pub fn subscribe(&mut self, endpoint: ClusterEndpoint, view: ViewId) {
@@ -260,6 +271,35 @@ mod tests {
         assert_eq!(ep, ClusterEndpoint::ControllerStatus);
         match &store.snapshot.controller_status {
             EndpointState::Ready { data, .. } => assert_eq!(data.running, 1),
+            other => panic!("expected Ready, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn root_pg_status_update_is_applied() {
+        let mut store = ClusterStore::new(ClusterPollingConfig::default());
+        let fake_pg = RootPgStatusSnapshot {
+            flow_files_queued: 42,
+            bytes_queued: 1024,
+            connections: vec![],
+            process_group_count: 3,
+            input_port_count: 1,
+            output_port_count: 2,
+            processors: crate::client::ProcessorStateCounts {
+                running: 5,
+                stopped: 1,
+                invalid: 0,
+                disabled: 0,
+            },
+        };
+        let ep = store.apply_update(ClusterUpdate::RootPgStatus(Ok(fake_pg.clone()), meta()));
+        assert_eq!(ep, ClusterEndpoint::RootPgStatus);
+        match &store.snapshot.root_pg_status {
+            EndpointState::Ready { data, .. } => {
+                assert_eq!(data.flow_files_queued, 42);
+                assert_eq!(data.process_group_count, 3);
+                assert_eq!(data.processors.running, 5);
+            }
             other => panic!("expected Ready, got {:?}", other),
         }
     }

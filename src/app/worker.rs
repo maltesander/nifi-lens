@@ -82,6 +82,12 @@ impl WorkerRegistry {
     /// Ensure the worker for `view` is running, aborting any previously
     /// active worker. No-ops when `view` already matches the currently-
     /// running worker.
+    ///
+    /// `cluster` is the central `ClusterStore`. The registry calls
+    /// `subscribe` on entry into a view and `unsubscribe` on exit so
+    /// `ClusterStore` can gate expensive endpoints to only the views
+    /// that need them (Task 10).
+    #[allow(clippy::too_many_arguments)]
     pub fn ensure(
         &mut self,
         view: ViewId,
@@ -89,6 +95,7 @@ impl WorkerRegistry {
         tx: &mpsc::Sender<AppEvent>,
         bulletins_last_id: Option<i64>,
         browser: &mut crate::view::browser::state::BrowserState,
+        cluster: &mut crate::cluster::ClusterStore,
         polling: &crate::config::PollingConfig,
     ) {
         if matches!(&self.current, Some((existing, _)) if *existing == view) {
@@ -101,14 +108,33 @@ impl WorkerRegistry {
                 "worker registry: swapping view worker"
             );
             handle.abort();
-            if existing_view == ViewId::Browser {
-                browser.detail_tx = None;
-                browser.force_tick_tx = None;
+            // Unsubscribe the outgoing view from its cluster endpoints
+            // and drop any per-view channels held on AppState.
+            match existing_view {
+                ViewId::Overview => {
+                    cluster.unsubscribe(
+                        crate::cluster::ClusterEndpoint::RootPgStatus,
+                        ViewId::Overview,
+                    );
+                }
+                ViewId::Browser => {
+                    browser.detail_tx = None;
+                    browser.force_tick_tx = None;
+                }
+                _ => {}
             }
         }
         let handle = match view {
             ViewId::Overview => {
                 tracing::debug!(?view, "worker registry: spawning overview worker");
+                // Subscribe for cluster-wide endpoints Overview consumes.
+                // Additional endpoints (ControllerStatus, ControllerServices,
+                // SystemDiagnostics, About) move into the cluster store in
+                // later tasks and will be subscribed here then.
+                cluster.subscribe(
+                    crate::cluster::ClusterEndpoint::RootPgStatus,
+                    ViewId::Overview,
+                );
                 Some(crate::view::overview::worker::spawn(
                     client.clone(),
                     tx.clone(),

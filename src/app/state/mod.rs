@@ -899,6 +899,11 @@ fn update_inner(state: &mut AppState, event: AppEvent, config: &Config) -> Updat
             }
 
             apply_overview_payload(&mut state.overview, payload);
+            // Refresh the Components / Unhealthy-queues projections from
+            // the cluster snapshot. Kept here so both payload arrival
+            // and `ClusterChanged(RootPgStatus)` go through the same
+            // derivation path.
+            crate::view::overview::state::redraw_components(state);
             state.last_refresh = Instant::now();
             UpdateResult {
                 redraw: true,

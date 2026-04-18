@@ -81,12 +81,13 @@ pub enum OverviewFocus {
 }
 
 /// Snapshot of the Overview tab at one point in time. `None` until the
-/// first poll completes.
+/// first Overview-worker PG-status poll completes. The `root_pg`
+/// projection now lives on `OverviewState::root_pg`, populated by
+/// `redraw_components` from `AppState.cluster.snapshot.root_pg_status`.
 #[derive(Debug, Clone, Default)]
 pub struct OverviewSnapshot {
     pub about: AboutSnapshot,
     pub controller: ControllerStatusSnapshot,
-    pub root_pg: RootPgStatusSnapshot,
     pub cs_counts: Option<crate::client::ControllerServiceCounts>,
     pub fetched_at: Option<SystemTime>,
 }
@@ -94,6 +95,11 @@ pub struct OverviewSnapshot {
 #[derive(Debug, Default)]
 pub struct OverviewState {
     pub snapshot: Option<OverviewSnapshot>,
+    /// Latest root-PG status, mirrored from the cluster snapshot by
+    /// `redraw_components`. `None` until the first `RootPgStatus` fetch
+    /// has landed in `AppState.cluster.snapshot`. The renderer reads
+    /// this directly; the Overview worker no longer fetches it.
+    pub root_pg: Option<RootPgStatusSnapshot>,
     pub sparkline: [BulletinBucket; SPARKLINE_MINUTES],
     /// Unix seconds at the start of `sparkline[SPARKLINE_MINUTES-1]` (the
     /// newest bucket). `None` until the first PG-status poll lands. Aligned
@@ -181,30 +187,19 @@ pub fn apply_payload(state: &mut OverviewState, payload: OverviewPayload) {
 
 /// Fold one PG-status poll into the existing Overview state.
 /// Pre-Phase-3 this was the entire body of `apply_payload`.
+///
+/// The `root_pg` projection is no longer sourced from the payload —
+/// `ClusterStore` owns that endpoint. `redraw_components` rebuilds it
+/// from `AppState.cluster.snapshot.root_pg_status` whenever either
+/// this reducer or `ClusterChanged(RootPgStatus)` fires.
 fn apply_pg_status(state: &mut OverviewState, payload: OverviewPgStatusPayload) {
     let OverviewPgStatusPayload {
         about,
         controller,
-        root_pg,
         bulletin_board,
         cs_counts,
         fetched_at,
     } = payload;
-
-    // Unhealthy queues: take the top N (already sorted descending by the
-    // client wrapper).
-    state.unhealthy = root_pg
-        .connections
-        .iter()
-        .take(TOP_QUEUES)
-        .cloned()
-        .map(UnhealthyQueue::from)
-        .collect();
-    if !state.unhealthy.is_empty() {
-        state.queues_selected = state.queues_selected.min(state.unhealthy.len() - 1);
-    } else {
-        state.queues_selected = 0;
-    }
 
     // Sparkline: rolling 15-minute bulletin-rate chart.
     //
@@ -337,10 +332,53 @@ fn apply_pg_status(state: &mut OverviewState, payload: OverviewPgStatusPayload) 
     state.snapshot = Some(OverviewSnapshot {
         about,
         controller,
-        root_pg,
         cs_counts,
         fetched_at: Some(fetched_at),
     });
+}
+
+/// Build the Unhealthy-queues leaderboard from a root-PG snapshot.
+/// Shared by `redraw_components` and the render-path test helper so
+/// the two can't drift.
+pub(crate) fn derive_unhealthy(
+    root_pg: &crate::client::RootPgStatusSnapshot,
+) -> Vec<UnhealthyQueue> {
+    root_pg
+        .connections
+        .iter()
+        .take(TOP_QUEUES)
+        .cloned()
+        .map(UnhealthyQueue::from)
+        .collect()
+}
+
+/// Re-derive Overview projections that depend on `root_pg_status`:
+/// mirrors the latest snapshot into `state.overview.root_pg` and
+/// rebuilds the Unhealthy-queues leaderboard. Called from the
+/// `AppEvent::ClusterChanged(RootPgStatus)` arm in the main loop and
+/// from `apply_payload` so the projection stays consistent regardless
+/// of which poll lands first.
+///
+/// Idempotent: invoking it twice with the same snapshot produces the
+/// same `state.overview.root_pg` / `state.overview.unhealthy`.
+pub(crate) fn redraw_components(state: &mut crate::app::state::AppState) {
+    let Some(root_pg) = state.cluster.snapshot.root_pg_status.latest() else {
+        // Pre-first-fetch: leave `root_pg` as `None` and `unhealthy`
+        // untouched. The Components panel renders its "loading…"
+        // affordance, mirroring the pre-refactor first-frame behavior
+        // (where `OverviewState.snapshot` was `None` until the first
+        // PG-status poll).
+        return;
+    };
+
+    let unhealthy = derive_unhealthy(root_pg);
+    if !unhealthy.is_empty() {
+        state.overview.queues_selected = state.overview.queues_selected.min(unhealthy.len() - 1);
+    } else {
+        state.overview.queues_selected = 0;
+    }
+    state.overview.unhealthy = unhealthy;
+    state.overview.root_pg = Some(root_pg.clone());
 }
 
 fn apply_system_diagnostics(
@@ -416,25 +454,39 @@ mod tests {
 
     fn payload(
         controller: ControllerStatusSnapshot,
-        queues: Vec<QueueSnapshot>,
+        _queues: Vec<QueueSnapshot>,
         bulletins: Vec<BulletinSnapshot>,
     ) -> OverviewPayload {
+        // `_queues` was fed into `root_pg.connections` before Task 3;
+        // the payload no longer carries `root_pg`, so queue-dependent
+        // tests seed `cluster.snapshot.root_pg_status` directly via
+        // `seed_root_pg` below.
         OverviewPayload::PgStatus(OverviewPgStatusPayload {
             about: AboutSnapshot {
                 version: "2.8.0".into(),
                 title: "NiFi".into(),
             },
             controller,
-            root_pg: RootPgStatusSnapshot {
-                flow_files_queued: 0,
-                bytes_queued: 0,
-                connections: queues,
-                ..Default::default()
-            },
             bulletin_board: BulletinBoardSnapshot { bulletins },
             cs_counts: None,
             fetched_at: UNIX_EPOCH + Duration::from_secs(T0),
         })
+    }
+
+    /// Push a `RootPgStatusSnapshot` into `state.cluster.snapshot` so
+    /// `redraw_components` can consume it. Replaces the pre-Task-3 path
+    /// where `root_pg` rode along on `OverviewPgStatusPayload`.
+    fn seed_root_pg(state: &mut crate::app::state::AppState, root_pg: RootPgStatusSnapshot) {
+        use crate::cluster::snapshot::{EndpointState, FetchMeta};
+        use std::time::Instant;
+        state.cluster.snapshot.root_pg_status = EndpointState::Ready {
+            data: root_pg,
+            meta: FetchMeta {
+                fetched_at: Instant::now(),
+                fetch_duration: Duration::from_millis(5),
+                next_interval: Duration::from_secs(10),
+            },
+        };
     }
 
     fn q(id: &str, pct: u32) -> QueueSnapshot {
@@ -475,12 +527,6 @@ mod tests {
                 title: "NiFi".into(),
             },
             controller: ControllerStatusSnapshot::default(),
-            root_pg: RootPgStatusSnapshot {
-                flow_files_queued: 0,
-                bytes_queued: 0,
-                connections: vec![],
-                ..Default::default()
-            },
             bulletin_board: BulletinBoardSnapshot { bulletins },
             cs_counts: None,
             fetched_at: UNIX_EPOCH + Duration::from_secs(fetched_secs),
@@ -521,17 +567,21 @@ mod tests {
 
     #[test]
     fn unhealthy_queues_truncated_to_top_ten() {
-        let mut state = OverviewState::new();
+        let mut state = crate::test_support::fresh_state();
         let queues: Vec<QueueSnapshot> = (0..20)
             .map(|i| q(&format!("c{i}"), 100 - i as u32))
             .collect();
-        apply_payload(
+        seed_root_pg(
             &mut state,
-            payload(ControllerStatusSnapshot::default(), queues, vec![]),
+            RootPgStatusSnapshot {
+                connections: queues,
+                ..Default::default()
+            },
         );
-        assert_eq!(state.unhealthy.len(), TOP_QUEUES);
-        assert_eq!(state.unhealthy[0].fill_percent, 100);
-        assert_eq!(state.unhealthy[9].fill_percent, 91);
+        redraw_components(&mut state);
+        assert_eq!(state.overview.unhealthy.len(), TOP_QUEUES);
+        assert_eq!(state.overview.unhealthy[0].fill_percent, 100);
+        assert_eq!(state.overview.unhealthy[9].fill_percent, 91);
     }
 
     #[test]
@@ -796,14 +846,21 @@ mod tests {
 
     #[test]
     fn queues_cursor_clamped_when_data_shrinks() {
-        let mut state = OverviewState::new();
-        state.queues_selected = 9;
+        let mut state = crate::test_support::fresh_state();
+        state.overview.queues_selected = 9;
         let queues = vec![q("c0", 90), q("c1", 80), q("c2", 70)];
-        apply_payload(
+        seed_root_pg(
             &mut state,
-            payload(ControllerStatusSnapshot::default(), queues, vec![]),
+            RootPgStatusSnapshot {
+                connections: queues,
+                ..Default::default()
+            },
         );
-        assert_eq!(state.queues_selected, 2, "cursor clamped to len-1 = 2");
+        redraw_components(&mut state);
+        assert_eq!(
+            state.overview.queues_selected, 2,
+            "cursor clamped to len-1 = 2"
+        );
     }
 
     #[test]
@@ -894,5 +951,85 @@ mod tests {
         assert_eq!(state.repositories_summary.flowfile_percent, 30);
         assert_eq!(state.repositories_summary.provenance_percent, 20);
         assert!(state.last_sysdiag_refresh.is_some());
+    }
+
+    #[test]
+    fn redraw_components_leaves_state_untouched_when_snapshot_is_loading() {
+        // Pre-first-fetch: `cluster.snapshot.root_pg_status` is in
+        // `Loading`. `redraw_components` must not clobber the
+        // OverviewState's root_pg or unhealthy fields.
+        let mut state = crate::test_support::fresh_state();
+        state.overview.unhealthy = vec![UnhealthyQueue {
+            id: "pre-existing".into(),
+            group_id: "g".into(),
+            name: "pre".into(),
+            source_name: "s".into(),
+            destination_name: "d".into(),
+            fill_percent: 1,
+            flow_files_queued: 1,
+            bytes_queued: 0,
+            queued_display: "1".into(),
+        }];
+        redraw_components(&mut state);
+        assert!(state.overview.root_pg.is_none());
+        assert_eq!(
+            state.overview.unhealthy.len(),
+            1,
+            "unhealthy must be preserved on None snapshot"
+        );
+    }
+
+    #[test]
+    fn redraw_components_mirrors_snapshot_into_overview_state() {
+        let mut state = crate::test_support::fresh_state();
+        seed_root_pg(
+            &mut state,
+            RootPgStatusSnapshot {
+                flow_files_queued: 42,
+                bytes_queued: 512,
+                process_group_count: 7,
+                input_port_count: 2,
+                output_port_count: 1,
+                processors: crate::client::ProcessorStateCounts {
+                    running: 5,
+                    stopped: 1,
+                    invalid: 0,
+                    disabled: 0,
+                },
+                connections: vec![q("c0", 95), q("c1", 90)],
+            },
+        );
+        redraw_components(&mut state);
+        let root_pg = state
+            .overview
+            .root_pg
+            .as_ref()
+            .expect("root_pg must be populated after redraw");
+        assert_eq!(root_pg.process_group_count, 7);
+        assert_eq!(root_pg.processors.running, 5);
+        assert_eq!(state.overview.unhealthy.len(), 2);
+        assert_eq!(state.overview.unhealthy[0].fill_percent, 95);
+    }
+
+    #[test]
+    fn redraw_components_is_idempotent() {
+        let mut state = crate::test_support::fresh_state();
+        seed_root_pg(
+            &mut state,
+            RootPgStatusSnapshot {
+                process_group_count: 3,
+                connections: vec![q("c0", 80)],
+                ..Default::default()
+            },
+        );
+        redraw_components(&mut state);
+        let first_unhealthy_len = state.overview.unhealthy.len();
+        let first_pg_count = state.overview.root_pg.as_ref().unwrap().process_group_count;
+        redraw_components(&mut state);
+        assert_eq!(state.overview.unhealthy.len(), first_unhealthy_len);
+        assert_eq!(
+            state.overview.root_pg.as_ref().unwrap().process_group_count,
+            first_pg_count
+        );
     }
 }
