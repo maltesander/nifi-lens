@@ -81,6 +81,32 @@ pub fn normalize_dynamic_brackets(s: &str) -> String {
     out
 }
 
+/// Case-insensitive, non-overlapping substring search. Returns matches
+/// in pre-wrap coordinates. Input is split on `\n`; each line is
+/// searched independently. Empty `query` returns an empty vec.
+pub fn compute_matches(body: &str, query: &str) -> Vec<MatchSpan> {
+    if query.is_empty() {
+        return Vec::new();
+    }
+    let lq = query.to_ascii_lowercase();
+    let mut out = Vec::new();
+    for (line_idx, line) in body.split('\n').enumerate() {
+        let ll = line.to_ascii_lowercase();
+        let mut from = 0;
+        while let Some(rel) = ll[from..].find(&lq) {
+            let start = from + rel;
+            let end = start + lq.len();
+            out.push(MatchSpan {
+                line_idx,
+                byte_start: start,
+                byte_end: end,
+            });
+            from = end;
+        }
+    }
+    out
+}
+
 /// Return up to `limit` most-recent bulletins from `ring` whose
 /// `source_id` matches `source_id`, in newest-first order.
 ///
@@ -876,6 +902,38 @@ pub fn redraw_bulletins(state: &mut AppState) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn compute_matches_finds_case_insensitive_substrings() {
+        let body = "Error: connection refused\nRetrying ERROR\nerror happens";
+        let m = compute_matches(body, "error");
+        assert_eq!(m.len(), 3);
+        assert_eq!(m[0].line_idx, 0);
+        assert_eq!(m[0].byte_start, 0);
+        assert_eq!(m[1].line_idx, 1);
+        assert_eq!(m[2].line_idx, 2);
+    }
+
+    #[test]
+    fn compute_matches_empty_query_returns_empty() {
+        assert_eq!(compute_matches("any text", "").len(), 0);
+    }
+
+    #[test]
+    fn compute_matches_no_match_returns_empty() {
+        assert_eq!(compute_matches("abc", "xyz").len(), 0);
+    }
+
+    #[test]
+    fn compute_matches_does_not_overlap() {
+        // "aaaa" searching "aa" should return non-overlapping matches.
+        let m = compute_matches("aaaa", "aa");
+        assert_eq!(m.len(), 2);
+        assert_eq!(m[0].byte_start, 0);
+        assert_eq!(m[0].byte_end, 2);
+        assert_eq!(m[1].byte_start, 2);
+        assert_eq!(m[1].byte_end, 4);
+    }
     use crate::client::BulletinSnapshot;
     use std::time::{Duration, UNIX_EPOCH};
 
