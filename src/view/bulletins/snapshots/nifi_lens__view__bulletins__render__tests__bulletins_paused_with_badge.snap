@@ -4,7 +4,7 @@ expression: render_to_string(&state)
 ---
 "┌ Filters ─────────────────────────────────────────────────────────────────────────────────────────────────────────────┐"
 "│[E 4] [W 0] [I 0]   type: All   text: (none)   +7 new                                                                 │"
-"│— 1/2/3 severity · T type · / text · G group: source+msg · M mute · c copy · P pause · R clear —                      │"
+"│— T type · / text · G group: source+msg · M mute · c copy · P pause · R clear —                                       │"
 "└──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┘"
 "┌ Bulletins ────────────────────────────────────────────────────────────────────────────────────────────── last <DUR> ago ┐"
 "│time            sev   #    source               pg path                  message                                      │"

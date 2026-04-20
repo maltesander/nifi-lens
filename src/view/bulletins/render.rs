@@ -5,7 +5,7 @@
 //! ```text
 //! ┌─ Bulletins ──────────────────── last 3s ago ┐
 //! │  [E] [W] [I]  type: All  /foo_     +12 new  │
-//! │  — 1/2/3 severity · T type · / text · G group · M mute · c copy · P pause · R clear — │
+//! │  — T type · / text · G group · M mute · c copy · P pause · R clear — │
 //! ├─────────────────────────────────────────────┤
 //! │ HH:MM:SS  SEV   Source           group  msg │
 //! │ ...                                          │
@@ -151,7 +151,7 @@ fn render_filter_bar(frame: &mut Frame, area: Rect, state: &BulletinsState) {
         let group_label = state.group_mode.label();
         Line::from(Span::styled(
             format!(
-                "— 1/2/3 severity · T type · / text · G group: {group_label} · M mute · c copy · P pause · R clear —"
+                "— T type · / text · G group: {group_label} · M mute · c copy · P pause · R clear —"
             ),
             theme::muted(),
         ))
