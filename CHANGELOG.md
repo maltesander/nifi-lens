@@ -7,11 +7,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **Bulletins**: new detail modal (`i`) shows the full raw message with
+  vertical scroll (`↑`/`↓`, `PgUp`/`PgDn`, `Home`/`End`),
+  plain-substring `/`-search with `n`/`N` cycling, `c` to copy, and
+  `Enter` to jump to the source in Browser. `Esc` closes.
+
 ### Changed
 
 - **Bulletins**: the `×N` repeat-count cell is now dim grey (bold)
   instead of yellow, so the severity column is the only color signal
   on each row.
+- **Bulletins**: `1`/`2`/`3` severity hints no longer appear in the
+  status-bar hint strip — the `[E n] [W n] [I n]` filter chips already
+  surface both the shortcut and the filter state. Still documented in
+  `?` help.
 
 ## [0.5.0] — 2026-04-18
 

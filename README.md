@@ -145,9 +145,12 @@ hint bar at the bottom always shows what's available. A few highlights:
 switches the active cluster context, `Shift+F` opens global fuzzy search,
 `q`/`Ctrl+C` to quit.
 
-**Bulletins** — `1`/`2`/`3` toggle severity filters; `Shift+G` cycles
-group-by modes; `Shift+P` pauses auto-scroll; `Shift+M` mutes a source;
-`Shift+R` clears all filters (severity, component type, text, mutes).
+**Bulletins** — `1`/`2`/`3` toggle severity filters; `i` opens the detail
+modal (scroll with `↑`/`↓`/`PgUp`/`PgDn`, `/`-search with `n`/`N`
+cycling, `c` copies the full message, `Enter` jumps to source in Browser,
+`Esc` closes); `Shift+G` cycles group-by modes; `Shift+P` pauses
+auto-scroll; `Shift+M` mutes a source; `Shift+R` clears all filters
+(severity, component type, text, mutes).
 
 **Browser** — `p` for properties modal (processors and controller
 services); `c` to copy; `Enter`/`→` to expand a folder or drill into the

@@ -182,6 +182,14 @@ memory is preserved.
 enum source) to the log file. Unadvertised in the help modal; use it
 when debugging "why doesn't key X do anything".
 
+Verbs whose shortcut is already visible adjacent to the status-bar hint
+strip can opt out of the strip via `Verb::show_in_hint_bar() -> false`
+while still appearing in `?` help and being dispatched by the keymap.
+Used by the Bulletins severity filters (`1`/`2`/`3`), which are
+surfaced by the `[E n] [W n] [I n]` chips, and by
+`BulletinsVerb::SearchNext` / `SearchPrev` which only make sense inside
+the detail modal.
+
 ### Adding a new view
 
 1. Create `src/view/<name>/` with `mod.rs`, `state.rs`, and rendering
@@ -256,6 +264,17 @@ before hashing, so repeating errors from the same component collapse
 into a single row with an `×N` count column. Grouping mode is cycled by
 `Shift+G` (`source+msg` / `source` / `off`). `g` triggers
 `AppAction::Jump` — a context-sensitive cross-tab jump menu.
+
+### Bulletins detail modal
+
+`i` on a selected bulletin opens a full-screen detail modal showing the
+full raw message with scroll (`↑↓`/`PgUp`/`PgDn`/`Home`/`End`),
+plain-substring `/`-search with `n`/`N` cycling, `c` to copy, and
+`Enter` to jump to the source in Browser. `Esc` closes. The modal lives
+as `BulletinsState::detail_modal` (not an app-wide `Modal`) because it
+carries per-view semantics. `open_detail_modal` captures a `GroupKey`
+and `GroupDetails` snapshot at open time; subsequent ring mutations do
+not disturb the open modal.
 
 ### Poll intervals
 
