@@ -31,6 +31,8 @@ pub enum BulletinsVerb {
     OpenSearch,
     OpenDetail,
     Refresh,
+    SearchNext,
+    SearchPrev,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -72,6 +74,8 @@ impl Verb for BulletinsVerb {
             Self::OpenSearch => Chord::simple(KeyCode::Char('/')),
             Self::OpenDetail => Chord::simple(KeyCode::Char('i')),
             Self::Refresh => Chord::simple(KeyCode::Char('r')),
+            Self::SearchNext => Chord::simple(KeyCode::Char('n')),
+            Self::SearchPrev => Chord::shift(KeyCode::Char('N')),
         }
     }
     fn label(self) -> &'static str {
@@ -88,6 +92,8 @@ impl Verb for BulletinsVerb {
             Self::OpenSearch => "open text search",
             Self::OpenDetail => "open detail modal",
             Self::Refresh => "refresh",
+            Self::SearchNext => "next match",
+            Self::SearchPrev => "previous match",
         }
     }
     fn hint(self) -> &'static str {
@@ -104,6 +110,8 @@ impl Verb for BulletinsVerb {
             Self::OpenSearch => "find",
             Self::OpenDetail => "info",
             Self::Refresh => "refresh",
+            Self::SearchNext => "next",
+            Self::SearchPrev => "prev",
         }
     }
     fn priority(self) -> u8 {
@@ -120,6 +128,14 @@ impl Verb for BulletinsVerb {
     fn enabled(self, ctx: &HintContext<'_>) -> bool {
         match self {
             Self::OpenDetail => !ctx.state.bulletins.ring.is_empty(),
+            Self::SearchNext | Self::SearchPrev => ctx
+                .state
+                .bulletins
+                .detail_modal
+                .as_ref()
+                .and_then(|m| m.search.as_ref())
+                .map(|s| s.committed)
+                .unwrap_or(false),
             _ => true,
         }
     }
@@ -138,6 +154,8 @@ impl Verb for BulletinsVerb {
             Self::OpenSearch,
             Self::OpenDetail,
             Self::Refresh,
+            Self::SearchNext,
+            Self::SearchPrev,
         ]
     }
 }

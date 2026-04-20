@@ -10,6 +10,9 @@ pub(crate) struct BulletinsHandler;
 
 impl ViewKeyHandler for BulletinsHandler {
     fn handle_verb(state: &mut AppState, verb: ViewVerb) -> Option<UpdateResult> {
+        if state.bulletins.detail_modal.is_some() {
+            return handle_modal_verb(state, verb);
+        }
         let bv = match verb {
             ViewVerb::Bulletins(v) => v,
             _ => return None,
@@ -45,6 +48,9 @@ impl ViewKeyHandler for BulletinsHandler {
             }
             // Bulletins auto-refreshes; verb kept for parity but no state mutation.
             BulletinsVerb::Refresh => {}
+            // SearchNext/SearchPrev are only active when the modal is open; they
+            // are routed through handle_modal_verb and never reach this path.
+            BulletinsVerb::SearchNext | BulletinsVerb::SearchPrev => {}
         }
         Some(UpdateResult {
             redraw: true,
@@ -92,13 +98,32 @@ impl ViewKeyHandler for BulletinsHandler {
 
     fn is_text_input_focused(state: &AppState) -> bool {
         state.bulletins.text_input.is_some()
+            || state
+                .bulletins
+                .detail_modal
+                .as_ref()
+                .and_then(|m| m.search.as_ref())
+                .map(|s| s.input_active)
+                .unwrap_or(false)
     }
 
     fn blocks_app_shortcuts(state: &AppState) -> bool {
-        state.bulletins.text_input.is_some()
+        Self::is_text_input_focused(state)
     }
 
     fn handle_text_input(state: &mut AppState, key: KeyEvent) -> Option<UpdateResult> {
+        // Modal search takes priority when its input is active.
+        let modal_search_active = state
+            .bulletins
+            .detail_modal
+            .as_ref()
+            .and_then(|m| m.search.as_ref())
+            .map(|s| s.input_active)
+            .unwrap_or(false);
+        if modal_search_active {
+            return handle_modal_search_input(state, key);
+        }
+        // Existing list-search path (unchanged):
         if state.bulletins.text_input.is_some()
             && matches!(key.modifiers, KeyModifiers::NONE | KeyModifiers::SHIFT)
         {
@@ -142,6 +167,53 @@ fn handle_modal_focus(state: &mut AppState, action: FocusAction) -> Option<Updat
         FocusAction::Left | FocusAction::Right | FocusAction::NextPane | FocusAction::PrevPane => {
             return Some(UpdateResult::default());
         }
+    }
+    Some(UpdateResult {
+        redraw: true,
+        intent: None,
+        tracer_followup: None,
+    })
+}
+
+/// Handles verb dispatch while the detail modal is open.
+fn handle_modal_verb(state: &mut AppState, verb: ViewVerb) -> Option<UpdateResult> {
+    let bv = match verb {
+        ViewVerb::Bulletins(v) => v,
+        _ => return Some(UpdateResult::default()),
+    };
+    match bv {
+        BulletinsVerb::OpenSearch => state.bulletins.modal_search_open(),
+        BulletinsVerb::SearchNext => state.bulletins.modal_search_cycle_next(),
+        BulletinsVerb::SearchPrev => state.bulletins.modal_search_cycle_prev(),
+        BulletinsVerb::CopyMessage => {
+            if let Some(msg) = state.bulletins.modal_copy_message() {
+                let preview: String = msg.chars().take(40).collect();
+                match state.copy_to_clipboard(msg) {
+                    Ok(()) => state.post_info(format!("copied: {preview}")),
+                    Err(err) => state.post_warning(format!("clipboard: {err}")),
+                }
+            }
+        }
+        // Everything else is swallowed while the modal is open — no
+        // filter toggles, no pause, no group cycle. OpenDetail is a
+        // no-op (already open). Refresh is a no-op.
+        _ => {}
+    }
+    Some(UpdateResult {
+        redraw: true,
+        intent: None,
+        tracer_followup: None,
+    })
+}
+
+/// Handles text-input keypresses while modal search input is active.
+fn handle_modal_search_input(state: &mut AppState, key: KeyEvent) -> Option<UpdateResult> {
+    match key.code {
+        KeyCode::Esc => state.bulletins.modal_search_cancel(),
+        KeyCode::Enter => state.bulletins.modal_search_commit(),
+        KeyCode::Backspace => state.bulletins.modal_search_pop(),
+        KeyCode::Char(ch) => state.bulletins.modal_search_push(ch),
+        _ => return Some(UpdateResult::default()),
     }
     Some(UpdateResult {
         redraw: true,
@@ -822,6 +894,128 @@ mod tests {
                 crate::intent::CrossLink::OpenInBrowser { .. }
             ))
         ));
+    }
+
+    #[test]
+    fn slash_in_modal_enters_search_input_mode() {
+        let mut s = fresh_state();
+        let c = tiny_config();
+        s.current_tab = ViewId::Bulletins;
+        seed_one_bulletin(&mut s);
+        update(&mut s, key(KeyCode::Char('i'), KeyModifiers::NONE), &c);
+        update(&mut s, key(KeyCode::Char('/'), KeyModifiers::NONE), &c);
+        let m = s.bulletins.detail_modal.as_ref().unwrap();
+        assert!(m.search.as_ref().unwrap().input_active);
+    }
+
+    #[test]
+    fn typing_in_modal_search_fills_query_not_scroll() {
+        let mut s = fresh_state();
+        let c = tiny_config();
+        s.current_tab = ViewId::Bulletins;
+        seed_one_bulletin(&mut s);
+        update(&mut s, key(KeyCode::Char('i'), KeyModifiers::NONE), &c);
+        update(&mut s, key(KeyCode::Char('/'), KeyModifiers::NONE), &c);
+        update(&mut s, key(KeyCode::Char('b'), KeyModifiers::NONE), &c);
+        update(&mut s, key(KeyCode::Char('o'), KeyModifiers::NONE), &c);
+        let s_state = s
+            .bulletins
+            .detail_modal
+            .as_ref()
+            .unwrap()
+            .search
+            .as_ref()
+            .unwrap();
+        assert_eq!(s_state.query, "bo");
+    }
+
+    #[test]
+    fn enter_in_search_commits_not_closes_modal() {
+        let mut s = fresh_state();
+        let c = tiny_config();
+        s.current_tab = ViewId::Bulletins;
+        seed_one_bulletin(&mut s);
+        update(&mut s, key(KeyCode::Char('i'), KeyModifiers::NONE), &c);
+        update(&mut s, key(KeyCode::Char('/'), KeyModifiers::NONE), &c);
+        update(&mut s, key(KeyCode::Char('b'), KeyModifiers::NONE), &c);
+        update(&mut s, key(KeyCode::Enter, KeyModifiers::NONE), &c);
+        let m = s.bulletins.detail_modal.as_ref().unwrap();
+        assert!(m.search.as_ref().unwrap().committed);
+        assert!(!m.search.as_ref().unwrap().input_active);
+    }
+
+    #[test]
+    fn esc_in_search_cancels_search_not_modal() {
+        let mut s = fresh_state();
+        let c = tiny_config();
+        s.current_tab = ViewId::Bulletins;
+        seed_one_bulletin(&mut s);
+        update(&mut s, key(KeyCode::Char('i'), KeyModifiers::NONE), &c);
+        update(&mut s, key(KeyCode::Char('/'), KeyModifiers::NONE), &c);
+        update(&mut s, key(KeyCode::Char('b'), KeyModifiers::NONE), &c);
+        update(&mut s, key(KeyCode::Esc, KeyModifiers::NONE), &c);
+        let m = s.bulletins.detail_modal.as_ref().unwrap();
+        assert!(m.search.is_none());
+    }
+
+    #[test]
+    fn n_and_shift_n_cycle_after_commit() {
+        use crate::cluster::snapshot::FetchMeta;
+        use std::time::{Duration, Instant};
+        let mut s = fresh_state();
+        let c = tiny_config();
+        s.current_tab = ViewId::Bulletins;
+        // Seed a bulletin with three "aaa" matches.
+        s.cluster.snapshot.bulletins.merge(vec![BulletinSnapshot {
+            id: 1,
+            level: "ERROR".into(),
+            message: "aaa bbb aaa ccc aaa".into(),
+            source_id: "s".into(),
+            source_name: "S".into(),
+            source_type: "PROCESSOR".into(),
+            group_id: "g".into(),
+            timestamp_iso: "2026-04-20T10:00:00Z".into(),
+            timestamp_human: String::new(),
+        }]);
+        s.cluster.snapshot.bulletins.meta = Some(FetchMeta {
+            fetched_at: Instant::now(),
+            fetch_duration: Duration::from_millis(5),
+            next_interval: Duration::from_secs(5),
+        });
+        crate::view::bulletins::state::redraw_bulletins(&mut s);
+        s.bulletins.auto_scroll = false;
+        s.bulletins.selected = 0;
+
+        update(&mut s, key(KeyCode::Char('i'), KeyModifiers::NONE), &c);
+        update(&mut s, key(KeyCode::Char('/'), KeyModifiers::NONE), &c);
+        for ch in "aaa".chars() {
+            update(&mut s, key(KeyCode::Char(ch), KeyModifiers::NONE), &c);
+        }
+        update(&mut s, key(KeyCode::Enter, KeyModifiers::NONE), &c);
+
+        update(&mut s, key(KeyCode::Char('n'), KeyModifiers::NONE), &c);
+        let cur = s
+            .bulletins
+            .detail_modal
+            .as_ref()
+            .unwrap()
+            .search
+            .as_ref()
+            .unwrap()
+            .current;
+        assert_eq!(cur, Some(1));
+
+        update(&mut s, key(KeyCode::Char('N'), KeyModifiers::SHIFT), &c);
+        let cur = s
+            .bulletins
+            .detail_modal
+            .as_ref()
+            .unwrap()
+            .search
+            .as_ref()
+            .unwrap()
+            .current;
+        assert_eq!(cur, Some(0));
     }
 
     #[test]
