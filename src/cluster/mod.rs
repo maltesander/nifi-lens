@@ -1,5 +1,22 @@
-//! Central cluster-state store. See
-//! `docs/superpowers/specs/2026-04-18-central-cluster-store-design.md`.
+//! Central cluster-state store.
+//!
+//! Owns every periodic NiFi poll for the active context. One
+//! [`fetcher`] task per [`ClusterEndpoint`] runs on the main-thread
+//! `LocalSet`, writes results into a shared [`ClusterSnapshot`]
+//! through [`ClusterStore`], and emits `AppEvent::ClusterUpdate` so
+//! the UI loop can fan out `AppEvent::ClusterChanged(endpoint)` to
+//! subscribed views.
+//!
+//! Cadences come from [`ClusterPollingConfig`] and are scaled
+//! adaptively with jitter. Three endpoints — `RootPgStatus`,
+//! `ControllerServices`, and `ConnectionsByPg` — are subscriber-gated
+//! and park when no view needs them; the [`SubscriberRegistry`]
+//! tracks that gating. On context switch the main loop calls
+//! [`ClusterStore::shutdown`] and rebuilds the store with the new
+//! client.
+//!
+//! Views never poll directly: they subscribe via `WorkerRegistry` and
+//! re-derive their projections from the shared snapshot.
 
 pub mod config;
 pub mod fetcher;
