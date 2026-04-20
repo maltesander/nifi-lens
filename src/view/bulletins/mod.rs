@@ -12,9 +12,12 @@ pub use state::{BulletinsState, redraw_bulletins};
 pub fn render(
     frame: &mut Frame,
     area: Rect,
-    state: &BulletinsState,
+    state: &mut BulletinsState,
     browser: &crate::view::browser::state::BrowserState,
     cfg: &crate::timestamp::TimestampConfig,
 ) {
     render::render(frame, area, state, browser, cfg);
+    if state.detail_modal.is_some() {
+        modal::render(frame, area, state);
+    }
 }

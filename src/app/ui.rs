@@ -8,7 +8,7 @@ use crate::app::state::{AppState, Modal, ViewId};
 use crate::view::{browser, bulletins, events, overview, tracer};
 use crate::widget::{context_switcher, help_modal, status_bar};
 
-pub fn render(frame: &mut Frame, state: &AppState) {
+pub fn render(frame: &mut Frame, state: &mut AppState) {
     let root = frame.area();
     let chunks = Layout::default()
         .direction(Direction::Vertical)
@@ -56,16 +56,14 @@ pub fn render(frame: &mut Frame, state: &AppState) {
     }
 }
 
-fn render_content(frame: &mut Frame, area: Rect, state: &AppState) {
+fn render_content(frame: &mut Frame, area: Rect, state: &mut AppState) {
     match state.current_tab {
         ViewId::Overview => overview::render(frame, area, &state.overview),
-        ViewId::Bulletins => bulletins::render(
-            frame,
-            area,
-            &state.bulletins,
-            &state.browser,
-            &state.timestamp_cfg,
-        ),
+        ViewId::Bulletins => {
+            let browser = &state.browser;
+            let cfg = &state.timestamp_cfg;
+            bulletins::render(frame, area, &mut state.bulletins, browser, cfg);
+        }
         ViewId::Browser => browser::render(
             frame,
             area,
@@ -126,7 +124,7 @@ mod tests {
         state.context_name = "dev-nifi-2-9-0".into();
         let backend = TestBackend::new(100, 25);
         let mut term = Terminal::new(backend).unwrap();
-        term.draw(|f| render(f, &state)).unwrap();
+        term.draw(|f| render(f, &mut state)).unwrap();
         let snapshot = format!("{}", term.backend());
         let first_line = snapshot.lines().next().unwrap();
         assert!(

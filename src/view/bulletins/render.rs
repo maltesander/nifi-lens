@@ -36,7 +36,7 @@ const DETAIL_PANE_ROWS: u16 = 8;
 pub fn render(
     frame: &mut Frame,
     area: Rect,
-    state: &BulletinsState,
+    state: &mut BulletinsState,
     browser: &crate::view::browser::state::BrowserState,
     cfg: &crate::timestamp::TimestampConfig,
 ) {
@@ -561,7 +561,7 @@ mod tests {
         s
     }
 
-    fn render_to_string(state: &BulletinsState) -> String {
+    fn render_to_string(state: &mut BulletinsState) -> String {
         let backend = TestBackend::new(120, 30);
         let mut term = Terminal::new(backend).unwrap();
         let cfg = crate::timestamp::TimestampConfig::default();
@@ -573,8 +573,8 @@ mod tests {
 
     #[test]
     fn snapshot_empty() {
-        let state = BulletinsState::with_capacity(100);
-        insta::assert_snapshot!("bulletins_empty", render_to_string(&state));
+        let mut state = BulletinsState::with_capacity(100);
+        insta::assert_snapshot!("bulletins_empty", render_to_string(&mut state));
     }
 
     #[test]
@@ -621,10 +621,10 @@ mod tests {
                 "2026-04-11T10:14:22Z",
             ),
         ];
-        let state = seed_state(rows);
+        let mut state = seed_state(rows);
         insta::with_settings!(
             { filters => vec![(r"last [^\s]+ ago", "last <DUR> ago")] },
-            { insta::assert_snapshot!("bulletins_seeded_all_on", render_to_string(&state)); }
+            { insta::assert_snapshot!("bulletins_seeded_all_on", render_to_string(&mut state)); }
         );
     }
 
@@ -658,7 +658,7 @@ mod tests {
             {
                 insta::assert_snapshot!(
                     "bulletins_filtered_severity_only_errors",
-                    render_to_string(&state)
+                    render_to_string(&mut state)
                 );
             }
         );
@@ -685,7 +685,7 @@ mod tests {
         state.new_since_pause = 7;
         insta::with_settings!(
             { filters => vec![(r"last [^\s]+ ago", "last <DUR> ago")] },
-            { insta::assert_snapshot!("bulletins_paused_with_badge", render_to_string(&state)); }
+            { insta::assert_snapshot!("bulletins_paused_with_badge", render_to_string(&mut state)); }
         );
     }
 
@@ -718,7 +718,7 @@ mod tests {
         insta::with_settings!(
             { filters => vec![(r"last [^\s]+ ago", "last <DUR> ago")] },
             {
-                insta::assert_snapshot!("bulletins_text_input_active", render_to_string(&state));
+                insta::assert_snapshot!("bulletins_text_input_active", render_to_string(&mut state));
             }
         );
     }
@@ -773,13 +773,13 @@ mod tests {
                 timestamp_human: String::new(),
             },
         ];
-        let state = seed_state(rows);
+        let mut state = seed_state(rows);
         insta::with_settings!(
             { filters => vec![(r"last [^\s]+ ago", "last <DUR> ago")] },
             {
                 insta::assert_snapshot!(
                     "bulletins_dedups_identical_stems_across_sources",
-                    render_to_string(&state)
+                    render_to_string(&mut state)
                 );
             }
         );

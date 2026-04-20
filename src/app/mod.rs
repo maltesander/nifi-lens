@@ -66,7 +66,7 @@ pub async fn run(
     });
 
     terminal
-        .draw(|f| ui::render(f, &state))
+        .draw(|f| ui::render(f, &mut state))
         .map_err(|source| NifiLensError::TerminalInit { source })?;
 
     while let Some(event) = rx.recv().await {
@@ -178,7 +178,7 @@ pub async fn run(
                     || (affects_bulletins && active == ViewId::Bulletins);
                 if should_redraw {
                     terminal
-                        .draw(|f| ui::render(f, &state))
+                        .draw(|f| ui::render(f, &mut state))
                         .map_err(|source| NifiLensError::TerminalInit { source })?;
                 }
                 continue;
@@ -252,7 +252,7 @@ pub async fn run(
 
         if result.redraw {
             terminal
-                .draw(|f| ui::render(f, &state))
+                .draw(|f| ui::render(f, &mut state))
                 .map_err(|source| NifiLensError::TerminalInit { source })?;
         }
 

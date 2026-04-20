@@ -178,4 +178,77 @@ mod tests {
     fn estimate_wrapped_rows_width_zero_falls_back_to_line_count() {
         assert_eq!(estimate_wrapped_rows("a\nb\nc", 0), 3);
     }
+
+    #[test]
+    fn modal_renders_short_message() {
+        use crate::client::BulletinSnapshot;
+        use crate::view::bulletins::state::BulletinsState;
+        use ratatui::Terminal;
+        use ratatui::backend::TestBackend;
+        use ratatui::layout::Rect;
+
+        let mut state = BulletinsState::with_capacity(10);
+        state.ring.push_back(BulletinSnapshot {
+            id: 1,
+            level: "ERROR".into(),
+            message: "short error".into(),
+            source_id: "src-1".into(),
+            source_name: "PutDb".into(),
+            source_type: "PROCESSOR".into(),
+            group_id: "g".into(),
+            timestamp_iso: "2026-04-20T10:14:22Z".into(),
+            timestamp_human: String::new(),
+        });
+        state.selected = 0;
+        state.auto_scroll = false;
+        state.open_detail_modal();
+
+        let backend = TestBackend::new(60, 15);
+        let mut terminal = Terminal::new(backend).unwrap();
+        terminal
+            .draw(|frame| {
+                render(frame, Rect::new(0, 0, 60, 15), &mut state);
+            })
+            .unwrap();
+        insta::assert_debug_snapshot!("modal_short_message", terminal.backend().buffer());
+    }
+
+    #[test]
+    fn modal_renders_scrolled_long_message() {
+        use crate::client::BulletinSnapshot;
+        use crate::view::bulletins::state::BulletinsState;
+        use ratatui::Terminal;
+        use ratatui::backend::TestBackend;
+        use ratatui::layout::Rect;
+
+        let long = (0..30)
+            .map(|i| format!("line {i}"))
+            .collect::<Vec<_>>()
+            .join("\n");
+        let mut state = BulletinsState::with_capacity(10);
+        state.ring.push_back(BulletinSnapshot {
+            id: 1,
+            level: "ERROR".into(),
+            message: long,
+            source_id: "s".into(),
+            source_name: "S".into(),
+            source_type: "PROCESSOR".into(),
+            group_id: "g".into(),
+            timestamp_iso: "2026-04-20T10:14:22Z".into(),
+            timestamp_human: String::new(),
+        });
+        state.selected = 0;
+        state.auto_scroll = false;
+        state.open_detail_modal();
+        state.detail_modal.as_mut().unwrap().scroll_offset = 5;
+
+        let backend = TestBackend::new(60, 15);
+        let mut terminal = Terminal::new(backend).unwrap();
+        terminal
+            .draw(|frame| {
+                render(frame, Rect::new(0, 0, 60, 15), &mut state);
+            })
+            .unwrap();
+        insta::assert_debug_snapshot!("modal_long_message_scrolled", terminal.backend().buffer());
+    }
 }
