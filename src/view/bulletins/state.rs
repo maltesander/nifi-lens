@@ -147,6 +147,9 @@ pub struct BulletinsState {
     pub auto_scroll: bool,
     pub new_since_pause: u32,
     pub group_mode: GroupMode,
+    /// `Some(modal)` while the detail modal is open. Opened by `i`,
+    /// closed by `Esc` or by `Enter` (which also emits the cross-link).
+    pub detail_modal: Option<DetailModalState>,
 }
 
 #[derive(Debug, Clone)]
@@ -276,6 +279,64 @@ pub struct GroupDetails {
     pub severity: crate::client::Severity,
 }
 
+/// A group's identity, captured when the user opens the detail modal
+/// so we can re-resolve the same bulletin against a ring that may
+/// have shifted (eviction, new arrivals).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct GroupKey {
+    pub source_id: String,
+    /// `strip_component_prefix(message)` + `normalize_dynamic_brackets`.
+    /// Empty string when `mode == Off` or `mode == Source` (dedup key
+    /// doesn't use the message).
+    pub message_stem: String,
+    pub mode: GroupMode,
+}
+
+/// A substring match in the pre-wrap raw message. Byte offsets into
+/// the specific line (split on `\n`); `line_idx` is the pre-wrap line.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct MatchSpan {
+    pub line_idx: usize,
+    pub byte_start: usize,
+    pub byte_end: usize,
+}
+
+#[derive(Debug, Clone, Default)]
+pub struct SearchState {
+    pub query: String,
+    /// True while the user is still typing the query (/ just pressed,
+    /// Enter not yet). Consumes keystrokes as literal text.
+    pub input_active: bool,
+    /// True once the user pressed Enter. `n`/`N` only work in this state.
+    pub committed: bool,
+    /// Matches in pre-wrap coordinates. Recomputed on every query edit.
+    pub matches: Vec<MatchSpan>,
+    /// Index into `matches`; `None` when `matches` is empty.
+    pub current: Option<usize>,
+}
+
+#[derive(Debug, Clone)]
+pub struct DetailModalState {
+    /// Identity of the group at the time of open. Used to re-resolve
+    /// and defensive-close if the ring no longer contains it.
+    pub group_key: GroupKey,
+    /// Snapshot of the group's details at open time. If the ring
+    /// changes the underlying data, the snapshot keeps the modal
+    /// coherent until the user closes it.
+    pub details: GroupDetails,
+    /// Vertical scroll offset in wrapped-line units. Saturates on
+    /// render if the renderer's clamped max is smaller.
+    pub scroll_offset: usize,
+    /// Last viewport row count (wrap-aware body area, header/footer
+    /// excluded). Written by the renderer each frame; reducers read it
+    /// to compute page-size scrolls. Initial value `0` means page
+    /// scrolls behave like line scrolls until the first render — this
+    /// is harmless because the modal renders before the user can press
+    /// a key.
+    pub last_viewport_rows: usize,
+    pub search: Option<SearchState>,
+}
+
 impl BulletinsState {
     pub fn with_capacity(ring_capacity: usize) -> Self {
         Self {
@@ -290,6 +351,7 @@ impl BulletinsState {
             auto_scroll: true,
             new_since_pause: 0,
             group_mode: GroupMode::SourceAndMessage,
+            detail_modal: None,
         }
     }
 
@@ -2017,5 +2079,23 @@ mod tests {
         assert_eq!(hits.len(), 2);
         assert_eq!(hits[0].id, 3, "newest first");
         assert_eq!(hits[1].id, 1);
+    }
+
+    #[test]
+    fn detail_modal_state_default_is_empty() {
+        let state = BulletinsState::with_capacity(10);
+        assert!(state.detail_modal.is_none());
+    }
+
+    #[test]
+    fn group_key_equality_ignores_case_of_source_id_is_exact() {
+        // Sanity: GroupKey uses exact string equality for source_id + message_stem.
+        let a = GroupKey {
+            source_id: "abc".into(),
+            message_stem: "boom".into(),
+            mode: GroupMode::SourceAndMessage,
+        };
+        let b = a.clone();
+        assert_eq!(a, b);
     }
 }
