@@ -564,6 +564,9 @@ pub fn collect_hints(state: &AppState) -> Vec<crate::widget::hint_bar::HintSpan>
         v: V,
         ctx: &crate::input::HintContext<'_>,
     ) {
+        if !v.show_in_hint_bar() {
+            return;
+        }
         out.push(HintSpan {
             key: Cow::Owned(v.chord().display()),
             action: Cow::Borrowed(v.hint()),
@@ -2372,6 +2375,30 @@ mod tests {
             !hint_text.contains("Alt+"),
             "hint bar must not advertise old Alt+ chords: {hint_text}"
         );
+    }
+
+    #[test]
+    fn severity_filter_hints_are_hidden_from_status_bar() {
+        let mut s = fresh_state();
+        s.current_tab = ViewId::Bulletins;
+        let hints = collect_hints(&s);
+        // The three 1/2/3 hints must not appear in the status-bar strip —
+        // they're surfaced by the [E n] [W n] [I n] chips one row above.
+        assert!(
+            !hints.iter().any(|h| h.key == "1"),
+            "key '1' must not be in status bar; got {:?}",
+            hints.iter().map(|h| h.key.as_ref()).collect::<Vec<_>>(),
+        );
+        assert!(
+            !hints.iter().any(|h| h.key == "2"),
+            "key '2' must not be in status bar"
+        );
+        assert!(
+            !hints.iter().any(|h| h.key == "3"),
+            "key '3' must not be in status bar"
+        );
+        // Sanity: other Bulletins hints are still present.
+        assert!(hints.iter().any(|h| h.key == "/"), "other hints unaffected");
     }
 
     #[test]

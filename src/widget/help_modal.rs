@@ -248,6 +248,16 @@ mod tests {
     }
 
     #[test]
+    fn help_modal_still_lists_severity_filters_for_bulletins() {
+        use crate::input::{BulletinsVerb, Verb};
+        let sec = section("Bulletins", BulletinsVerb::all());
+        let keys: Vec<String> = sec.rows.iter().map(|(k, _)| k.clone()).collect();
+        assert!(keys.iter().any(|k| k == "1"));
+        assert!(keys.iter().any(|k| k == "2"));
+        assert!(keys.iter().any(|k| k == "3"));
+    }
+
+    #[test]
     fn tab_section_row_counts_match_verb_counts() {
         assert_eq!(
             tab_section(ViewId::Bulletins).unwrap().rows.len(),

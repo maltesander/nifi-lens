@@ -179,6 +179,15 @@ pub trait Verb: Copy + 'static {
         50
     }
 
+    /// If false, this verb is advertised only in the help modal (`?`),
+    /// not in the per-frame status-bar hint strip. Default: `true`.
+    /// Use sparingly — only when a UI element adjacent to the hint bar
+    /// already surfaces the same shortcut (e.g. the Bulletins
+    /// `[E n] [W n] [I n]` chips surface `1/2/3`).
+    fn show_in_hint_bar(self) -> bool {
+        true
+    }
+
     /// Canonical iteration order for the variants of this enum.
     /// Drives help-modal section layout and reverse-table
     /// construction.

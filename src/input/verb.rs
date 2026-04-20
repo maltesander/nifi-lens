@@ -109,6 +109,10 @@ impl Verb for BulletinsVerb {
             _ => 40,
         }
     }
+    fn show_in_hint_bar(self) -> bool {
+        !matches!(self, Self::ToggleSeverity(_))
+    }
+
     fn all() -> &'static [Self] {
         &[
             Self::ToggleSeverity(Severity::Error),
