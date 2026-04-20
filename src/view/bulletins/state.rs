@@ -837,6 +837,125 @@ impl BulletinsState {
             .as_ref()
             .map(|m| m.details.raw_message.clone())
     }
+
+    /// Open the search input inside the detail modal. Initialises
+    /// `modal.search` with an empty query and `input_active = true`.
+    /// No-op if no modal is open.
+    pub fn modal_search_open(&mut self) {
+        let Some(modal) = self.detail_modal.as_mut() else {
+            return;
+        };
+        modal.search = Some(SearchState {
+            query: String::new(),
+            input_active: true,
+            committed: false,
+            matches: Vec::new(),
+            current: None,
+        });
+    }
+
+    /// Append a character to the live search query and recompute matches.
+    /// No-op if no modal or no active search input.
+    pub fn modal_search_push(&mut self, ch: char) {
+        let Some(modal) = self.detail_modal.as_mut() else {
+            return;
+        };
+        let Some(search) = modal.search.as_mut() else {
+            return;
+        };
+        if !search.input_active {
+            return;
+        }
+        search.query.push(ch);
+        search.matches = compute_matches(&modal.details.raw_message, &search.query);
+        search.current = if search.matches.is_empty() {
+            None
+        } else {
+            Some(0)
+        };
+    }
+
+    /// Remove the last character from the live search query and recompute matches.
+    /// No-op if no modal or no active search input.
+    pub fn modal_search_pop(&mut self) {
+        let Some(modal) = self.detail_modal.as_mut() else {
+            return;
+        };
+        let Some(search) = modal.search.as_mut() else {
+            return;
+        };
+        if !search.input_active {
+            return;
+        }
+        search.query.pop();
+        search.matches = compute_matches(&modal.details.raw_message, &search.query);
+        search.current = if search.matches.is_empty() {
+            None
+        } else {
+            Some(0)
+        };
+    }
+
+    /// Commit the current query. If the query is empty, closes search
+    /// (sets `modal.search = None`). Otherwise flips `input_active` to
+    /// false and `committed` to true.
+    pub fn modal_search_commit(&mut self) {
+        let Some(modal) = self.detail_modal.as_mut() else {
+            return;
+        };
+        let Some(search) = modal.search.as_mut() else {
+            return;
+        };
+        if search.query.is_empty() {
+            modal.search = None;
+            return;
+        }
+        search.input_active = false;
+        search.committed = true;
+    }
+
+    /// Cancel search and clear all search state from the modal.
+    pub fn modal_search_cancel(&mut self) {
+        if let Some(modal) = self.detail_modal.as_mut() {
+            modal.search = None;
+        }
+    }
+
+    /// Advance to the next match, wrapping around. No-op unless search
+    /// is committed and has at least one match.
+    pub fn modal_search_cycle_next(&mut self) {
+        let Some(modal) = self.detail_modal.as_mut() else {
+            return;
+        };
+        let Some(search) = modal.search.as_mut() else {
+            return;
+        };
+        if !search.committed || search.matches.is_empty() {
+            return;
+        }
+        let cur = search.current.unwrap_or(0);
+        search.current = Some((cur + 1) % search.matches.len());
+    }
+
+    /// Move to the previous match, wrapping around. No-op unless search
+    /// is committed and has at least one match.
+    pub fn modal_search_cycle_prev(&mut self) {
+        let Some(modal) = self.detail_modal.as_mut() else {
+            return;
+        };
+        let Some(search) = modal.search.as_mut() else {
+            return;
+        };
+        if !search.committed || search.matches.is_empty() {
+            return;
+        }
+        let cur = search.current.unwrap_or(0);
+        search.current = Some(if cur == 0 {
+            search.matches.len() - 1
+        } else {
+            cur - 1
+        });
+    }
 }
 
 /// Mirror the cluster-owned `BulletinRing` into `BulletinsState`,
@@ -2429,5 +2548,193 @@ mod tests {
     fn modal_copy_message_none_when_closed() {
         let state = BulletinsState::with_capacity(10);
         assert!(state.modal_copy_message().is_none());
+    }
+
+    #[test]
+    fn modal_search_open_flips_input_active() {
+        let mut state = BulletinsState::with_capacity(10);
+        state.ring.push_back(BulletinSnapshot {
+            id: 1,
+            level: "INFO".into(),
+            message: "error here".into(),
+            source_id: "s".into(),
+            source_name: "S".into(),
+            source_type: "PROCESSOR".into(),
+            group_id: "g".into(),
+            timestamp_iso: "2026-04-20T10:00:00Z".into(),
+            timestamp_human: String::new(),
+        });
+        state.selected = 0;
+        state.open_detail_modal();
+        state.modal_search_open();
+        let s = state
+            .detail_modal
+            .as_ref()
+            .unwrap()
+            .search
+            .as_ref()
+            .unwrap();
+        assert!(s.input_active);
+        assert_eq!(s.query, "");
+    }
+
+    #[test]
+    fn modal_search_push_updates_matches_live() {
+        let mut state = BulletinsState::with_capacity(10);
+        state.ring.push_back(BulletinSnapshot {
+            id: 1,
+            level: "INFO".into(),
+            message: "error here".into(),
+            source_id: "s".into(),
+            source_name: "S".into(),
+            source_type: "PROCESSOR".into(),
+            group_id: "g".into(),
+            timestamp_iso: "2026-04-20T10:00:00Z".into(),
+            timestamp_human: String::new(),
+        });
+        state.selected = 0;
+        state.open_detail_modal();
+        state.modal_search_open();
+        state.modal_search_push('e');
+        state.modal_search_push('r');
+        state.modal_search_push('r');
+        let s = state
+            .detail_modal
+            .as_ref()
+            .unwrap()
+            .search
+            .as_ref()
+            .unwrap();
+        assert_eq!(s.query, "err");
+        assert_eq!(s.matches.len(), 1);
+        assert_eq!(s.current, Some(0));
+    }
+
+    #[test]
+    fn modal_search_commit_flips_committed_and_keeps_matches() {
+        let mut state = BulletinsState::with_capacity(10);
+        state.ring.push_back(BulletinSnapshot {
+            id: 1,
+            level: "INFO".into(),
+            message: "aaa bbb aaa".into(),
+            source_id: "s".into(),
+            source_name: "S".into(),
+            source_type: "PROCESSOR".into(),
+            group_id: "g".into(),
+            timestamp_iso: "2026-04-20T10:00:00Z".into(),
+            timestamp_human: String::new(),
+        });
+        state.selected = 0;
+        state.open_detail_modal();
+        state.modal_search_open();
+        for c in "aaa".chars() {
+            state.modal_search_push(c);
+        }
+        state.modal_search_commit();
+        let s = state
+            .detail_modal
+            .as_ref()
+            .unwrap()
+            .search
+            .as_ref()
+            .unwrap();
+        assert!(s.committed);
+        assert!(!s.input_active);
+        assert_eq!(s.matches.len(), 2);
+    }
+
+    #[test]
+    fn modal_search_cancel_clears_query_and_matches() {
+        let mut state = BulletinsState::with_capacity(10);
+        state.ring.push_back(BulletinSnapshot {
+            id: 1,
+            level: "INFO".into(),
+            message: "aaa".into(),
+            source_id: "s".into(),
+            source_name: "S".into(),
+            source_type: "PROCESSOR".into(),
+            group_id: "g".into(),
+            timestamp_iso: "2026-04-20T10:00:00Z".into(),
+            timestamp_human: String::new(),
+        });
+        state.selected = 0;
+        state.open_detail_modal();
+        state.modal_search_open();
+        for c in "aaa".chars() {
+            state.modal_search_push(c);
+        }
+        state.modal_search_cancel();
+        assert!(state.detail_modal.as_ref().unwrap().search.is_none());
+    }
+
+    #[test]
+    fn modal_search_cycle_wraps_both_directions() {
+        let mut state = BulletinsState::with_capacity(10);
+        state.ring.push_back(BulletinSnapshot {
+            id: 1,
+            level: "INFO".into(),
+            message: "a x a x a".into(),
+            source_id: "s".into(),
+            source_name: "S".into(),
+            source_type: "PROCESSOR".into(),
+            group_id: "g".into(),
+            timestamp_iso: "2026-04-20T10:00:00Z".into(),
+            timestamp_human: String::new(),
+        });
+        state.selected = 0;
+        state.open_detail_modal();
+        state.modal_search_open();
+        state.modal_search_push('a');
+        state.modal_search_commit();
+        // current starts at 0, there are 3 matches
+        state.modal_search_cycle_next();
+        assert_eq!(
+            state
+                .detail_modal
+                .as_ref()
+                .unwrap()
+                .search
+                .as_ref()
+                .unwrap()
+                .current,
+            Some(1)
+        );
+        state.modal_search_cycle_next();
+        assert_eq!(
+            state
+                .detail_modal
+                .as_ref()
+                .unwrap()
+                .search
+                .as_ref()
+                .unwrap()
+                .current,
+            Some(2)
+        );
+        state.modal_search_cycle_next();
+        assert_eq!(
+            state
+                .detail_modal
+                .as_ref()
+                .unwrap()
+                .search
+                .as_ref()
+                .unwrap()
+                .current,
+            Some(0)
+        ); // wrap
+
+        state.modal_search_cycle_prev();
+        assert_eq!(
+            state
+                .detail_modal
+                .as_ref()
+                .unwrap()
+                .search
+                .as_ref()
+                .unwrap()
+                .current,
+            Some(2)
+        ); // wrap
     }
 }
