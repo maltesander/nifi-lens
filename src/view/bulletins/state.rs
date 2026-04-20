@@ -757,6 +757,51 @@ impl BulletinsState {
     pub fn close_detail_modal(&mut self) {
         self.detail_modal = None;
     }
+
+    /// Scroll the modal body by `delta` lines (negative = up). Clamps
+    /// the lower bound at 0; does not clamp upward (renderer clamps
+    /// against the real wrap-aware max each frame).
+    pub fn modal_scroll_by(&mut self, delta: i32) {
+        let Some(modal) = self.detail_modal.as_mut() else {
+            return;
+        };
+        if delta >= 0 {
+            modal.scroll_offset = modal.scroll_offset.saturating_add(delta as usize);
+        } else {
+            modal.scroll_offset = modal.scroll_offset.saturating_sub((-delta) as usize);
+        }
+    }
+
+    pub fn modal_page_down(&mut self) {
+        let Some(modal) = self.detail_modal.as_mut() else {
+            return;
+        };
+        let page = modal.last_viewport_rows.max(1);
+        modal.scroll_offset = modal.scroll_offset.saturating_add(page);
+    }
+
+    pub fn modal_page_up(&mut self) {
+        let Some(modal) = self.detail_modal.as_mut() else {
+            return;
+        };
+        let page = modal.last_viewport_rows.max(1);
+        modal.scroll_offset = modal.scroll_offset.saturating_sub(page);
+    }
+
+    pub fn modal_jump_top(&mut self) {
+        if let Some(modal) = self.detail_modal.as_mut() {
+            modal.scroll_offset = 0;
+        }
+    }
+
+    /// Sets offset to `usize::MAX`; the renderer clamps against the
+    /// real maximum on the next frame. State-level reducer has no
+    /// access to viewport-derived maxima.
+    pub fn modal_jump_bottom(&mut self) {
+        if let Some(modal) = self.detail_modal.as_mut() {
+            modal.scroll_offset = usize::MAX;
+        }
+    }
 }
 
 /// Mirror the cluster-owned `BulletinRing` into `BulletinsState`,
@@ -2195,5 +2240,100 @@ mod tests {
 
         state.close_detail_modal();
         assert!(state.detail_modal.is_none());
+    }
+
+    #[test]
+    fn modal_scroll_down_advances_offset() {
+        let mut state = BulletinsState::with_capacity(10);
+        state.ring.push_back(BulletinSnapshot {
+            id: 1,
+            level: "INFO".into(),
+            message: "a".into(),
+            source_id: "s".into(),
+            source_name: "S".into(),
+            source_type: "PROCESSOR".into(),
+            group_id: "g".into(),
+            timestamp_iso: "2026-04-20T10:00:00Z".into(),
+            timestamp_human: String::new(),
+        });
+        state.selected = 0;
+        state.open_detail_modal();
+        state.modal_scroll_by(1);
+        assert_eq!(state.detail_modal.as_ref().unwrap().scroll_offset, 1);
+        state.modal_scroll_by(3);
+        assert_eq!(state.detail_modal.as_ref().unwrap().scroll_offset, 4);
+    }
+
+    #[test]
+    fn modal_scroll_up_clamps_at_zero() {
+        let mut state = BulletinsState::with_capacity(10);
+        state.ring.push_back(BulletinSnapshot {
+            id: 1,
+            level: "INFO".into(),
+            message: "a".into(),
+            source_id: "s".into(),
+            source_name: "S".into(),
+            source_type: "PROCESSOR".into(),
+            group_id: "g".into(),
+            timestamp_iso: "2026-04-20T10:00:00Z".into(),
+            timestamp_human: String::new(),
+        });
+        state.selected = 0;
+        state.open_detail_modal();
+        state.modal_scroll_by(-5);
+        assert_eq!(state.detail_modal.as_ref().unwrap().scroll_offset, 0);
+    }
+
+    #[test]
+    fn modal_page_scroll_uses_last_viewport_rows() {
+        let mut state = BulletinsState::with_capacity(10);
+        state.ring.push_back(BulletinSnapshot {
+            id: 1,
+            level: "INFO".into(),
+            message: "a".into(),
+            source_id: "s".into(),
+            source_name: "S".into(),
+            source_type: "PROCESSOR".into(),
+            group_id: "g".into(),
+            timestamp_iso: "2026-04-20T10:00:00Z".into(),
+            timestamp_human: String::new(),
+        });
+        state.selected = 0;
+        state.open_detail_modal();
+        // Simulate a render having measured viewport_rows = 10.
+        state.detail_modal.as_mut().unwrap().last_viewport_rows = 10;
+        state.modal_page_down();
+        assert_eq!(state.detail_modal.as_ref().unwrap().scroll_offset, 10);
+        state.modal_page_up();
+        assert_eq!(state.detail_modal.as_ref().unwrap().scroll_offset, 0);
+    }
+
+    #[test]
+    fn modal_jump_top_and_bottom() {
+        let mut state = BulletinsState::with_capacity(10);
+        state.ring.push_back(BulletinSnapshot {
+            id: 1,
+            level: "INFO".into(),
+            message: "a".into(),
+            source_id: "s".into(),
+            source_name: "S".into(),
+            source_type: "PROCESSOR".into(),
+            group_id: "g".into(),
+            timestamp_iso: "2026-04-20T10:00:00Z".into(),
+            timestamp_human: String::new(),
+        });
+        state.selected = 0;
+        state.open_detail_modal();
+        state.detail_modal.as_mut().unwrap().scroll_offset = 5;
+        state.modal_jump_top();
+        assert_eq!(state.detail_modal.as_ref().unwrap().scroll_offset, 0);
+
+        // `modal_jump_bottom` sets offset to usize::MAX; renderer clamps
+        // against real max. State-level test only verifies the sentinel.
+        state.modal_jump_bottom();
+        assert_eq!(
+            state.detail_modal.as_ref().unwrap().scroll_offset,
+            usize::MAX
+        );
     }
 }
