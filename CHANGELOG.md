@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- **Bulletins**: the `×N` repeat-count cell is now dim grey (bold)
+  instead of yellow, so the severity column is the only color signal
+  on each row.
+
 ## [0.5.0] — 2026-04-18
 
 ### Changed

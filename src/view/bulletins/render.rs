@@ -241,7 +241,7 @@ fn render_list(
             };
             let count_cell = if group.count > 1 {
                 Cell::from(format!("\u{00D7}{}", group.count))
-                    .style(theme::warning().add_modifier(Modifier::BOLD))
+                    .style(theme::muted().add_modifier(Modifier::BOLD))
             } else {
                 Cell::from("")
             };
