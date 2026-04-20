@@ -802,6 +802,15 @@ impl BulletinsState {
             modal.scroll_offset = usize::MAX;
         }
     }
+
+    /// Returns the full raw message for the currently open modal, or
+    /// `None` if no modal is open. Caller is responsible for pushing
+    /// to the clipboard and posting a status banner.
+    pub fn modal_copy_message(&self) -> Option<String> {
+        self.detail_modal
+            .as_ref()
+            .map(|m| m.details.raw_message.clone())
+    }
 }
 
 /// Mirror the cluster-owned `BulletinRing` into `BulletinsState`,
@@ -2335,5 +2344,32 @@ mod tests {
             state.detail_modal.as_ref().unwrap().scroll_offset,
             usize::MAX
         );
+    }
+
+    #[test]
+    fn modal_copy_message_returns_full_raw_message() {
+        let mut state = BulletinsState::with_capacity(10);
+        let long = "line one\nline two with a long tail of text".to_string();
+        state.ring.push_back(BulletinSnapshot {
+            id: 1,
+            level: "ERROR".into(),
+            message: long.clone(),
+            source_id: "s".into(),
+            source_name: "S".into(),
+            source_type: "PROCESSOR".into(),
+            group_id: "g".into(),
+            timestamp_iso: "2026-04-20T10:00:00Z".into(),
+            timestamp_human: String::new(),
+        });
+        state.selected = 0;
+        state.open_detail_modal();
+        let msg = state.modal_copy_message().expect("modal open");
+        assert_eq!(msg, long);
+    }
+
+    #[test]
+    fn modal_copy_message_none_when_closed() {
+        let state = BulletinsState::with_capacity(10);
+        assert!(state.modal_copy_message().is_none());
     }
 }
