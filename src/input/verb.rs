@@ -29,6 +29,7 @@ pub enum BulletinsVerb {
     CopyMessage,
     ClearFilters,
     OpenSearch,
+    OpenDetail,
     Refresh,
 }
 
@@ -69,6 +70,7 @@ impl Verb for BulletinsVerb {
             Self::CopyMessage => Chord::simple(KeyCode::Char('c')),
             Self::ClearFilters => Chord::shift(KeyCode::Char('R')),
             Self::OpenSearch => Chord::simple(KeyCode::Char('/')),
+            Self::OpenDetail => Chord::simple(KeyCode::Char('i')),
             Self::Refresh => Chord::simple(KeyCode::Char('r')),
         }
     }
@@ -84,6 +86,7 @@ impl Verb for BulletinsVerb {
             Self::CopyMessage => "copy raw message to clipboard",
             Self::ClearFilters => "clear all filters",
             Self::OpenSearch => "open text search",
+            Self::OpenDetail => "open detail modal",
             Self::Refresh => "refresh",
         }
     }
@@ -99,6 +102,7 @@ impl Verb for BulletinsVerb {
             Self::CopyMessage => "copy",
             Self::ClearFilters => "clear",
             Self::OpenSearch => "find",
+            Self::OpenDetail => "info",
             Self::Refresh => "refresh",
         }
     }
@@ -113,6 +117,13 @@ impl Verb for BulletinsVerb {
         !matches!(self, Self::ToggleSeverity(_))
     }
 
+    fn enabled(self, ctx: &HintContext<'_>) -> bool {
+        match self {
+            Self::OpenDetail => !ctx.state.bulletins.ring.is_empty(),
+            _ => true,
+        }
+    }
+
     fn all() -> &'static [Self] {
         &[
             Self::ToggleSeverity(Severity::Error),
@@ -125,6 +136,7 @@ impl Verb for BulletinsVerb {
             Self::CopyMessage,
             Self::ClearFilters,
             Self::OpenSearch,
+            Self::OpenDetail,
             Self::Refresh,
         ]
     }

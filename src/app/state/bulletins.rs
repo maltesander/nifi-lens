@@ -42,6 +42,9 @@ impl ViewKeyHandler for BulletinsHandler {
             }
             BulletinsVerb::ClearFilters => state.bulletins.clear_filters(),
             BulletinsVerb::OpenSearch => state.bulletins.enter_text_input_mode(),
+            BulletinsVerb::OpenDetail => {
+                state.bulletins.open_detail_modal();
+            }
             // Bulletins auto-refreshes; verb kept for parity but no state mutation.
             BulletinsVerb::Refresh => {}
         }
@@ -712,5 +715,25 @@ mod tests {
             s.bulletins.text_input.is_none(),
             "text_input should be cancelled after cut"
         );
+    }
+
+    #[test]
+    fn i_opens_detail_modal_when_a_bulletin_is_selected() {
+        let mut s = fresh_state();
+        let c = tiny_config();
+        s.current_tab = ViewId::Bulletins;
+        seed_one_bulletin(&mut s);
+        assert!(s.bulletins.detail_modal.is_none());
+        update(&mut s, key(KeyCode::Char('i'), KeyModifiers::NONE), &c);
+        assert!(s.bulletins.detail_modal.is_some());
+    }
+
+    #[test]
+    fn i_is_noop_on_empty_bulletins_list() {
+        let mut s = fresh_state();
+        let c = tiny_config();
+        s.current_tab = ViewId::Bulletins;
+        update(&mut s, key(KeyCode::Char('i'), KeyModifiers::NONE), &c);
+        assert!(s.bulletins.detail_modal.is_none());
     }
 }
