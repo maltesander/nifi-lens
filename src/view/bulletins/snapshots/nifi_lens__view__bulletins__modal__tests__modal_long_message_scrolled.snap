@@ -18,7 +18,7 @@ Buffer {
         "│line 11                                                   │",
         "│line 12                                                   │",
         "│                                                          │",
-        "│↑↓ scroll · PgUp/PgDn page · c copy · Enter Browser · Esc │",
+        "│↑↓ scroll · PgUp/PgDn page · c copy · / find · Enter Brows│",
         "└──────────────────────────────────────────────────────────┘",
     ],
     styles: [
