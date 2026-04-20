@@ -715,6 +715,48 @@ impl BulletinsState {
             severity: crate::client::Severity::parse(&latest.level),
         })
     }
+
+    /// Build a `GroupKey` for the currently selected group, or `None`
+    /// when the list is empty.
+    pub fn selected_group_key(&self) -> Option<GroupKey> {
+        let group = self.grouped_view().into_iter().nth(self.selected)?;
+        let latest = &self.ring[group.latest_ring_idx];
+        let message_stem = match self.group_mode {
+            GroupMode::SourceAndMessage => {
+                normalize_dynamic_brackets(strip_component_prefix(&latest.message))
+            }
+            GroupMode::Source | GroupMode::Off => String::new(),
+        };
+        Some(GroupKey {
+            source_id: latest.source_id.clone(),
+            message_stem,
+            mode: self.group_mode,
+        })
+    }
+
+    /// Open the detail modal for the currently selected group.
+    /// Returns `true` if opened, `false` if there is nothing selected.
+    pub fn open_detail_modal(&mut self) -> bool {
+        let Some(details) = self.group_details() else {
+            return false;
+        };
+        let Some(group_key) = self.selected_group_key() else {
+            return false;
+        };
+        self.detail_modal = Some(DetailModalState {
+            group_key,
+            details,
+            scroll_offset: 0,
+            last_viewport_rows: 0,
+            search: None,
+        });
+        true
+    }
+
+    /// Close the detail modal, clearing all modal-local state.
+    pub fn close_detail_modal(&mut self) {
+        self.detail_modal = None;
+    }
 }
 
 /// Mirror the cluster-owned `BulletinRing` into `BulletinsState`,
@@ -2097,5 +2139,61 @@ mod tests {
         };
         let b = a.clone();
         assert_eq!(a, b);
+    }
+
+    #[test]
+    fn open_detail_modal_captures_group_key_and_details() {
+        let mut state = BulletinsState::with_capacity(10);
+        // Seed a single bulletin.
+        state.ring.push_back(BulletinSnapshot {
+            id: 1,
+            level: "ERROR".into(),
+            message: "PutDb[id=abc] boom".into(),
+            source_id: "src-1".into(),
+            source_name: "PutDb".into(),
+            source_type: "PROCESSOR".into(),
+            group_id: "g".into(),
+            timestamp_iso: "2026-04-20T10:00:00Z".into(),
+            timestamp_human: String::new(),
+        });
+        state.selected = 0;
+        state.auto_scroll = false;
+
+        assert!(state.open_detail_modal());
+        let modal = state.detail_modal.as_ref().expect("modal open");
+        assert_eq!(modal.group_key.source_id, "src-1");
+        assert_eq!(modal.details.raw_message, "PutDb[id=abc] boom");
+        assert_eq!(modal.scroll_offset, 0);
+        assert!(modal.search.is_none());
+    }
+
+    #[test]
+    fn open_detail_modal_noops_on_empty_list() {
+        let mut state = BulletinsState::with_capacity(10);
+        assert!(!state.open_detail_modal());
+        assert!(state.detail_modal.is_none());
+    }
+
+    #[test]
+    fn close_detail_modal_clears_state() {
+        let mut state = BulletinsState::with_capacity(10);
+        state.ring.push_back(BulletinSnapshot {
+            id: 1,
+            level: "INFO".into(),
+            message: "msg".into(),
+            source_id: "s".into(),
+            source_name: "S".into(),
+            source_type: "PROCESSOR".into(),
+            group_id: "g".into(),
+            timestamp_iso: "2026-04-20T10:00:00Z".into(),
+            timestamp_human: String::new(),
+        });
+        state.selected = 0;
+        state.auto_scroll = false;
+        state.open_detail_modal();
+        assert!(state.detail_modal.is_some());
+
+        state.close_detail_modal();
+        assert!(state.detail_modal.is_none());
     }
 }
