@@ -1,5 +1,6 @@
 //! Bulletins tab: cluster-wide bulletin tail.
 
+pub mod modal;
 pub mod render;
 pub mod state;
 
