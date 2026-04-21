@@ -230,17 +230,11 @@ pub fn spawn_content(
     })
 }
 
-/// Re-fetches the full content bytes for `(event_id, side)` and
-/// writes them to `path`. Emits `TracerPayload::ContentSaved` on
-/// success or `TracerPayload::ContentSaveFailed` on fetch or write
-/// error.
-///
-/// The write runs on the blocking thread pool via
-/// `tokio::task::spawn_blocking` so it does not block the `LocalSet`.
-//
-// TODO(nifi-rust-client): switch to a streaming body API when
-// upstream adds one, so the full response doesn't need to be
-// buffered in memory before writing to disk.
+/// Streams the content bytes for `(event_id, side)` straight to `path`
+/// without buffering the full body in memory. Emits
+/// `TracerPayload::ContentSaved` on success or
+/// `TracerPayload::ContentSaveFailed` if the fetch, an intermediate
+/// chunk, or the write fails.
 pub fn spawn_save(
     client: Arc<RwLock<NifiClient>>,
     tx: mpsc::Sender<AppEvent>,
@@ -249,10 +243,13 @@ pub fn spawn_save(
     side: ContentSide,
 ) -> JoinHandle<()> {
     tokio::task::spawn_local(async move {
-        let bytes = {
+        use futures::StreamExt;
+        use tokio::io::AsyncWriteExt;
+
+        let mut stream = {
             let guard = client.read().await;
-            match guard.provenance_content_raw(event_id, side).await {
-                Ok(bytes) => bytes,
+            match guard.provenance_content_stream(event_id, side).await {
+                Ok(s) => s,
                 Err(err) => {
                     let _ = tx
                         .send(AppEvent::Data(ViewPayload::Tracer(
@@ -267,21 +264,35 @@ pub fn spawn_save(
             }
         };
 
-        let path_clone = path.clone();
-        let result = tokio::task::spawn_blocking(move || std::fs::write(&path_clone, &bytes)).await;
-
-        let payload = match result {
-            Ok(Ok(())) => TracerPayload::ContentSaved { path },
-            Ok(Err(io_err)) => TracerPayload::ContentSaveFailed {
-                path,
-                error: io_err.to_string(),
-            },
-            Err(join_err) => TracerPayload::ContentSaveFailed {
-                path,
-                error: join_err.to_string(),
-            },
+        let mut file = match tokio::fs::File::create(&path).await {
+            Ok(f) => f,
+            Err(err) => {
+                let _ = tx
+                    .send(AppEvent::Data(ViewPayload::Tracer(
+                        TracerPayload::ContentSaveFailed {
+                            path,
+                            error: err.to_string(),
+                        },
+                    )))
+                    .await;
+                return;
+            }
         };
 
+        let write_result: Result<(), String> = async {
+            while let Some(chunk) = stream.next().await {
+                let chunk = chunk.map_err(|e| e.to_string())?;
+                file.write_all(&chunk).await.map_err(|e| e.to_string())?;
+            }
+            file.flush().await.map_err(|e| e.to_string())?;
+            Ok(())
+        }
+        .await;
+
+        let payload = match write_result {
+            Ok(()) => TracerPayload::ContentSaved { path },
+            Err(error) => TracerPayload::ContentSaveFailed { path, error },
+        };
         let _ = tx.send(AppEvent::Data(ViewPayload::Tracer(payload))).await;
     })
 }

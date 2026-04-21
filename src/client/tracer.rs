@@ -439,39 +439,43 @@ impl NifiClient {
         })
     }
 
-    /// Fetches the raw content bytes for a provenance event without
-    /// classification. Used by the Save path, which writes bytes to disk
-    /// and does not need a `ContentRender`.
+    /// Opens a streaming body for the content bytes of a provenance event.
     ///
     /// Maps `GET /nifi-api/provenance-events/{id}/content/{side}` with
-    /// no `Range` header. Errors are mapped to
-    /// [`NifiLensError::ProvenanceContentFetchFailed`], same as
-    /// `provenance_content`.
-    pub async fn provenance_content_raw(
+    /// no `Range` header and returns the response as a
+    /// [`nifi_rust_client::BytesStream`] so callers can sink arbitrarily
+    /// large flowfile bodies to disk without buffering them in memory.
+    ///
+    /// Errors on the initial status-line exchange are mapped to
+    /// [`NifiLensError::ProvenanceContentFetchFailed`]. Transport errors
+    /// that terminate the stream mid-body are surfaced on the stream
+    /// itself as `Result<Bytes, NifiError>`; the caller decides how to
+    /// report them.
+    pub async fn provenance_content_stream(
         &self,
         event_id: i64,
         side: ContentSide,
-    ) -> Result<Vec<u8>, NifiLensError> {
+    ) -> Result<nifi_rust_client::BytesStream, NifiLensError> {
         tracing::debug!(
             context = %self.context_name(),
             event_id,
             side = side.as_str(),
-            "fetching provenance event content (raw, uncapped)",
+            "opening provenance event content stream (uncapped)",
         );
 
         let id_str = event_id.to_string();
         let events_api = self.inner.provenanceevents();
         let cluster_node_id = self.inner.cluster_node_id();
 
-        let bytes = match side {
+        let stream = match side {
             ContentSide::Input => {
                 events_api
-                    .get_input_content(&id_str, cluster_node_id, None)
+                    .get_input_content_stream(&id_str, cluster_node_id, None)
                     .await
             }
             ContentSide::Output => {
                 events_api
-                    .get_output_content(&id_str, cluster_node_id, None)
+                    .get_output_content_stream(&id_str, cluster_node_id, None)
                     .await
             }
         }
@@ -486,7 +490,7 @@ impl NifiClient {
             })
         })?;
 
-        Ok(bytes)
+        Ok(stream)
     }
 }
 
@@ -703,15 +707,18 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn provenance_content_raw_fetches_body_without_classification() {
+    async fn provenance_content_stream_yields_full_body() {
+        use futures::StreamExt;
+
         let server = wiremock::MockServer::start().await;
+        let payload: Vec<u8> = (0..=255u8).cycle().take(4096).collect();
         wiremock::Mock::given(wiremock::matchers::method("GET"))
             .and(wiremock::matchers::path(
                 "/nifi-api/provenance-events/42/content/output",
             ))
             .respond_with(
                 wiremock::ResponseTemplate::new(200)
-                    .set_body_bytes(b"hello world" as &[u8])
+                    .set_body_bytes(payload.clone())
                     .insert_header("content-type", "application/octet-stream"),
             )
             .expect(1)
@@ -719,11 +726,16 @@ mod tests {
             .await;
 
         let client = test_client(&server).await;
-        let bytes = client
-            .provenance_content_raw(42, ContentSide::Output)
+        let mut stream = client
+            .provenance_content_stream(42, ContentSide::Output)
             .await
-            .expect("fetch should succeed");
-        assert_eq!(bytes, b"hello world");
+            .expect("stream open should succeed");
+
+        let mut collected = Vec::new();
+        while let Some(chunk) = stream.next().await {
+            collected.extend_from_slice(&chunk.expect("chunk"));
+        }
+        assert_eq!(collected, payload);
     }
 
     #[tokio::test]

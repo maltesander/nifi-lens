@@ -16,6 +16,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **Tracer**: the Save-to-disk action now streams the flowfile body
+  chunk-by-chunk to the target path via the new
+  `provenance_content_stream` helper, replacing the previous
+  fetch-into-`Vec<u8>`-then-write path. Large flowfiles no longer spike
+  RAM during save.
 - **Bulletins**: the `×N` repeat-count cell is now dim grey (bold)
   instead of yellow, so the severity column is the only color signal
   on each row.
