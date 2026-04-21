@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.6.0] — 2026-04-21
+
 ### Added
 
 - **Bulletins**: new detail modal (`i`) shows the full raw message with
@@ -350,7 +352,8 @@ that landed in this tag.
   drill-in, processor thread leaderboard, and queue time-to-full
   predictions are known unshipped polish items.
 
-[Unreleased]: https://github.com/maltesander/nifi-lens/compare/v0.5.0...HEAD
+[Unreleased]: https://github.com/maltesander/nifi-lens/compare/v0.6.0...HEAD
+[0.6.0]: https://github.com/maltesander/nifi-lens/releases/tag/v0.6.0
 [0.5.0]: https://github.com/maltesander/nifi-lens/releases/tag/v0.5.0
 [0.4.0]: https://github.com/maltesander/nifi-lens/releases/tag/v0.4.0
 [0.3.0]: https://github.com/maltesander/nifi-lens/releases/tag/v0.3.0
