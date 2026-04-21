@@ -4,10 +4,29 @@
 use std::time::Duration;
 
 use nifi_rust_client::dynamic::{DynamicClient, types};
+use nifi_rust_client::{NifiError, wait};
 
 use crate::entities::{make_controller_service, props};
 use crate::error::{Result, SeederError};
 use crate::state::poll_until;
+
+/// Map a `wait::` failure into the seeder's error vocabulary. Timeouts
+/// surface as `SeederError::StateTimeout` (carrying the configured
+/// timeout as `elapsed_secs`, matching the seeder's own `poll_until`
+/// convention); all other errors become `SeederError::Api`.
+fn map_wait_err(err: NifiError, what: &str, target: &str, timeout: Duration) -> SeederError {
+    match err {
+        NifiError::Timeout { .. } => SeederError::StateTimeout {
+            what: what.to_string(),
+            target_state: target.to_string(),
+            elapsed_secs: timeout.as_secs(),
+        },
+        other => SeederError::Api {
+            message: format!("wait for {what} {target}"),
+            source: Box::new(other),
+        },
+    }
+}
 
 /// IDs of the controller services that other fixture modules need to
 /// reference (e.g. to wire ConvertRecord properties).
@@ -73,35 +92,20 @@ async fn create_and_enable_cs(
             message: format!("{name} has no id after create"),
         })?;
 
-    // Freshly created CS sits in DISABLED. Poll to confirm validation finished.
-    let id_poll = id.clone();
-    let name_owned = name.to_string();
-    poll_until(
-        name,
-        "DISABLED (validated)",
-        Duration::from_secs(15),
-        || {
-            let id = id_poll.clone();
-            let name = name_owned.clone();
-            async move {
-                let got = client
-                    .controller_services()
-                    .get_controller_service(&id, None)
-                    .await
-                    .map_err(|e| SeederError::Api {
-                        message: format!("poll {name} validation"),
-                        source: Box::new(e),
-                    })?;
-                let state = got.component.and_then(|c| c.state).unwrap_or_default();
-                if state == "DISABLED" {
-                    Ok(Some(()))
-                } else {
-                    Ok(None)
-                }
-            }
+    // Freshly created CS sits in DISABLED. Wait for validation to finish.
+    let validated_timeout = Duration::from_secs(15);
+    wait::controller_service_state_dynamic(
+        client,
+        &id,
+        wait::ControllerServiceTargetState::Disabled,
+        wait::WaitConfig {
+            timeout: validated_timeout,
+            poll_interval: Duration::from_millis(250),
+            ..Default::default()
         },
     )
-    .await?;
+    .await
+    .map_err(|e| map_wait_err(e, name, "DISABLED (validated)", validated_timeout))?;
 
     // Flip to ENABLED — fetch the current revision first; NiFi uses
     // optimistic concurrency and rejects stale revision numbers.
@@ -129,29 +133,19 @@ async fn create_and_enable_cs(
             source: Box::new(e),
         })?;
 
-    let id_poll = id.clone();
-    let name_owned = name.to_string();
-    poll_until(name, "ENABLED", Duration::from_secs(30), || {
-        let id = id_poll.clone();
-        let name = name_owned.clone();
-        async move {
-            let got = client
-                .controller_services()
-                .get_controller_service(&id, None)
-                .await
-                .map_err(|e| SeederError::Api {
-                    message: format!("poll {name} enable"),
-                    source: Box::new(e),
-                })?;
-            let state = got.component.and_then(|c| c.state).unwrap_or_default();
-            if state == "ENABLED" {
-                Ok(Some(()))
-            } else {
-                Ok(None)
-            }
-        }
-    })
-    .await?;
+    let enabled_timeout = Duration::from_secs(30);
+    wait::controller_service_state_dynamic(
+        client,
+        &id,
+        wait::ControllerServiceTargetState::Enabled,
+        wait::WaitConfig {
+            timeout: enabled_timeout,
+            poll_interval: Duration::from_millis(500),
+            ..Default::default()
+        },
+    )
+    .await
+    .map_err(|e| map_wait_err(e, name, "ENABLED", enabled_timeout))?;
 
     tracing::info!(%id, %name, "controller service ENABLED");
     Ok(id)

@@ -1705,7 +1705,7 @@ dependencies = [
  "futures",
  "humantime-serde",
  "insta",
- "nifi-rust-client 0.11.0",
+ "nifi-rust-client",
  "nucleo",
  "rand 0.10.1",
  "ratatui",
@@ -1728,20 +1728,6 @@ dependencies = [
 
 [[package]]
 name = "nifi-openapi-gen"
-version = "0.10.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "5861d392a212e1d28efc4200f857410be7e687793be2304d34ef61de35702249"
-dependencies = [
- "prettyplease",
- "semver",
- "serde",
- "serde_json",
- "syn 2.0.117",
- "toml_edit",
-]
-
-[[package]]
-name = "nifi-openapi-gen"
 version = "0.11.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "027dcdc3cff17602b544e89b15d9250fa43db6ea4aa96a58fa8e06f4b57ff28c"
@@ -1756,24 +1742,6 @@ dependencies = [
 
 [[package]]
 name = "nifi-rust-client"
-version = "0.10.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "38d419b2fbd952048ca772b43ad6d847cc411248f30c58f67b6b15ad008a88d8"
-dependencies = [
- "async-trait",
- "nifi-openapi-gen 0.10.1",
- "reqwest",
- "semver",
- "serde",
- "serde_json",
- "snafu",
- "tokio",
- "tracing",
- "url",
-]
-
-[[package]]
-name = "nifi-rust-client"
 version = "0.11.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "699eb91f0be21fe23204cc344abedf142ae60d0e006c7c13eb4d1a5da32713eb"
@@ -1782,7 +1750,7 @@ dependencies = [
  "bytes",
  "futures-core",
  "futures-util",
- "nifi-openapi-gen 0.11.0",
+ "nifi-openapi-gen",
  "reqwest",
  "semver",
  "serde",
@@ -1801,7 +1769,7 @@ version = "0.0.0"
 dependencies = [
  "clap",
  "nifi-lens",
- "nifi-rust-client 0.10.1",
+ "nifi-rust-client",
  "semver",
  "snafu",
  "tempfile",
