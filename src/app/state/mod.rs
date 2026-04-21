@@ -1782,8 +1782,11 @@ fn handle_intent_outcome(
             state.overview = OverviewState::new();
             state.bulletins = BulletinsState::with_capacity(ring_cap);
             state.browser = BrowserState::new();
+            state.events = EventsState::new();
             state.tracer = TracerState::new();
             state.flow_index = None;
+            state.cluster_summary = ClusterSummary::default();
+            state.history = crate::app::history::TabHistory::default();
 
             // Signal the app loop to force-restart the current view worker.
             state.pending_worker_restart = true;
@@ -2223,6 +2226,74 @@ mod tests {
         assert_eq!(s.context_name, "other-ctx");
         assert!(s.modal.is_none());
         assert!(s.pending_worker_restart, "worker restart must be flagged");
+    }
+
+    #[test]
+    fn context_switched_clears_cluster_summary_and_history() {
+        use crate::app::history::{HistoryEntry, SelectionAnchor};
+
+        let mut s = fresh_state();
+        let c = tiny_config();
+        s.cluster_summary = ClusterSummary {
+            connected_nodes: Some(3),
+            total_nodes: Some(3),
+        };
+        s.history.push(HistoryEntry {
+            tab: ViewId::Browser,
+            anchor: Some(SelectionAnchor::ComponentId("stale-cid".into())),
+        });
+
+        let outcome = Ok(IntentOutcome::ContextSwitched {
+            new_context_name: "other-ctx".into(),
+            new_version: Version::new(2, 7, 2),
+        });
+        update(&mut s, AppEvent::IntentOutcome(outcome), &c);
+
+        assert_eq!(s.cluster_summary.connected_nodes, None);
+        assert_eq!(s.cluster_summary.total_nodes, None);
+        assert!(!s.history.can_go_back(), "history must be wiped");
+        assert!(!s.history.can_go_forward());
+    }
+
+    #[test]
+    fn context_switched_clears_events_results() {
+        use crate::client::ProvenanceEventSummary;
+        use crate::view::events::state::EventsQueryStatus;
+        use std::time::SystemTime;
+
+        let mut s = fresh_state();
+        let c = tiny_config();
+        s.events.events.push(ProvenanceEventSummary {
+            event_id: 1,
+            event_time_iso: "2026-04-17T00:00:00Z".into(),
+            event_type: "DROP".into(),
+            component_id: "cid".into(),
+            component_name: "CName".into(),
+            component_type: "PROCESSOR".into(),
+            group_id: "gid".into(),
+            flow_file_uuid: "ff-1".into(),
+            relationship: None,
+            details: None,
+        });
+        s.events.selected_row = Some(0);
+        s.events.status = EventsQueryStatus::Done {
+            fetched_at: SystemTime::now(),
+            truncated: false,
+            took_ms: 42,
+        };
+
+        let outcome = Ok(IntentOutcome::ContextSwitched {
+            new_context_name: "other-ctx".into(),
+            new_version: Version::new(2, 7, 2),
+        });
+        update(&mut s, AppEvent::IntentOutcome(outcome), &c);
+
+        assert!(
+            s.events.events.is_empty(),
+            "stale provenance results must be cleared"
+        );
+        assert!(s.events.selected_row.is_none());
+        assert!(matches!(s.events.status, EventsQueryStatus::Idle));
     }
 
     #[test]
