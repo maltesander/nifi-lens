@@ -1705,7 +1705,7 @@ dependencies = [
  "futures",
  "humantime-serde",
  "insta",
- "nifi-rust-client",
+ "nifi-rust-client 0.11.0",
  "nucleo",
  "rand 0.10.1",
  "ratatui",
@@ -1741,13 +1741,27 @@ dependencies = [
 ]
 
 [[package]]
+name = "nifi-openapi-gen"
+version = "0.11.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "027dcdc3cff17602b544e89b15d9250fa43db6ea4aa96a58fa8e06f4b57ff28c"
+dependencies = [
+ "prettyplease",
+ "semver",
+ "serde",
+ "serde_json",
+ "syn 2.0.117",
+ "toml_edit",
+]
+
+[[package]]
 name = "nifi-rust-client"
 version = "0.10.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "38d419b2fbd952048ca772b43ad6d847cc411248f30c58f67b6b15ad008a88d8"
 dependencies = [
  "async-trait",
- "nifi-openapi-gen",
+ "nifi-openapi-gen 0.10.1",
  "reqwest",
  "semver",
  "serde",
@@ -1759,12 +1773,35 @@ dependencies = [
 ]
 
 [[package]]
+name = "nifi-rust-client"
+version = "0.11.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "699eb91f0be21fe23204cc344abedf142ae60d0e006c7c13eb4d1a5da32713eb"
+dependencies = [
+ "async-trait",
+ "bytes",
+ "futures-core",
+ "futures-util",
+ "nifi-openapi-gen 0.11.0",
+ "reqwest",
+ "semver",
+ "serde",
+ "serde_json",
+ "snafu",
+ "tokio",
+ "tracing",
+ "url",
+ "uuid",
+ "zeroize",
+]
+
+[[package]]
 name = "nifilens-fixture-seeder"
 version = "0.0.0"
 dependencies = [
  "clap",
  "nifi-lens",
- "nifi-rust-client",
+ "nifi-rust-client 0.10.1",
  "semver",
  "snafu",
  "tempfile",
@@ -2502,12 +2539,14 @@ dependencies = [
  "sync_wrapper",
  "tokio",
  "tokio-rustls",
+ "tokio-util",
  "tower",
  "tower-http",
  "tower-service",
  "url",
  "wasm-bindgen",
  "wasm-bindgen-futures",
+ "wasm-streams",
  "web-sys",
 ]
 
@@ -3643,6 +3682,19 @@ dependencies = [
  "indexmap",
  "wasm-encoder",
  "wasmparser",
+]
+
+[[package]]
+name = "wasm-streams"
+version = "0.5.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "9d1ec4f6517c9e11ae630e200b2b65d193279042e28edd4a2cda233e46670bbb"
+dependencies = [
+ "futures-util",
+ "js-sys",
+ "wasm-bindgen",
+ "wasm-bindgen-futures",
+ "web-sys",
 ]
 
 [[package]]
