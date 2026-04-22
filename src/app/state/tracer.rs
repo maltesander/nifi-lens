@@ -937,18 +937,50 @@ fn handle_content_modal_verb(
             }
         }
 
-        // ── Stubs — wired but no-op until T22 (search) / T19 (save) ──────────
         ContentModalVerb::OpenSearch => {
-            // TODO(T22): initialise SearchState { input_active: true } on modal.
-            UpdateResult::default()
+            use crate::widget::search::SearchState;
+            if let Some(modal) = state.tracer.content_modal.as_mut() {
+                modal.search = Some(SearchState {
+                    input_active: true,
+                    ..Default::default()
+                });
+            }
+            UpdateResult {
+                redraw: true,
+                intent: None,
+                tracer_followup: None,
+            }
         }
         ContentModalVerb::SearchNext => {
-            // TODO(T22): advance modal.search.current forward through matches.
-            UpdateResult::default()
+            if let Some(modal) = state.tracer.content_modal.as_mut()
+                && let Some(s) = modal.search.as_mut()
+                && s.committed
+                && !s.matches.is_empty()
+            {
+                let i = s.current.unwrap_or(0);
+                s.current = Some((i + 1) % s.matches.len());
+            }
+            UpdateResult {
+                redraw: true,
+                intent: None,
+                tracer_followup: None,
+            }
         }
         ContentModalVerb::SearchPrev => {
-            // TODO(T22): advance modal.search.current backward through matches.
-            UpdateResult::default()
+            if let Some(modal) = state.tracer.content_modal.as_mut()
+                && let Some(s) = modal.search.as_mut()
+                && s.committed
+                && !s.matches.is_empty()
+            {
+                let i = s.current.unwrap_or(0);
+                let n = s.matches.len();
+                s.current = Some((i + n - 1) % n);
+            }
+            UpdateResult {
+                redraw: true,
+                intent: None,
+                tracer_followup: None,
+            }
         }
         ContentModalVerb::Save => {
             // Open save modal for the active side (or last_nondiff_tab when on

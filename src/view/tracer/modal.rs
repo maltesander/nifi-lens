@@ -317,3 +317,179 @@ fn render_footer_hint(frame: &mut Frame, area: Rect) {
         area,
     );
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::client::tracer::ContentRender;
+    use crate::view::tracer::state::{
+        ContentModalHeader, ContentModalState, ContentModalTab, DiffLine, DiffRender, Diffable,
+        HunkAnchor, NotDiffableReason, SideBuffer,
+    };
+    use ratatui::Terminal;
+    use ratatui::backend::TestBackend;
+
+    fn stub_header() -> ContentModalHeader {
+        ContentModalHeader {
+            event_type: "DROP".into(),
+            event_timestamp_iso: "2026-04-22T13:42:18.231".into(),
+            component_name: "UpdateAttribute-enrich".into(),
+            pg_path: "healthy-pipeline/enrich".into(),
+            input_size: Some(2_400),
+            output_size: Some(2_800),
+            input_mime: Some("application/json".into()),
+            output_mime: Some("application/json".into()),
+            input_available: true,
+            output_available: true,
+        }
+    }
+
+    fn stub_modal(active: ContentModalTab) -> ContentModalState {
+        ContentModalState {
+            event_id: 8_471_293,
+            header: stub_header(),
+            active_tab: active,
+            last_nondiff_tab: ContentModalTab::Input,
+            diffable: Diffable::Ok,
+            input: SideBuffer {
+                loaded: br#"{"orderId":"A-1029","total":299.00}"#.to_vec(),
+                decoded: ContentRender::Text {
+                    text: "{\"orderId\":\"A-1029\",\n  \"total\":299.00}\n".into(),
+                    pretty_printed: true,
+                },
+                fully_loaded: true,
+                ceiling_hit: false,
+                in_flight: false,
+                last_error: None,
+            },
+            output: SideBuffer {
+                loaded: br#"{"orderId":"A-1029","total":329.99,"tax":30.99}"#.to_vec(),
+                decoded: ContentRender::Text {
+                    text: "{\"orderId\":\"A-1029\",\n  \"total\":329.99,\n  \"tax\":30.99}\n"
+                        .into(),
+                    pretty_printed: true,
+                },
+                fully_loaded: true,
+                ceiling_hit: false,
+                in_flight: false,
+                last_error: None,
+            },
+            diff_cache: None,
+            scroll_offset: 0,
+            last_viewport_rows: 0,
+            search: None,
+        }
+    }
+
+    #[test]
+    fn modal_input_complete() {
+        let mut modal = stub_modal(ContentModalTab::Input);
+        let backend = TestBackend::new(80, 20);
+        let mut terminal = Terminal::new(backend).unwrap();
+        terminal.draw(|f| render(f, f.area(), &mut modal)).unwrap();
+        insta::assert_debug_snapshot!("modal_input_complete", terminal.backend().buffer());
+    }
+
+    #[test]
+    fn modal_output_empty() {
+        let mut modal = stub_modal(ContentModalTab::Output);
+        modal.output.loaded.clear();
+        modal.output.decoded = ContentRender::Empty;
+        let backend = TestBackend::new(80, 20);
+        let mut terminal = Terminal::new(backend).unwrap();
+        terminal.draw(|f| render(f, f.area(), &mut modal)).unwrap();
+        insta::assert_debug_snapshot!("modal_output_empty", terminal.backend().buffer());
+    }
+
+    #[test]
+    fn modal_input_ceiling_hit() {
+        let mut modal = stub_modal(ContentModalTab::Input);
+        modal.input.loaded = vec![b'x'; 4 * 1024 * 1024];
+        modal.input.ceiling_hit = true;
+        modal.input.fully_loaded = true;
+        let backend = TestBackend::new(100, 20);
+        let mut terminal = Terminal::new(backend).unwrap();
+        terminal.draw(|f| render(f, f.area(), &mut modal)).unwrap();
+        insta::assert_debug_snapshot!("modal_input_ceiling_hit", terminal.backend().buffer());
+    }
+
+    #[test]
+    fn modal_diff_unified_three_hunks() {
+        let mut modal = stub_modal(ContentModalTab::Diff);
+        modal.diffable = Diffable::Ok;
+        modal.diff_cache = Some(DiffRender {
+            lines: vec![
+                DiffLine {
+                    tag: similar::ChangeTag::Delete,
+                    text: "\"total\":299.00".into(),
+                    input_line: Some(3),
+                    output_line: None,
+                },
+                DiffLine {
+                    tag: similar::ChangeTag::Insert,
+                    text: "\"total\":329.99,".into(),
+                    input_line: None,
+                    output_line: Some(3),
+                },
+                DiffLine {
+                    tag: similar::ChangeTag::Insert,
+                    text: "\"tax\":30.99".into(),
+                    input_line: None,
+                    output_line: Some(4),
+                },
+            ],
+            hunks: vec![HunkAnchor {
+                line_idx: 0,
+                input_line: 3,
+                output_line: 3,
+            }],
+        });
+        let backend = TestBackend::new(100, 20);
+        let mut terminal = Terminal::new(backend).unwrap();
+        terminal.draw(|f| render(f, f.area(), &mut modal)).unwrap();
+        insta::assert_debug_snapshot!(
+            "modal_diff_unified_three_hunks",
+            terminal.backend().buffer()
+        );
+    }
+
+    #[test]
+    fn modal_diff_no_differences() {
+        let mut modal = stub_modal(ContentModalTab::Output);
+        modal.diffable = Diffable::NotAvailable(NotDiffableReason::NoDifferences);
+        let backend = TestBackend::new(100, 20);
+        let mut terminal = Terminal::new(backend).unwrap();
+        terminal.draw(|f| render(f, f.area(), &mut modal)).unwrap();
+        insta::assert_debug_snapshot!("modal_diff_no_differences", terminal.backend().buffer());
+    }
+
+    #[test]
+    fn modal_diff_size_exceeds_cap() {
+        let mut modal = stub_modal(ContentModalTab::Input);
+        modal.diffable = Diffable::NotAvailable(NotDiffableReason::SizeExceedsDiffCap);
+        let backend = TestBackend::new(100, 20);
+        let mut terminal = Terminal::new(backend).unwrap();
+        terminal.draw(|f| render(f, f.area(), &mut modal)).unwrap();
+        insta::assert_debug_snapshot!("modal_diff_size_exceeds_cap", terminal.backend().buffer());
+    }
+
+    #[test]
+    fn modal_search_with_matches() {
+        let mut modal = stub_modal(ContentModalTab::Input);
+        modal.search = Some(crate::widget::search::SearchState {
+            query: "total".to_string(),
+            input_active: false,
+            committed: true,
+            matches: vec![crate::widget::search::MatchSpan {
+                line_idx: 2,
+                byte_start: 3,
+                byte_end: 8,
+            }],
+            current: Some(0),
+        });
+        let backend = TestBackend::new(100, 20);
+        let mut terminal = Terminal::new(backend).unwrap();
+        terminal.draw(|f| render(f, f.area(), &mut modal)).unwrap();
+        insta::assert_debug_snapshot!("modal_search_with_matches", terminal.backend().buffer());
+    }
+}

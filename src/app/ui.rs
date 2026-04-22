@@ -77,7 +77,12 @@ fn render_content(frame: &mut Frame, area: Rect, state: &mut AppState) {
             &state.bulletins.ring,
         ),
         ViewId::Events => events::render::render(frame, area, &state.events, &state.timestamp_cfg),
-        ViewId::Tracer => tracer::render(frame, area, &state.tracer, &state.timestamp_cfg),
+        ViewId::Tracer => {
+            tracer::render(frame, area, &state.tracer, &state.timestamp_cfg);
+            if let Some(modal) = state.tracer.content_modal.as_mut() {
+                crate::view::tracer::modal::render(frame, area, modal);
+            }
+        }
     }
 }
 
