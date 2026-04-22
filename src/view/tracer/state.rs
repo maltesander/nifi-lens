@@ -1134,6 +1134,120 @@ pub struct ContentModalState {
     pub search: Option<crate::widget::search::SearchState>,
 }
 
+// ── Content viewer modal reducers ─────────────────────────────────────────────
+
+/// Byte size of a single streaming fetch chunk.
+pub const MODAL_CHUNK_BYTES: usize = 512 * 1024;
+
+/// Maximum bytes loaded per side in Diff mode. Fixed; unlike the
+/// single-side ceiling this is not configurable.
+pub const DIFF_SIZE_CAP_BYTES: u64 = 512 * 1024;
+
+/// One pending fetch request — the reducer returns these instead of
+/// spawning directly so `AppState` code can route through the
+/// `tokio::spawn_local` wiring.
+#[derive(Debug, Clone, Copy)]
+pub struct ModalFetchRequest {
+    pub event_id: i64,
+    pub side: crate::client::ContentSide,
+    pub offset: usize,
+    pub len: usize,
+}
+
+/// Open the content viewer modal for `event_id` seeded from `detail`.
+/// Lands on `active_tab`; fires the first chunk on the corresponding
+/// side (Diff fires both). Returns the list of fetch requests the
+/// caller must spawn.
+pub fn open_content_modal(
+    state: &mut TracerState,
+    detail: &crate::client::tracer::ProvenanceEventDetail,
+    active_tab: ContentModalTab,
+    _ceiling: Option<usize>,
+) -> Vec<ModalFetchRequest> {
+    let (input_mime, output_mime) = mime_pair_from_attributes(&detail.attributes);
+    let header = ContentModalHeader {
+        event_type: detail.summary.event_type.clone(),
+        event_timestamp_iso: detail.summary.event_time_iso.clone(),
+        component_name: detail.summary.component_name.clone(),
+        pg_path: detail.summary.group_id.clone(),
+        input_size: detail.input_size,
+        output_size: detail.output_size,
+        input_mime,
+        output_mime,
+        input_available: detail.input_available,
+        output_available: detail.output_available,
+    };
+
+    let last_nondiff_tab = match active_tab {
+        ContentModalTab::Diff => {
+            if header.input_available {
+                ContentModalTab::Input
+            } else {
+                ContentModalTab::Output
+            }
+        }
+        other => other,
+    };
+
+    let mut modal = ContentModalState {
+        event_id: detail.summary.event_id,
+        header,
+        active_tab,
+        last_nondiff_tab,
+        diffable: Diffable::Pending,
+        input: SideBuffer::default(),
+        output: SideBuffer::default(),
+        diff_cache: None,
+        scroll_offset: 0,
+        last_viewport_rows: 0,
+        search: None,
+    };
+
+    let mut fired: Vec<ModalFetchRequest> = Vec::new();
+    let event_id = modal.event_id;
+
+    let mut fire = |side: crate::client::ContentSide, buf: &mut SideBuffer| {
+        buf.in_flight = true;
+        fired.push(ModalFetchRequest {
+            event_id,
+            side,
+            offset: 0,
+            len: MODAL_CHUNK_BYTES,
+        });
+    };
+
+    match active_tab {
+        ContentModalTab::Input if modal.header.input_available => {
+            fire(crate::client::ContentSide::Input, &mut modal.input);
+        }
+        ContentModalTab::Output if modal.header.output_available => {
+            fire(crate::client::ContentSide::Output, &mut modal.output);
+        }
+        ContentModalTab::Diff => {
+            if modal.header.input_available {
+                fire(crate::client::ContentSide::Input, &mut modal.input);
+            }
+            if modal.header.output_available {
+                fire(crate::client::ContentSide::Output, &mut modal.output);
+            }
+        }
+        _ => {}
+    }
+
+    state.content_modal = Some(modal);
+    fired
+}
+
+fn mime_pair_from_attributes(
+    attrs: &[crate::client::tracer::AttributeTriple],
+) -> (Option<String>, Option<String>) {
+    let row = attrs.iter().find(|a| a.key == "mime.type");
+    match row {
+        Some(a) => (a.previous.clone(), a.current.clone()),
+        None => (None, None),
+    }
+}
+
 // ── Tests ─────────────────────────────────────────────────────────────────────
 
 #[cfg(test)]
@@ -2249,5 +2363,61 @@ mod tests {
     fn selected_component_label_none_in_entry_mode() {
         let ts = TracerState::new();
         assert_eq!(ts.selected_component_label(), None);
+    }
+
+    #[test]
+    fn content_modal_opens_with_active_side_loading() {
+        use crate::client::ContentSide;
+        use crate::client::tracer::{
+            AttributeTriple, ProvenanceEventDetail, ProvenanceEventSummary,
+        };
+
+        let mut state = TracerState::default();
+        let detail = ProvenanceEventDetail {
+            summary: ProvenanceEventSummary {
+                event_id: 42,
+                event_time_iso: "2026-04-22T13:42:18.231Z".to_string(),
+                event_type: "DROP".to_string(),
+                component_id: "c-1".to_string(),
+                component_name: "UpdateAttribute-enrich".to_string(),
+                component_type: "UpdateAttribute".to_string(),
+                group_id: "pg-1".to_string(),
+                flow_file_uuid: "ff-uuid".to_string(),
+                relationship: None,
+                details: None,
+            },
+            attributes: vec![AttributeTriple {
+                key: "mime.type".to_string(),
+                previous: Some("application/json".to_string()),
+                current: Some("application/json".to_string()),
+            }],
+            transit_uri: None,
+            input_available: true,
+            output_available: true,
+            input_size: Some(2400),
+            output_size: Some(2800),
+        };
+
+        let fired = open_content_modal(
+            &mut state,
+            &detail,
+            ContentModalTab::Input,
+            Some(4 * 1024 * 1024),
+        );
+        let modal = state.content_modal.as_ref().expect("modal open");
+        assert_eq!(modal.event_id, 42);
+        assert_eq!(modal.active_tab, ContentModalTab::Input);
+        assert_eq!(modal.diffable, Diffable::Pending);
+        assert!(modal.input.in_flight);
+        assert!(!modal.output.in_flight, "output lazy-fetched on switch");
+        assert_eq!(modal.header.input_mime.as_deref(), Some("application/json"));
+        assert_eq!(
+            modal.header.output_mime.as_deref(),
+            Some("application/json")
+        );
+        assert_eq!(fired.len(), 1);
+        assert_eq!(fired[0].side, ContentSide::Input);
+        assert_eq!(fired[0].offset, 0);
+        assert_eq!(fired[0].len, 524_288);
     }
 }
