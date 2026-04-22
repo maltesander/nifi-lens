@@ -174,8 +174,11 @@ pub struct ClusterNodeRow {
     pub events: Vec<ClusterNodeEvent>,
 }
 
-/// Snapshot of `GET /controller/cluster`. `fetched_at` is the reducer-
-/// anchor used to compute per-node heartbeat ages.
+/// Snapshot of `GET /controller/cluster`. `fetched_at` carries a
+/// monotonic `Instant` used by the store's staleness checks;
+/// `fetched_wall` carries a wall-clock `OffsetDateTime` used by the
+/// `update_nodes` reducer to compute per-node heartbeat ages
+/// deterministically.
 ///
 /// No `Default` impl: `Instant` has no sensible default, and the
 /// sibling `SystemDiagSnapshot` is declared the same way.
