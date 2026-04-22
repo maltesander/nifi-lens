@@ -124,9 +124,15 @@ impl ViewKeyHandler for TracerHandler {
                 let extracted = if let TracerMode::Lineage(ref view) = state.tracer.mode
                     && let EventDetail::Loaded { ref event, .. } = view.event_detail
                 {
-                    let active_tab = match view.active_detail_tab {
-                        DetailTab::Output => ContentModalTab::Output,
-                        _ => ContentModalTab::Input,
+                    // Always land on Input when it's available — Input is
+                    // the "before" side and is what a user expects to see
+                    // first when drilling into a content-modifying event.
+                    // Fall back to Output only when Input isn't available
+                    // (e.g. a CREATE event with no upstream content).
+                    let active_tab = if event.input_available {
+                        ContentModalTab::Input
+                    } else {
+                        ContentModalTab::Output
                     };
                     Some((active_tab, event.as_ref().clone()))
                 } else {
@@ -881,7 +887,20 @@ fn handle_content_modal_verb(
 
     match v {
         ContentModalVerb::Close => {
-            close_content_modal(&mut state.tracer);
+            // Esc cancels an active search first (input-active Esc is
+            // already handled in `handle_content_modal_search_input`;
+            // this path handles Esc after a search has been committed).
+            // Only when no search is active does Esc close the modal.
+            let has_search = state
+                .tracer
+                .content_modal
+                .as_ref()
+                .is_some_and(|m| m.search.is_some());
+            if has_search {
+                ts::content_modal_search_cancel(&mut state.tracer);
+            } else {
+                close_content_modal(&mut state.tracer);
+            }
             UpdateResult {
                 redraw: true,
                 intent: None,
