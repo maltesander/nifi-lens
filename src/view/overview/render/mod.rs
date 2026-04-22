@@ -62,10 +62,25 @@ pub fn render(frame: &mut Frame, area: Rect, state: &OverviewState) {
     frame.render_widget(components_block, zones[0]);
     render_components_table(frame, components_inner, state);
 
-    // Nodes panel — title shows node count when populated
+    // Nodes panel — title shows node count when populated.
+    // When any row has cluster membership data (any_cluster = true) the
+    // title switches to the "C/T connected" format.
     let total = state.nodes.nodes.len();
     let nodes_title = if total == 0 {
         " Nodes ".to_string()
+    } else if state.nodes.nodes.iter().any(|n| n.cluster.is_some()) {
+        let connected = state
+            .nodes
+            .nodes
+            .iter()
+            .filter(|r| {
+                r.cluster
+                    .as_ref()
+                    .map(|c| c.status == crate::client::health::ClusterNodeStatus::Connected)
+                    .unwrap_or(true)
+            })
+            .count();
+        format!(" Nodes ({connected}/{total} connected) ")
     } else {
         format!(" Nodes ({total} connected) ")
     };
@@ -237,6 +252,7 @@ fn render_nodes_zone(frame: &mut Frame, area: Rect, state: &OverviewState) {
         return;
     }
 
+    let any_cluster = state.nodes.nodes.iter().any(|n| n.cluster.is_some());
     let selected = state.nodes.selected;
     // Reserve 1 row at the bottom for the repositories aggregate.
     let visible_node_rows = area.height.saturating_sub(1) as usize;
@@ -250,18 +266,55 @@ fn render_nodes_zone(frame: &mut Frame, area: Rect, state: &OverviewState) {
         .take(visible_node_rows)
         .enumerate()
         .map(|(idx, node)| {
-            let row_style = if focused && idx == window.selected_local {
+            let is_focused_sel = focused && idx == window.selected_local;
+            let is_dead = node
+                .cluster
+                .as_ref()
+                .map(|c| c.status.is_dead())
+                .unwrap_or(false);
+            let row_style = if is_focused_sel {
                 theme::cursor_row()
+            } else if is_dead {
+                theme::muted()
             } else {
                 Style::default()
             };
-            node_to_row(node).style(row_style)
+            node_to_row(node, any_cluster, is_dead).style(row_style)
         })
         .collect();
 
-    // Cluster-aggregate repositories row (not selectable).
+    // Cluster-aggregate repositories row. When badges are rendered,
+    // prepend an empty cell so the columns line up with node rows.
     let repos = &state.repositories_summary;
-    rows.push(Row::new(vec![
+    let mut footer_cells = Vec::new();
+    if any_cluster {
+        footer_cells.push(Cell::from(""));
+    }
+    footer_cells.extend(repos_footer_cells(repos));
+    rows.push(Row::new(footer_cells));
+
+    let widths: Vec<Constraint> = if any_cluster {
+        vec![
+            Constraint::Length(6),  // badge
+            Constraint::Fill(1),    // address + heartbeat age
+            Constraint::Length(15), // heap
+            Constraint::Length(15), // gc
+            Constraint::Length(14), // load
+        ]
+    } else {
+        vec![
+            Constraint::Fill(1),
+            Constraint::Length(15),
+            Constraint::Length(15),
+            Constraint::Length(14),
+        ]
+    };
+    frame.render_widget(Table::new(rows, widths), area);
+}
+
+/// Build the four-cell repositories footer row.
+fn repos_footer_cells(repos: &super::state::RepositoriesSummary) -> Vec<Cell<'static>> {
+    vec![
         Cell::from(Span::styled("  repositories", theme::muted())),
         Cell::from(Line::from(vec![
             Span::raw("cont "),
@@ -299,23 +352,23 @@ fn render_nodes_zone(frame: &mut Frame, area: Rect, state: &OverviewState) {
                 fill_style(repos.provenance_percent),
             ),
         ])),
-    ]));
-
-    let table = Table::new(
-        rows,
-        [
-            Constraint::Fill(1),
-            Constraint::Length(15),
-            Constraint::Length(15),
-            Constraint::Length(14),
-        ],
-    );
-    frame.render_widget(table, area);
+    ]
 }
 
-/// Convert a `NodeHealthRow` to a ratatui `Row` with four styled cells:
-/// address | heap bar+% | gc | load bar+value.
-fn node_to_row(node: &crate::client::health::NodeHealthRow) -> Row<'static> {
+/// Build the heap `Cell` for a live node row.
+fn heap_cell_for(node: &crate::client::health::NodeHealthRow) -> Cell<'static> {
+    let heap_style = health_severity_style(node.heap_severity);
+    let heap_bar = fill_bar(5, node.heap_percent);
+    Cell::from(Line::from(vec![
+        Span::raw("heap "),
+        Span::styled(heap_bar, heap_style),
+        Span::raw(" "),
+        Span::styled(format!("{:>3}%", node.heap_percent), heap_style),
+    ]))
+}
+
+/// Build the GC `Cell` for a live node row.
+fn gc_cell_for(node: &crate::client::health::NodeHealthRow) -> Cell<'static> {
     let gc_style = match node.gc_delta {
         Some(d) if d > 5 => theme::error(),
         Some(_) => theme::warning(),
@@ -325,6 +378,14 @@ fn node_to_row(node: &crate::client::health::NodeHealthRow) -> Row<'static> {
         Some(d) => format!("{:>4}ms (+{})", node.gc_millis, d),
         None => format!("{:>4}ms", node.gc_millis),
     };
+    Cell::from(Line::from(vec![
+        Span::raw("gc "),
+        Span::styled(gc_str, gc_style),
+    ]))
+}
+
+/// Build the load-average `Cell` for a live node row.
+fn load_cell_for(node: &crate::client::health::NodeHealthRow) -> Cell<'static> {
     let (load_str, load_style) = match (node.load_average, node.available_processors) {
         (Some(l), Some(cpus)) if cpus > 0 => {
             let ratio = l / cpus as f64;
@@ -340,36 +401,88 @@ fn node_to_row(node: &crate::client::health::NodeHealthRow) -> Row<'static> {
         (Some(l), _) => (format!("{l:>4.1}"), Style::default()),
         (None, _) => ("\u{2014}   ".to_string(), theme::muted()),
     };
-    let heap_style = health_severity_style(node.heap_severity);
-    let heap_bar = fill_bar(5, node.heap_percent);
     let load_bar = match (node.load_average, node.available_processors) {
         (Some(l), Some(cpus)) if cpus > 0 => {
             format!("{:.2}", (l / cpus as f64).min(9.99))
         }
         _ => "    ".to_string(),
     };
-    Row::new(vec![
-        Cell::from(Span::styled(
-            format!("  {}", node.node_address),
-            theme::accent(),
-        )),
-        Cell::from(Line::from(vec![
-            Span::raw("heap "),
-            Span::styled(heap_bar, heap_style),
-            Span::raw(" "),
-            Span::styled(format!("{:>3}%", node.heap_percent), heap_style),
-        ])),
-        Cell::from(Line::from(vec![
-            Span::raw("gc "),
-            Span::styled(gc_str, gc_style),
-        ])),
-        Cell::from(Line::from(vec![
-            Span::raw("load "),
-            Span::styled(load_bar, load_style),
-            Span::raw(" "),
-            Span::styled(load_str, load_style),
-        ])),
-    ])
+    Cell::from(Line::from(vec![
+        Span::raw("load "),
+        Span::styled(load_bar, load_style),
+        Span::raw(" "),
+        Span::styled(load_str, load_style),
+    ]))
+}
+
+/// Convert a `NodeHealthRow` into a ratatui `Row`.
+///
+/// When `include_badge` is `true` a leading 6-column badge cell is
+/// prepended and the address cell includes the heartbeat age span.
+/// When `is_dead` is `true` the heap/gc/load cells are replaced with
+/// `───` placeholders.
+fn node_to_row(
+    node: &crate::client::health::NodeHealthRow,
+    include_badge: bool,
+    is_dead: bool,
+) -> Row<'static> {
+    // Badge cell (only when rendering cluster info).
+    let badge_cell = include_badge.then(|| match &node.cluster {
+        Some(c) => Cell::from(crate::widget::node_badge::node_badge(c)),
+        None => Cell::from(""),
+    });
+
+    // Address + optional heartbeat age.
+    let hb_span = node
+        .cluster
+        .as_ref()
+        .map(|c| {
+            let age_text = crate::timestamp::format_age(c.heartbeat_age);
+            Span::styled(
+                format!("  {age_text}"),
+                heartbeat_age_style(c.heartbeat_age),
+            )
+        })
+        .unwrap_or_else(|| Span::raw(""));
+    let address_cell = Cell::from(Line::from(vec![
+        Span::styled(format!("  {}", node.node_address), theme::accent()),
+        hb_span,
+    ]));
+
+    // Heap / gc / load — collapse to ─── for dead rows.
+    let (heap_cell, gc_cell, load_cell) = if is_dead {
+        let dim = theme::muted();
+        (
+            Cell::from(Span::styled(
+                "heap \u{2500}\u{2500}\u{2500} \u{2500}\u{2500}\u{2500}",
+                dim,
+            )),
+            Cell::from(Span::styled("gc \u{2500}\u{2500}\u{2500}", dim)),
+            Cell::from(Span::styled("load \u{2500}\u{2500}\u{2500}", dim)),
+        )
+    } else {
+        (heap_cell_for(node), gc_cell_for(node), load_cell_for(node))
+    };
+
+    let mut cells = Vec::with_capacity(5);
+    if let Some(b) = badge_cell {
+        cells.push(b);
+    }
+    cells.push(address_cell);
+    cells.push(heap_cell);
+    cells.push(gc_cell);
+    cells.push(load_cell);
+    Row::new(cells)
+}
+
+/// Style for the heartbeat age text appended to the address cell.
+fn heartbeat_age_style(age: Option<std::time::Duration>) -> Style {
+    match age {
+        None => theme::muted(),
+        Some(d) if d.as_secs() < 30 => theme::muted(),
+        Some(d) if d.as_secs() < 120 => theme::warning(),
+        Some(_) => theme::error(),
+    }
 }
 
 fn render_bulletins_and_noisy(
