@@ -6,7 +6,7 @@
 use std::collections::{HashMap, VecDeque};
 use std::time::{Duration, Instant};
 
-use crate::client::health::SystemDiagSnapshot;
+use crate::client::health::{ClusterNodesSnapshot, SystemDiagSnapshot};
 use crate::client::{
     AboutSnapshot, BulletinSnapshot, ConnectionEndpoints, ControllerServicesSnapshot,
     ControllerStatusSnapshot, RootPgStatusSnapshot,
@@ -143,6 +143,7 @@ pub struct ClusterSnapshot {
     pub controller_status: EndpointState<ControllerStatusSnapshot>,
     pub root_pg_status: EndpointState<RootPgStatusSnapshot>,
     pub controller_services: EndpointState<ControllerServicesSnapshot>,
+    pub cluster_nodes: EndpointState<ClusterNodesSnapshot>,
     pub system_diagnostics: EndpointState<SystemDiagSnapshot>,
     pub connections_by_pg: HashMap<String, EndpointState<ConnectionEndpoints>>,
     pub bulletins: BulletinRing,
@@ -194,7 +195,7 @@ impl ClusterSnapshot {
                 .map(|m| m.next_interval)
                 .max(),
             ClusterEndpoint::Bulletins => self.bulletins.meta.map(|m| m.next_interval),
-            ClusterEndpoint::ClusterNodes => None, // populated in Task 12
+            ClusterEndpoint::ClusterNodes => meta_of(&self.cluster_nodes).map(|m| m.next_interval),
         }
     }
 }
@@ -286,6 +287,29 @@ mod tests {
         assert_eq!(
             snap.next_interval_for(ClusterEndpoint::ControllerStatus),
             Some(Duration::from_secs(15)),
+        );
+    }
+
+    #[test]
+    fn next_interval_for_cluster_nodes() {
+        use crate::client::health::ClusterNodesSnapshot;
+        let mut snap = ClusterSnapshot::default();
+        let meta = FetchMeta {
+            fetched_at: Instant::now(),
+            fetch_duration: Duration::from_millis(5),
+            next_interval: Duration::from_secs(5),
+        };
+        snap.cluster_nodes.apply(
+            Ok(ClusterNodesSnapshot {
+                rows: vec![],
+                fetched_at: Instant::now(),
+                fetched_wall: time::OffsetDateTime::now_utc(),
+            }),
+            meta,
+        );
+        assert_eq!(
+            snap.next_interval_for(ClusterEndpoint::ClusterNodes),
+            Some(Duration::from_secs(5)),
         );
     }
 
