@@ -94,11 +94,12 @@ pub async fn run(
             }
             AppEvent::ClusterChanged(endpoint) => {
                 use crate::cluster::ClusterEndpoint;
-                // Overview cares about six cluster endpoints (all read-
+                // Overview cares about seven cluster endpoints (all read-
                 // model fields plus Bulletins for the sparkline +
                 // noisy-components leaderboard). Task 8 added
                 // ControllerStatus, SystemDiagnostics, and About —
-                // previously Overview-worker-owned.
+                // previously Overview-worker-owned. Task 16/17 adds
+                // ClusterNodes for the per-node membership join.
                 let affects_overview = matches!(
                     endpoint,
                     ClusterEndpoint::RootPgStatus
@@ -107,6 +108,7 @@ pub async fn run(
                         | ClusterEndpoint::SystemDiagnostics
                         | ClusterEndpoint::About
                         | ClusterEndpoint::Bulletins
+                        | ClusterEndpoint::ClusterNodes
                 );
                 let affects_browser = matches!(
                     endpoint,
@@ -131,6 +133,9 @@ pub async fn run(
                         }
                         ClusterEndpoint::SystemDiagnostics => {
                             crate::view::overview::state::redraw_sysdiag(&mut state);
+                        }
+                        ClusterEndpoint::ClusterNodes => {
+                            crate::view::overview::state::redraw_cluster_nodes(&mut state);
                         }
                         ClusterEndpoint::About => {
                             // `About` has no OverviewState mirror today
