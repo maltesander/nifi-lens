@@ -408,3 +408,225 @@ fn center_rect(pct_x: u16, height: u16, area: Rect) -> Rect {
         height,
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::client::health::{
+        ClusterMembership, ClusterNodeEvent, ClusterNodeStatus, GcSnapshot, NodeHealthRow,
+        RepoUsage, Severity as HSev,
+    };
+    use ratatui::Terminal;
+    use ratatui::backend::TestBackend;
+
+    #[test]
+    fn snapshot_node_detail_modal_clustered() {
+        let backend = TestBackend::new(110, 28);
+        let mut term = Terminal::new(backend).unwrap();
+        let row = NodeHealthRow {
+            node_address: "node2.nifi:8443".into(),
+            heap_used_bytes: 620 * 1024 * 1024,
+            heap_max_bytes: 1024 * 1024 * 1024,
+            heap_percent: 60,
+            heap_severity: HSev::Yellow,
+            gc_collection_count: 12,
+            gc_delta: Some(2),
+            gc_millis: 170,
+            load_average: Some(1.24),
+            available_processors: Some(4),
+            uptime: "2h 30m".into(),
+            total_threads: 104,
+            gc: vec![
+                GcSnapshot {
+                    name: "G1 Young Generation".into(),
+                    collection_count: 10,
+                    collection_millis: 50,
+                },
+                GcSnapshot {
+                    name: "G1 Old Generation".into(),
+                    collection_count: 2,
+                    collection_millis: 120,
+                },
+            ],
+            content_repos: vec![
+                RepoUsage {
+                    identifier: "/data/c1".into(),
+                    used_bytes: 118 * 1024_u64.pow(3),
+                    total_bytes: 190 * 1024_u64.pow(3),
+                    free_bytes: 72 * 1024_u64.pow(3),
+                    utilization_percent: 62,
+                },
+                RepoUsage {
+                    identifier: "/data/c2".into(),
+                    used_bytes: 78 * 1024_u64.pow(3),
+                    total_bytes: 190 * 1024_u64.pow(3),
+                    free_bytes: 112 * 1024_u64.pow(3),
+                    utilization_percent: 41,
+                },
+            ],
+            flowfile_repo: Some(RepoUsage {
+                identifier: "/data/ff".into(),
+                used_bytes: 9 * 1024_u64.pow(3),
+                total_bytes: 50 * 1024_u64.pow(3),
+                free_bytes: 41 * 1024_u64.pow(3),
+                utilization_percent: 18,
+            }),
+            provenance_repos: vec![RepoUsage {
+                identifier: "/data/p1".into(),
+                used_bytes: 124 * 1024_u64.pow(3),
+                total_bytes: 200 * 1024_u64.pow(3),
+                free_bytes: 76 * 1024_u64.pow(3),
+                utilization_percent: 62,
+            }],
+            cluster: Some(ClusterMembership {
+                node_id: "5f2b8a17-1234-1234-1234-c394e97c3000".into(),
+                status: ClusterNodeStatus::Connected,
+                is_primary: true,
+                is_coordinator: true,
+                heartbeat_age: Some(std::time::Duration::from_secs(3)),
+                node_start_iso: Some("04/22/2026 09:12:04 UTC".into()),
+                active_thread_count: 42,
+                flow_files_queued: 1234,
+                bytes_queued: 456 * 1024 * 1024,
+                events: vec![
+                    ClusterNodeEvent {
+                        timestamp_iso: "04/22/2026 10:14:03 UTC".into(),
+                        category: Some("CONNECTED".into()),
+                        message: String::new(),
+                    },
+                    ClusterNodeEvent {
+                        timestamp_iso: "04/22/2026 10:13:44 UTC".into(),
+                        category: Some("HEARTBEAT_RECEIVED".into()),
+                        message: String::new(),
+                    },
+                    ClusterNodeEvent {
+                        timestamp_iso: "04/22/2026 09:12:04 UTC".into(),
+                        category: Some("DISCONNECTED".into()),
+                        message: String::new(),
+                    },
+                    ClusterNodeEvent {
+                        timestamp_iso: "04/22/2026 09:11:58 UTC".into(),
+                        category: Some("CONNECTION_REQUESTED".into()),
+                        message: String::new(),
+                    },
+                ],
+            }),
+        };
+        term.draw(|f| render_node_detail_modal(f, f.area(), &row))
+            .unwrap();
+        insta::assert_snapshot!("node_detail_modal_clustered", format!("{}", term.backend()));
+    }
+
+    #[test]
+    fn snapshot_node_detail_modal_standalone() {
+        let backend = TestBackend::new(110, 28);
+        let mut term = Terminal::new(backend).unwrap();
+        let row = NodeHealthRow {
+            node_address: "nifi:8443".into(),
+            heap_used_bytes: 512 * 1024 * 1024,
+            heap_max_bytes: 1024 * 1024 * 1024,
+            heap_percent: 52,
+            heap_severity: HSev::Green,
+            gc_collection_count: 12,
+            gc_delta: Some(2),
+            gc_millis: 170,
+            load_average: Some(1.5),
+            available_processors: Some(4),
+            uptime: "2h 30m".into(),
+            total_threads: 50,
+            gc: vec![
+                GcSnapshot {
+                    name: "G1 Young".into(),
+                    collection_count: 10,
+                    collection_millis: 50,
+                },
+                GcSnapshot {
+                    name: "G1 Old".into(),
+                    collection_count: 2,
+                    collection_millis: 120,
+                },
+            ],
+            content_repos: vec![RepoUsage {
+                identifier: "c".into(),
+                used_bytes: 60,
+                total_bytes: 100,
+                free_bytes: 40,
+                utilization_percent: 60,
+            }],
+            flowfile_repo: Some(RepoUsage {
+                identifier: "f".into(),
+                used_bytes: 30,
+                total_bytes: 100,
+                free_bytes: 70,
+                utilization_percent: 30,
+            }),
+            provenance_repos: vec![RepoUsage {
+                identifier: "p".into(),
+                used_bytes: 20,
+                total_bytes: 100,
+                free_bytes: 80,
+                utilization_percent: 20,
+            }],
+            cluster: None,
+        };
+        term.draw(|f| render_node_detail_modal(f, f.area(), &row))
+            .unwrap();
+        insta::assert_snapshot!(
+            "node_detail_modal_standalone",
+            format!("{}", term.backend())
+        );
+    }
+
+    #[test]
+    fn snapshot_node_detail_modal_disconnected() {
+        let backend = TestBackend::new(110, 28);
+        let mut term = Terminal::new(backend).unwrap();
+        let row = NodeHealthRow {
+            node_address: "node3.nifi:8443".into(),
+            heap_used_bytes: 0,
+            heap_max_bytes: 1024 * 1024 * 1024,
+            heap_percent: 0,
+            heap_severity: HSev::Green,
+            gc_collection_count: 0,
+            gc_delta: None,
+            gc_millis: 0,
+            load_average: None,
+            available_processors: None,
+            uptime: "\u{2014}".into(),
+            total_threads: 0,
+            gc: vec![],
+            content_repos: vec![],
+            flowfile_repo: None,
+            provenance_repos: vec![],
+            cluster: Some(ClusterMembership {
+                node_id: "8a2f3b1c-...-aaaa".into(),
+                status: ClusterNodeStatus::Disconnected,
+                is_primary: false,
+                is_coordinator: false,
+                heartbeat_age: Some(std::time::Duration::from_secs(300)),
+                node_start_iso: Some("04/22/2026 08:00:00 UTC".into()),
+                active_thread_count: 0,
+                flow_files_queued: 0,
+                bytes_queued: 0,
+                events: vec![
+                    ClusterNodeEvent {
+                        timestamp_iso: "04/22/2026 10:05:00 UTC".into(),
+                        category: Some("DISCONNECTED".into()),
+                        message: String::new(),
+                    },
+                    ClusterNodeEvent {
+                        timestamp_iso: "04/22/2026 09:59:00 UTC".into(),
+                        category: Some("HEARTBEAT_RECEIVED".into()),
+                        message: String::new(),
+                    },
+                ],
+            }),
+        };
+        term.draw(|f| render_node_detail_modal(f, f.area(), &row))
+            .unwrap();
+        insta::assert_snapshot!(
+            "node_detail_modal_disconnected",
+            format!("{}", term.backend())
+        );
+    }
+}
