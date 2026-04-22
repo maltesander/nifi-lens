@@ -184,6 +184,39 @@ pub fn format_age(d: Option<Duration>) -> String {
     }
 }
 
+/// Returns a human-readable byte count using power-of-1024 thresholds.
+///
+/// Matches the numbers NiFi prints in StorageUsageDto. Values >= 100 in the
+/// MB/GB tiers render without a decimal (e.g., 512 MB, not 512.0 MB) so
+/// table columns stay aligned.
+pub fn format_bytes(n: u64) -> String {
+    const KB: u64 = 1024;
+    const MB: u64 = KB * 1024;
+    const GB: u64 = MB * 1024;
+    const TB: u64 = GB * 1024;
+    if n < KB {
+        format!("{n} B")
+    } else if n < MB {
+        format!("{:.1} KB", n as f64 / KB as f64)
+    } else if n < GB {
+        let v = n as f64 / MB as f64;
+        if v >= 100.0 {
+            format!("{v:.0} MB")
+        } else {
+            format!("{v:.1} MB")
+        }
+    } else if n < TB {
+        let v = n as f64 / GB as f64;
+        if v >= 100.0 {
+            format!("{v:.0} GB")
+        } else {
+            format!("{v:.1} GB")
+        }
+    } else {
+        format!("{:.1} TB", n as f64 / TB as f64)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -331,5 +364,18 @@ mod tests {
     #[test]
     fn format_age_none() {
         assert_eq!(format_age(None), "\u{2014}"); // em-dash
+    }
+
+    #[test]
+    fn format_bytes_tiers() {
+        assert_eq!(format_bytes(0), "0 B");
+        assert_eq!(format_bytes(999), "999 B");
+        assert_eq!(format_bytes(1024), "1.0 KB");
+        assert_eq!(format_bytes(1536), "1.5 KB");
+        assert_eq!(format_bytes(1024 * 1024), "1.0 MB");
+        assert_eq!(format_bytes(512 * 1024 * 1024), "512 MB");
+        assert_eq!(format_bytes(1024 * 1024 * 1024), "1.0 GB");
+        assert_eq!(format_bytes(190 * 1024 * 1024 * 1024), "190 GB");
+        assert_eq!(format_bytes(3 * 1024_u64.pow(4)), "3.0 TB");
     }
 }
