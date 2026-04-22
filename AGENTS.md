@@ -244,6 +244,25 @@ on its own cadence. That fetch is **non-fatal**: failure degrades the
 CS row to a `cs list unavailable` chip while the other rows still
 render.
 
+### Overview Nodes panel
+
+The Nodes panel joins `/controller/cluster` membership into each row
+via `ClusterEndpoint::ClusterNodes`. Rows show a role/status badge
+(`[P·]` / `[·C]` / `[PC]` / `[··]` / `[OFF]` / `[DIS]` / `[CON]`), a
+heartbeat-age column, and dim to `theme::muted()` with `───`
+placeholders when the node is disconnected or offloaded. Standalone
+NiFi servers return 409 on `/controller/cluster`; the fetcher
+transparently serves an empty snapshot and the panel degrades to
+today's 4-column layout (no badge column, no heartbeat).
+
+The detail modal (`Enter` on a node) renders a four-quadrant
+dashboard: an identity header (badge + status word + roles + heartbeat
+age + node_id + joined timestamp), a Resources / Repositories top row
+(the Repositories quadrant shows one row per physical repo with
+`used / total` in power-of-1024 human units), and an Events / GC
+bottom row. When the node is standalone the Events quadrant is hidden
+and GC fills the bottom row.
+
 ### Bulletins ring buffer
 
 The Bulletins tab holds a rolling in-memory window of recently-seen
@@ -320,7 +339,8 @@ spec.
 All periodic NiFi fetches are owned by `src/cluster/ClusterStore`.
 Base cadences come from `[polling.cluster]` in `config.toml` (keys:
 `root_pg_status`, `controller_services`, `controller_status`,
-`system_diagnostics`, `bulletins`, `connections_by_pg`, `about`, plus
+`system_diagnostics`, `bulletins`, `cluster_nodes`,
+`connections_by_pg`, `about`, plus
 the adaptive knobs `max_interval` and `jitter_percent`). The fetcher
 scales intervals adaptively (up to `max_interval`) based on measured
 latency, adds ±`jitter_percent/100` jitter, and parks expensive

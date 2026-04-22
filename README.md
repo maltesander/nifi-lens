@@ -38,6 +38,7 @@
 ## Features
 
 - **Cluster overview** — health dashboard with bulletin-rate sparkline, queue backpressure, per-node heap/GC, and noisiest components.
+  - **Per-node cluster membership** — primary / coordinator badges, heartbeat age, and a redesigned per-node detail modal with per-disk repository usage and a node-events timeline.
 - **Bulletin tail** — live cluster-wide log with severity filters, source deduplication, per-source mute, and a full-screen detail modal with scroll + substring search.
 - **Flow browser** — component tree with per-node detail.
   - **Cross-navigation** — detail rows whose value is a known component render a trailing `→` and jump to it on Enter. Covered surfaces: connection endpoints (FROM/TO), processor / CS property values that are component UUIDs, processor `Connections` section, process-group `Controller services` section. Controller Service and Port Identity panels resolve the parent group UUID to the PG name.
@@ -252,6 +253,7 @@ controller_services = "10s"
 controller_status   = "10s"
 system_diagnostics  = "30s"
 bulletins           = "5s"
+cluster_nodes       = "5s"
 connections_by_pg   = "15s"
 about               = "5m"
 max_interval        = "60s"
