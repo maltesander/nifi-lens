@@ -1162,7 +1162,7 @@ pub fn open_content_modal(
     state: &mut TracerState,
     detail: &crate::client::tracer::ProvenanceEventDetail,
     active_tab: ContentModalTab,
-    _ceiling: Option<usize>,
+    ceiling: Option<usize>,
 ) -> Vec<ModalFetchRequest> {
     let (input_mime, output_mime) = mime_pair_from_attributes(&detail.attributes);
     let header = ContentModalHeader {
@@ -1205,6 +1205,10 @@ pub fn open_content_modal(
 
     let mut fired: Vec<ModalFetchRequest> = Vec::new();
     let event_id = modal.event_id;
+    let initial_len = match ceiling {
+        Some(cap) => MODAL_CHUNK_BYTES.min(cap),
+        None => MODAL_CHUNK_BYTES,
+    };
 
     let mut fire = |side: crate::client::ContentSide, buf: &mut SideBuffer| {
         buf.in_flight = true;
@@ -1212,7 +1216,7 @@ pub fn open_content_modal(
             event_id,
             side,
             offset: 0,
-            len: MODAL_CHUNK_BYTES,
+            len: initial_len,
         });
     };
 
@@ -1620,7 +1624,7 @@ pub fn close_content_modal(state: &mut TracerState) {
 pub fn switch_content_modal_tab(
     state: &mut TracerState,
     new_tab: ContentModalTab,
-    _ceiling: Option<usize>,
+    ceiling: Option<usize>,
 ) -> Vec<ModalFetchRequest> {
     let Some(modal) = state.content_modal.as_mut() else {
         return Vec::new();
@@ -1637,6 +1641,10 @@ pub fn switch_content_modal_tab(
     }
 
     let event_id = modal.event_id;
+    let initial_len = match ceiling {
+        Some(cap) => MODAL_CHUNK_BYTES.min(cap),
+        None => MODAL_CHUNK_BYTES,
+    };
     let mut fired: Vec<ModalFetchRequest> = Vec::new();
     let mut fire = |side: crate::client::ContentSide, buf: &mut SideBuffer| {
         if buf.in_flight || !buf.loaded.is_empty() || buf.fully_loaded {
@@ -1647,7 +1655,7 @@ pub fn switch_content_modal_tab(
             event_id,
             side,
             offset: 0,
-            len: MODAL_CHUNK_BYTES,
+            len: initial_len,
         });
     };
     match new_tab {
@@ -3126,15 +3134,11 @@ mod tests {
         assert!(!buf.fully_loaded);
     }
 
-    #[test]
-    fn content_modal_opens_with_active_side_loading() {
-        use crate::client::ContentSide;
+    fn stub_event_detail() -> crate::client::tracer::ProvenanceEventDetail {
         use crate::client::tracer::{
             AttributeTriple, ProvenanceEventDetail, ProvenanceEventSummary,
         };
-
-        let mut state = TracerState::default();
-        let detail = ProvenanceEventDetail {
+        ProvenanceEventDetail {
             summary: ProvenanceEventSummary {
                 event_id: 42,
                 event_time_iso: "2026-04-22T13:42:18.231Z".to_string(),
@@ -3157,7 +3161,15 @@ mod tests {
             output_available: true,
             input_size: Some(2400),
             output_size: Some(2800),
-        };
+        }
+    }
+
+    #[test]
+    fn content_modal_opens_with_active_side_loading() {
+        use crate::client::ContentSide;
+
+        let mut state = TracerState::default();
+        let detail = stub_event_detail();
 
         let fired = open_content_modal(
             &mut state,
@@ -3180,6 +3192,18 @@ mod tests {
         assert_eq!(fired[0].side, ContentSide::Input);
         assert_eq!(fired[0].offset, 0);
         assert_eq!(fired[0].len, 524_288);
+    }
+
+    #[test]
+    fn content_modal_open_with_tiny_ceiling_clamps_first_chunk() {
+        use crate::client::ContentSide;
+
+        let detail = stub_event_detail();
+        let mut state = TracerState::default();
+        let fired = open_content_modal(&mut state, &detail, ContentModalTab::Input, Some(100_000));
+        assert_eq!(fired.len(), 1);
+        assert_eq!(fired[0].side, ContentSide::Input);
+        assert_eq!(fired[0].len, 100_000);
     }
 
     #[test]
