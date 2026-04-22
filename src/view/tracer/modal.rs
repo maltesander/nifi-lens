@@ -44,7 +44,9 @@ pub fn render(frame: &mut Frame, area: Rect, modal: &mut ContentModalState) {
 
     render_header(frame, rows[0], modal);
     render_tab_strip(frame, rows[2], modal);
-    // Body / status / search / hint added in T21–T22.
+    render_body(frame, rows[4], modal);
+    render_stream_status(frame, rows[6], modal);
+    // Search strip / hint added in T22.
     modal.last_viewport_rows = rows[4].height as usize;
 }
 
@@ -96,6 +98,137 @@ fn render_tab_strip(frame: &mut Frame, area: Rect, modal: &ContentModalState) {
     frame.render_widget(Paragraph::new(Line::from(spans)), area);
 }
 
+fn render_body(frame: &mut Frame, area: Rect, modal: &ContentModalState) {
+    let lines: Vec<Line<'static>> = match modal.active_tab {
+        ContentModalTab::Input => text_body_lines(
+            &modal.input.decoded,
+            modal.scroll_offset,
+            area.height as usize,
+        ),
+        ContentModalTab::Output => text_body_lines(
+            &modal.output.decoded,
+            modal.scroll_offset,
+            area.height as usize,
+        ),
+        ContentModalTab::Diff => diff_body_lines(modal, area.height as usize),
+    };
+    frame.render_widget(Paragraph::new(lines), area);
+}
+
+fn text_body_lines(
+    render: &crate::client::tracer::ContentRender,
+    scroll: usize,
+    height: usize,
+) -> Vec<Line<'static>> {
+    use crate::client::tracer::ContentRender;
+    match render {
+        ContentRender::Empty => vec![Line::from(Span::styled("<empty>", theme::muted()))],
+        ContentRender::Text { text, .. } => text
+            .lines()
+            .skip(scroll)
+            .take(height)
+            .map(|l| Line::from(Span::raw(l.to_string())))
+            .collect(),
+        ContentRender::Hex { first_4k } => first_4k
+            .lines()
+            .skip(scroll)
+            .take(height)
+            .map(|l| Line::from(Span::raw(l.to_string())))
+            .collect(),
+    }
+}
+
+fn diff_body_lines(modal: &ContentModalState, height: usize) -> Vec<Line<'static>> {
+    let Some(cache) = modal.diff_cache.as_ref() else {
+        return vec![Line::from(Span::styled(
+            match &modal.diffable {
+                Diffable::Pending => "computing diff…".to_string(),
+                Diffable::NotAvailable(r) => format!("diff unavailable: {}", reason_chip(*r)),
+                Diffable::Ok => "no diff cached".to_string(),
+            },
+            theme::muted(),
+        ))];
+    };
+
+    let mut rows: Vec<Line<'static>> = Vec::with_capacity(height);
+    let hunks = &cache.hunks;
+    let mut hunk_idx = 0usize;
+    let mut next_hunk_line = hunks
+        .first()
+        .map(|h| h.line_idx as usize)
+        .unwrap_or(usize::MAX);
+
+    for (idx, dl) in cache
+        .lines
+        .iter()
+        .enumerate()
+        .skip(modal.scroll_offset)
+        .take(height)
+    {
+        if idx == next_hunk_line {
+            let h = &hunks[hunk_idx];
+            rows.push(Line::from(Span::styled(
+                format!("@@ input L{} · output L{} @@", h.input_line, h.output_line),
+                theme::hunk_header(),
+            )));
+            hunk_idx += 1;
+            next_hunk_line = hunks
+                .get(hunk_idx)
+                .map(|h| h.line_idx as usize)
+                .unwrap_or(usize::MAX);
+            continue;
+        }
+        let (prefix, style) = match dl.tag {
+            similar::ChangeTag::Insert => ("+ ", theme::diff_add()),
+            similar::ChangeTag::Delete => ("- ", theme::diff_del()),
+            similar::ChangeTag::Equal => ("  ", ratatui::style::Style::default()),
+        };
+        rows.push(Line::from(vec![
+            Span::styled(prefix, style),
+            Span::styled(dl.text.clone(), style),
+        ]));
+    }
+    rows
+}
+
+fn render_stream_status(frame: &mut Frame, area: Rect, modal: &ContentModalState) {
+    let buf = match modal.active_tab {
+        ContentModalTab::Input => Some(&modal.input),
+        ContentModalTab::Output => Some(&modal.output),
+        ContentModalTab::Diff => None,
+    };
+    let text = match buf {
+        None => String::new(),
+        Some(b) if b.last_error.is_some() => format!(
+            "loaded {} · fetch failed: {}",
+            bytes_ui(b.loaded.len()),
+            b.last_error.clone().unwrap_or_default(),
+        ),
+        Some(b) if b.ceiling_hit => format!(
+            "loaded {} · ceiling reached — press 's' to save full content",
+            bytes_ui(b.loaded.len()),
+        ),
+        Some(b) if b.fully_loaded => format!("loaded {} (complete)", bytes_ui(b.loaded.len())),
+        Some(b) if b.in_flight => format!("loaded {} · fetching…", bytes_ui(b.loaded.len())),
+        Some(b) => format!("loaded {}", bytes_ui(b.loaded.len())),
+    };
+    let style = match buf {
+        Some(b) if b.last_error.is_some() => theme::error(),
+        _ => theme::muted(),
+    };
+    frame.render_widget(Paragraph::new(Line::from(Span::styled(text, style))), area);
+}
+
+fn bytes_ui(n: usize) -> String {
+    if n >= 1024 * 1024 {
+        format!("{:.1} MiB", n as f64 / 1_048_576.0)
+    } else if n >= 1024 {
+        format!("{:.1} KiB", n as f64 / 1024.0)
+    } else {
+        format!("{} B", n)
+    }
+}
+
 fn tab_span(label: &str, active: bool, enabled: bool) -> Span<'static> {
     let style = if !enabled {
         theme::muted()
@@ -107,7 +240,6 @@ fn tab_span(label: &str, active: bool, enabled: bool) -> Span<'static> {
     Span::styled(format!(" {} ", label), style)
 }
 
-#[allow(dead_code)] // consumed in T21/T22
 fn reason_chip(r: NotDiffableReason) -> &'static str {
     match r {
         NotDiffableReason::InputUnavailable => "input unavailable",
@@ -130,7 +262,6 @@ fn short_iso(iso: &str) -> String {
     iso.trim_end_matches('Z').to_string()
 }
 
-#[allow(dead_code)] // consumed in T21/T22
 fn size_ui(n: Option<u64>) -> String {
     match n {
         Some(n) if n >= 1024 * 1024 => format!("{:.1} MiB", n as f64 / 1_048_576.0),
@@ -140,7 +271,6 @@ fn size_ui(n: Option<u64>) -> String {
     }
 }
 
-#[allow(dead_code)] // consumed in T21/T22
 fn delta_ui(i: Option<u64>, o: Option<u64>) -> String {
     match (i, o) {
         (Some(i), Some(o)) => {
