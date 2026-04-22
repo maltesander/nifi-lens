@@ -13,10 +13,11 @@ use crate::client::NifiClient;
 use crate::client::classify_or_fallback;
 use crate::error::NifiLensError;
 
-/// Preview cap applied to Tracer content fetches. Flowfile bodies
-/// above this threshold return `206 Partial Content`; the UI
-/// renders the truncated slice and flags the truncation.
-pub const PREVIEW_CAP_BYTES: usize = 1 << 20; // 1 MiB
+/// Byte cap on the inline content-pane preview in the Tracer tab.
+/// The full-screen content viewer modal uses `provenance_content_range`
+/// with its own streaming ceiling; this constant only bounds the inline
+/// mini-preview.
+pub const INLINE_PREVIEW_BYTES: usize = 8 * 1024;
 
 /// Direction of a content claim on a provenance event.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

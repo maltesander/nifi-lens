@@ -204,7 +204,7 @@ pub fn spawn_content(
             .provenance_content(
                 event_id,
                 side,
-                Some(crate::client::tracer::PREVIEW_CAP_BYTES),
+                Some(crate::client::tracer::INLINE_PREVIEW_BYTES),
             )
             .await
         {
