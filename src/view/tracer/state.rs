@@ -1248,6 +1248,92 @@ fn mime_pair_from_attributes(
     }
 }
 
+/// Apply a successfully-fetched chunk to the modal buffer.
+///
+/// Drops chunks whose `event_id` doesn't match the currently-open
+/// modal (stale delivery after modal close or event change).
+pub fn apply_modal_chunk(
+    state: &mut TracerState,
+    event_id: i64,
+    side: crate::client::ContentSide,
+    offset: usize,
+    bytes: Vec<u8>,
+    eof: bool,
+    requested_len: usize,
+) {
+    apply_modal_chunk_with_ceiling(
+        state,
+        event_id,
+        side,
+        offset,
+        bytes,
+        eof,
+        requested_len,
+        None,
+    );
+}
+
+#[allow(clippy::too_many_arguments)]
+pub fn apply_modal_chunk_with_ceiling(
+    state: &mut TracerState,
+    event_id: i64,
+    side: crate::client::ContentSide,
+    offset: usize,
+    bytes: Vec<u8>,
+    eof: bool,
+    _requested_len: usize,
+    ceiling: Option<usize>,
+) {
+    let Some(modal) = state.content_modal.as_mut() else {
+        return;
+    };
+    if modal.event_id != event_id {
+        return;
+    }
+    let buf = match side {
+        crate::client::ContentSide::Input => &mut modal.input,
+        crate::client::ContentSide::Output => &mut modal.output,
+    };
+    if offset != buf.loaded.len() {
+        return;
+    }
+    buf.loaded.extend_from_slice(&bytes);
+    buf.in_flight = false;
+    buf.last_error = None;
+    buf.decoded = crate::client::tracer::classify_content(buf.loaded.clone());
+    if eof {
+        buf.fully_loaded = true;
+    }
+    if let Some(cap) = ceiling
+        && buf.loaded.len() >= cap
+    {
+        buf.ceiling_hit = true;
+        buf.fully_loaded = true;
+    }
+    modal.diff_cache = None;
+}
+
+pub fn apply_modal_chunk_failed(
+    state: &mut TracerState,
+    event_id: i64,
+    side: crate::client::ContentSide,
+    _offset: usize,
+    error: String,
+) {
+    let Some(modal) = state.content_modal.as_mut() else {
+        return;
+    };
+    if modal.event_id != event_id {
+        return;
+    }
+    let buf = match side {
+        crate::client::ContentSide::Input => &mut modal.input,
+        crate::client::ContentSide::Output => &mut modal.output,
+    };
+    buf.in_flight = false;
+    buf.last_error = Some(error);
+}
+
 // ── Tests ─────────────────────────────────────────────────────────────────────
 
 #[cfg(test)]
@@ -2363,6 +2449,168 @@ mod tests {
     fn selected_component_label_none_in_entry_mode() {
         let ts = TracerState::new();
         assert_eq!(ts.selected_component_label(), None);
+    }
+
+    fn stub_modal(event_id: i64, active: ContentModalTab) -> ContentModalState {
+        ContentModalState {
+            event_id,
+            header: ContentModalHeader {
+                event_type: "DROP".into(),
+                event_timestamp_iso: "".into(),
+                component_name: "x".into(),
+                pg_path: "pg".into(),
+                input_size: Some(1024),
+                output_size: Some(1024),
+                input_mime: Some("application/json".into()),
+                output_mime: Some("application/json".into()),
+                input_available: true,
+                output_available: true,
+            },
+            active_tab: active,
+            last_nondiff_tab: match active {
+                ContentModalTab::Diff => ContentModalTab::Input,
+                other => other,
+            },
+            diffable: Diffable::Pending,
+            input: SideBuffer::default(),
+            output: SideBuffer::default(),
+            diff_cache: None,
+            scroll_offset: 0,
+            last_viewport_rows: 0,
+            search: None,
+        }
+    }
+
+    #[test]
+    fn apply_modal_chunk_extends_loaded_and_reclassifies() {
+        use crate::client::ContentSide;
+        use crate::client::tracer::ContentRender;
+
+        let mut modal = stub_modal(42, ContentModalTab::Input);
+        modal.input.in_flight = true;
+        let mut state = TracerState {
+            content_modal: Some(modal),
+            ..TracerState::default()
+        };
+
+        apply_modal_chunk(
+            &mut state,
+            42,
+            ContentSide::Input,
+            0,
+            br#"{"a":1}"#.to_vec(),
+            true,
+            MODAL_CHUNK_BYTES,
+        );
+
+        let modal = state.content_modal.as_ref().unwrap();
+        assert_eq!(modal.input.loaded, br#"{"a":1}"#);
+        assert!(modal.input.fully_loaded);
+        assert!(!modal.input.in_flight);
+        assert!(matches!(modal.input.decoded, ContentRender::Text { .. }));
+    }
+
+    #[test]
+    fn apply_modal_chunk_for_different_event_is_dropped() {
+        use crate::client::ContentSide;
+
+        let mut modal = stub_modal(42, ContentModalTab::Input);
+        modal.input.in_flight = true;
+        let mut state = TracerState {
+            content_modal: Some(modal),
+            ..TracerState::default()
+        };
+
+        apply_modal_chunk(
+            &mut state,
+            99,
+            ContentSide::Input,
+            0,
+            b"stale".to_vec(),
+            true,
+            MODAL_CHUNK_BYTES,
+        );
+
+        let modal = state.content_modal.as_ref().unwrap();
+        assert!(modal.input.loaded.is_empty());
+        assert!(modal.input.in_flight, "still pending");
+    }
+
+    #[test]
+    fn apply_modal_chunk_hits_ceiling() {
+        use crate::client::ContentSide;
+
+        let mut state = TracerState::default();
+        let mut modal = stub_modal(1, ContentModalTab::Input);
+        modal.input.in_flight = true;
+        modal.input.loaded = vec![b'x'; 1_000_000];
+        state.content_modal = Some(modal);
+
+        apply_modal_chunk_with_ceiling(
+            &mut state,
+            1,
+            ContentSide::Input,
+            1_000_000,
+            vec![b'y'; 48_576],
+            false,
+            MODAL_CHUNK_BYTES,
+            Some(1_048_576),
+        );
+
+        let buf = &state.content_modal.as_ref().unwrap().input;
+        assert!(buf.ceiling_hit);
+        assert!(buf.fully_loaded);
+    }
+
+    #[test]
+    fn apply_modal_chunk_unbounded_ceiling_keeps_streaming() {
+        use crate::client::ContentSide;
+
+        let mut state = TracerState::default();
+        let mut modal = stub_modal(1, ContentModalTab::Input);
+        modal.input.in_flight = true;
+        modal.input.loaded = vec![b'x'; 10_000_000];
+        state.content_modal = Some(modal);
+
+        apply_modal_chunk_with_ceiling(
+            &mut state,
+            1,
+            ContentSide::Input,
+            10_000_000,
+            vec![b'y'; MODAL_CHUNK_BYTES],
+            false,
+            MODAL_CHUNK_BYTES,
+            None,
+        );
+
+        let buf = &state.content_modal.as_ref().unwrap().input;
+        assert!(!buf.ceiling_hit);
+        assert!(!buf.fully_loaded);
+    }
+
+    #[test]
+    fn apply_modal_chunk_failed_sets_last_error() {
+        use crate::client::ContentSide;
+
+        let mut modal = stub_modal(1, ContentModalTab::Input);
+        modal.input.in_flight = true;
+        let mut state = TracerState {
+            content_modal: Some(modal),
+            ..TracerState::default()
+        };
+
+        apply_modal_chunk_failed(
+            &mut state,
+            1,
+            ContentSide::Input,
+            0,
+            "500 internal".to_string(),
+        );
+
+        let buf = &state.content_modal.as_ref().unwrap().input;
+        assert!(!buf.in_flight);
+        assert_eq!(buf.last_error.as_deref(), Some("500 internal"));
+        assert!(!buf.fully_loaded);
     }
 
     #[test]

@@ -584,7 +584,7 @@ impl NifiClient {
 /// - Empty slice → [`ContentRender::Empty`]
 /// - Valid UTF-8 text → [`ContentRender::Text`] with JSON pretty-printing if parseable
 /// - Non-UTF-8 bytes → [`ContentRender::Hex`] with the first 4 KiB hex-dumped
-pub(crate) fn classify_content(bytes: Vec<u8>) -> ContentRender {
+pub fn classify_content(bytes: Vec<u8>) -> ContentRender {
     if bytes.is_empty() {
         return ContentRender::Empty;
     }
