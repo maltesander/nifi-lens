@@ -128,73 +128,77 @@ fn text_body_lines(
 ) -> Vec<Line<'static>> {
     use crate::client::tracer::ContentRender;
 
-    // Collect the raw line strings for the visible window.
-    let raw: Vec<(usize, String)> = match render {
+    // Collect the visible window + the TOTAL line count so we can size
+    // the line-number gutter.
+    let (raw, total_lines): (Vec<(usize, String)>, usize) = match render {
         ContentRender::Empty => {
             return vec![Line::from(Span::styled("<empty>", theme::muted()))];
         }
-        ContentRender::Text { text, .. } => text
-            .lines()
-            .enumerate()
-            .skip(scroll)
-            .take(height)
-            .map(|(abs_idx, l)| (abs_idx, l.to_string()))
-            .collect(),
-        ContentRender::Hex { first_4k } => first_4k
-            .lines()
-            .enumerate()
-            .skip(scroll)
-            .take(height)
-            .map(|(abs_idx, l)| (abs_idx, l.to_string()))
-            .collect(),
+        ContentRender::Text { text, .. } => {
+            let total = text.lines().count();
+            let window: Vec<(usize, String)> = text
+                .lines()
+                .enumerate()
+                .skip(scroll)
+                .take(height)
+                .map(|(abs_idx, l)| (abs_idx, l.to_string()))
+                .collect();
+            (window, total)
+        }
+        ContentRender::Hex { first_4k } => {
+            let total = first_4k.lines().count();
+            let window: Vec<(usize, String)> = first_4k
+                .lines()
+                .enumerate()
+                .skip(scroll)
+                .take(height)
+                .map(|(abs_idx, l)| (abs_idx, l.to_string()))
+                .collect();
+            (window, total)
+        }
     };
 
-    // Fast path: no committed search — plain spans, no allocation overhead.
-    let Some(s) = search else {
-        return raw
-            .into_iter()
-            .map(|(_, l)| Line::from(Span::raw(l)))
-            .collect();
-    };
-    if !s.committed || s.matches.is_empty() {
-        return raw
-            .into_iter()
-            .map(|(_, l)| Line::from(Span::raw(l)))
-            .collect();
-    }
+    let gutter_width = line_number_width(total_lines);
+
+    let search_active = search
+        .map(|s| s.committed && !s.matches.is_empty())
+        .unwrap_or(false);
 
     raw.into_iter()
         .map(|(abs_idx, line_text)| {
-            // Find all matches on this line.
+            let mut spans: Vec<Span<'static>> = vec![gutter_span(Some(abs_idx + 1), gutter_width)];
+
+            if !search_active {
+                spans.push(Span::raw(line_text));
+                return Line::from(spans);
+            }
+            let s = search.expect("search_active implies search Some");
             let line_matches: Vec<(usize, usize, bool)> = s
                 .matches
                 .iter()
                 .enumerate()
                 .filter(|(_, m)| m.line_idx == abs_idx)
-                .map(|(mi, m)| (m.byte_start, m.byte_end, Some(mi) == s.current))
+                .map(|(mi, m)| {
+                    let start = m.byte_start.min(line_text.len());
+                    let end = m.byte_end.min(line_text.len());
+                    (start, end, Some(mi) == s.current)
+                })
                 .collect();
-
             if line_matches.is_empty() {
-                return Line::from(Span::raw(line_text));
+                spans.push(Span::raw(line_text));
+                return Line::from(spans);
             }
-
-            // Split the line into spans, applying highlight styles at match boundaries.
-            let mut spans: Vec<Span<'static>> = Vec::new();
-            let bytes = line_text.as_bytes();
             let mut cursor = 0usize;
-            for (start, end, is_current) in &line_matches {
-                let start = (*start).min(bytes.len());
-                let end = (*end).min(bytes.len());
+            for (start, end, is_current) in line_matches {
                 if cursor < start {
                     spans.push(Span::raw(line_text[cursor..start].to_string()));
                 }
-                let matched = line_text[start..end].to_string();
-                let style = if *is_current {
+                let style = if is_current {
                     theme::highlight()
                 } else {
                     theme::bold()
                 };
-                spans.push(Span::styled(matched, style));
+                spans.push(Span::styled(line_text[start..end].to_string(), style));
                 cursor = end;
             }
             if cursor < line_text.len() {
@@ -203,6 +207,36 @@ fn text_body_lines(
             Line::from(spans)
         })
         .collect()
+}
+
+/// Width (in characters) of a right-aligned line-number column big
+/// enough to hold `total_lines`. Minimum 3 so short content still
+/// gets a tidy gutter.
+fn line_number_width(total_lines: usize) -> usize {
+    let digits = if total_lines == 0 {
+        1
+    } else {
+        let mut n = total_lines;
+        let mut d = 0usize;
+        while n > 0 {
+            n /= 10;
+            d += 1;
+        }
+        d
+    };
+    digits.max(3)
+}
+
+/// Single-column line-number gutter: right-aligned number, separator
+/// `│`, and surrounding spaces. `None` produces a blank gutter of the
+/// same width for diff rows where one side doesn't apply. Always
+/// rendered in `theme::muted()`.
+fn gutter_span(n: Option<usize>, width: usize) -> Span<'static> {
+    let text = match n {
+        Some(v) => format!(" {:>width$} │ ", v, width = width),
+        None => format!(" {:>width$} │ ", "", width = width),
+    };
+    Span::styled(text, theme::muted())
 }
 
 fn diff_body_lines(
@@ -229,6 +263,24 @@ fn diff_body_lines(
         .map(|h| h.line_idx as usize)
         .unwrap_or(usize::MAX);
 
+    // Size the two-column gutter to the widest line number appearing
+    // on either side. Walk the whole cache once so every rendered row
+    // lines up regardless of scroll position.
+    let max_input_line = cache
+        .lines
+        .iter()
+        .filter_map(|dl| dl.input_line)
+        .max()
+        .unwrap_or(0) as usize;
+    let max_output_line = cache
+        .lines
+        .iter()
+        .filter_map(|dl| dl.output_line)
+        .max()
+        .unwrap_or(0) as usize;
+    let in_width = line_number_width(max_input_line);
+    let out_width = line_number_width(max_output_line);
+
     // Search corpus for the Diff tab is `cache.lines.join("\n")` (see
     // `content_modal_search_body`), so committed match `line_idx`
     // values map 1:1 to the iteration index into `cache.lines` below.
@@ -245,10 +297,17 @@ fn diff_body_lines(
     {
         if idx == next_hunk_line {
             let h = &hunks[hunk_idx];
-            rows.push(Line::from(Span::styled(
-                format!("@@ input L{} · output L{} @@", h.input_line, h.output_line),
-                theme::hunk_header(),
-            )));
+            // Hunk header rows get a blank two-column gutter so the
+            // `@@ … @@` text aligns with the body columns below.
+            let header_spans: Vec<Span<'static>> = vec![
+                gutter_span(None, in_width),
+                gutter_span(None, out_width),
+                Span::styled(
+                    format!("@@ input L{} · output L{} @@", h.input_line, h.output_line),
+                    theme::hunk_header(),
+                ),
+            ];
+            rows.push(Line::from(header_spans));
             hunk_idx += 1;
             next_hunk_line = hunks
                 .get(hunk_idx)
@@ -304,13 +363,15 @@ fn diff_body_lines(
             Vec::new()
         };
 
-        rows.push(Line::from(build_diff_line_spans(
-            prefix,
-            line_color,
-            &dl.text,
-            &base_styles,
-            &line_matches,
-        )));
+        // Build the body spans (prefix + text), then prepend the two
+        // line-number gutters so each row has `[in] [out] <body>`.
+        let body_spans =
+            build_diff_line_spans(prefix, line_color, &dl.text, &base_styles, &line_matches);
+        let mut row_spans: Vec<Span<'static>> = Vec::with_capacity(body_spans.len() + 2);
+        row_spans.push(gutter_span(dl.input_line.map(|n| n as usize), in_width));
+        row_spans.push(gutter_span(dl.output_line.map(|n| n as usize), out_width));
+        row_spans.extend(body_spans);
+        rows.push(Line::from(row_spans));
     }
     rows
 }
