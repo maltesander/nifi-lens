@@ -227,10 +227,19 @@ pub struct KeyMap {}
 impl KeyMap {
     pub fn translate(
         &mut self,
-        key: crossterm::event::KeyEvent,
+        mut key: crossterm::event::KeyEvent,
         active_view: crate::app::state::ViewId,
     ) -> InputEvent {
         use crossterm::event::{KeyCode, KeyModifiers};
+
+        // Transport-level normalization: crossterm delivers Shift+Tab as
+        // `KeyCode::BackTab` with `KeyModifiers::SHIFT` already set, but
+        // `BackTab` *means* Shift+Tab — the extra SHIFT bit is redundant
+        // and breaks the strict modifier equality in `chord_matches`.
+        // Strip it so chords declared as `Chord::simple(BackTab)` match.
+        if key.code == KeyCode::BackTab {
+            key.modifiers.remove(KeyModifiers::SHIFT);
+        }
 
         // Reverse-lookup across framework enums (order matters: Focus
         // is highest priority so Esc/Enter always win).
@@ -463,6 +472,22 @@ mod keymap_tests {
         let mut km = KeyMap::default();
         assert_eq!(
             km.translate(press(KeyCode::BackTab), ViewId::Overview),
+            InputEvent::Focus(FocusAction::PrevPane)
+        );
+    }
+
+    #[test]
+    fn shift_back_tab_is_focus_prev_pane() {
+        // crossterm delivers Shift+Tab as KeyCode::BackTab with the SHIFT
+        // modifier bit set — not with KeyModifiers::NONE. The chord table
+        // must translate both the "bare" BackTab used internally by tests
+        // and the SHIFT-decorated BackTab emitted by real terminals.
+        let mut km = KeyMap::default();
+        assert_eq!(
+            km.translate(
+                press_mod(KeyCode::BackTab, KeyModifiers::SHIFT),
+                ViewId::Overview
+            ),
             InputEvent::Focus(FocusAction::PrevPane)
         );
     }

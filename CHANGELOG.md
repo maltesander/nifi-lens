@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **Input**: `Shift+Tab` (previous pane focus) no longer falls through to
+  `Unmapped` on crossterm ≥ 0.28, which delivers the key as
+  `KeyCode::BackTab` with the redundant `SHIFT` modifier bit set. The
+  bit is now stripped at the keymap boundary so the `BackTab` chord
+  matches again across every view.
+
 ## [0.6.0] — 2026-04-21
 
 ### Added
