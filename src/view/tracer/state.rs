@@ -976,6 +976,8 @@ pub fn apply_payload(state: &mut TracerState, payload: TracerPayload) -> Option<
         }
         TracerPayload::ContentSaved { .. } => None,
         TracerPayload::ContentSaveFailed { .. } => None,
+        TracerPayload::ModalChunk { .. } => None,
+        TracerPayload::ModalChunkFailed { .. } => None,
     }
 }
 
