@@ -106,6 +106,46 @@ impl Severity {
     }
 }
 
+/// Cluster-membership state for a single node, from
+/// `/controller/cluster` `NodeDTO.status`. Unknown wire values map to
+/// `Other` — kept unit-typed so the enum stays `Copy`/`Eq`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ClusterNodeStatus {
+    Connected,
+    Connecting,
+    Disconnected,
+    Disconnecting,
+    Offloading,
+    Offloaded,
+    Other,
+}
+
+impl ClusterNodeStatus {
+    /// Map a NiFi wire status to the typed enum. Unknown values
+    /// collapse to `Other` so new NiFi versions never panic.
+    pub fn from_wire(s: &str) -> Self {
+        match s {
+            "CONNECTED" => Self::Connected,
+            "CONNECTING" => Self::Connecting,
+            "DISCONNECTED" => Self::Disconnected,
+            "DISCONNECTING" => Self::Disconnecting,
+            "OFFLOADING" => Self::Offloading,
+            "OFFLOADED" => Self::Offloaded,
+            _ => Self::Other,
+        }
+    }
+
+    /// Returns `true` when the node is not expected to report fresh
+    /// telemetry. The Nodes panel dims these rows and shows `───`
+    /// placeholders for heap/gc/load columns.
+    pub fn is_dead(self) -> bool {
+        matches!(
+            self,
+            Self::Disconnected | Self::Disconnecting | Self::Offloading | Self::Offloaded,
+        )
+    }
+}
+
 /// One row in the node-health table.
 #[derive(Debug, Clone)]
 pub struct NodeHealthRow {
@@ -656,5 +696,39 @@ mod tests {
         assert_eq!(state.nodes[0].heap_used_bytes, 4_000);
         assert_eq!(state.nodes[0].heap_max_bytes, 8_000);
         assert_eq!(state.nodes[0].gc_collection_count, 42);
+    }
+
+    // -----------------------------------------------------------------------
+    // ClusterNodeStatus tests
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn cluster_node_status_from_wire_recognizes_known() {
+        use super::ClusterNodeStatus as S;
+        assert_eq!(S::from_wire("CONNECTED"), S::Connected);
+        assert_eq!(S::from_wire("CONNECTING"), S::Connecting);
+        assert_eq!(S::from_wire("DISCONNECTED"), S::Disconnected);
+        assert_eq!(S::from_wire("DISCONNECTING"), S::Disconnecting);
+        assert_eq!(S::from_wire("OFFLOADING"), S::Offloading);
+        assert_eq!(S::from_wire("OFFLOADED"), S::Offloaded);
+    }
+
+    #[test]
+    fn cluster_node_status_from_wire_unknown_is_other() {
+        use super::ClusterNodeStatus as S;
+        assert_eq!(S::from_wire("WEIRD_FUTURE_STATE"), S::Other);
+        assert_eq!(S::from_wire(""), S::Other);
+    }
+
+    #[test]
+    fn cluster_node_status_is_dead_matrix() {
+        use super::ClusterNodeStatus as S;
+        assert!(!S::Connected.is_dead());
+        assert!(!S::Connecting.is_dead());
+        assert!(!S::Other.is_dead());
+        assert!(S::Disconnected.is_dead());
+        assert!(S::Disconnecting.is_dead());
+        assert!(S::Offloading.is_dead());
+        assert!(S::Offloaded.is_dead());
     }
 }
