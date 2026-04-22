@@ -1,5 +1,6 @@
 //! Tracer tab: forensic flowfile investigation.
 
+pub mod modal;
 pub mod render;
 pub mod state;
 pub mod worker;
