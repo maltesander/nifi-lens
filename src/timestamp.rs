@@ -8,6 +8,7 @@
 //! according to the user's `[ui]` config.
 
 use serde::Deserialize;
+use std::time::Duration;
 use time::OffsetDateTime;
 use time::format_description::well_known::Iso8601;
 use time::macros::format_description;
@@ -166,9 +167,10 @@ pub fn format(
     }
 }
 
-/// Compact human-readable age. `< 60s → "Ns"`, `< 60m → "Nm"`,
-/// otherwise `"Nh"`. `None` → em-dash.
-pub fn format_age(d: Option<std::time::Duration>) -> String {
+/// Returns a compact, floor-rounded age string suitable for a fixed-width
+/// table column: `"Ns"` (0–59 s), `"Nm"` (1–59 min), `"Nh"` (≥ 1 h).
+/// Returns an em-dash for `None`.
+pub fn format_age(d: Option<Duration>) -> String {
     let Some(d) = d else {
         return "\u{2014}".to_string();
     };
@@ -306,29 +308,24 @@ mod tests {
 
     #[test]
     fn format_age_under_minute() {
-        assert_eq!(format_age(Some(std::time::Duration::from_secs(0))), "0s");
-        assert_eq!(format_age(Some(std::time::Duration::from_secs(3))), "3s");
-        assert_eq!(format_age(Some(std::time::Duration::from_secs(59))), "59s");
+        assert_eq!(format_age(Some(Duration::from_millis(500))), "0s");
+        assert_eq!(format_age(Some(Duration::from_secs(0))), "0s");
+        assert_eq!(format_age(Some(Duration::from_secs(3))), "3s");
+        assert_eq!(format_age(Some(Duration::from_secs(59))), "59s");
     }
 
     #[test]
     fn format_age_minutes() {
-        assert_eq!(format_age(Some(std::time::Duration::from_secs(60))), "1m");
-        assert_eq!(format_age(Some(std::time::Duration::from_secs(125))), "2m");
-        assert_eq!(
-            format_age(Some(std::time::Duration::from_secs(3599))),
-            "59m"
-        );
+        assert_eq!(format_age(Some(Duration::from_secs(60))), "1m");
+        assert_eq!(format_age(Some(Duration::from_secs(125))), "2m");
+        assert_eq!(format_age(Some(Duration::from_secs(3599))), "59m");
     }
 
     #[test]
     fn format_age_hours() {
-        assert_eq!(format_age(Some(std::time::Duration::from_secs(3600))), "1h");
-        assert_eq!(format_age(Some(std::time::Duration::from_secs(7200))), "2h");
-        assert_eq!(
-            format_age(Some(std::time::Duration::from_secs(86_400))),
-            "24h"
-        );
+        assert_eq!(format_age(Some(Duration::from_secs(3600))), "1h");
+        assert_eq!(format_age(Some(Duration::from_secs(7200))), "2h");
+        assert_eq!(format_age(Some(Duration::from_secs(86_400))), "24h");
     }
 
     #[test]
