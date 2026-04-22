@@ -988,7 +988,11 @@ fn handle_key(state: &mut AppState, key: KeyEvent, config: &Config) -> UpdateRes
     }
 
     // translate() runs before view dispatch so the InputEvent is ready.
-    let input_event = state.keymap.translate(key, state.current_tab);
+    let content_modal_open = state.current_tab == crate::app::state::ViewId::Tracer
+        && state.tracer.content_modal.is_some();
+    let input_event = state
+        .keymap
+        .translate(key, state.current_tab, content_modal_open);
 
     // Central dispatch for typed InputEvent variants. History / Tab / App
     // are handled here and return early. Focus / View dispatch to per-view

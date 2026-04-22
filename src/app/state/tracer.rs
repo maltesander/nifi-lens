@@ -12,6 +12,11 @@ impl ViewKeyHandler for TracerHandler {
         use crate::input::TracerVerb;
         use crate::view::tracer::state::{ContentPane, DetailTab, EventDetail, TracerMode};
 
+        // ContentModalVerb takes priority when the modal is open.
+        if let crate::input::ViewVerb::ContentModal(v) = verb {
+            return Some(handle_content_modal_verb(state, v));
+        }
+
         let tv = match verb {
             crate::input::ViewVerb::Tracer(v) => v,
             _ => return None,
@@ -751,6 +756,229 @@ fn lineage_load_detail_intent(
     Some(PendingIntent::Dispatch(Intent::LoadEventDetail {
         event_id,
     }))
+}
+
+// ── ContentModalVerb dispatch ─────────────────────────────────────────────────
+
+/// Dispatch a `ContentModalVerb` action. Called when the content viewer modal
+/// is open and the keymap has routed `ViewVerb::ContentModal(v)` here.
+fn handle_content_modal_verb(
+    state: &mut AppState,
+    v: crate::input::ContentModalVerb,
+) -> UpdateResult {
+    use crate::input::ContentModalVerb;
+    use crate::view::tracer::state::{
+        ContentModalTab, Diffable, close_content_modal, content_modal_copy_text, hunk_next,
+        hunk_prev, switch_content_modal_tab,
+    };
+
+    match v {
+        ContentModalVerb::Close => {
+            close_content_modal(&mut state.tracer);
+            UpdateResult {
+                redraw: true,
+                intent: None,
+                tracer_followup: None,
+            }
+        }
+
+        ContentModalVerb::Copy => {
+            if let Some(text) = content_modal_copy_text(&state.tracer) {
+                super::clipboard_copy(state, &text);
+            }
+            UpdateResult {
+                redraw: true,
+                intent: None,
+                tracer_followup: None,
+            }
+        }
+
+        ContentModalVerb::SwitchTabNext => {
+            let Some(modal) = state.tracer.content_modal.as_ref() else {
+                return UpdateResult::default();
+            };
+            let next = match modal.active_tab {
+                ContentModalTab::Input => {
+                    if modal.header.output_available {
+                        ContentModalTab::Output
+                    } else if matches!(modal.diffable, Diffable::Ok) {
+                        ContentModalTab::Diff
+                    } else {
+                        ContentModalTab::Input
+                    }
+                }
+                ContentModalTab::Output => {
+                    if matches!(modal.diffable, Diffable::Ok) {
+                        ContentModalTab::Diff
+                    } else {
+                        ContentModalTab::Output
+                    }
+                }
+                ContentModalTab::Diff => ContentModalTab::Input,
+            };
+            let ceiling = state.tracer_config.modal_streaming_ceiling;
+            let fired = switch_content_modal_tab(&mut state.tracer, next, ceiling);
+            UpdateResult {
+                redraw: true,
+                intent: if fired.is_empty() {
+                    None
+                } else {
+                    Some(PendingIntent::SpawnModalChunks(fired))
+                },
+                tracer_followup: None,
+            }
+        }
+
+        ContentModalVerb::SwitchTabPrev => {
+            let Some(modal) = state.tracer.content_modal.as_ref() else {
+                return UpdateResult::default();
+            };
+            let prev = match modal.active_tab {
+                ContentModalTab::Input => {
+                    if matches!(modal.diffable, Diffable::Ok) {
+                        ContentModalTab::Diff
+                    } else if modal.header.output_available {
+                        ContentModalTab::Output
+                    } else {
+                        ContentModalTab::Input
+                    }
+                }
+                ContentModalTab::Output => ContentModalTab::Input,
+                ContentModalTab::Diff => {
+                    if modal.header.output_available {
+                        ContentModalTab::Output
+                    } else {
+                        ContentModalTab::Input
+                    }
+                }
+            };
+            let ceiling = state.tracer_config.modal_streaming_ceiling;
+            let fired = switch_content_modal_tab(&mut state.tracer, prev, ceiling);
+            UpdateResult {
+                redraw: true,
+                intent: if fired.is_empty() {
+                    None
+                } else {
+                    Some(PendingIntent::SpawnModalChunks(fired))
+                },
+                tracer_followup: None,
+            }
+        }
+
+        ContentModalVerb::JumpInput => {
+            let ceiling = state.tracer_config.modal_streaming_ceiling;
+            let fired =
+                switch_content_modal_tab(&mut state.tracer, ContentModalTab::Input, ceiling);
+            UpdateResult {
+                redraw: true,
+                intent: if fired.is_empty() {
+                    None
+                } else {
+                    Some(PendingIntent::SpawnModalChunks(fired))
+                },
+                tracer_followup: None,
+            }
+        }
+
+        ContentModalVerb::JumpOutput => {
+            let ceiling = state.tracer_config.modal_streaming_ceiling;
+            let fired =
+                switch_content_modal_tab(&mut state.tracer, ContentModalTab::Output, ceiling);
+            UpdateResult {
+                redraw: true,
+                intent: if fired.is_empty() {
+                    None
+                } else {
+                    Some(PendingIntent::SpawnModalChunks(fired))
+                },
+                tracer_followup: None,
+            }
+        }
+
+        ContentModalVerb::JumpDiff => {
+            // Only act when the diff is ready.
+            let diffable_ok = state
+                .tracer
+                .content_modal
+                .as_ref()
+                .map(|m| matches!(m.diffable, Diffable::Ok))
+                .unwrap_or(false);
+            if !diffable_ok {
+                return UpdateResult::default();
+            }
+            let ceiling = state.tracer_config.modal_streaming_ceiling;
+            let fired = switch_content_modal_tab(&mut state.tracer, ContentModalTab::Diff, ceiling);
+            UpdateResult {
+                redraw: true,
+                intent: if fired.is_empty() {
+                    None
+                } else {
+                    Some(PendingIntent::SpawnModalChunks(fired))
+                },
+                tracer_followup: None,
+            }
+        }
+
+        ContentModalVerb::HunkNext => {
+            hunk_next(&mut state.tracer);
+            UpdateResult {
+                redraw: true,
+                intent: None,
+                tracer_followup: None,
+            }
+        }
+
+        ContentModalVerb::HunkPrev => {
+            hunk_prev(&mut state.tracer);
+            UpdateResult {
+                redraw: true,
+                intent: None,
+                tracer_followup: None,
+            }
+        }
+
+        // ── Stubs — wired but no-op until T22 (search) / T19 (save) ──────────
+        ContentModalVerb::OpenSearch => {
+            // TODO(T22): initialise SearchState { input_active: true } on modal.
+            UpdateResult::default()
+        }
+        ContentModalVerb::SearchNext => {
+            // TODO(T22): advance modal.search.current forward through matches.
+            UpdateResult::default()
+        }
+        ContentModalVerb::SearchPrev => {
+            // TODO(T22): advance modal.search.current backward through matches.
+            UpdateResult::default()
+        }
+        ContentModalVerb::Save => {
+            // Open save modal for the active side (or last_nondiff_tab when on
+            // Diff). Uses the same Modal::SaveEventContent path as TracerVerb::Save.
+            // TODO(T19): build_pending_save_from_modal when content modal save
+            // wiring is ready. For now, open the save modal pointing at the
+            // event_id from the content modal header.
+            let save_state = state.tracer.content_modal.as_ref().map(|modal| {
+                let side = match modal.active_tab {
+                    ContentModalTab::Diff => match modal.last_nondiff_tab {
+                        ContentModalTab::Output => crate::client::ContentSide::Output,
+                        _ => crate::client::ContentSide::Input,
+                    },
+                    ContentModalTab::Output => crate::client::ContentSide::Output,
+                    _ => crate::client::ContentSide::Input,
+                };
+                crate::widget::save_modal::SaveEventContentState::new(modal.event_id, side)
+            });
+            if let Some(save) = save_state {
+                state.modal = Some(Modal::SaveEventContent(save));
+                UpdateResult {
+                    redraw: true,
+                    intent: None,
+                    tracer_followup: None,
+                }
+            } else {
+                UpdateResult::default()
+            }
+        }
+    }
 }
 
 #[cfg(test)]
