@@ -480,24 +480,37 @@ cargo run -- --config integration-tests/nifilens-config.toml \
 marker PG (`nifilens-fixture-v2`) is already present, so iterating on
 `nifi-lens` itself doesn't reset the fixture state.
 
-The fixture is five process groups (`healthy-pipeline` with nested
+The fixture is six process groups (`healthy-pipeline` with nested
 `ingest` / `enrich` children, `noisy-pipeline`, `backpressure-pipeline`,
-`invalid-pipeline`, and `bulky-pipeline`) plus four controller services
-(`fixture-json-reader` ENABLED, `fixture-json-writer` ENABLED,
-`fixture-csv-reader` DISABLED, `fixture-broken-writer` INVALID/DISABLED),
-all under a top-level marker PG named `nifilens-fixture-v2`.
-`bulky-pipeline` produces ~1.5 MiB flowfiles at a low rate, providing
-content for Tracer truncation testing. The `healthy-pipeline/enrich`
-processor chain starts with a `ConvertRecord` processor that references
-`fixture-json-reader` and `fixture-json-writer`, followed by
-`UpdateAttribute-enrich`, `UpdateAttribute-cleanup`, and `LogAttribute-INFO`,
-exercising CS-referencing coverage on all NiFi versions including the 2.6.0
-floor. When the detected NiFi version is >= 2.9.0, the seeder also creates
-`stress-pipeline` — a longer branching flow with ConvertRecord (JSON to
-CSV), UpdateRecord, RouteOnAttribute (hot/normal split), and dual ControlRate
-bottlenecks for sustained queue backpressure, plus four additional controller
-services. Bumping the marker name invalidates stale fixtures automatically on
-the next seed pass.
+`invalid-pipeline`, `bulky-pipeline`, and `diff-pipeline`) plus four
+top-level controller services (`fixture-json-reader` ENABLED,
+`fixture-json-writer` ENABLED, `fixture-csv-reader` DISABLED,
+`fixture-broken-writer` INVALID/DISABLED), all under a top-level
+marker PG named `nifilens-fixture-v2`.
+
+`bulky-pipeline` produces ~1.5 MiB random-text flowfiles at a low rate,
+providing content for Tracer streaming / truncation testing.
+`diff-pipeline` generates ~180 KiB structured JSON flowfiles (1000
+sensor records from an embedded `diff_payload.json` asset) and passes
+them through `UpdateRecord-json` → `ConvertRecord` → `UpdateRecord-csv`
+→ `LogAttribute-INFO`, producing provenance events whose input and
+output content claims differ byte-wise with known mime pairs —
+exercising the Tracer content viewer modal's diff tab (JSON↔JSON and
+CSV↔CSV diffable stages, plus the JSON↔CSV mime-mismatch stage that
+the diff tab grays out). `diff-pipeline` owns its own five scoped
+controller services: `diff-json-reader`, `diff-json-writer`,
+`diff-csv-reader`, `diff-csv-writer`, and `diff-csv-writer-out`.
+
+The `healthy-pipeline/enrich` processor chain starts with a
+`ConvertRecord` processor that references `fixture-json-reader` and
+`fixture-json-writer`, followed by `UpdateAttribute-enrich`,
+`UpdateAttribute-cleanup`, and `LogAttribute-INFO`, exercising
+CS-referencing coverage on all NiFi versions including the 2.6.0
+floor.
+
+All fixture pipelines work on the 2.6.0 floor; the seeder no longer
+version-gates any pipeline. Bumping the marker name invalidates stale
+fixtures automatically on the next seed pass.
 
 ### Bumping the NiFi ceiling version
 
