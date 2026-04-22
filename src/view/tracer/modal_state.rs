@@ -590,6 +590,25 @@ pub fn compute_diff_cache(input: &str, output: &str) -> DiffRender {
     DiffRender { lines, hunks }
 }
 
+/// Resolve diffability for the modal and (lazily) populate
+/// `diff_cache` when both sides are loaded and `Diffable::Ok`.
+/// Idempotent — a cached diff stays cached.
+///
+/// Designed to be called from any reducer that may have just mutated
+/// `modal.input` or `modal.output` (chunk arrival, tab switch).
+/// Independent of `modal.active_tab` — users typically open on
+/// Input/Output and switch to Diff *after* both chunks have already
+/// arrived, by which point no further chunks fire and a tab-gated
+/// compute would never trigger.
+pub fn resolve_and_cache_diff(modal: &mut ContentModalState) {
+    modal.diffable = resolve_diffable(&modal.header, &modal.input, &modal.output);
+    if modal.diffable == Diffable::Ok && modal.diff_cache.is_none() {
+        let input_text = String::from_utf8_lossy(&modal.input.loaded).into_owned();
+        let output_text = String::from_utf8_lossy(&modal.output.loaded).into_owned();
+        modal.diff_cache = Some(compute_diff_cache(&input_text, &output_text));
+    }
+}
+
 pub fn close_content_modal(state: &mut TracerState) {
     state.content_modal = None;
 }
@@ -1697,5 +1716,60 @@ mod tests {
             50,
             "scroll must jump to match line"
         );
+    }
+
+    // ── resolve_and_cache_diff tests ──────────────────────────────────────────
+
+    #[test]
+    fn resolve_and_cache_diff_populates_cache_when_both_sides_loaded_and_ok() {
+        let mut modal = stub_modal(1, ContentModalTab::Input);
+        modal.input = text_buffer("line a\nline b\nline c\n");
+        modal.output = text_buffer("line a\nline B\nline c\n");
+        // Active tab is Input — cache must still populate (this is the
+        // bug the helper fixes).
+        resolve_and_cache_diff(&mut modal);
+        assert_eq!(modal.diffable, Diffable::Ok);
+        assert!(modal.diff_cache.is_some());
+        let cache = modal.diff_cache.as_ref().unwrap();
+        assert!(!cache.lines.is_empty());
+        assert!(!cache.hunks.is_empty());
+    }
+
+    #[test]
+    fn resolve_and_cache_diff_is_idempotent() {
+        let mut modal = stub_modal(1, ContentModalTab::Input);
+        modal.input = text_buffer("alpha\nbeta\n");
+        modal.output = text_buffer("alpha\nBETA\n");
+        resolve_and_cache_diff(&mut modal);
+        let first_ptr = modal.diff_cache.as_ref().unwrap() as *const DiffRender;
+        // Second call must not reallocate — same Box address.
+        resolve_and_cache_diff(&mut modal);
+        let second_ptr = modal.diff_cache.as_ref().unwrap() as *const DiffRender;
+        assert_eq!(first_ptr, second_ptr, "cached diff must not be recomputed");
+    }
+
+    #[test]
+    fn resolve_and_cache_diff_skips_when_pending() {
+        let mut modal = stub_modal(1, ContentModalTab::Input);
+        // Input loaded but output not (in_flight) → resolve_diffable
+        // returns Pending → cache stays None.
+        modal.input = text_buffer("anything");
+        modal.output.in_flight = true;
+        resolve_and_cache_diff(&mut modal);
+        assert_eq!(modal.diffable, Diffable::Pending);
+        assert!(modal.diff_cache.is_none());
+    }
+
+    #[test]
+    fn resolve_and_cache_diff_skips_when_no_differences() {
+        let mut modal = stub_modal(1, ContentModalTab::Input);
+        modal.input = text_buffer("identical content");
+        modal.output = text_buffer("identical content");
+        resolve_and_cache_diff(&mut modal);
+        assert_eq!(
+            modal.diffable,
+            Diffable::NotAvailable(NotDiffableReason::NoDifferences)
+        );
+        assert!(modal.diff_cache.is_none());
     }
 }

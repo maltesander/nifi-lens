@@ -905,31 +905,12 @@ fn update_inner(state: &mut AppState, event: AppEvent, config: &Config) -> Updat
                         requested_len,
                         ceiling,
                     );
-                    // Recompute diffability after each chunk lands; lazily
-                    // build the diff cache when the Diff tab is active and
-                    // both sides are fully loaded.
+                    // Recompute diffability and (lazily) populate the
+                    // diff cache after every chunk — independent of the
+                    // currently active tab, since the user may switch to
+                    // Diff after both sides have already loaded.
                     if let Some(modal) = state.tracer.content_modal.as_mut() {
-                        modal.diffable = crate::view::tracer::state::resolve_diffable(
-                            &modal.header,
-                            &modal.input,
-                            &modal.output,
-                        );
-                        if matches!(
-                            modal.active_tab,
-                            crate::view::tracer::state::ContentModalTab::Diff
-                        ) && modal.diffable == crate::view::tracer::state::Diffable::Ok
-                            && modal.diff_cache.is_none()
-                        {
-                            let input_text =
-                                String::from_utf8_lossy(&modal.input.loaded).into_owned();
-                            let output_text =
-                                String::from_utf8_lossy(&modal.output.loaded).into_owned();
-                            modal.diff_cache =
-                                Some(crate::view::tracer::state::compute_diff_cache(
-                                    &input_text,
-                                    &output_text,
-                                ));
-                        }
+                        crate::view::tracer::state::resolve_and_cache_diff(modal);
                     }
                     state.last_refresh = Instant::now();
                     UpdateResult {

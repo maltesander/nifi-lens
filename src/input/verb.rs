@@ -299,8 +299,12 @@ impl Verb for TracerVerb {
             Self::Save => ctx.state.tracer_content_tab_is_active(),
             Self::ToggleDiff => ctx.state.tracer_attributes_tab_is_active(),
             Self::OpenContentModal => {
-                ctx.state.tracer_content_tab_is_active()
-                    && ctx.state.tracer.content_modal.is_none()
+                // The handler opens the modal from any sub-tab as long as a
+                // lineage event with content is loaded — match that here so
+                // the hint bar doesn't gray `i` while it's actually
+                // dispatchable. The outer `current_tab != Tracer` guard above
+                // already handles the tab gate.
+                ctx.state.tracer.content_modal.is_none()
                     && ctx.state.tracer_has_any_side_available()
             }
             _ => true,
