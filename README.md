@@ -150,7 +150,7 @@ reference; you don't need to memorise them.
 | Key          | Action                                                 |
 |--------------|--------------------------------------------------------|
 | `1` / `2` / `3` | Toggle ERROR / WARN / INFO severity filter          |
-| `Shift+G`    | Cycle group-by mode (source + message / source / off) |
+| `Shift+G`    | Cycle group-by mode (source + message / source / off)  |
 | `Shift+T`    | Cycle component-type filter                            |
 | `Shift+P`    | Pause / resume auto-scroll                             |
 | `Shift+M`    | Mute the selected source                               |
@@ -177,15 +177,15 @@ reference; you don't need to memorise them.
 |--------------|--------------------------------------------------------|
 | `Enter` / `→` | Expand folder or drill into the selected node         |
 | `←`          | Collapse folder or ascend to parent                    |
-| `p`          | Open properties modal (processors and controller services) |
+| `p`          | Open properties (processors and controller services)   |
 | `c`          | Copy the selected node's id                            |
 
 ### Events
 
-| Key                              | Action                               |
-|----------------------------------|--------------------------------------|
+| Key                              | Action                                                  |
+|----------------------------------|---------------------------------------------------------|
 | `Shift+D` / `T` / `S` / `U` / `A` | Edit filters (time / type / source / UUID / attribute) |
-| `Enter` (in filter bar)          | Submit the query                     |
+| `Enter` (in filter bar)          | Submit the query                                        |
 
 ### Tracer
 
