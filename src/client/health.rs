@@ -491,6 +491,24 @@ impl NifiClient {
             fetched_at: Instant::now(),
         })
     }
+
+    /// Calls `GET /nifi-api/controller/cluster`. On standalone NiFi the
+    /// server returns HTTP 409 — the fetcher task (`spawn_cluster_nodes`,
+    /// added in a later task) translates that specific shape to an empty
+    /// snapshot rather than a failure. This method surfaces *all* errors;
+    /// the shape-detection lives one layer up where it belongs.
+    pub async fn cluster_nodes(&self) -> Result<ClusterNodesSnapshot, NifiLensError> {
+        tracing::debug!(context = %self.context_name(), "fetching /controller/cluster");
+        let dto = self.inner.controller().get_cluster().await.map_err(|err| {
+            classify_or_fallback(self.context_name(), Box::new(err), |source| {
+                NifiLensError::ClusterNodesFailed {
+                    context: self.context_name().to_string(),
+                    source,
+                }
+            })
+        })?;
+        Ok(ClusterNodesSnapshot::from_cluster_dto(&dto))
+    }
 }
 
 /// Extract utilization percentage from a `StorageUsageDto`.
