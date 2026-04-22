@@ -1533,6 +1533,124 @@ pub fn compute_diff_cache(input: &str, output: &str) -> DiffRender {
     DiffRender { lines, hunks }
 }
 
+pub fn close_content_modal(state: &mut TracerState) {
+    state.content_modal = None;
+}
+
+pub fn switch_content_modal_tab(
+    state: &mut TracerState,
+    new_tab: ContentModalTab,
+    _ceiling: Option<usize>,
+) -> Vec<ModalFetchRequest> {
+    let Some(modal) = state.content_modal.as_mut() else {
+        return Vec::new();
+    };
+    if modal.active_tab == new_tab {
+        return Vec::new();
+    }
+
+    modal.active_tab = new_tab;
+    modal.scroll_offset = 0;
+    modal.search = None;
+    if !matches!(new_tab, ContentModalTab::Diff) {
+        modal.last_nondiff_tab = new_tab;
+    }
+
+    let event_id = modal.event_id;
+    let mut fired: Vec<ModalFetchRequest> = Vec::new();
+    let mut fire = |side: crate::client::ContentSide, buf: &mut SideBuffer| {
+        if buf.in_flight || !buf.loaded.is_empty() || buf.fully_loaded {
+            return;
+        }
+        buf.in_flight = true;
+        fired.push(ModalFetchRequest {
+            event_id,
+            side,
+            offset: 0,
+            len: MODAL_CHUNK_BYTES,
+        });
+    };
+    match new_tab {
+        ContentModalTab::Input if modal.header.input_available => {
+            fire(crate::client::ContentSide::Input, &mut modal.input);
+        }
+        ContentModalTab::Output if modal.header.output_available => {
+            fire(crate::client::ContentSide::Output, &mut modal.output);
+        }
+        ContentModalTab::Diff => {
+            if modal.header.input_available {
+                fire(crate::client::ContentSide::Input, &mut modal.input);
+            }
+            if modal.header.output_available {
+                fire(crate::client::ContentSide::Output, &mut modal.output);
+            }
+        }
+        _ => {}
+    }
+    fired
+}
+
+pub fn hunk_next(state: &mut TracerState) {
+    let Some(modal) = state.content_modal.as_mut() else {
+        return;
+    };
+    let Some(cache) = modal.diff_cache.as_ref() else {
+        return;
+    };
+    let current = modal.scroll_offset as u32;
+    if let Some(next) = cache.hunks.iter().find(|h| h.line_idx > current) {
+        modal.scroll_offset = next.line_idx as usize;
+    }
+}
+
+pub fn hunk_prev(state: &mut TracerState) {
+    let Some(modal) = state.content_modal.as_mut() else {
+        return;
+    };
+    let Some(cache) = modal.diff_cache.as_ref() else {
+        return;
+    };
+    let current = modal.scroll_offset as u32;
+    if let Some(prev) = cache.hunks.iter().rev().find(|h| h.line_idx < current) {
+        modal.scroll_offset = prev.line_idx as usize;
+    }
+}
+
+/// Render the currently visible tab's contents as plain text for the
+/// clipboard. Returns `None` when there is nothing to copy.
+pub fn content_modal_copy_text(state: &TracerState) -> Option<String> {
+    let modal = state.content_modal.as_ref()?;
+    match modal.active_tab {
+        ContentModalTab::Input => {
+            if modal.input.loaded.is_empty() {
+                return None;
+            }
+            Some(String::from_utf8_lossy(&modal.input.loaded).into_owned())
+        }
+        ContentModalTab::Output => {
+            if modal.output.loaded.is_empty() {
+                return None;
+            }
+            Some(String::from_utf8_lossy(&modal.output.loaded).into_owned())
+        }
+        ContentModalTab::Diff => {
+            let cache = modal.diff_cache.as_ref()?;
+            let mut buf = String::new();
+            for line in &cache.lines {
+                let prefix = match line.tag {
+                    similar::ChangeTag::Insert => "+ ",
+                    similar::ChangeTag::Delete => "- ",
+                    similar::ChangeTag::Equal => "  ",
+                };
+                buf.push_str(prefix);
+                buf.push_str(&line.text);
+                buf.push('\n');
+            }
+            Some(buf)
+        }
+    }
+}
+
 // ── Tests ─────────────────────────────────────────────────────────────────────
 
 #[cfg(test)]
@@ -3072,5 +3190,147 @@ mod tests {
         assert!(inserts >= 1, "expected at least one insert");
         assert!(deletes >= 1, "expected at least one delete");
         assert_eq!(render.hunks.len(), 1);
+    }
+
+    #[test]
+    fn close_content_modal_clears_state() {
+        let mut state = TracerState {
+            content_modal: Some(stub_modal(1, ContentModalTab::Input)),
+            ..TracerState::default()
+        };
+        close_content_modal(&mut state);
+        assert!(state.content_modal.is_none());
+    }
+
+    #[test]
+    fn switch_tab_updates_active_and_clears_scroll() {
+        let mut state = TracerState {
+            content_modal: Some(stub_modal(1, ContentModalTab::Input)),
+            ..TracerState::default()
+        };
+        let fired =
+            switch_content_modal_tab(&mut state, ContentModalTab::Output, Some(4 * 1024 * 1024));
+        let modal = state.content_modal.as_ref().unwrap();
+        assert_eq!(modal.active_tab, ContentModalTab::Output);
+        assert_eq!(modal.scroll_offset, 0);
+        assert_eq!(fired.len(), 1);
+        assert_eq!(fired[0].side, crate::client::ContentSide::Output);
+    }
+
+    #[test]
+    fn switch_tab_to_already_loaded_side_does_not_refetch() {
+        let mut modal = stub_modal(1, ContentModalTab::Input);
+        modal.output.loaded = b"already".to_vec();
+        modal.output.fully_loaded = true;
+        let mut state = TracerState {
+            content_modal: Some(modal),
+            ..TracerState::default()
+        };
+        let fired =
+            switch_content_modal_tab(&mut state, ContentModalTab::Output, Some(4 * 1024 * 1024));
+        assert!(fired.is_empty());
+    }
+
+    #[test]
+    fn hunk_next_advances_scroll_to_next_anchor() {
+        let mut modal = stub_modal(1, ContentModalTab::Diff);
+        modal.diff_cache = Some(DiffRender {
+            lines: Vec::new(),
+            hunks: vec![
+                HunkAnchor {
+                    line_idx: 10,
+                    input_line: 1,
+                    output_line: 1,
+                },
+                HunkAnchor {
+                    line_idx: 50,
+                    input_line: 5,
+                    output_line: 5,
+                },
+            ],
+        });
+        modal.scroll_offset = 5;
+        let mut state = TracerState {
+            content_modal: Some(modal),
+            ..TracerState::default()
+        };
+        hunk_next(&mut state);
+        assert_eq!(state.content_modal.as_ref().unwrap().scroll_offset, 10);
+        hunk_next(&mut state);
+        assert_eq!(state.content_modal.as_ref().unwrap().scroll_offset, 50);
+        hunk_next(&mut state);
+        assert_eq!(state.content_modal.as_ref().unwrap().scroll_offset, 50);
+    }
+
+    #[test]
+    fn hunk_prev_moves_backward() {
+        let mut modal = stub_modal(1, ContentModalTab::Diff);
+        modal.diff_cache = Some(DiffRender {
+            lines: Vec::new(),
+            hunks: vec![
+                HunkAnchor {
+                    line_idx: 10,
+                    input_line: 1,
+                    output_line: 1,
+                },
+                HunkAnchor {
+                    line_idx: 50,
+                    input_line: 5,
+                    output_line: 5,
+                },
+            ],
+        });
+        modal.scroll_offset = 75;
+        let mut state = TracerState {
+            content_modal: Some(modal),
+            ..TracerState::default()
+        };
+        hunk_prev(&mut state);
+        assert_eq!(state.content_modal.as_ref().unwrap().scroll_offset, 50);
+        hunk_prev(&mut state);
+        assert_eq!(state.content_modal.as_ref().unwrap().scroll_offset, 10);
+        hunk_prev(&mut state);
+        assert_eq!(state.content_modal.as_ref().unwrap().scroll_offset, 10);
+    }
+
+    #[test]
+    fn copy_returns_raw_bytes_on_input_tab() {
+        let mut modal = stub_modal(1, ContentModalTab::Input);
+        modal.input.loaded = b"hello".to_vec();
+        let state = TracerState {
+            content_modal: Some(modal),
+            ..TracerState::default()
+        };
+        let text = content_modal_copy_text(&state).unwrap();
+        assert_eq!(text, "hello");
+    }
+
+    #[test]
+    fn copy_returns_rendered_diff_on_diff_tab() {
+        let mut modal = stub_modal(1, ContentModalTab::Diff);
+        modal.diff_cache = Some(DiffRender {
+            lines: vec![
+                DiffLine {
+                    tag: similar::ChangeTag::Delete,
+                    text: "x".into(),
+                    input_line: Some(1),
+                    output_line: None,
+                },
+                DiffLine {
+                    tag: similar::ChangeTag::Insert,
+                    text: "y".into(),
+                    input_line: None,
+                    output_line: Some(1),
+                },
+            ],
+            hunks: Vec::new(),
+        });
+        let state = TracerState {
+            content_modal: Some(modal),
+            ..TracerState::default()
+        };
+        let text = content_modal_copy_text(&state).unwrap();
+        assert!(text.contains("- x"));
+        assert!(text.contains("+ y"));
     }
 }
