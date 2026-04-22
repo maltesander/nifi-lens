@@ -98,6 +98,12 @@ pub struct HunkAnchor {
 pub struct DiffRender {
     pub lines: Vec<DiffLine>,
     pub hunks: Vec<HunkAnchor>,
+    /// Line indices at which Ctrl+↓ / Ctrl+↑ ("next change") should
+    /// land. A stop is the first line of every contiguous run of
+    /// non-Equal lines — plus the start of each new Delete in a
+    /// Replace block's interleaved pairs, so a CSV body with N
+    /// changed rows yields N stops instead of a single hunk anchor.
+    pub change_stops: Vec<u32>,
 }
 
 #[derive(Debug, Clone)]
@@ -748,7 +754,34 @@ pub fn compute_diff_cache(input: &str, output: &str) -> DiffRender {
         }
     }
 
-    DiffRender { lines, hunks }
+    let change_stops = compute_change_stops(&lines);
+    DiffRender {
+        lines,
+        hunks,
+        change_stops,
+    }
+}
+
+/// Walk `lines` once and collect the line indices where the user
+/// expects Ctrl+↓ to land. See [`DiffRender::change_stops`] for the
+/// rule. Run alone because `compute_diff_cache` emits lines in multiple
+/// branches and a post-pass keeps the rule in one place.
+fn compute_change_stops(lines: &[DiffLine]) -> Vec<u32> {
+    let mut stops = Vec::new();
+    let mut prev: Option<similar::ChangeTag> = None;
+    for (idx, line) in lines.iter().enumerate() {
+        let stop = match (prev, line.tag) {
+            (_, similar::ChangeTag::Equal) => false,
+            (None | Some(similar::ChangeTag::Equal), _) => true,
+            (Some(similar::ChangeTag::Insert), similar::ChangeTag::Delete) => true,
+            _ => false,
+        };
+        if stop {
+            stops.push(idx as u32);
+        }
+        prev = Some(line.tag);
+    }
+    stops
 }
 
 /// Trim a single trailing `\n` — the counterpart to
@@ -996,8 +1029,8 @@ pub fn hunk_next(state: &mut TracerState) {
         return;
     };
     let current = modal.scroll_offset as u32;
-    if let Some(next) = cache.hunks.iter().find(|h| h.line_idx > current) {
-        modal.scroll_offset = next.line_idx as usize;
+    if let Some(&next) = cache.change_stops.iter().find(|&&i| i > current) {
+        modal.scroll_offset = next as usize;
     }
 }
 
@@ -1009,8 +1042,8 @@ pub fn hunk_prev(state: &mut TracerState) {
         return;
     };
     let current = modal.scroll_offset as u32;
-    if let Some(prev) = cache.hunks.iter().rev().find(|h| h.line_idx < current) {
-        modal.scroll_offset = prev.line_idx as usize;
+    if let Some(&prev) = cache.change_stops.iter().rev().find(|&&i| i < current) {
+        modal.scroll_offset = prev as usize;
     }
 }
 
@@ -1693,22 +1726,12 @@ mod tests {
     }
 
     #[test]
-    fn hunk_next_advances_scroll_to_next_anchor() {
+    fn hunk_next_advances_scroll_to_next_change_stop() {
         let mut modal = stub_modal(1, ContentModalTab::Diff);
         modal.diff_cache = Some(DiffRender {
             lines: Vec::new(),
-            hunks: vec![
-                HunkAnchor {
-                    line_idx: 10,
-                    input_line: 1,
-                    output_line: 1,
-                },
-                HunkAnchor {
-                    line_idx: 50,
-                    input_line: 5,
-                    output_line: 5,
-                },
-            ],
+            hunks: Vec::new(),
+            change_stops: vec![10, 50],
         });
         modal.scroll_offset = 5;
         let mut state = TracerState {
@@ -1728,18 +1751,8 @@ mod tests {
         let mut modal = stub_modal(1, ContentModalTab::Diff);
         modal.diff_cache = Some(DiffRender {
             lines: Vec::new(),
-            hunks: vec![
-                HunkAnchor {
-                    line_idx: 10,
-                    input_line: 1,
-                    output_line: 1,
-                },
-                HunkAnchor {
-                    line_idx: 50,
-                    input_line: 5,
-                    output_line: 5,
-                },
-            ],
+            hunks: Vec::new(),
+            change_stops: vec![10, 50],
         });
         modal.scroll_offset = 75;
         let mut state = TracerState {
@@ -1752,6 +1765,28 @@ mod tests {
         assert_eq!(state.content_modal.as_ref().unwrap().scroll_offset, 10);
         hunk_prev(&mut state);
         assert_eq!(state.content_modal.as_ref().unwrap().scroll_offset, 10);
+    }
+
+    /// Root cause for the CSV-diff bug: a body where every line changed
+    /// collapses into a single `grouped_ops` hunk at line 0, so the old
+    /// hunk-only navigation had no forward targets. `change_stops`
+    /// must produce one stop per interleaved Replace pair so Ctrl+↓
+    /// keeps advancing.
+    #[test]
+    fn change_stops_cover_every_replace_pair_for_csv_body() {
+        let mut input = String::from("id,value,status\n");
+        let mut output = String::from("id,value,status\n");
+        for i in 0..10 {
+            input.push_str(&format!("{i},42,OK\n"));
+            output.push_str(&format!("{i},42,ok\n"));
+        }
+        let render = compute_diff_cache(&input, &output);
+        assert_eq!(render.hunks.len(), 1, "grouped_ops collapses to 1 hunk");
+        assert_eq!(
+            render.change_stops.len(),
+            10,
+            "one change stop per modified row"
+        );
     }
 
     #[test]
@@ -1787,6 +1822,7 @@ mod tests {
                 },
             ],
             hunks: Vec::new(),
+            change_stops: Vec::new(),
         });
         let state = TracerState {
             content_modal: Some(modal),

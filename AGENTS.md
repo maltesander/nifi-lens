@@ -297,6 +297,18 @@ eligibility requires both sides available, MIME pair matching the
 allowlist (or UTF-8 fallback when neither side declares a MIME),
 declared size ≤ 512 KiB per side, and non-identical bytes.
 
+`DiffRender::change_stops` is the navigation index for Ctrl+↓ /
+Ctrl+↑ ("next / previous change"). It is a flat list of line
+indices — one per contiguous run of non-Equal lines, plus one per
+new `Delete` that begins a fresh pair inside a Replace block —
+populated by `compute_change_stops` after `compute_diff_cache`
+emits its lines. `DiffRender::hunks` still drives the rendered
+`@@ input Lx · output Ly @@` headers, but it is **not** used for
+navigation: a CSV body where every row changed collapses into a
+single `grouped_ops` hunk at line 0, and hunk-only navigation
+would have no forward targets. The header's `sizes …` line also
+appends `· N changes` from `change_stops.len()`.
+
 Search primitives (`MatchSpan`, `SearchState`, `compute_matches`) are
 shared with the Bulletins detail modal via `src/widget/search.rs`.
 

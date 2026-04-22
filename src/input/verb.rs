@@ -370,8 +370,8 @@ impl Verb for ContentModalVerb {
             Self::OpenSearch => "open text search",
             Self::SearchNext => "next match",
             Self::SearchPrev => "previous match",
-            Self::HunkNext => "next diff hunk",
-            Self::HunkPrev => "previous diff hunk",
+            Self::HunkNext => "next change",
+            Self::HunkPrev => "previous change",
             Self::Copy => "copy visible body to clipboard",
             Self::Save => "save full content to file",
             Self::Close => "close modal",
@@ -382,7 +382,7 @@ impl Verb for ContentModalVerb {
             Self::SwitchTabNext => "switch",
             Self::OpenSearch => "find",
             Self::SearchNext => "match",
-            Self::HunkNext => "hunk",
+            Self::HunkNext => "change",
             Self::Copy => "copy",
             Self::Save => "save",
             Self::Close => "close",
@@ -420,7 +420,7 @@ impl Verb for ContentModalVerb {
                     && modal
                         .diff_cache
                         .as_ref()
-                        .map(|d| !d.hunks.is_empty())
+                        .map(|d| !d.change_stops.is_empty())
                         .unwrap_or(false)
             }
             _ => true,

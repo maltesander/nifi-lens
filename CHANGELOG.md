@@ -10,9 +10,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 
 - **Tracer**: full-screen content viewer modal (`i`) with Input /
-  Output / Diff tabs, streaming fetch, colored unified diff, hunk
-  navigation (`Ctrl+↓` / `Ctrl+↑`), bulletins-style search primitives
-  shared via `src/widget/search.rs`.
+  Output / Diff tabs, streaming fetch, colored unified diff,
+  change navigation (`Ctrl+↓` / `Ctrl+↑`) that steps through every
+  individual change — including dense bodies like CSV where every
+  row changed — and a `· N changes` count on the header's sizes
+  line. Bulletins-style search primitives are shared via
+  `src/widget/search.rs`.
 - **Config**: `[tracer] modal_streaming_ceiling` (default `4MiB`,
   `"0"` = unbounded) bounds the modal's per-side load.
 

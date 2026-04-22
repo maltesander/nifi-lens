@@ -210,7 +210,7 @@ reference; you don't need to memorise them.
 | `Home` / `End`         | Jump to top / bottom                             |
 | `/`                    | Open substring search                            |
 | `n` / `N`              | Next / previous search match                     |
-| `Ctrl+↓` / `Ctrl+↑`    | Next / previous diff hunk (Diff tab only)        |
+| `Ctrl+↓` / `Ctrl+↑`    | Next / previous change (Diff tab only)           |
 | `c`                    | Copy the visible body to clipboard               |
 | `s`                    | Save the full raw content to file (uncapped)     |
 | `Esc`                  | Close the modal                                  |

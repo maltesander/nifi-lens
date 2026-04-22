@@ -64,12 +64,21 @@ fn render_header(frame: &mut Frame, area: Rect, modal: &ContentModalState) {
         short_iso(&h.event_timestamp_iso),
         h.pg_path,
     );
-    let sizes = format!(
+    let mut sizes = format!(
         "sizes in {} → out {}  ({})",
         size_ui(h.input_size),
         size_ui(h.output_size),
         delta_ui(h.input_size, h.output_size),
     );
+    if let Some(cache) = modal.diff_cache.as_ref() {
+        let n = cache.change_stops.len();
+        if n > 0 {
+            sizes.push_str(&format!(
+                "  ·  {n} {}",
+                if n == 1 { "change" } else { "changes" },
+            ));
+        }
+    }
     let mime = format!(
         "mime  in {} · out {}  {}",
         h.input_mime.clone().unwrap_or_else(|| "—".into()),
@@ -794,6 +803,7 @@ mod tests {
                 input_line: 3,
                 output_line: 3,
             }],
+            change_stops: vec![0, 1],
         });
         let backend = TestBackend::new(100, 20);
         let mut terminal = Terminal::new(backend).unwrap();
