@@ -1102,11 +1102,9 @@ fn handle_content_modal_verb(
             }
         }
         ContentModalVerb::Save => {
-            // Open save modal for the active side (or last_nondiff_tab when on
-            // Diff). Uses the same Modal::SaveEventContent path as TracerVerb::Save.
-            // TODO(T19): build_pending_save_from_modal when content modal save
-            // wiring is ready. For now, open the save modal pointing at the
-            // event_id from the content modal header.
+            // Open the save modal for the active side (or last_nondiff_tab when on
+            // the Diff tab). Uses the same Modal::SaveEventContent path as
+            // TracerVerb::Save — event_id and side are derived from the modal header.
             let save_state = state.tracer.content_modal.as_ref().map(|modal| {
                 let side = match modal.active_tab {
                     ContentModalTab::Diff => match modal.last_nondiff_tab {
