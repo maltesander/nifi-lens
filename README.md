@@ -38,19 +38,14 @@
 ## Features
 
 - **Cluster overview** — health dashboard with bulletin-rate sparkline, queue backpressure, per-node heap/GC, and noisiest components.
-- **Bulletin tail** — live cluster-wide log with severity filters, source deduplication, and per-source mute.
+- **Bulletin tail** — live cluster-wide log with severity filters, source deduplication, per-source mute, and a full-screen detail modal with scroll + substring search.
 - **Flow browser** — component tree with per-node detail.
-  - **Cross-navigation.** Detail rows whose value is a known component
-    render a trailing `→` and jump to it on Enter. Covered surfaces:
-    connection endpoints (FROM/TO), processor / CS property values that
-    are component UUIDs (typically CS references), processor `Connections`
-    section, process-group `Controller services` section. Controller
-    Service and Port Identity panels resolve the parent group UUID to
-    the PG name.
-  - **Fuzzy search** `Shift+F` across all known components.
+  - **Cross-navigation** — detail rows whose value is a known component render a trailing `→` and jump to it on Enter. Covered surfaces: connection endpoints (FROM/TO), processor / CS property values that are component UUIDs, processor `Connections` section, process-group `Controller services` section. Controller Service and Port Identity panels resolve the parent group UUID to the PG name.
+  - **Fuzzy search** across all known components.
 - **Provenance events** — filterable cluster-wide event search cross-linked from Bulletins and Browser.
-- **Flowfile tracer** — paste a UUID to trace its full lineage with attribute diffs and content previews (text, JSON, hex).
-- **Multi-cluster** — kubeconfig-style contexts; `Shift+K` to switch clusters; one binary for every NiFi 2.x version.
+- **Flowfile tracer** — paste a UUID to trace its full lineage with attribute diffs, an inline content preview, and…
+- **Content viewer modal** — full-screen content viewer (Input / Output / Diff tabs) that streams large flowfile bodies in 512 KiB chunks up to a configurable ceiling, renders a colored unified diff when both sides share a MIME type, and supports in-body substring search with match highlighting.
+- **Multi-cluster** — kubeconfig-style contexts; one binary for every NiFi 2.x version.
 - **Read-only** — v0.x never mutates cluster state.
 
 ## Install
@@ -102,90 +97,121 @@ the bottom shows relevant keybindings for the current view.
 
 Five top-level tabs, each targeting a specific operational question.
 
-**Overview** — Cluster health at a glance: a **Components panel** (top)
-showing a three-row table of process groups (count, version-sync drift,
-input/output port counts), processors (per-state counts), and controller
-services (per-state counts); plus a bulletin-rate sparkline, queue
-backpressure, repository fill, per-node health strips, and noisiest
-components.
+**Overview** — Cluster health at a glance. A Components panel at the top
+summarises process groups (count, version-sync drift, port counts),
+processors (per-state counts), and controller services (per-state
+counts). Below it: a bulletin-rate sparkline, queue backpressure,
+repository fill, per-node health strips, and the noisiest components.
 
-**Bulletins** — Live cluster-wide bulletin tail. Severity, component-type,
-and free-text filters; deduplication collapses repeating errors into a single
-row with an `×N` count. `Enter` on a row jumps to the component in Browser.
+**Bulletins** — Live cluster-wide bulletin tail with severity,
+component-type, and free-text filters. Deduplication collapses
+repeating errors from the same component into a single `×N` row. A
+full-screen detail modal shows the full raw message with substring
+search.
 
-**Browser** — Two-pane PG tree with per-node detail. Controller services
-appear as first-class tree nodes under their owning PG, bucketed inside a
-`⚙ Controller services (N)` folder; queues get the same treatment under
-a `→ Queues (N)` folder. Folders expand / collapse with `Enter` / `→`
-and collapse with `←`. `p` opens a properties modal (also works on
-controller-service rows); `c` copies the node id; `g` opens the
-cross-tab jump menu. Selecting an input / output port shows its detail
-pane (identity + recent bulletins). The controller-service detail pane
-includes a **Referencing components** section listing the processors,
-reporting tasks, or other services that consume it — press `Enter` on a
-row to jump to that component.
+**Browser** — Two-pane process-group tree with per-node detail.
+Controller services and queues appear as first-class tree nodes under
+their owning PG, bucketed inside named folders. Input / output ports
+have their own detail panes. The controller-service detail pane lists
+every component that references it, each jumpable. Properties are
+browsable in a dedicated modal.
 
 **Events** — Provenance search with a filter bar (time / type / source /
 flowfile UUID / attribute). Results are colored by event type and
 cross-linked from Bulletins and Browser.
 
-**Tracer** — Paste a flowfile UUID to trace its full lineage. Expand any
-event for a tabbed detail pane (Attributes | Input | Output); `d` toggles
-the attribute All / Changed diff; `s` saves raw content to a file.
-
-### Content viewer modal
-
-Press `i` on a provenance event with content to open a full-screen
-viewer with three tabs:
-
-- **Input** — streamed input-side content. Default ceiling 4 MiB;
-  raise with the config key below.
-- **Output** — same for the output side.
-- **Diff** — colored unified diff when both sides are present and
-  hold the same MIME type (bounded at 512 KiB per side).
-
-Inside the modal:
-
-| Key                      | Action                                           |
-|--------------------------|--------------------------------------------------|
-| `Tab` / `Shift+Tab`      | Cycle Input → Output → Diff (skips disabled)     |
-| `1` / `2` / `3`          | Jump to Input / Output / Diff tab                |
-| `↑↓` / `PgUp` / `PgDn`  | Scroll body                                      |
-| `Home` / `End`           | Jump to top / bottom                             |
-| `/`                      | Open text search                                 |
-| `n` / `N`                | Next / previous search match                     |
-| `Ctrl+↓` / `Ctrl+↑`      | Next / previous diff hunk (Diff tab only)        |
-| `c`                      | Copy the visible body to clipboard               |
-| `s`                      | Save the full raw content to file (uncapped)     |
-| `Esc`                    | Close the modal                                  |
+**Tracer** — Paste a flowfile UUID to trace its full lineage. Each event
+has a tabbed detail pane (Attributes | Input | Output) with a toggleable
+All / Changed attribute diff and an inline 8 KiB content preview. A
+full-screen content viewer modal streams larger bodies on demand and
+can render a colored unified diff between input and output.
 
 ## Keybindings
 
-The tool is largely self-explanatory — `?` opens context-aware help and the
-hint bar at the bottom always shows what's available. A few highlights:
+`?` opens a context-aware help modal. The hint bar at the bottom always
+shows what's available on the current view. The tables below are a
+reference; you don't need to memorise them.
 
-**Navigation** — `↑`/`↓` rows, `Tab`/`Shift+Tab` between panes,
-`F1`–`F5` jump to tabs, `g` opens the cross-tab goto menu, `Shift+K`
-switches the active cluster context, `Shift+F` opens global fuzzy search,
-`q`/`Ctrl+C` to quit.
+### Global
 
-**Bulletins** — `1`/`2`/`3` toggle severity filters; `i` opens the detail
-modal (scroll with `↑`/`↓`/`PgUp`/`PgDn`, `/`-search with `n`/`N`
-cycling, `c` copies the full message, `Enter` jumps to source in Browser,
-`Esc` closes); `Shift+G` cycles group-by modes; `Shift+P` pauses
-auto-scroll; `Shift+M` mutes a source; `Shift+R` clears all filters
-(severity, component type, text, mutes).
+| Key                 | Action                                           |
+|---------------------|--------------------------------------------------|
+| `↑` / `↓`           | Move row selection                               |
+| `Tab` / `Shift+Tab` | Switch pane                                      |
+| `F1`–`F5`           | Jump directly to a tab                           |
+| `Shift+K`           | Switch active cluster context                    |
+| `Shift+F`           | Global fuzzy search across all known components  |
+| `g`                 | Cross-tab goto menu                              |
+| `?`                 | Open context-aware help                          |
+| `q` / `Ctrl+C`      | Quit                                             |
 
-**Browser** — `p` for properties modal (processors and controller
-services); `c` to copy; `Enter`/`→` to expand a folder or drill into the
-selected node; `←` to collapse a folder or ascend; `Shift+F` for global
-fuzzy search.
+### Bulletins
 
-**Events** — `Shift+D`/`T`/`S`/`U`/`A` to edit filters; `Enter` in
-the filter bar to submit.
+| Key          | Action                                                 |
+|--------------|--------------------------------------------------------|
+| `1` / `2` / `3` | Toggle ERROR / WARN / INFO severity filter          |
+| `Shift+G`    | Cycle group-by mode (source + message / source / off) |
+| `Shift+T`    | Cycle component-type filter                            |
+| `Shift+P`    | Pause / resume auto-scroll                             |
+| `Shift+M`    | Mute the selected source                               |
+| `Shift+R`    | Clear all filters                                      |
+| `i`          | Open the bulletin detail modal                         |
+| `Enter`      | Jump to source component in Browser                    |
+| `c`          | Copy the raw message to clipboard                      |
 
-**Tracer** — `←`/`→` cycle detail tabs; `d` toggles attribute diff;
-`s` saves content; `i` opens the full-screen content viewer modal.
+#### Bulletin detail modal
+
+| Key                        | Action                                      |
+|----------------------------|---------------------------------------------|
+| `↑↓` / `PgUp` / `PgDn`     | Scroll body                                 |
+| `Home` / `End`             | Jump to top / bottom                        |
+| `/`                        | Open substring search                       |
+| `n` / `N`                  | Next / previous search match                |
+| `c`                        | Copy the full message to clipboard          |
+| `Enter`                    | Jump to source component in Browser         |
+| `Esc`                      | Close the modal                             |
+
+### Browser
+
+| Key          | Action                                                 |
+|--------------|--------------------------------------------------------|
+| `Enter` / `→` | Expand folder or drill into the selected node         |
+| `←`          | Collapse folder or ascend to parent                    |
+| `p`          | Open properties modal (processors and controller services) |
+| `c`          | Copy the selected node's id                            |
+
+### Events
+
+| Key                              | Action                               |
+|----------------------------------|--------------------------------------|
+| `Shift+D` / `T` / `S` / `U` / `A` | Edit filters (time / type / source / UUID / attribute) |
+| `Enter` (in filter bar)          | Submit the query                     |
+
+### Tracer
+
+| Key          | Action                                                 |
+|--------------|--------------------------------------------------------|
+| `←` / `→`    | Cycle event detail tabs (Attributes / Input / Output)  |
+| `d`          | Toggle attribute diff (All / Changed)                  |
+| `s`          | Save raw content to a file                             |
+| `i`          | Open the full-screen content viewer modal              |
+| `c`          | Copy the focused attribute value or selected UUID      |
+| `r`          | Refresh the lineage query                              |
+
+#### Content viewer modal
+
+| Key                    | Action                                           |
+|------------------------|--------------------------------------------------|
+| `Tab` / `Shift+Tab`    | Cycle Input → Output → Diff (skips disabled)     |
+| `1` / `2` / `3`        | Jump directly to Input / Output / Diff tab       |
+| `↑↓` / `PgUp` / `PgDn` | Scroll body (auto-streams more bytes near tail)  |
+| `Home` / `End`         | Jump to top / bottom                             |
+| `/`                    | Open substring search                            |
+| `n` / `N`              | Next / previous search match                     |
+| `Ctrl+↓` / `Ctrl+↑`    | Next / previous diff hunk (Diff tab only)        |
+| `c`                    | Copy the visible body to clipboard               |
+| `s`                    | Save the full raw content to file (uncapped)     |
+| `Esc`                  | Close the modal                                  |
 
 ## Configuration
 
