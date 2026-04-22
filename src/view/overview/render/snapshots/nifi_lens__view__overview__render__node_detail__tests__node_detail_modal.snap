@@ -1,5 +1,6 @@
 ---
-source: src/view/overview/render.rs
+source: src/view/overview/render/node_detail.rs
+assertion_line: 267
 expression: "format!(\"{}\", term.backend())"
 ---
 "                                                                                                    "
