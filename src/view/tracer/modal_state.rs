@@ -544,10 +544,24 @@ pub fn resolve_diffable(
 /// Number of context lines to surround each change group with.
 const DIFF_CONTEXT_LINES: usize = 3;
 
-/// Compute the unified-diff cache for `(input, output)`. Line-based;
-/// no inline (char) refinement.
+/// Compute the unified-diff cache for `(input, output)`. Line-based.
+///
+/// For `Replace` ops (block of N old lines becoming M new lines), the
+/// `-` and `+` lines are **interleaved pairwise** so each changed
+/// position reads as `-old / +new` adjacent — much easier to scan than
+/// "all deletes followed by all inserts" when many or every line of a
+/// CSV / table-like body has changed. When `N != M`, leftover lines
+/// from the longer side are appended after the paired block.
 pub fn compute_diff_cache(input: &str, output: &str) -> DiffRender {
     let diff = similar::TextDiff::from_lines(input, output);
+    // Pre-split both bodies so we can index by line number for the
+    // interleave path. `split_inclusive('\n')` keeps the trailing
+    // newline, matching `iter_changes` text content; we strip it
+    // when building each `DiffLine` so the renderer doesn't draw a
+    // dangling empty line per row.
+    let old_lines: Vec<&str> = input.split_inclusive('\n').collect();
+    let new_lines: Vec<&str> = output.split_inclusive('\n').collect();
+
     let mut lines: Vec<DiffLine> = Vec::new();
     let mut hunks: Vec<HunkAnchor> = Vec::new();
 
@@ -569,25 +583,121 @@ pub fn compute_diff_cache(input: &str, output: &str) -> DiffRender {
         });
 
         for op in group {
-            for change in diff.iter_changes(&op) {
-                let tag = change.tag();
-                let mut text = change.to_string();
-                if text.ends_with('\n') {
-                    text.pop();
+            match op.tag() {
+                similar::DiffTag::Equal => {
+                    let old_range = op.old_range();
+                    let new_range = op.new_range();
+                    for (oi, ni) in old_range.zip(new_range) {
+                        if let Some(text) = old_lines.get(oi).copied() {
+                            lines.push(make_diff_line(
+                                similar::ChangeTag::Equal,
+                                text,
+                                Some((oi + 1) as u32),
+                                Some((ni + 1) as u32),
+                            ));
+                        }
+                    }
                 }
-                let input_line_num = change.old_index().map(|i| (i + 1) as u32);
-                let output_line_num = change.new_index().map(|i| (i + 1) as u32);
-                lines.push(DiffLine {
-                    tag,
-                    text,
-                    input_line: input_line_num,
-                    output_line: output_line_num,
-                });
+                similar::DiffTag::Delete => {
+                    for oi in op.old_range() {
+                        if let Some(text) = old_lines.get(oi).copied() {
+                            lines.push(make_diff_line(
+                                similar::ChangeTag::Delete,
+                                text,
+                                Some((oi + 1) as u32),
+                                None,
+                            ));
+                        }
+                    }
+                }
+                similar::DiffTag::Insert => {
+                    for ni in op.new_range() {
+                        if let Some(text) = new_lines.get(ni).copied() {
+                            lines.push(make_diff_line(
+                                similar::ChangeTag::Insert,
+                                text,
+                                None,
+                                Some((ni + 1) as u32),
+                            ));
+                        }
+                    }
+                }
+                similar::DiffTag::Replace => {
+                    let old_range = op.old_range();
+                    let new_range = op.new_range();
+                    let pair_count = old_range.len().min(new_range.len());
+
+                    // Interleaved pairs: -old[k] +new[k].
+                    for k in 0..pair_count {
+                        let oi = old_range.start + k;
+                        let ni = new_range.start + k;
+                        if let Some(text) = old_lines.get(oi).copied() {
+                            lines.push(make_diff_line(
+                                similar::ChangeTag::Delete,
+                                text,
+                                Some((oi + 1) as u32),
+                                None,
+                            ));
+                        }
+                        if let Some(text) = new_lines.get(ni).copied() {
+                            lines.push(make_diff_line(
+                                similar::ChangeTag::Insert,
+                                text,
+                                None,
+                                Some((ni + 1) as u32),
+                            ));
+                        }
+                    }
+                    // Trailing unmatched old lines (deletions only).
+                    for k in pair_count..old_range.len() {
+                        let oi = old_range.start + k;
+                        if let Some(text) = old_lines.get(oi).copied() {
+                            lines.push(make_diff_line(
+                                similar::ChangeTag::Delete,
+                                text,
+                                Some((oi + 1) as u32),
+                                None,
+                            ));
+                        }
+                    }
+                    // Trailing unmatched new lines (insertions only).
+                    for k in pair_count..new_range.len() {
+                        let ni = new_range.start + k;
+                        if let Some(text) = new_lines.get(ni).copied() {
+                            lines.push(make_diff_line(
+                                similar::ChangeTag::Insert,
+                                text,
+                                None,
+                                Some((ni + 1) as u32),
+                            ));
+                        }
+                    }
+                }
             }
         }
     }
 
     DiffRender { lines, hunks }
+}
+
+/// Strip the trailing newline retained by `split_inclusive` and wrap
+/// the line into a `DiffLine`.
+fn make_diff_line(
+    tag: similar::ChangeTag,
+    raw: &str,
+    input_line: Option<u32>,
+    output_line: Option<u32>,
+) -> DiffLine {
+    let mut text = raw.to_string();
+    if text.ends_with('\n') {
+        text.pop();
+    }
+    DiffLine {
+        tag,
+        text,
+        input_line,
+        output_line,
+    }
 }
 
 /// Resolve diffability for the modal and (lazily) populate
@@ -1772,6 +1882,58 @@ mod tests {
         resolve_and_cache_diff(&mut modal);
         assert_eq!(modal.diffable, Diffable::Pending);
         assert!(modal.diff_cache.is_none());
+    }
+
+    #[test]
+    fn compute_diff_cache_interleaves_replace_pairs() {
+        // Three CSV-shaped lines, all changed in place — the classic
+        // "every line is a delete" case that the interleave fix targets.
+        let input = "a,1,OK\nb,2,WARN\nc,3,OK\n";
+        let output = "a,1,ok\nb,2,warn\nc,3,ok\n";
+        let render = compute_diff_cache(input, output);
+
+        // Expected order: -a OK, +a ok, -b WARN, +b warn, -c OK, +c ok
+        let tags: Vec<similar::ChangeTag> = render.lines.iter().map(|l| l.tag).collect();
+        assert_eq!(
+            tags,
+            vec![
+                similar::ChangeTag::Delete,
+                similar::ChangeTag::Insert,
+                similar::ChangeTag::Delete,
+                similar::ChangeTag::Insert,
+                similar::ChangeTag::Delete,
+                similar::ChangeTag::Insert,
+            ],
+            "delete and insert lines must interleave per row, got {tags:?}"
+        );
+
+        // Spot-check that paired lines belong to the same row.
+        assert!(render.lines[0].text.contains("OK"));
+        assert!(render.lines[1].text.contains("ok"));
+        assert!(render.lines[2].text.contains("WARN"));
+        assert!(render.lines[3].text.contains("warn"));
+    }
+
+    #[test]
+    fn compute_diff_cache_replace_with_unequal_lengths_appends_remainder() {
+        // Two old lines replaced by three new lines — first two pair,
+        // the third trails as a pure insert.
+        let input = "alpha\nbeta\n";
+        let output = "ALPHA\nBETA\nGAMMA\n";
+        let render = compute_diff_cache(input, output);
+
+        let tags: Vec<similar::ChangeTag> = render.lines.iter().map(|l| l.tag).collect();
+        assert_eq!(
+            tags,
+            vec![
+                similar::ChangeTag::Delete, // alpha
+                similar::ChangeTag::Insert, // ALPHA
+                similar::ChangeTag::Delete, // beta
+                similar::ChangeTag::Insert, // BETA
+                similar::ChangeTag::Insert, // GAMMA (trailing remainder)
+            ],
+            "trailing inserts must follow paired interleave, got {tags:?}"
+        );
     }
 
     #[test]
