@@ -55,8 +55,6 @@
 
 ## Install
 
-Once published to crates.io:
-
 ```bash
 cargo install nifi-lens
 ```
@@ -280,7 +278,13 @@ For long-running live testing, skip the test step and leave the fixture
 up:
 
 ```bash
-docker compose -f integration-tests/docker-compose.yml up -d
+# First-time only: generate the CA + server certs the containers mount.
+./integration-tests/scripts/generate-certs.sh
+
+# --wait blocks until every service's healthcheck goes green; NiFi can
+# take several minutes to finish booting on a cold start.
+docker compose -f integration-tests/docker-compose.yml up -d --wait
+
 export NIFILENS_IT_PASSWORD=adminpassword123
 cargo run -p nifilens-fixture-seeder -- \
     --config integration-tests/nifilens-config.toml \
