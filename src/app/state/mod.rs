@@ -1978,6 +1978,7 @@ mod tests {
             bulletins: Default::default(),
             ui: Default::default(),
             polling: Default::default(),
+            tracer: Default::default(),
             contexts: vec![
                 Context {
                     name: "dev".into(),
