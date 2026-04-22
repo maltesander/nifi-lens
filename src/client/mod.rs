@@ -726,9 +726,9 @@ pub use health::{
     SystemDiagAggregate, SystemDiagSnapshot,
 };
 pub use tracer::{
-    AttributeTriple, ContentRender, ContentSide, ContentSnapshot, INLINE_PREVIEW_BYTES,
-    LatestEventsSnapshot, LineagePoll, LineageSnapshot, ProvenanceEventDetail,
-    ProvenanceEventSummary,
+    AttributeTriple, ContentRangeSnapshot, ContentRender, ContentSide, ContentSnapshot,
+    INLINE_PREVIEW_BYTES, LatestEventsSnapshot, LineagePoll, LineageSnapshot,
+    ProvenanceEventDetail, ProvenanceEventSummary,
 };
 
 #[cfg(test)]
