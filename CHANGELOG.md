@@ -15,6 +15,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   bit is now stripped at the keymap boundary so the `BackTab` chord
   matches again across every view.
 
+### Security
+
+- Bump `rustls-webpki` to 0.103.13, resolving
+  [RUSTSEC-2026-0104][rustsec-0104] (reachable panic in CRL parsing).
+  `nifi-lens` does not use CRLs, so it was not exposed, but the
+  transitive lockfile entry is updated to keep `cargo deny` green.
+
+[rustsec-0104]: https://rustsec.org/advisories/RUSTSEC-2026-0104
+
 ## [0.6.0] — 2026-04-21
 
 ### Added
