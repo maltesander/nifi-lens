@@ -256,62 +256,132 @@ fn diff_body_lines(
                 .unwrap_or(usize::MAX);
             continue;
         }
-        let (prefix, style) = match dl.tag {
+        let (prefix, line_color) = match dl.tag {
             similar::ChangeTag::Insert => ("+ ", theme::diff_add()),
             similar::ChangeTag::Delete => ("- ", theme::diff_del()),
             similar::ChangeTag::Equal => ("  ", ratatui::style::Style::default()),
         };
 
-        if !search_active {
-            rows.push(Line::from(vec![
-                Span::styled(prefix, style),
-                Span::styled(dl.text.clone(), style),
-            ]));
-            continue;
-        }
-
-        // Patch the row's `-`/`+` color over the search highlight so
-        // the colored diff context survives the search emphasis.
-        let s = search.expect("search_active implies search Some");
-        let line_matches: Vec<(usize, usize, bool)> = s
-            .matches
-            .iter()
-            .enumerate()
-            .filter(|(_, m)| m.line_idx == idx)
-            .map(|(mi, m)| (m.byte_start, m.byte_end, Some(mi) == s.current))
-            .collect();
-
-        if line_matches.is_empty() {
-            rows.push(Line::from(vec![
-                Span::styled(prefix, style),
-                Span::styled(dl.text.clone(), style),
-            ]));
-            continue;
-        }
-
-        let text = dl.text.clone();
-        let mut spans: Vec<Span<'static>> = vec![Span::styled(prefix, style)];
-        let mut cursor = 0usize;
-        for (start, end, is_current) in line_matches {
-            let start = start.min(text.len());
-            let end = end.min(text.len());
-            if cursor < start {
-                spans.push(Span::styled(text[cursor..start].to_string(), style));
+        // Per-byte base styles for `dl.text`: if `inline_diff` segments
+        // are present, unchanged bytes render muted and changed bytes
+        // render in the row's `-`/`+` color; otherwise every byte gets
+        // the row color (old behavior, appropriate for unpaired
+        // Delete/Insert rows and Equal context).
+        let base_styles: Vec<ratatui::style::Style> = match &dl.inline_diff {
+            Some(segments) if !segments.is_empty() => {
+                let mut v = vec![line_color; dl.text.len()];
+                for seg in segments {
+                    let end = seg.range.end.min(v.len());
+                    let start = seg.range.start.min(end);
+                    let style = if seg.differs {
+                        line_color
+                    } else {
+                        theme::muted()
+                    };
+                    for byte_style in v.iter_mut().take(end).skip(start) {
+                        *byte_style = style;
+                    }
+                }
+                v
             }
-            let hl_style = if is_current {
-                style.patch(theme::highlight())
-            } else {
-                style.patch(theme::bold())
-            };
-            spans.push(Span::styled(text[start..end].to_string(), hl_style));
-            cursor = end;
-        }
-        if cursor < text.len() {
-            spans.push(Span::styled(text[cursor..].to_string(), style));
-        }
-        rows.push(Line::from(spans));
+            _ => vec![line_color; dl.text.len()],
+        };
+
+        // Collect committed search matches on this visible diff row.
+        let line_matches: Vec<(usize, usize, bool)> = if search_active {
+            let s = search.expect("search_active implies search Some");
+            s.matches
+                .iter()
+                .enumerate()
+                .filter(|(_, m)| m.line_idx == idx)
+                .map(|(mi, m)| {
+                    let start = m.byte_start.min(dl.text.len());
+                    let end = m.byte_end.min(dl.text.len());
+                    (start, end, Some(mi) == s.current)
+                })
+                .collect()
+        } else {
+            Vec::new()
+        };
+
+        rows.push(Line::from(build_diff_line_spans(
+            prefix,
+            line_color,
+            &dl.text,
+            &base_styles,
+            &line_matches,
+        )));
     }
     rows
+}
+
+/// Build the ratatui spans for one diff body row. Walks `text` byte
+/// by byte, emitting a new span whenever the effective style changes
+/// (i.e. at inline-diff segment boundaries or search-match boundaries).
+/// This centralizes the inline-diff + search-overlay interaction so
+/// neither feature has to special-case the other.
+fn build_diff_line_spans(
+    prefix: &'static str,
+    prefix_style: ratatui::style::Style,
+    text: &str,
+    base_styles: &[ratatui::style::Style],
+    matches: &[(usize, usize, bool)],
+) -> Vec<Span<'static>> {
+    // Fast path: single color across the whole text and no matches →
+    // one body span (two total including the prefix).
+    let uniform_base = base_styles.is_empty() || base_styles.iter().all(|s| *s == base_styles[0]);
+    if matches.is_empty() && uniform_base {
+        let body_style = base_styles.first().copied().unwrap_or(prefix_style);
+        return vec![
+            Span::styled(prefix, prefix_style),
+            Span::styled(text.to_string(), body_style),
+        ];
+    }
+
+    // Walk the text, emitting a new span at every byte boundary where
+    // the effective style changes. `effective_style(i)` composes the
+    // per-byte base style with any search-match overlay at byte `i`.
+    let effective_style = |i: usize| -> ratatui::style::Style {
+        let base = base_styles.get(i).copied().unwrap_or(prefix_style);
+        // Highest-priority overlay wins: current match > other match
+        // > base.
+        for (start, end, is_current) in matches {
+            if *start <= i && i < *end {
+                return if *is_current {
+                    base.patch(theme::highlight())
+                } else {
+                    base.patch(theme::bold())
+                };
+            }
+        }
+        base
+    };
+
+    let mut spans: Vec<Span<'static>> = vec![Span::styled(prefix, prefix_style)];
+    if text.is_empty() {
+        return spans;
+    }
+
+    let mut run_start = 0usize;
+    let mut run_style = effective_style(0);
+    for i in 1..text.len() {
+        // Only consider char boundaries so UTF-8 chars never split
+        // mid-byte. For ASCII content (the common case) every index
+        // is a boundary.
+        if !text.is_char_boundary(i) {
+            continue;
+        }
+        let style = effective_style(i);
+        if style != run_style {
+            spans.push(Span::styled(text[run_start..i].to_string(), run_style));
+            run_start = i;
+            run_style = style;
+        }
+    }
+    if run_start < text.len() {
+        spans.push(Span::styled(text[run_start..].to_string(), run_style));
+    }
+    spans
 }
 
 fn render_stream_status(frame: &mut Frame, area: Rect, modal: &ContentModalState) {
@@ -583,18 +653,21 @@ mod tests {
                     text: "\"total\":299.00".into(),
                     input_line: Some(3),
                     output_line: None,
+                    inline_diff: None,
                 },
                 DiffLine {
                     tag: similar::ChangeTag::Insert,
                     text: "\"total\":329.99,".into(),
                     input_line: None,
                     output_line: Some(3),
+                    inline_diff: None,
                 },
                 DiffLine {
                     tag: similar::ChangeTag::Insert,
                     text: "\"tax\":30.99".into(),
                     input_line: None,
                     output_line: Some(4),
+                    inline_diff: None,
                 },
             ],
             hunks: vec![HunkAnchor {
