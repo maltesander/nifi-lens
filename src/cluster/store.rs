@@ -16,7 +16,7 @@ use crate::client::{
 use crate::cluster::ClusterEndpoint;
 use crate::cluster::config::ClusterPollingConfig;
 use crate::cluster::fetcher_tasks::{
-    FetchTaskConfig, spawn_about, spawn_bulletins, spawn_connections_by_pg,
+    FetchTaskConfig, spawn_about, spawn_bulletins, spawn_cluster_nodes, spawn_connections_by_pg,
     spawn_controller_services, spawn_controller_status, spawn_root_pg_status,
     spawn_system_diagnostics,
 };
@@ -260,6 +260,20 @@ impl ClusterStore {
         };
         self.handles
             .push(spawn_about(client.clone(), tx.clone(), about_cfg));
+
+        let cluster_nodes_cfg = FetchTaskConfig {
+            base_interval: self.config.cluster_nodes,
+            max_interval: self.config.max_interval,
+            jitter_percent: self.config.jitter_percent,
+            force: self.notifies.get(ClusterEndpoint::ClusterNodes),
+            gated: true,
+            subscriber_counter: self.subscribers.counter(ClusterEndpoint::ClusterNodes),
+        };
+        self.handles.push(spawn_cluster_nodes(
+            client.clone(),
+            tx.clone(),
+            cluster_nodes_cfg,
+        ));
     }
 
     pub fn subscribe(&mut self, endpoint: ClusterEndpoint, view: ViewId) {

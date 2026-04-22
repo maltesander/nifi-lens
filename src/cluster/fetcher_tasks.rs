@@ -494,7 +494,6 @@ pub(crate) fn spawn_connections_by_pg(
 /// `Ok(ClusterNodesSnapshot)` rather than a failure — the 409 is the
 /// expected steady state on a non-clustered server. The fetcher logs
 /// the standalone detection once (at `info`) and then stays silent.
-#[allow(dead_code)]
 pub(crate) fn spawn_cluster_nodes(
     client: Arc<RwLock<NifiClient>>,
     tx: mpsc::Sender<AppEvent>,
@@ -558,7 +557,6 @@ pub(crate) fn spawn_cluster_nodes(
 /// — if the shape changes across nifi-rust-client versions this falls
 /// back to the generic failure path and the endpoint shows as `Failed`,
 /// which is safe.
-#[allow(dead_code)]
 fn error_is_standalone_409(err: &NifiLensError) -> bool {
     let debug_repr = format!("{err:?}");
     debug_repr.contains("409") || debug_repr.contains("NotClustered")
