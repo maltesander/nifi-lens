@@ -508,9 +508,22 @@ The `healthy-pipeline/enrich` processor chain starts with a
 CS-referencing coverage on all NiFi versions including the 2.6.0
 floor.
 
-All fixture pipelines work on the 2.6.0 floor; the seeder no longer
-version-gates any pipeline. Bumping the marker name invalidates stale
-fixtures automatically on the next seed pass.
+All fixture pipelines work on the 2.6.0 floor. Some individual NiFi
+processor *property keys* drift between minor versions even when the
+display name is stable — setting a property by display name when the
+real key differs silently turns it into a user-defined dynamic
+flowfile attribute, and the descriptor-backed field stays at its
+default. GenerateFlowFile's Custom Text is the known case:
+`generate-ff-custom-text` on 2.6.0, `Custom Text` from 2.9.0 onward.
+The seeder handles this via `fixture::custom_text_property_key(version)`;
+add to that helper (or a sibling) when a newly-added fixture property
+turns out to drift. The detection recipe: fetch
+`GET /nifi-api/processors/{id}` on every `FIXTURE_VERSIONS` cluster
+and diff the `config.descriptors` keys — a descriptor with
+`dynamic=true` whose display name matches a `dynamic=false` descriptor
+elsewhere in the same response is the signature of a display-name-as-key
+mistake. Bumping the marker name invalidates stale fixtures
+automatically on the next seed pass.
 
 ### Bumping the NiFi ceiling version
 

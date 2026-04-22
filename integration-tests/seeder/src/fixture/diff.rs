@@ -47,6 +47,7 @@ use nifi_rust_client::{NifiError, wait};
 
 use crate::entities::{make_controller_service, make_processor, props};
 use crate::error::{Result, SeederError};
+use crate::fixture::custom_text_property_key;
 use crate::fixture::healthy::{
     create_child_pg, create_connection_in_pg, create_processor, start_processor, wait_for_valid,
 };
@@ -66,7 +67,11 @@ struct DiffServices {
     csv_writer_out_id: String,
 }
 
-pub async fn seed(client: &DynamicClient, parent_pg_id: &str) -> Result<()> {
+pub async fn seed(
+    client: &DynamicClient,
+    parent_pg_id: &str,
+    version: &semver::Version,
+) -> Result<()> {
     tracing::info!("seeding diff-pipeline");
 
     let pg_id = create_child_pg(client, parent_pg_id, "diff-pipeline").await?;
@@ -80,7 +85,7 @@ pub async fn seed(client: &DynamicClient, parent_pg_id: &str) -> Result<()> {
             "GenerateFlowFile",
             "org.apache.nifi.processors.standard.GenerateFlowFile",
             props(&[
-                ("Custom Text", DIFF_PAYLOAD),
+                (custom_text_property_key(version), DIFF_PAYLOAD),
                 ("Data Format", "Text"),
                 ("Unique FlowFiles", "false"),
                 ("Batch Size", "1"),

@@ -24,6 +24,7 @@ use nifi_rust_client::dynamic::{DynamicClient, types};
 
 use crate::entities::{make_connection, make_pg, make_port, make_processor, props};
 use crate::error::{Result, SeederError};
+use crate::fixture::custom_text_property_key;
 use crate::fixture::payload::HEALTHY_INGEST_CUSTOM_TEXT;
 use crate::fixture::services::ServiceIds;
 use crate::state::poll_until;
@@ -41,6 +42,7 @@ pub async fn seed(
     client: &DynamicClient,
     parent_pg_id: &str,
     service_ids: &ServiceIds,
+    version: &semver::Version,
 ) -> Result<()> {
     tracing::info!("seeding healthy-pipeline");
 
@@ -59,7 +61,10 @@ pub async fn seed(
             // (Custom Text + Unique FlowFiles=true). Setting it to
             // false satisfies both 2.6.0 and 2.8.0.
             props(&[
-                ("Custom Text", HEALTHY_INGEST_CUSTOM_TEXT),
+                (
+                    custom_text_property_key(version),
+                    HEALTHY_INGEST_CUSTOM_TEXT,
+                ),
                 ("Data Format", "Text"),
                 ("Unique FlowFiles", "false"),
                 ("Batch Size", "1"),
