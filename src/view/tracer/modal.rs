@@ -113,9 +113,9 @@ fn render_body(frame: &mut Frame, area: Rect, modal: &ContentModalState) {
             area.height as usize,
             modal.search.as_ref(),
         ),
-        // Search highlighting on the Diff tab is a follow-up; Diff is
-        // line-based and has its own renderer.
-        ContentModalTab::Diff => diff_body_lines(modal, area.height as usize),
+        ContentModalTab::Diff => {
+            diff_body_lines(modal, area.height as usize, modal.search.as_ref())
+        }
     };
     frame.render_widget(Paragraph::new(lines), area);
 }
@@ -205,7 +205,11 @@ fn text_body_lines(
         .collect()
 }
 
-fn diff_body_lines(modal: &ContentModalState, height: usize) -> Vec<Line<'static>> {
+fn diff_body_lines(
+    modal: &ContentModalState,
+    height: usize,
+    search: Option<&crate::widget::search::SearchState>,
+) -> Vec<Line<'static>> {
     let Some(cache) = modal.diff_cache.as_ref() else {
         return vec![Line::from(Span::styled(
             match &modal.diffable {
@@ -224,6 +228,13 @@ fn diff_body_lines(modal: &ContentModalState, height: usize) -> Vec<Line<'static
         .first()
         .map(|h| h.line_idx as usize)
         .unwrap_or(usize::MAX);
+
+    // Search corpus for the Diff tab is `cache.lines.join("\n")` (see
+    // `content_modal_search_body`), so committed match `line_idx`
+    // values map 1:1 to the iteration index into `cache.lines` below.
+    let search_active = search
+        .map(|s| s.committed && !s.matches.is_empty())
+        .unwrap_or(false);
 
     for (idx, dl) in cache
         .lines
@@ -250,10 +261,55 @@ fn diff_body_lines(modal: &ContentModalState, height: usize) -> Vec<Line<'static
             similar::ChangeTag::Delete => ("- ", theme::diff_del()),
             similar::ChangeTag::Equal => ("  ", ratatui::style::Style::default()),
         };
-        rows.push(Line::from(vec![
-            Span::styled(prefix, style),
-            Span::styled(dl.text.clone(), style),
-        ]));
+
+        if !search_active {
+            rows.push(Line::from(vec![
+                Span::styled(prefix, style),
+                Span::styled(dl.text.clone(), style),
+            ]));
+            continue;
+        }
+
+        // Patch the row's `-`/`+` color over the search highlight so
+        // the colored diff context survives the search emphasis.
+        let s = search.expect("search_active implies search Some");
+        let line_matches: Vec<(usize, usize, bool)> = s
+            .matches
+            .iter()
+            .enumerate()
+            .filter(|(_, m)| m.line_idx == idx)
+            .map(|(mi, m)| (m.byte_start, m.byte_end, Some(mi) == s.current))
+            .collect();
+
+        if line_matches.is_empty() {
+            rows.push(Line::from(vec![
+                Span::styled(prefix, style),
+                Span::styled(dl.text.clone(), style),
+            ]));
+            continue;
+        }
+
+        let text = dl.text.clone();
+        let mut spans: Vec<Span<'static>> = vec![Span::styled(prefix, style)];
+        let mut cursor = 0usize;
+        for (start, end, is_current) in line_matches {
+            let start = start.min(text.len());
+            let end = end.min(text.len());
+            if cursor < start {
+                spans.push(Span::styled(text[cursor..start].to_string(), style));
+            }
+            let hl_style = if is_current {
+                style.patch(theme::highlight())
+            } else {
+                style.patch(theme::bold())
+            };
+            spans.push(Span::styled(text[start..end].to_string(), hl_style));
+            cursor = end;
+        }
+        if cursor < text.len() {
+            spans.push(Span::styled(text[cursor..].to_string(), style));
+        }
+        rows.push(Line::from(spans));
     }
     rows
 }
