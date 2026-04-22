@@ -1484,6 +1484,55 @@ pub fn resolve_diffable(
     Diffable::Pending
 }
 
+/// Number of context lines to surround each change group with.
+const DIFF_CONTEXT_LINES: usize = 3;
+
+/// Compute the unified-diff cache for `(input, output)`. Line-based;
+/// no inline (char) refinement.
+pub fn compute_diff_cache(input: &str, output: &str) -> DiffRender {
+    let diff = similar::TextDiff::from_lines(input, output);
+    let mut lines: Vec<DiffLine> = Vec::new();
+    let mut hunks: Vec<HunkAnchor> = Vec::new();
+
+    for group in diff.grouped_ops(DIFF_CONTEXT_LINES) {
+        let hunk_start = lines.len();
+        let (input_line, output_line) = group
+            .first()
+            .map(|op| {
+                (
+                    op.old_range().start as u32 + 1,
+                    op.new_range().start as u32 + 1,
+                )
+            })
+            .unwrap_or((0, 0));
+        hunks.push(HunkAnchor {
+            line_idx: hunk_start as u32,
+            input_line,
+            output_line,
+        });
+
+        for op in group {
+            for change in diff.iter_changes(&op) {
+                let tag = change.tag();
+                let mut text = change.to_string();
+                if text.ends_with('\n') {
+                    text.pop();
+                }
+                let input_line_num = change.old_index().map(|i| (i + 1) as u32);
+                let output_line_num = change.new_index().map(|i| (i + 1) as u32);
+                lines.push(DiffLine {
+                    tag,
+                    text,
+                    input_line: input_line_num,
+                    output_line: output_line_num,
+                });
+            }
+        }
+    }
+
+    DiffRender { lines, hunks }
+}
+
 // ── Tests ─────────────────────────────────────────────────────────────────────
 
 #[cfg(test)]
@@ -3003,5 +3052,25 @@ mod tests {
             resolve_diffable(&header, &input, &output),
             Diffable::NotAvailable(NotDiffableReason::InputUnavailable)
         );
+    }
+
+    #[test]
+    fn compute_diff_cache_produces_lines_and_hunks() {
+        let input = "line a\nline b\nline c\n";
+        let output = "line a\nline B\nline c\n";
+        let render = compute_diff_cache(input, output);
+        let inserts = render
+            .lines
+            .iter()
+            .filter(|l| matches!(l.tag, similar::ChangeTag::Insert))
+            .count();
+        let deletes = render
+            .lines
+            .iter()
+            .filter(|l| matches!(l.tag, similar::ChangeTag::Delete))
+            .count();
+        assert!(inserts >= 1, "expected at least one insert");
+        assert!(deletes >= 1, "expected at least one delete");
+        assert_eq!(render.hunks.len(), 1);
     }
 }
