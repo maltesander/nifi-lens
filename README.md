@@ -133,6 +133,32 @@ cross-linked from Bulletins and Browser.
 event for a tabbed detail pane (Attributes | Input | Output); `d` toggles
 the attribute All / Changed diff; `s` saves raw content to a file.
 
+### Content viewer modal
+
+Press `i` on a provenance event with content to open a full-screen
+viewer with three tabs:
+
+- **Input** — streamed input-side content. Default ceiling 4 MiB;
+  raise with the config key below.
+- **Output** — same for the output side.
+- **Diff** — colored unified diff when both sides are present and
+  hold the same MIME type (bounded at 512 KiB per side).
+
+Inside the modal:
+
+| Key                      | Action                                           |
+|--------------------------|--------------------------------------------------|
+| `Tab` / `Shift+Tab`      | Cycle Input → Output → Diff (skips disabled)     |
+| `1` / `2` / `3`          | Jump to Input / Output / Diff tab                |
+| `↑↓` / `PgUp` / `PgDn`  | Scroll body                                      |
+| `Home` / `End`           | Jump to top / bottom                             |
+| `/`                      | Open text search                                 |
+| `n` / `N`                | Next / previous search match                     |
+| `Ctrl+↓` / `Ctrl+↑`      | Next / previous diff hunk (Diff tab only)        |
+| `c`                      | Copy the visible body to clipboard               |
+| `s`                      | Save the full raw content to file (uncapped)     |
+| `Esc`                    | Close the modal                                  |
+
 ## Keybindings
 
 The tool is largely self-explanatory — `?` opens context-aware help and the
@@ -159,7 +185,7 @@ fuzzy search.
 the filter bar to submit.
 
 **Tracer** — `←`/`→` cycle detail tabs; `d` toggles attribute diff;
-`s` saves content.
+`s` saves content; `i` opens the full-screen content viewer modal.
 
 ## Configuration
 
@@ -172,6 +198,10 @@ current_context = "dev"
 # 100..=100000. Larger values keep more history at the cost of memory.
 [bulletins]
 ring_size = 5000
+
+# Optional: Tracer tab options.
+[tracer]
+modal_streaming_ceiling = "4MiB"   # "0" disables the ceiling (unbounded)
 
 # Optional: UI rendering options. All fields are optional; the defaults
 # below match what the tool uses if you omit the section.

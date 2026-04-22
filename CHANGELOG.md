@@ -7,6 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **Tracer**: full-screen content viewer modal (`i`) with Input /
+  Output / Diff tabs, streaming fetch, colored unified diff, hunk
+  navigation (`Ctrl+↓` / `Ctrl+↑`), bulletins-style search primitives
+  shared via `src/widget/search.rs`.
+- **Config**: `[tracer] modal_streaming_ceiling` (default `4MiB`,
+  `"0"` = unbounded) bounds the modal's per-side load.
+
+### Changed
+
+- **Tracer**: inline content preview cap lowered from 1 MiB to 8 KiB.
+  Use `i` to open the new modal for full streamed content.
+
 ### Fixed
 
 - **Input**: `Shift+Tab` (previous pane focus) no longer falls through to

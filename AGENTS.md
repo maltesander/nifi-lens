@@ -276,6 +276,33 @@ carries per-view semantics. `open_detail_modal` captures a `GroupKey`
 and `GroupDetails` snapshot at open time; subsequent ring mutations do
 not disturb the open modal.
 
+### Tracer content viewer modal
+
+Full-screen modal opened with `i` on the Tracer Content sub-tab.
+State lives on `AppState.tracer.content_modal: Option<ContentModalState>`.
+Modal-scoped keys use `ContentModalVerb` (a separate enum from
+`TracerVerb`); when the modal is open, the modal's `Verb::all()`
+generator drives the footer hint strip and help modal section, and
+the keymap shadows outer-tab keys.
+
+Streaming: `provenance_content_range(event_id, side, offset, len)`
+fetches 512 KiB chunks. A reducer auto-fires the next chunk when the
+viewport bottom comes within 100 lines of the decoded tail. Per-side
+ceiling defaults to 4 MiB (`[tracer] modal_streaming_ceiling`);
+`"0"` → unbounded.
+
+Diff mode is bounded at 512 KiB per side (fixed, not configurable)
+and uses `similar::TextDiff::from_lines` with 3-line context. Diff
+eligibility requires both sides available, MIME pair matching the
+allowlist (or UTF-8 fallback when neither side declares a MIME),
+declared size ≤ 512 KiB per side, and non-identical bytes.
+
+Search primitives (`MatchSpan`, `SearchState`, `compute_matches`) are
+shared with the Bulletins detail modal via `src/widget/search.rs`.
+
+Parquet / tabular viewers are **out of scope**; tracked as a follow-up
+spec.
+
 ### Poll intervals
 
 All periodic NiFi fetches are owned by `src/cluster/ClusterStore`.
