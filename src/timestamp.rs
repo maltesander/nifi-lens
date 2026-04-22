@@ -166,6 +166,22 @@ pub fn format(
     }
 }
 
+/// Compact human-readable age. `< 60s → "Ns"`, `< 60m → "Nm"`,
+/// otherwise `"Nh"`. `None` → em-dash.
+pub fn format_age(d: Option<std::time::Duration>) -> String {
+    let Some(d) = d else {
+        return "\u{2014}".to_string();
+    };
+    let secs = d.as_secs();
+    if secs < 60 {
+        format!("{secs}s")
+    } else if secs < 3600 {
+        format!("{}m", secs / 60)
+    } else {
+        format!("{}h", secs / 3600)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -286,5 +302,37 @@ mod tests {
             format(dt, now, &utc_cfg(TimestampFormat::Human), true),
             "Apr 12 14:32:18.456"
         );
+    }
+
+    #[test]
+    fn format_age_under_minute() {
+        assert_eq!(format_age(Some(std::time::Duration::from_secs(0))), "0s");
+        assert_eq!(format_age(Some(std::time::Duration::from_secs(3))), "3s");
+        assert_eq!(format_age(Some(std::time::Duration::from_secs(59))), "59s");
+    }
+
+    #[test]
+    fn format_age_minutes() {
+        assert_eq!(format_age(Some(std::time::Duration::from_secs(60))), "1m");
+        assert_eq!(format_age(Some(std::time::Duration::from_secs(125))), "2m");
+        assert_eq!(
+            format_age(Some(std::time::Duration::from_secs(3599))),
+            "59m"
+        );
+    }
+
+    #[test]
+    fn format_age_hours() {
+        assert_eq!(format_age(Some(std::time::Duration::from_secs(3600))), "1h");
+        assert_eq!(format_age(Some(std::time::Duration::from_secs(7200))), "2h");
+        assert_eq!(
+            format_age(Some(std::time::Duration::from_secs(86_400))),
+            "24h"
+        );
+    }
+
+    #[test]
+    fn format_age_none() {
+        assert_eq!(format_age(None), "\u{2014}"); // em-dash
     }
 }
