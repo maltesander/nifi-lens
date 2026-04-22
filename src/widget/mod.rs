@@ -9,6 +9,7 @@ pub mod hint_bar;
 pub mod panel;
 pub mod run_icon;
 pub mod save_modal;
+pub mod search;
 pub mod severity;
 pub mod status_bar;
 pub mod top_bar;
