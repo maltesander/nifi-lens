@@ -18,6 +18,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `src/widget/search.rs`.
 - **Config**: `[tracer] modal_streaming_ceiling` (default `4MiB`,
   `"0"` = unbounded) bounds the modal's per-side load.
+- **Overview** Nodes panel: per-row role/status badge (`[PC]` / `[P·]` /
+  `[·C]` / `[··]` / `[OFF]` / `[DIS]` / `[CON]`) and heartbeat-age
+  column, joined from a new `ClusterEndpoint::ClusterNodes` fetcher
+  polling `/controller/cluster` every 5 s by default.
+- **Overview** node detail modal: redesigned as a four-quadrant dashboard
+  (identity header, resources, repositories per-disk, events timeline,
+  GC table). Standalone NiFi servers degrade cleanly to a reduced
+  layout.
+- `[polling.cluster] cluster_nodes` config key (default `5s`).
 
 ### Changed
 

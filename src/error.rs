@@ -279,6 +279,17 @@ pub enum NifiLensError {
     },
 
     /// See `ClientBuildFailed` for the boxed-source rationale; callers
+    /// must box explicitly. Standalone NiFi servers return HTTP 409 for
+    /// `/controller/cluster` — the fetcher recognizes that shape and
+    /// does not produce a `ClusterNodesFailed`; only true errors end up
+    /// here.
+    #[snafu(display("failed to fetch cluster nodes for context {context:?}: {source}"))]
+    ClusterNodesFailed {
+        context: String,
+        source: Box<dyn std::error::Error + Send + Sync>,
+    },
+
+    /// See `ClientBuildFailed` for the boxed-source rationale; callers
     /// must box explicitly.
     #[snafu(display(
         "failed to fetch process-group {id:?} detail for context {context:?}: {source}"

@@ -8,6 +8,7 @@
 //! according to the user's `[ui]` config.
 
 use serde::Deserialize;
+use std::time::Duration;
 use time::OffsetDateTime;
 use time::format_description::well_known::Iso8601;
 use time::macros::format_description;
@@ -166,6 +167,64 @@ pub fn format(
     }
 }
 
+/// Returns a compact, floor-rounded age string suitable for a fixed-width
+/// table column: `"Ns"` (0–59 s), `"Nm"` (1–59 min), `"Nh"` (≥ 1 h).
+/// Returns an em-dash for `None`.
+pub fn format_age(d: Option<Duration>) -> String {
+    let Some(d) = d else {
+        return "\u{2014}".to_string();
+    };
+    let secs = d.as_secs();
+    if secs < 60 {
+        format!("{secs}s")
+    } else if secs < 3600 {
+        format!("{}m", secs / 60)
+    } else {
+        format!("{}h", secs / 3600)
+    }
+}
+
+/// Returns a human-readable byte count using power-of-1024 thresholds
+/// (matches the numbers NiFi prints in `StorageUsageDto`). Values
+/// `>= 100` in the `MB`, `GB`, and `TB` tiers render without a decimal
+/// (`"512 MB"`, not `"512.0 MB"`) so table columns stay aligned; the
+/// `KB` tier always renders with one decimal.
+///
+/// Intended for disk-byte counts in the low-petabyte range and below;
+/// the `n as f64` conversion loses precision above `2^53` bytes (~8 PB).
+pub fn format_bytes(n: u64) -> String {
+    const KB: u64 = 1024;
+    const MB: u64 = KB * 1024;
+    const GB: u64 = MB * 1024;
+    const TB: u64 = GB * 1024;
+    if n < KB {
+        format!("{n} B")
+    } else if n < MB {
+        format!("{:.1} KB", n as f64 / KB as f64)
+    } else if n < GB {
+        let v = n as f64 / MB as f64;
+        if v >= 100.0 {
+            format!("{v:.0} MB")
+        } else {
+            format!("{v:.1} MB")
+        }
+    } else if n < TB {
+        let v = n as f64 / GB as f64;
+        if v >= 100.0 {
+            format!("{v:.0} GB")
+        } else {
+            format!("{v:.1} GB")
+        }
+    } else {
+        let v = n as f64 / TB as f64;
+        if v >= 100.0 {
+            format!("{v:.0} TB")
+        } else {
+            format!("{v:.1} TB")
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -286,5 +345,62 @@ mod tests {
             format(dt, now, &utc_cfg(TimestampFormat::Human), true),
             "Apr 12 14:32:18.456"
         );
+    }
+
+    #[test]
+    fn format_age_under_minute() {
+        assert_eq!(format_age(Some(Duration::from_millis(500))), "0s");
+        assert_eq!(format_age(Some(Duration::from_secs(0))), "0s");
+        assert_eq!(format_age(Some(Duration::from_secs(3))), "3s");
+        assert_eq!(format_age(Some(Duration::from_secs(59))), "59s");
+    }
+
+    #[test]
+    fn format_age_minutes() {
+        assert_eq!(format_age(Some(Duration::from_secs(60))), "1m");
+        assert_eq!(format_age(Some(Duration::from_secs(125))), "2m");
+        assert_eq!(format_age(Some(Duration::from_secs(3599))), "59m");
+    }
+
+    #[test]
+    fn format_age_hours() {
+        assert_eq!(format_age(Some(Duration::from_secs(3600))), "1h");
+        assert_eq!(format_age(Some(Duration::from_secs(7200))), "2h");
+        assert_eq!(format_age(Some(Duration::from_secs(86_400))), "24h");
+    }
+
+    #[test]
+    fn format_age_none() {
+        assert_eq!(format_age(None), "\u{2014}"); // em-dash
+    }
+
+    #[test]
+    fn format_bytes_tiers() {
+        assert_eq!(format_bytes(0), "0 B");
+        assert_eq!(format_bytes(999), "999 B");
+        assert_eq!(format_bytes(1024), "1.0 KB");
+        assert_eq!(format_bytes(1536), "1.5 KB");
+        assert_eq!(format_bytes(1024 * 1024), "1.0 MB");
+        assert_eq!(format_bytes(512 * 1024 * 1024), "512 MB");
+        assert_eq!(format_bytes(1024 * 1024 * 1024), "1.0 GB");
+        assert_eq!(format_bytes(190 * 1024 * 1024 * 1024), "190 GB");
+        assert_eq!(format_bytes(3 * 1024_u64.pow(4)), "3.0 TB");
+
+        // Tier transitions (1023↔1024 boundary on each tier).
+        assert_eq!(format_bytes(1023), "1023 B");
+        assert_eq!(format_bytes(1024 * 1024 - 1), "1024.0 KB");
+        assert_eq!(format_bytes(1024 * 1024), "1.0 MB");
+        assert_eq!(format_bytes(1024 * 1024 * 1024 - 1), "1024 MB");
+        assert_eq!(format_bytes(1024 * 1024 * 1024), "1.0 GB");
+        assert_eq!(format_bytes(1024_u64.pow(4) - 1), "1024 GB");
+        assert_eq!(format_bytes(1024_u64.pow(4)), "1.0 TB");
+
+        // Decimal-suppression threshold (>= 100) in MB/GB/TB.
+        assert_eq!(format_bytes(99 * 1024 * 1024), "99.0 MB");
+        assert_eq!(format_bytes(100 * 1024 * 1024), "100 MB");
+        assert_eq!(format_bytes(99 * 1024_u64.pow(3)), "99.0 GB");
+        assert_eq!(format_bytes(100 * 1024_u64.pow(3)), "100 GB");
+        assert_eq!(format_bytes(99 * 1024_u64.pow(4)), "99.0 TB");
+        assert_eq!(format_bytes(100 * 1024_u64.pow(4)), "100 TB");
     }
 }

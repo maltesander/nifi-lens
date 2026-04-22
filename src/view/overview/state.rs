@@ -195,11 +195,21 @@ pub(crate) fn redraw_sysdiag(state: &mut crate::app::state::AppState) {
         return;
     };
 
-    crate::client::health::update_nodes(&mut state.overview.nodes, diag);
+    let cluster = state.cluster.snapshot.cluster_nodes.latest().cloned();
+    crate::client::health::update_nodes(&mut state.overview.nodes, diag, cluster.as_ref());
     state.overview.repositories_summary = build_repositories_summary(diag);
     state.overview.last_sysdiag_refresh = Some(std::time::Instant::now());
     state.cluster_summary.total_nodes = Some(diag.nodes.len());
     state.cluster_summary.connected_nodes = Some(diag.nodes.len());
+}
+
+/// Redraw path invoked when `ClusterEndpoint::ClusterNodes` changes.
+/// Idempotent — delegates to `redraw_sysdiag` which reads both endpoint
+/// states out of `AppState.cluster.snapshot` and re-runs the join.
+/// A `ClusterNodes` update arriving before the first sysdiag converges
+/// in at most one extra redraw.
+pub(crate) fn redraw_cluster_nodes(state: &mut crate::app::state::AppState) {
+    redraw_sysdiag(state);
 }
 
 /// Re-derive bulletin-facing Overview projections (sparkline, noisy
@@ -1181,5 +1191,63 @@ mod tests {
             state.overview.root_pg.as_ref().unwrap().process_group_count,
             first_pg_count
         );
+    }
+
+    #[test]
+    fn redraw_cluster_nodes_populates_membership_on_existing_rows() {
+        use crate::client::health::{ClusterNodeRow, ClusterNodeStatus, ClusterNodesSnapshot};
+        use crate::cluster::snapshot::FetchMeta;
+
+        // First: seed sysdiag so we have a node1:8080 / node2:8080 rows.
+        let mut state = crate::test_support::fresh_state();
+        seed_sysdiag(&mut state, two_node_sysdiag());
+
+        // Now seed cluster-nodes with matching addresses. Both nodes connected.
+        let cluster = ClusterNodesSnapshot {
+            rows: vec![
+                ClusterNodeRow {
+                    node_id: "id-1".into(),
+                    address: "node1:8080".into(),
+                    status: ClusterNodeStatus::Connected,
+                    is_primary: true,
+                    is_coordinator: false,
+                    heartbeat_iso: None,
+                    node_start_iso: None,
+                    active_thread_count: 4,
+                    flow_files_queued: 10,
+                    bytes_queued: 100,
+                    events: vec![],
+                },
+                ClusterNodeRow {
+                    node_id: "id-2".into(),
+                    address: "node2:8080".into(),
+                    status: ClusterNodeStatus::Connected,
+                    is_primary: false,
+                    is_coordinator: true,
+                    heartbeat_iso: None,
+                    node_start_iso: None,
+                    active_thread_count: 3,
+                    flow_files_queued: 5,
+                    bytes_queued: 50,
+                    events: vec![],
+                },
+            ],
+            fetched_at: std::time::Instant::now(),
+            fetched_wall: time::OffsetDateTime::now_utc(),
+        };
+        state.cluster.snapshot.cluster_nodes.apply(
+            Ok(cluster),
+            FetchMeta {
+                fetched_at: std::time::Instant::now(),
+                fetch_duration: std::time::Duration::from_millis(1),
+                next_interval: std::time::Duration::from_secs(5),
+            },
+        );
+        crate::view::overview::state::redraw_cluster_nodes(&mut state);
+
+        let rows = &state.overview.nodes.nodes;
+        assert_eq!(rows.len(), 2);
+        assert!(rows[0].cluster.as_ref().unwrap().is_primary);
+        assert!(rows[1].cluster.as_ref().unwrap().is_coordinator);
     }
 }

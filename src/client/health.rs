@@ -3,6 +3,7 @@
 use std::time::Instant;
 
 use nifi_rust_client::dynamic::types::common::StorageUsageDto;
+use time::OffsetDateTime;
 
 use crate::app::navigation::ListNavigation;
 use crate::client::NifiClient;
@@ -106,6 +107,166 @@ impl Severity {
     }
 }
 
+/// Cluster-membership state for a single node, from
+/// `/controller/cluster` `NodeDTO.status`. Unknown wire values map to
+/// `Other` — kept unit-typed so the enum stays `Copy`/`Eq`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ClusterNodeStatus {
+    Connected,
+    Connecting,
+    Disconnected,
+    Disconnecting,
+    Offloading,
+    Offloaded,
+    Other,
+}
+
+impl ClusterNodeStatus {
+    /// Map a NiFi wire status to the typed enum. Unknown values
+    /// collapse to `Other` so new NiFi versions never panic.
+    pub fn from_wire(s: &str) -> Self {
+        match s {
+            "CONNECTED" => Self::Connected,
+            "CONNECTING" => Self::Connecting,
+            "DISCONNECTED" => Self::Disconnected,
+            "DISCONNECTING" => Self::Disconnecting,
+            "OFFLOADING" => Self::Offloading,
+            "OFFLOADED" => Self::Offloaded,
+            _ => Self::Other,
+        }
+    }
+
+    /// Returns `true` when the node is not expected to report fresh
+    /// telemetry. The Nodes panel dims these rows and shows `───`
+    /// placeholders for heap/gc/load columns.
+    pub fn is_dead(self) -> bool {
+        matches!(
+            self,
+            Self::Disconnected | Self::Disconnecting | Self::Offloading | Self::Offloaded,
+        )
+    }
+}
+
+/// One historical event recorded against a cluster node. Newest-first
+/// inside `ClusterNodeRow.events`; capped to 8 at parse time.
+#[derive(Debug, Clone)]
+pub struct ClusterNodeEvent {
+    pub timestamp_iso: String,
+    pub category: Option<String>,
+    pub message: String,
+}
+
+/// Per-node cluster-membership row from `/controller/cluster`.
+#[derive(Debug, Clone)]
+pub struct ClusterNodeRow {
+    pub node_id: String,
+    /// `"host:apiPort"` — composed identically to `SystemDiagSnapshot`
+    /// node addresses so the Overview reducer can join on this string.
+    pub address: String,
+    pub status: ClusterNodeStatus,
+    pub is_primary: bool,
+    pub is_coordinator: bool,
+    pub heartbeat_iso: Option<String>,
+    pub node_start_iso: Option<String>,
+    pub active_thread_count: u32,
+    pub flow_files_queued: u32,
+    pub bytes_queued: u64,
+    pub events: Vec<ClusterNodeEvent>,
+}
+
+/// Snapshot of `GET /controller/cluster`. `fetched_at` carries a
+/// monotonic `Instant` used by the store's staleness checks;
+/// `fetched_wall` carries a wall-clock `OffsetDateTime` used by the
+/// `update_nodes` reducer to compute per-node heartbeat ages
+/// deterministically.
+///
+/// No `Default` impl: `Instant` has no sensible default, and the
+/// sibling `SystemDiagSnapshot` is declared the same way.
+#[derive(Debug, Clone)]
+pub struct ClusterNodesSnapshot {
+    pub rows: Vec<ClusterNodeRow>,
+    pub fetched_at: std::time::Instant,
+    /// Wall-clock anchor captured at fetch time. Used by the `update_nodes`
+    /// reducer to compute per-node heartbeat ages deterministically (an
+    /// `Instant` cannot be subtracted from a wall-clock `OffsetDateTime`
+    /// parsed from a NiFi heartbeat string).
+    pub fetched_wall: OffsetDateTime,
+}
+
+/// Per-node cluster-membership view joined into `NodeHealthRow`.
+/// `heartbeat_age` is materialized at reducer time so the list and the
+/// modal see identical values and snapshot tests stay deterministic.
+#[derive(Debug, Clone)]
+pub struct ClusterMembership {
+    pub node_id: String,
+    pub status: ClusterNodeStatus,
+    pub is_primary: bool,
+    pub is_coordinator: bool,
+    pub heartbeat_age: Option<std::time::Duration>,
+    pub node_start_iso: Option<String>,
+    pub active_thread_count: u32,
+    pub flow_files_queued: u32,
+    pub bytes_queued: u64,
+    pub events: Vec<ClusterNodeEvent>,
+}
+
+const MAX_NODE_EVENTS: usize = 8;
+
+impl ClusterNodesSnapshot {
+    /// Project a `ClusterDto` into the store-owned snapshot shape. Pure;
+    /// no I/O. Unknown wire statuses become `ClusterNodeStatus::Other`.
+    /// Events are truncated to `MAX_NODE_EVENTS`, preserving newest-first
+    /// order as NiFi returns them.
+    pub fn from_cluster_dto(dto: &nifi_rust_client::dynamic::types::ClusterDto) -> Self {
+        let rows = dto
+            .nodes
+            .as_deref()
+            .unwrap_or_default()
+            .iter()
+            .map(|n| {
+                let address = format!(
+                    "{}:{}",
+                    n.address.as_deref().unwrap_or("unknown"),
+                    n.api_port.unwrap_or(0),
+                );
+                let roles = n.roles.as_deref().unwrap_or_default();
+                let is_primary = roles.iter().any(|r| r == "Primary Node");
+                let is_coordinator = roles.iter().any(|r| r == "Cluster Coordinator");
+                let events = n
+                    .events
+                    .as_deref()
+                    .unwrap_or_default()
+                    .iter()
+                    .take(MAX_NODE_EVENTS)
+                    .map(|e| ClusterNodeEvent {
+                        timestamp_iso: e.timestamp.clone().unwrap_or_default(),
+                        category: e.category.clone(),
+                        message: e.message.clone().unwrap_or_default(),
+                    })
+                    .collect();
+                ClusterNodeRow {
+                    node_id: n.node_id.clone().unwrap_or_default(),
+                    address,
+                    status: ClusterNodeStatus::from_wire(n.status.as_deref().unwrap_or("")),
+                    is_primary,
+                    is_coordinator,
+                    heartbeat_iso: n.heartbeat.clone(),
+                    node_start_iso: n.node_start_time.clone(),
+                    active_thread_count: n.active_thread_count.unwrap_or(0).max(0) as u32,
+                    flow_files_queued: n.flow_files_queued.unwrap_or(0).max(0) as u32,
+                    bytes_queued: n.bytes_queued.unwrap_or(0).max(0) as u64,
+                    events,
+                }
+            })
+            .collect();
+        Self {
+            rows,
+            fetched_at: std::time::Instant::now(),
+            fetched_wall: OffsetDateTime::now_utc(),
+        }
+    }
+}
+
 /// One row in the node-health table.
 #[derive(Debug, Clone)]
 pub struct NodeHealthRow {
@@ -125,6 +286,7 @@ pub struct NodeHealthRow {
     pub content_repos: Vec<RepoUsage>,
     pub flowfile_repo: Option<RepoUsage>,
     pub provenance_repos: Vec<RepoUsage>,
+    pub cluster: Option<ClusterMembership>,
 }
 
 /// Stateful container for the node-health table.
@@ -157,17 +319,33 @@ impl ListNavigation for NodesState {
 // ---------------------------------------------------------------------------
 
 /// Refresh node-health rows from a fresh system-diagnostics snapshot.
+/// Optionally joins cluster-membership data from `/controller/cluster`.
 ///
 /// GC deltas are computed against the previous `state.nodes` values.
 /// Nodes that are new (not seen in the previous poll) receive `gc_delta = None`.
 /// `state.selected` is clamped to the new row count.
-pub fn update_nodes(state: &mut NodesState, diag: &SystemDiagSnapshot) {
+///
+/// Sysdiag is the source of truth for row existence. Cluster data is
+/// joined on `address`; rows whose address doesn't appear in `cluster`
+/// get `cluster = None`. Pass `cluster = None` on standalone NiFi or
+/// before the first cluster-nodes fetch completes — the result is
+/// identical to the pre-cluster-nodes behavior.
+pub fn update_nodes(
+    state: &mut NodesState,
+    diag: &SystemDiagSnapshot,
+    cluster: Option<&ClusterNodesSnapshot>,
+) {
     // Capture previous GC totals keyed by node address.
     let old_gc: std::collections::HashMap<&str, u64> = state
         .nodes
         .iter()
         .map(|n| (n.node_address.as_str(), n.gc_collection_count))
         .collect();
+
+    // Pre-index cluster rows by address for O(1) join.
+    let cluster_by_addr: std::collections::HashMap<&str, &ClusterNodeRow> = cluster
+        .map(|c| c.rows.iter().map(|r| (r.address.as_str(), r)).collect())
+        .unwrap_or_default();
 
     state.nodes = diag
         .nodes
@@ -182,6 +360,25 @@ pub fn update_nodes(state: &mut NodesState, diag: &SystemDiagSnapshot) {
             } else {
                 0
             };
+
+            let cluster_membership = cluster_by_addr.get(n.address.as_str()).map(|cr| {
+                let heartbeat_age = compute_heartbeat_age(
+                    cr.heartbeat_iso.as_deref(),
+                    cluster.map(|c| c.fetched_wall),
+                );
+                ClusterMembership {
+                    node_id: cr.node_id.clone(),
+                    status: cr.status,
+                    is_primary: cr.is_primary,
+                    is_coordinator: cr.is_coordinator,
+                    heartbeat_age,
+                    node_start_iso: cr.node_start_iso.clone(),
+                    active_thread_count: cr.active_thread_count,
+                    flow_files_queued: cr.flow_files_queued,
+                    bytes_queued: cr.bytes_queued,
+                    events: cr.events.clone(),
+                }
+            });
 
             NodeHealthRow {
                 node_address: n.address.clone(),
@@ -200,6 +397,7 @@ pub fn update_nodes(state: &mut NodesState, diag: &SystemDiagSnapshot) {
                 content_repos: n.content_repos.clone(),
                 flowfile_repo: n.flowfile_repo.clone(),
                 provenance_repos: n.provenance_repos.clone(),
+                cluster: cluster_membership,
             }
         })
         .collect();
@@ -219,6 +417,28 @@ pub fn update_nodes(state: &mut NodesState, diag: &SystemDiagSnapshot) {
     } else {
         state.selected = 0;
     }
+}
+
+/// Compute a `std::time::Duration` age between a parsed NiFi heartbeat
+/// and the snapshot's wall-clock anchor. Returns `None` when:
+/// - The heartbeat string is absent or unparseable, or
+/// - The cluster snapshot has no wall-clock anchor (shouldn't happen
+///   in practice; defensive), or
+/// - The heartbeat is in the future relative to the anchor (server
+///   clock skew — we don't try to represent negative ages).
+fn compute_heartbeat_age(
+    heartbeat_iso: Option<&str>,
+    fetched_wall: Option<OffsetDateTime>,
+) -> Option<std::time::Duration> {
+    let hb = heartbeat_iso.and_then(crate::timestamp::parse_nifi_timestamp)?;
+    let anchor = fetched_wall?;
+    let delta = anchor - hb;
+    if delta.is_negative() {
+        return None;
+    }
+    let whole = delta.whole_seconds();
+    // whole is i64; we've already checked non-negative above.
+    Some(std::time::Duration::from_secs(whole as u64))
 }
 
 // ---------------------------------------------------------------------------
@@ -357,6 +577,24 @@ impl NifiClient {
             fetched_at: Instant::now(),
         })
     }
+
+    /// Calls `GET /nifi-api/controller/cluster`. On standalone NiFi the
+    /// server returns HTTP 409 — the fetcher task (`spawn_cluster_nodes`,
+    /// added in a later task) translates that specific shape to an empty
+    /// snapshot rather than a failure. This method surfaces *all* errors;
+    /// the shape-detection lives one layer up where it belongs.
+    pub async fn cluster_nodes(&self) -> Result<ClusterNodesSnapshot, NifiLensError> {
+        tracing::debug!(context = %self.context_name(), "fetching /controller/cluster");
+        let dto = self.inner.controller().get_cluster().await.map_err(|err| {
+            classify_or_fallback(self.context_name(), Box::new(err), |source| {
+                NifiLensError::ClusterNodesFailed {
+                    context: self.context_name().to_string(),
+                    source,
+                }
+            })
+        })?;
+        Ok(ClusterNodesSnapshot::from_cluster_dto(&dto))
+    }
 }
 
 /// Extract utilization percentage from a `StorageUsageDto`.
@@ -468,7 +706,7 @@ mod tests {
             Vec::new(),
             vec![node_diag("node1:8080", 1_000, 8_000, 10)],
         );
-        update_nodes(&mut state, &snap1);
+        update_nodes(&mut state, &snap1, None);
         assert_eq!(state.nodes.len(), 1);
         assert!(state.nodes[0].gc_delta.is_none(), "first poll → no delta");
         assert_eq!(state.nodes[0].gc_collection_count, 10);
@@ -480,7 +718,7 @@ mod tests {
             Vec::new(),
             vec![node_diag("node1:8080", 1_000, 8_000, 15)],
         );
-        update_nodes(&mut state, &snap2);
+        update_nodes(&mut state, &snap2, None);
         assert_eq!(state.nodes[0].gc_delta, Some(5));
         assert_eq!(state.nodes[0].gc_collection_count, 15);
     }
@@ -502,7 +740,7 @@ mod tests {
                 node_diag("Bravo:8080", 1_000, 8_000, 0),
             ],
         );
-        update_nodes(&mut state, &snap);
+        update_nodes(&mut state, &snap, None);
 
         let addresses: Vec<&str> = state
             .nodes
@@ -523,7 +761,7 @@ mod tests {
             Vec::new(),
             vec![node_diag("node1:8080", 1_000, 8_000, 10)],
         );
-        update_nodes(&mut state, &snap1);
+        update_nodes(&mut state, &snap1, None);
 
         // Second poll: node1 + new node2
         let snap2 = diag_snap(
@@ -535,7 +773,7 @@ mod tests {
                 node_diag("node2:8080", 2_000, 8_000, 3),
             ],
         );
-        update_nodes(&mut state, &snap2);
+        update_nodes(&mut state, &snap2, None);
 
         let node1 = state
             .nodes
@@ -609,7 +847,7 @@ mod tests {
             fetched_at: Instant::now(),
         };
         let mut state = NodesState::default();
-        update_nodes(&mut state, &diag);
+        update_nodes(&mut state, &diag, None);
 
         let row = &state.nodes[0];
         assert_eq!(row.gc.len(), 2);
@@ -649,12 +887,371 @@ mod tests {
                 provenance_repos: Vec::new(),
             }],
         );
-        update_nodes(&mut state, &snap);
+        update_nodes(&mut state, &snap, None);
 
         assert_eq!(state.nodes.len(), 1);
         assert_eq!(state.nodes[0].node_address, "Cluster (aggregate)");
         assert_eq!(state.nodes[0].heap_used_bytes, 4_000);
         assert_eq!(state.nodes[0].heap_max_bytes, 8_000);
         assert_eq!(state.nodes[0].gc_collection_count, 42);
+    }
+
+    // -----------------------------------------------------------------------
+    // ClusterNodesSnapshot tests
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn cluster_nodes_snapshot_from_empty_cluster_is_empty() {
+        use nifi_rust_client::dynamic::types::ClusterDto;
+        let dto = ClusterDto::default();
+        let snap = super::ClusterNodesSnapshot::from_cluster_dto(&dto);
+        assert!(snap.rows.is_empty());
+    }
+
+    #[test]
+    fn cluster_nodes_snapshot_parses_all_fields() {
+        use nifi_rust_client::dynamic::types::{ClusterDto, NodeDto, NodeEventDto};
+        let mut ev = NodeEventDto::default();
+        ev.timestamp = Some("04/22/2026 10:14:03 UTC".into());
+        ev.category = Some("CONNECTED".into());
+        ev.message = Some("Node connected".into());
+
+        let mut node = NodeDto::default();
+        node.node_id = Some("5f2b8a17-1234-1234-1234-c394e97c3000".into());
+        node.address = Some("node2.nifi".into());
+        node.api_port = Some(8443);
+        node.status = Some("CONNECTED".into());
+        node.roles = Some(vec!["Primary Node".into(), "Cluster Coordinator".into()]);
+        node.heartbeat = Some("04/22/2026 14:03:17 UTC".into());
+        node.node_start_time = Some("04/22/2026 09:12:04 UTC".into());
+        node.active_thread_count = Some(42);
+        node.flow_files_queued = Some(1234);
+        node.bytes_queued = Some(456 * 1024 * 1024);
+        node.events = Some(vec![ev]);
+
+        let mut dto = ClusterDto::default();
+        dto.nodes = Some(vec![node]);
+
+        let snap = super::ClusterNodesSnapshot::from_cluster_dto(&dto);
+        assert_eq!(snap.rows.len(), 1);
+        let row = &snap.rows[0];
+        assert_eq!(row.node_id, "5f2b8a17-1234-1234-1234-c394e97c3000");
+        assert_eq!(row.address, "node2.nifi:8443");
+        assert_eq!(row.status, super::ClusterNodeStatus::Connected);
+        assert!(row.is_primary);
+        assert!(row.is_coordinator);
+        assert_eq!(
+            row.heartbeat_iso.as_deref(),
+            Some("04/22/2026 14:03:17 UTC")
+        );
+        assert_eq!(row.active_thread_count, 42);
+        assert_eq!(row.flow_files_queued, 1234);
+        assert_eq!(row.bytes_queued, 456 * 1024 * 1024);
+        assert_eq!(row.events.len(), 1);
+        assert_eq!(row.events[0].category.as_deref(), Some("CONNECTED"));
+    }
+
+    #[test]
+    fn cluster_nodes_snapshot_handles_unknown_status() {
+        use nifi_rust_client::dynamic::types::{ClusterDto, NodeDto};
+        let mut node = NodeDto::default();
+        node.address = Some("node1".into());
+        node.api_port = Some(8443);
+        node.status = Some("WEIRD_FUTURE_STATE".into());
+
+        let mut dto = ClusterDto::default();
+        dto.nodes = Some(vec![node]);
+
+        let snap = super::ClusterNodesSnapshot::from_cluster_dto(&dto);
+        assert_eq!(snap.rows[0].status, super::ClusterNodeStatus::Other);
+    }
+
+    #[test]
+    fn cluster_nodes_snapshot_caps_events_at_eight() {
+        use nifi_rust_client::dynamic::types::{ClusterDto, NodeDto, NodeEventDto};
+        let ev = |ts: &str| {
+            let mut e = NodeEventDto::default();
+            e.timestamp = Some(ts.to_string());
+            e.category = Some("HEARTBEAT_RECEIVED".into());
+            e.message = Some("x".into());
+            e
+        };
+        let events = (0..20)
+            .map(|i| ev(&format!("04/22/2026 10:14:{:02} UTC", i)))
+            .collect();
+
+        let mut node = NodeDto::default();
+        node.address = Some("node1".into());
+        node.api_port = Some(8443);
+        node.status = Some("CONNECTED".into());
+        node.events = Some(events);
+
+        let mut dto = ClusterDto::default();
+        dto.nodes = Some(vec![node]);
+
+        let snap = super::ClusterNodesSnapshot::from_cluster_dto(&dto);
+        assert_eq!(snap.rows[0].events.len(), 8);
+        assert_eq!(
+            snap.rows[0].events[0].timestamp_iso,
+            "04/22/2026 10:14:00 UTC"
+        );
+    }
+
+    #[test]
+    fn cluster_nodes_snapshot_address_defaults_when_missing() {
+        use nifi_rust_client::dynamic::types::{ClusterDto, NodeDto};
+        let mut node = NodeDto::default();
+        node.status = Some("CONNECTED".into());
+
+        let mut dto = ClusterDto::default();
+        dto.nodes = Some(vec![node]);
+
+        let snap = super::ClusterNodesSnapshot::from_cluster_dto(&dto);
+        assert_eq!(snap.rows[0].address, "unknown:0");
+    }
+
+    // -----------------------------------------------------------------------
+    // ClusterNodeStatus tests
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn cluster_node_status_from_wire_recognizes_known() {
+        use super::ClusterNodeStatus as S;
+        assert_eq!(S::from_wire("CONNECTED"), S::Connected);
+        assert_eq!(S::from_wire("CONNECTING"), S::Connecting);
+        assert_eq!(S::from_wire("DISCONNECTED"), S::Disconnected);
+        assert_eq!(S::from_wire("DISCONNECTING"), S::Disconnecting);
+        assert_eq!(S::from_wire("OFFLOADING"), S::Offloading);
+        assert_eq!(S::from_wire("OFFLOADED"), S::Offloaded);
+    }
+
+    #[test]
+    fn cluster_node_status_from_wire_unknown_is_other() {
+        use super::ClusterNodeStatus as S;
+        assert_eq!(S::from_wire("WEIRD_FUTURE_STATE"), S::Other);
+        assert_eq!(S::from_wire(""), S::Other);
+    }
+
+    #[test]
+    fn cluster_node_status_is_dead_matrix() {
+        use super::ClusterNodeStatus as S;
+        assert!(!S::Connected.is_dead());
+        assert!(!S::Connecting.is_dead());
+        assert!(!S::Other.is_dead());
+        assert!(S::Disconnected.is_dead());
+        assert!(S::Disconnecting.is_dead());
+        assert!(S::Offloading.is_dead());
+        assert!(S::Offloaded.is_dead());
+    }
+
+    #[test]
+    fn node_health_row_defaults_cluster_to_none() {
+        use super::{NodeHealthRow, Severity};
+        let row = NodeHealthRow {
+            node_address: "node1:8443".into(),
+            heap_used_bytes: 0,
+            heap_max_bytes: 0,
+            heap_percent: 0,
+            heap_severity: Severity::Green,
+            gc_collection_count: 0,
+            gc_delta: None,
+            gc_millis: 0,
+            load_average: None,
+            available_processors: None,
+            uptime: String::new(),
+            total_threads: 0,
+            gc: vec![],
+            content_repos: vec![],
+            flowfile_repo: None,
+            provenance_repos: vec![],
+            cluster: None,
+        };
+        assert!(row.cluster.is_none());
+    }
+
+    // -----------------------------------------------------------------------
+    // update_nodes cluster-join tests
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn update_nodes_without_cluster_snapshot_matches_today() {
+        let mut state = NodesState::default();
+        let snap = diag_snap(
+            Vec::new(),
+            None,
+            Vec::new(),
+            vec![node_diag("node1:8080", 1_000, 8_000, 10)],
+        );
+        super::update_nodes(&mut state, &snap, None);
+        assert_eq!(state.nodes.len(), 1);
+        assert!(state.nodes[0].cluster.is_none());
+    }
+
+    #[test]
+    fn update_nodes_joins_by_address_port() {
+        use super::{ClusterNodeRow, ClusterNodeStatus, ClusterNodesSnapshot};
+        let mut state = NodesState::default();
+        let sysdiag = diag_snap(
+            Vec::new(),
+            None,
+            Vec::new(),
+            vec![node_diag("node1:8443", 1_000, 8_000, 10)],
+        );
+        let cluster = ClusterNodesSnapshot {
+            rows: vec![ClusterNodeRow {
+                node_id: "id-1".into(),
+                address: "node1:8443".into(),
+                status: ClusterNodeStatus::Connected,
+                is_primary: true,
+                is_coordinator: false,
+                heartbeat_iso: None,
+                node_start_iso: None,
+                active_thread_count: 7,
+                flow_files_queued: 123,
+                bytes_queued: 456,
+                events: vec![],
+            }],
+            fetched_at: std::time::Instant::now(),
+            fetched_wall: time::OffsetDateTime::now_utc(),
+        };
+        super::update_nodes(&mut state, &sysdiag, Some(&cluster));
+        let row = &state.nodes[0];
+        let m = row.cluster.as_ref().expect("cluster joined");
+        assert_eq!(m.node_id, "id-1");
+        assert!(m.is_primary);
+        assert_eq!(m.active_thread_count, 7);
+        assert_eq!(m.flow_files_queued, 123);
+    }
+
+    #[test]
+    fn update_nodes_leaves_cluster_none_when_address_absent_from_cluster() {
+        use super::ClusterNodesSnapshot;
+        let mut state = NodesState::default();
+        let sysdiag = diag_snap(
+            Vec::new(),
+            None,
+            Vec::new(),
+            vec![node_diag("ghost:8443", 1_000, 8_000, 10)],
+        );
+        let cluster = ClusterNodesSnapshot {
+            rows: vec![],
+            fetched_at: std::time::Instant::now(),
+            fetched_wall: time::OffsetDateTime::now_utc(),
+        };
+        super::update_nodes(&mut state, &sysdiag, Some(&cluster));
+        assert!(state.nodes[0].cluster.is_none());
+    }
+
+    #[test]
+    fn update_nodes_heartbeat_age_is_deterministic_from_fetched_wall() {
+        use super::{ClusterNodeRow, ClusterNodeStatus, ClusterNodesSnapshot};
+        let mut state = NodesState::default();
+        let sysdiag = diag_snap(
+            Vec::new(),
+            None,
+            Vec::new(),
+            vec![node_diag("node1:8443", 1_000, 8_000, 10)],
+        );
+        // Anchor: snapshot was fetched exactly 5 seconds after the heartbeat.
+        let hb = "04/22/2026 14:03:17 UTC";
+        let hb_parsed = crate::timestamp::parse_nifi_timestamp(hb).expect("parseable");
+        let fetched_wall = hb_parsed + time::Duration::seconds(5);
+        let cluster = ClusterNodesSnapshot {
+            rows: vec![ClusterNodeRow {
+                node_id: "id-1".into(),
+                address: "node1:8443".into(),
+                status: ClusterNodeStatus::Connected,
+                is_primary: false,
+                is_coordinator: false,
+                heartbeat_iso: Some(hb.into()),
+                node_start_iso: None,
+                active_thread_count: 0,
+                flow_files_queued: 0,
+                bytes_queued: 0,
+                events: vec![],
+            }],
+            fetched_at: std::time::Instant::now(),
+            fetched_wall,
+        };
+        super::update_nodes(&mut state, &sysdiag, Some(&cluster));
+        let m = state.nodes[0].cluster.as_ref().unwrap();
+        assert_eq!(m.heartbeat_age, Some(std::time::Duration::from_secs(5)));
+    }
+
+    #[test]
+    fn update_nodes_unparseable_heartbeat_yields_none_age() {
+        use super::{ClusterNodeRow, ClusterNodeStatus, ClusterNodesSnapshot};
+        let mut state = NodesState::default();
+        let sysdiag = diag_snap(
+            Vec::new(),
+            None,
+            Vec::new(),
+            vec![node_diag("node1:8443", 1_000, 8_000, 10)],
+        );
+        let cluster = ClusterNodesSnapshot {
+            rows: vec![ClusterNodeRow {
+                node_id: "id-1".into(),
+                address: "node1:8443".into(),
+                status: ClusterNodeStatus::Connected,
+                is_primary: false,
+                is_coordinator: false,
+                heartbeat_iso: Some("nonsense".into()),
+                node_start_iso: None,
+                active_thread_count: 0,
+                flow_files_queued: 0,
+                bytes_queued: 0,
+                events: vec![],
+            }],
+            fetched_at: std::time::Instant::now(),
+            fetched_wall: time::OffsetDateTime::now_utc(),
+        };
+        super::update_nodes(&mut state, &sysdiag, Some(&cluster));
+        let m = state.nodes[0].cluster.as_ref().unwrap();
+        assert!(m.heartbeat_age.is_none());
+    }
+
+    #[test]
+    fn update_nodes_heartbeat_in_the_future_clamps_to_none() {
+        // Defensive: if the server clock is ahead of ours, heartbeat
+        // subtraction would be negative — represent that as None, not
+        // a wrap-around Duration.
+        use super::{ClusterNodeRow, ClusterNodeStatus, ClusterNodesSnapshot};
+        let mut state = NodesState::default();
+        let sysdiag = diag_snap(
+            Vec::new(),
+            None,
+            Vec::new(),
+            vec![node_diag("node1:8443", 1_000, 8_000, 10)],
+        );
+        let hb = "04/22/2026 14:03:17 UTC";
+        let hb_parsed = crate::timestamp::parse_nifi_timestamp(hb).unwrap();
+        // fetched_wall is 10s BEFORE heartbeat — future-from-our-POV.
+        let fetched_wall = hb_parsed - time::Duration::seconds(10);
+        let cluster = ClusterNodesSnapshot {
+            rows: vec![ClusterNodeRow {
+                node_id: "id-1".into(),
+                address: "node1:8443".into(),
+                status: ClusterNodeStatus::Connected,
+                is_primary: false,
+                is_coordinator: false,
+                heartbeat_iso: Some(hb.into()),
+                node_start_iso: None,
+                active_thread_count: 0,
+                flow_files_queued: 0,
+                bytes_queued: 0,
+                events: vec![],
+            }],
+            fetched_at: std::time::Instant::now(),
+            fetched_wall,
+        };
+        super::update_nodes(&mut state, &sysdiag, Some(&cluster));
+        assert!(
+            state.nodes[0]
+                .cluster
+                .as_ref()
+                .unwrap()
+                .heartbeat_age
+                .is_none()
+        );
     }
 }

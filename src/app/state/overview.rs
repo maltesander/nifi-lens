@@ -147,6 +147,7 @@ mod tests {
                 content_repos: vec![],
                 flowfile_repo: None,
                 provenance_repos: vec![],
+                cluster: None,
             })
             .collect();
     }

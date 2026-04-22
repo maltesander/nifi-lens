@@ -1,5 +1,9 @@
 //! Ratatui renderer for the Overview tab.
 //!
+//! The node detail modal lives in `node_detail.rs` and is re-exported here
+//! so callers at `crate::view::overview::render::render_node_detail_modal`
+//! continue to work unchanged.
+//!
 //! Layout 3:
 //!
 //! ```text
@@ -17,14 +21,15 @@
 //! └────────────────────────────────────────────────────────────────────────────┘
 //! ```
 
+pub mod node_detail;
+pub use node_detail::render_node_detail_modal;
+
 use ratatui::Frame;
 use ratatui::layout::{Constraint, Direction, Layout, Rect};
 use ratatui::style::Style;
 use ratatui::symbols;
 use ratatui::text::{Line, Span};
-use ratatui::widgets::{
-    Bar, BarChart, BarGroup, Block, Borders, Cell, Clear, Paragraph, Row, Table,
-};
+use ratatui::widgets::{Bar, BarChart, BarGroup, Cell, Paragraph, Row, Table};
 
 use super::state::{
     BulletinBucket, NoisyComponent, OverviewFocus, OverviewState, SPARKLINE_MINUTES, Severity,
@@ -57,10 +62,25 @@ pub fn render(frame: &mut Frame, area: Rect, state: &OverviewState) {
     frame.render_widget(components_block, zones[0]);
     render_components_table(frame, components_inner, state);
 
-    // Nodes panel — title shows node count when populated
+    // Nodes panel — title shows node count when populated.
+    // When any row has cluster membership data (any_cluster = true) the
+    // title switches to the "C/T connected" format.
     let total = state.nodes.nodes.len();
     let nodes_title = if total == 0 {
         " Nodes ".to_string()
+    } else if state.nodes.nodes.iter().any(|n| n.cluster.is_some()) {
+        let connected = state
+            .nodes
+            .nodes
+            .iter()
+            .filter(|r| {
+                r.cluster
+                    .as_ref()
+                    .map(|c| c.status == crate::client::health::ClusterNodeStatus::Connected)
+                    .unwrap_or(true)
+            })
+            .count();
+        format!(" Nodes ({connected}/{total} connected) ")
     } else {
         format!(" Nodes ({total} connected) ")
     };
@@ -232,6 +252,7 @@ fn render_nodes_zone(frame: &mut Frame, area: Rect, state: &OverviewState) {
         return;
     }
 
+    let any_cluster = state.nodes.nodes.iter().any(|n| n.cluster.is_some());
     let selected = state.nodes.selected;
     // Reserve 1 row at the bottom for the repositories aggregate.
     let visible_node_rows = area.height.saturating_sub(1) as usize;
@@ -245,18 +266,55 @@ fn render_nodes_zone(frame: &mut Frame, area: Rect, state: &OverviewState) {
         .take(visible_node_rows)
         .enumerate()
         .map(|(idx, node)| {
-            let row_style = if focused && idx == window.selected_local {
+            let is_focused_sel = focused && idx == window.selected_local;
+            let is_dead = node
+                .cluster
+                .as_ref()
+                .map(|c| c.status.is_dead())
+                .unwrap_or(false);
+            let row_style = if is_focused_sel {
                 theme::cursor_row()
+            } else if is_dead {
+                theme::muted()
             } else {
                 Style::default()
             };
-            node_to_row(node).style(row_style)
+            node_to_row(node, any_cluster, is_dead).style(row_style)
         })
         .collect();
 
-    // Cluster-aggregate repositories row (not selectable).
+    // Cluster-aggregate repositories row. When badges are rendered,
+    // prepend an empty cell so the columns line up with node rows.
     let repos = &state.repositories_summary;
-    rows.push(Row::new(vec![
+    let mut footer_cells = Vec::new();
+    if any_cluster {
+        footer_cells.push(Cell::from(""));
+    }
+    footer_cells.extend(repos_footer_cells(repos));
+    rows.push(Row::new(footer_cells));
+
+    let widths: Vec<Constraint> = if any_cluster {
+        vec![
+            Constraint::Length(6),  // badge
+            Constraint::Fill(1),    // address + heartbeat age
+            Constraint::Length(15), // heap
+            Constraint::Length(15), // gc
+            Constraint::Length(14), // load
+        ]
+    } else {
+        vec![
+            Constraint::Fill(1),
+            Constraint::Length(15),
+            Constraint::Length(15),
+            Constraint::Length(14),
+        ]
+    };
+    frame.render_widget(Table::new(rows, widths), area);
+}
+
+/// Build the four-cell repositories footer row.
+fn repos_footer_cells(repos: &super::state::RepositoriesSummary) -> Vec<Cell<'static>> {
+    vec![
         Cell::from(Span::styled("  repositories", theme::muted())),
         Cell::from(Line::from(vec![
             Span::raw("cont "),
@@ -294,23 +352,23 @@ fn render_nodes_zone(frame: &mut Frame, area: Rect, state: &OverviewState) {
                 fill_style(repos.provenance_percent),
             ),
         ])),
-    ]));
-
-    let table = Table::new(
-        rows,
-        [
-            Constraint::Fill(1),
-            Constraint::Length(15),
-            Constraint::Length(15),
-            Constraint::Length(14),
-        ],
-    );
-    frame.render_widget(table, area);
+    ]
 }
 
-/// Convert a `NodeHealthRow` to a ratatui `Row` with four styled cells:
-/// address | heap bar+% | gc | load bar+value.
-fn node_to_row(node: &crate::client::health::NodeHealthRow) -> Row<'static> {
+/// Build the heap `Cell` for a live node row.
+fn heap_cell_for(node: &crate::client::health::NodeHealthRow) -> Cell<'static> {
+    let heap_style = health_severity_style(node.heap_severity);
+    let heap_bar = fill_bar(5, node.heap_percent);
+    Cell::from(Line::from(vec![
+        Span::raw("heap "),
+        Span::styled(heap_bar, heap_style),
+        Span::raw(" "),
+        Span::styled(format!("{:>3}%", node.heap_percent), heap_style),
+    ]))
+}
+
+/// Build the GC `Cell` for a live node row.
+fn gc_cell_for(node: &crate::client::health::NodeHealthRow) -> Cell<'static> {
     let gc_style = match node.gc_delta {
         Some(d) if d > 5 => theme::error(),
         Some(_) => theme::warning(),
@@ -320,6 +378,14 @@ fn node_to_row(node: &crate::client::health::NodeHealthRow) -> Row<'static> {
         Some(d) => format!("{:>4}ms (+{})", node.gc_millis, d),
         None => format!("{:>4}ms", node.gc_millis),
     };
+    Cell::from(Line::from(vec![
+        Span::raw("gc "),
+        Span::styled(gc_str, gc_style),
+    ]))
+}
+
+/// Build the load-average `Cell` for a live node row.
+fn load_cell_for(node: &crate::client::health::NodeHealthRow) -> Cell<'static> {
     let (load_str, load_style) = match (node.load_average, node.available_processors) {
         (Some(l), Some(cpus)) if cpus > 0 => {
             let ratio = l / cpus as f64;
@@ -335,36 +401,88 @@ fn node_to_row(node: &crate::client::health::NodeHealthRow) -> Row<'static> {
         (Some(l), _) => (format!("{l:>4.1}"), Style::default()),
         (None, _) => ("\u{2014}   ".to_string(), theme::muted()),
     };
-    let heap_style = health_severity_style(node.heap_severity);
-    let heap_bar = fill_bar(5, node.heap_percent);
     let load_bar = match (node.load_average, node.available_processors) {
         (Some(l), Some(cpus)) if cpus > 0 => {
             format!("{:.2}", (l / cpus as f64).min(9.99))
         }
         _ => "    ".to_string(),
     };
-    Row::new(vec![
-        Cell::from(Span::styled(
-            format!("  {}", node.node_address),
-            theme::accent(),
-        )),
-        Cell::from(Line::from(vec![
-            Span::raw("heap "),
-            Span::styled(heap_bar, heap_style),
-            Span::raw(" "),
-            Span::styled(format!("{:>3}%", node.heap_percent), heap_style),
-        ])),
-        Cell::from(Line::from(vec![
-            Span::raw("gc "),
-            Span::styled(gc_str, gc_style),
-        ])),
-        Cell::from(Line::from(vec![
-            Span::raw("load "),
-            Span::styled(load_bar, load_style),
-            Span::raw(" "),
-            Span::styled(load_str, load_style),
-        ])),
-    ])
+    Cell::from(Line::from(vec![
+        Span::raw("load "),
+        Span::styled(load_bar, load_style),
+        Span::raw(" "),
+        Span::styled(load_str, load_style),
+    ]))
+}
+
+/// Convert a `NodeHealthRow` into a ratatui `Row`.
+///
+/// When `include_badge` is `true` a leading 6-column badge cell is
+/// prepended and the address cell includes the heartbeat age span.
+/// When `is_dead` is `true` the heap/gc/load cells are replaced with
+/// `───` placeholders.
+fn node_to_row(
+    node: &crate::client::health::NodeHealthRow,
+    include_badge: bool,
+    is_dead: bool,
+) -> Row<'static> {
+    // Badge cell (only when rendering cluster info).
+    let badge_cell = include_badge.then(|| match &node.cluster {
+        Some(c) => Cell::from(crate::widget::node_badge::node_badge(c)),
+        None => Cell::from(""),
+    });
+
+    // Address + optional heartbeat age.
+    let hb_span = node
+        .cluster
+        .as_ref()
+        .map(|c| {
+            let age_text = crate::timestamp::format_age(c.heartbeat_age);
+            Span::styled(
+                format!("  {age_text}"),
+                heartbeat_age_style(c.heartbeat_age),
+            )
+        })
+        .unwrap_or_else(|| Span::raw(""));
+    let address_cell = Cell::from(Line::from(vec![
+        Span::styled(format!("  {}", node.node_address), theme::accent()),
+        hb_span,
+    ]));
+
+    // Heap / gc / load — collapse to ─── for dead rows.
+    let (heap_cell, gc_cell, load_cell) = if is_dead {
+        let dim = theme::muted();
+        (
+            Cell::from(Span::styled(
+                "heap \u{2500}\u{2500}\u{2500} \u{2500}\u{2500}\u{2500}",
+                dim,
+            )),
+            Cell::from(Span::styled("gc \u{2500}\u{2500}\u{2500}", dim)),
+            Cell::from(Span::styled("load \u{2500}\u{2500}\u{2500}", dim)),
+        )
+    } else {
+        (heap_cell_for(node), gc_cell_for(node), load_cell_for(node))
+    };
+
+    let mut cells = Vec::with_capacity(5);
+    if let Some(b) = badge_cell {
+        cells.push(b);
+    }
+    cells.push(address_cell);
+    cells.push(heap_cell);
+    cells.push(gc_cell);
+    cells.push(load_cell);
+    Row::new(cells)
+}
+
+/// Style for the heartbeat age text appended to the address cell.
+fn heartbeat_age_style(age: Option<std::time::Duration>) -> Style {
+    match age {
+        None => theme::muted(),
+        Some(d) if d.as_secs() < 30 => theme::muted(),
+        Some(d) if d.as_secs() < 120 => theme::warning(),
+        Some(_) => theme::error(),
+    }
 }
 
 fn render_bulletins_and_noisy(
@@ -590,7 +708,7 @@ fn render_unhealthy_queues(
     frame.render_widget(table, area);
 }
 
-fn fill_style(percent: u32) -> Style {
+pub(super) fn fill_style(percent: u32) -> Style {
     match percent {
         0..=49 => theme::success(),
         50..=79 => theme::warning(),
@@ -599,7 +717,7 @@ fn fill_style(percent: u32) -> Style {
 }
 
 /// Convert a `client::health::Severity` (Green/Yellow/Red) into a theme style.
-fn health_severity_style(s: crate::client::health::Severity) -> Style {
+pub(super) fn health_severity_style(s: crate::client::health::Severity) -> Style {
     use crate::client::health::Severity as H;
     match s {
         H::Green => theme::success(),
@@ -615,195 +733,6 @@ fn severity_style(s: Severity) -> Style {
         Severity::Warning => theme::warning(),
         Severity::Info => theme::info(),
         Severity::Unknown => theme::muted(),
-    }
-}
-
-pub fn render_node_detail_modal(
-    frame: &mut Frame,
-    area: Rect,
-    row: &crate::client::health::NodeHealthRow,
-) {
-    let gc_rows = row.gc.len() as u16;
-    // Right pane: "GC" header + gc rows + separator + "Repositories" header + 3 repo rows.
-    let right_height = 1 + gc_rows + 1 + 1 + 3;
-    let left_height = 4u16; // heap, load, threads, uptime
-    let content_height = right_height.max(left_height);
-    let popup_height = content_height + 2; // +2 for outer border
-
-    let popup = center_rect(80, popup_height, area);
-    frame.render_widget(Clear, popup);
-
-    let outer = Panel::new(format!(" {} ", row.node_address)).into_block();
-    let inner = outer.inner(popup);
-    frame.render_widget(outer, popup);
-
-    // 40% left (system summary) / 60% right (GC + repos).
-    let h = Layout::default()
-        .direction(Direction::Horizontal)
-        .constraints([Constraint::Percentage(40), Constraint::Percentage(60)])
-        .split(inner);
-
-    render_node_system_summary(frame, h[0], row);
-    render_node_gc_and_repos(frame, h[1], row, gc_rows);
-}
-
-fn render_node_system_summary(
-    frame: &mut Frame,
-    area: Rect,
-    row: &crate::client::health::NodeHealthRow,
-) {
-    let heap_style = health_severity_style(row.heap_severity);
-    let heap_bar = fill_bar(5, row.heap_percent);
-
-    let (load_str, load_style, load_bar) = match (row.load_average, row.available_processors) {
-        (Some(l), Some(cpus)) if cpus > 0 => {
-            let ratio = l / cpus as f64;
-            let style = if ratio >= 2.0 {
-                theme::error()
-            } else if ratio >= 1.0 {
-                theme::warning()
-            } else {
-                theme::success()
-            };
-            (
-                format!("{l:.1}"),
-                style,
-                format!("{:>5.2}", ratio.min(9.99)),
-            )
-        }
-        (Some(l), _) => (format!("{l:.1}"), Style::default(), "     ".to_string()),
-        (None, _) => ("\u{2014}".to_string(), theme::muted(), "     ".to_string()),
-    };
-
-    let lines = vec![
-        Line::from(vec![
-            Span::styled("  heap     ", theme::muted()),
-            Span::styled(heap_bar, heap_style),
-            Span::raw("  "),
-            Span::styled(format!("{:>3}%", row.heap_percent), heap_style),
-        ]),
-        Line::from(vec![
-            Span::styled("  load     ", theme::muted()),
-            Span::styled(load_bar, load_style),
-            Span::raw("  "),
-            Span::styled(load_str, load_style),
-        ]),
-        Line::from(vec![
-            Span::styled("  threads  ", theme::muted()),
-            Span::raw(row.total_threads.to_string()),
-        ]),
-        Line::from(vec![
-            Span::styled("  uptime   ", theme::muted()),
-            Span::raw(row.uptime.clone()),
-        ]),
-    ];
-    frame.render_widget(Paragraph::new(lines), area);
-}
-
-fn render_node_gc_and_repos(
-    frame: &mut Frame,
-    area: Rect,
-    row: &crate::client::health::NodeHealthRow,
-    gc_rows: u16,
-) {
-    // Vertical split: GC section | separator | Repos section.
-    let gc_section_h = 1 + gc_rows; // "GC" header row + data rows
-    let repos_section_h = 1 + 3; // "Repositories" header + 3 repo type rows
-    let v = Layout::default()
-        .direction(Direction::Vertical)
-        .constraints([
-            Constraint::Length(gc_section_h),
-            Constraint::Length(1),
-            Constraint::Length(repos_section_h),
-        ])
-        .split(area);
-
-    // GC table.
-    let gc_table_rows: Vec<Row> = row
-        .gc
-        .iter()
-        .map(|g| {
-            Row::new(vec![
-                Cell::from(format!("  {}", g.name)),
-                Cell::from(format!("{}", g.collection_count)),
-                Cell::from(format!("{}ms", g.collection_millis)),
-            ])
-        })
-        .collect();
-    let gc_table = Table::new(
-        gc_table_rows,
-        [
-            Constraint::Fill(1),
-            Constraint::Length(8),
-            Constraint::Length(8),
-        ],
-    )
-    .header(Row::new(vec!["GC", "count", "millis"]).style(theme::bold()));
-    frame.render_widget(gc_table, v[0]);
-
-    // Separator line.
-    frame.render_widget(
-        Block::new()
-            .borders(Borders::TOP)
-            .border_style(theme::border_dim()),
-        v[1],
-    );
-
-    // Repositories table.
-    let content_pct = node_avg_pct(&row.content_repos);
-    let flowfile_pct = row
-        .flowfile_repo
-        .as_ref()
-        .map(|r| r.utilization_percent)
-        .unwrap_or(0);
-    let provenance_pct = node_avg_pct(&row.provenance_repos);
-
-    let repo_rows: Vec<Row> = [
-        ("content", content_pct),
-        ("flowfile", flowfile_pct),
-        ("provenance", provenance_pct),
-    ]
-    .iter()
-    .map(|(name, pct)| {
-        let style = fill_style(*pct);
-        Row::new(vec![
-            Cell::from(format!("  {}", name)),
-            Cell::from(Span::styled(fill_bar(4, *pct), style)),
-            Cell::from(Span::styled(format!("{:>3}%", pct), style)),
-        ])
-    })
-    .collect();
-    let repos_table = Table::new(
-        repo_rows,
-        [
-            Constraint::Fill(1),
-            Constraint::Length(6),
-            Constraint::Length(5),
-        ],
-    )
-    .header(Row::new(vec!["Repositories", "", ""]).style(theme::bold()));
-    frame.render_widget(repos_table, v[2]);
-}
-
-/// Average `utilization_percent` across a slice of repos.
-/// Returns 0 for an empty slice.
-fn node_avg_pct(repos: &[crate::client::health::RepoUsage]) -> u32 {
-    if repos.is_empty() {
-        return 0;
-    }
-    let sum: u32 = repos.iter().map(|r| r.utilization_percent).sum();
-    sum / repos.len() as u32
-}
-
-fn center_rect(pct_x: u16, height: u16, area: Rect) -> Rect {
-    let w = area.width * pct_x / 100;
-    let x = area.x + (area.width.saturating_sub(w)) / 2;
-    let y = area.y + (area.height.saturating_sub(height)) / 2;
-    Rect {
-        x,
-        y,
-        width: w,
-        height,
     }
 }
 
@@ -850,7 +779,7 @@ mod tests {
     /// `apply_payload(SystemDiag(..))` path in render tests.
     fn seed_sysdiag(state: &mut OverviewState, diag: &crate::client::health::SystemDiagSnapshot) {
         use crate::view::overview::state::RepositoriesSummary;
-        crate::client::health::update_nodes(&mut state.nodes, diag);
+        crate::client::health::update_nodes(&mut state.nodes, diag, None);
         let avg = |repos: &[crate::client::health::RepoUsage]| -> u32 {
             if repos.is_empty() {
                 0
@@ -1286,63 +1215,6 @@ mod tests {
     }
 
     #[test]
-    fn snapshot_node_detail_modal() {
-        use crate::client::health::{GcSnapshot, NodeHealthRow, RepoUsage, Severity as HSev};
-        let backend = TestBackend::new(100, 25);
-        let mut term = Terminal::new(backend).unwrap();
-        let row = NodeHealthRow {
-            node_address: "node1:8080".into(),
-            heap_used_bytes: 512 * 1024 * 1024,
-            heap_max_bytes: 1024 * 1024 * 1024,
-            heap_percent: 52,
-            heap_severity: HSev::Green,
-            gc_collection_count: 12,
-            gc_delta: Some(2),
-            gc_millis: 170,
-            load_average: Some(1.5),
-            available_processors: Some(4),
-            uptime: "2h 30m".into(),
-            total_threads: 50,
-            gc: vec![
-                GcSnapshot {
-                    name: "G1 Young".into(),
-                    collection_count: 10,
-                    collection_millis: 50,
-                },
-                GcSnapshot {
-                    name: "G1 Old".into(),
-                    collection_count: 2,
-                    collection_millis: 120,
-                },
-            ],
-            content_repos: vec![RepoUsage {
-                identifier: "c".into(),
-                used_bytes: 60,
-                total_bytes: 100,
-                free_bytes: 40,
-                utilization_percent: 60,
-            }],
-            flowfile_repo: Some(RepoUsage {
-                identifier: "f".into(),
-                used_bytes: 30,
-                total_bytes: 100,
-                free_bytes: 70,
-                utilization_percent: 30,
-            }),
-            provenance_repos: vec![RepoUsage {
-                identifier: "p".into(),
-                used_bytes: 20,
-                total_bytes: 100,
-                free_bytes: 80,
-                utilization_percent: 20,
-            }],
-        };
-        term.draw(|f| super::render_node_detail_modal(f, f.area(), &row))
-            .unwrap();
-        insta::assert_snapshot!("node_detail_modal", format!("{}", term.backend()));
-    }
-
-    #[test]
     fn nodes_panel_scrolls_to_selected() {
         use crate::client::health::{
             GcSnapshot, NodeDiagnostics, RepoUsage, SystemDiagAggregate, SystemDiagSnapshot,
@@ -1584,6 +1456,266 @@ mod tests {
         assert!(
             !output.contains("alfa"),
             "'alfa' must be scrolled out of view"
+        );
+    }
+
+    // ── T21 helpers and snapshot tests ───────────────────────────────────────
+
+    /// Build a two-node `AppState` with sysdiag pre-seeded and basic
+    /// controller/root-pg/cs data for a complete render.  The cluster-nodes
+    /// snapshot is NOT yet applied, so every `NodeHealthRow` has
+    /// `cluster = None` — this is the `any_cluster = false` baseline.
+    fn seed_state_with_two_nodes() -> crate::app::state::AppState {
+        use crate::client::health::{
+            GcSnapshot, NodeDiagnostics, RepoUsage, SystemDiagAggregate, SystemDiagSnapshot,
+        };
+        use crate::cluster::snapshot::{EndpointState, FetchMeta};
+        use std::time::Instant;
+
+        let mut state = crate::test_support::fresh_state();
+
+        // Seed controller_status.
+        state.cluster.snapshot.controller_status = EndpointState::Ready {
+            data: ControllerStatusSnapshot {
+                running: 42,
+                stopped: 3,
+                invalid: 0,
+                disabled: 1,
+                active_threads: 5,
+                flow_files_queued: 120,
+                bytes_queued: 4096,
+                stale: 0,
+                locally_modified: 0,
+                sync_failure: 0,
+                up_to_date: 0,
+            },
+            meta: FetchMeta {
+                fetched_at: Instant::now(),
+                fetch_duration: std::time::Duration::from_millis(5),
+                next_interval: std::time::Duration::from_secs(10),
+            },
+        };
+        crate::view::overview::state::redraw_controller_status(&mut state);
+
+        // Seed root-pg status.
+        let root_pg = RootPgStatusSnapshot {
+            flow_files_queued: 120,
+            bytes_queued: 4096,
+            connections: vec![],
+            process_group_count: 5,
+            input_port_count: 2,
+            output_port_count: 1,
+            processors: crate::client::ProcessorStateCounts {
+                running: 42,
+                stopped: 3,
+                invalid: 0,
+                disabled: 1,
+            },
+            process_group_ids: vec![],
+            nodes: vec![],
+        };
+        state.cluster.snapshot.root_pg_status = EndpointState::Ready {
+            data: root_pg,
+            meta: FetchMeta {
+                fetched_at: Instant::now(),
+                fetch_duration: std::time::Duration::from_millis(5),
+                next_interval: std::time::Duration::from_secs(10),
+            },
+        };
+        crate::view::overview::state::redraw_components(&mut state);
+
+        // Seed sysdiag with two nodes.
+        let node = |address: &str| NodeDiagnostics {
+            address: address.into(),
+            heap_used_bytes: 512 * 1024 * 1024,
+            heap_max_bytes: 1024 * 1024 * 1024,
+            gc: vec![GcSnapshot {
+                name: "G1 Young".into(),
+                collection_count: 10,
+                collection_millis: 50,
+            }],
+            load_average: Some(1.5),
+            available_processors: Some(4),
+            total_threads: 50,
+            uptime: "1h".into(),
+            content_repos: vec![RepoUsage {
+                identifier: "content".into(),
+                used_bytes: 60,
+                total_bytes: 100,
+                free_bytes: 40,
+                utilization_percent: 60,
+            }],
+            flowfile_repo: Some(RepoUsage {
+                identifier: "flowfile".into(),
+                used_bytes: 30,
+                total_bytes: 100,
+                free_bytes: 70,
+                utilization_percent: 30,
+            }),
+            provenance_repos: vec![RepoUsage {
+                identifier: "provenance".into(),
+                used_bytes: 20,
+                total_bytes: 100,
+                free_bytes: 80,
+                utilization_percent: 20,
+            }],
+        };
+        let diag = SystemDiagSnapshot {
+            aggregate: SystemDiagAggregate {
+                content_repos: vec![RepoUsage {
+                    identifier: "content".into(),
+                    used_bytes: 60,
+                    total_bytes: 100,
+                    free_bytes: 40,
+                    utilization_percent: 60,
+                }],
+                flowfile_repo: Some(RepoUsage {
+                    identifier: "flowfile".into(),
+                    used_bytes: 30,
+                    total_bytes: 100,
+                    free_bytes: 70,
+                    utilization_percent: 30,
+                }),
+                provenance_repos: vec![RepoUsage {
+                    identifier: "provenance".into(),
+                    used_bytes: 20,
+                    total_bytes: 100,
+                    free_bytes: 80,
+                    utilization_percent: 20,
+                }],
+            },
+            nodes: vec![node("node1:8080"), node("node2:8080")],
+            fetched_at: Instant::now(),
+        };
+        state.cluster.snapshot.system_diagnostics = EndpointState::Ready {
+            data: diag,
+            meta: FetchMeta {
+                fetched_at: Instant::now(),
+                fetch_duration: std::time::Duration::from_millis(5),
+                next_interval: std::time::Duration::from_secs(10),
+            },
+        };
+        crate::view::overview::state::redraw_sysdiag(&mut state);
+
+        state
+    }
+
+    #[test]
+    fn snapshot_overview_with_cluster_roles() {
+        use crate::client::health::{ClusterNodeRow, ClusterNodeStatus, ClusterNodesSnapshot};
+        use crate::cluster::snapshot::FetchMeta;
+
+        // Seed two-node sysdiag, then apply cluster-nodes with primary +
+        // coordinator.  Title: "Nodes (2/2 connected)".
+        let mut state = seed_state_with_two_nodes();
+        let cluster = ClusterNodesSnapshot {
+            rows: vec![
+                ClusterNodeRow {
+                    node_id: "id-1".into(),
+                    address: "node1:8080".into(),
+                    status: ClusterNodeStatus::Connected,
+                    is_primary: true,
+                    is_coordinator: false,
+                    heartbeat_iso: None,
+                    node_start_iso: None,
+                    active_thread_count: 4,
+                    flow_files_queued: 0,
+                    bytes_queued: 0,
+                    events: vec![],
+                },
+                ClusterNodeRow {
+                    node_id: "id-2".into(),
+                    address: "node2:8080".into(),
+                    status: ClusterNodeStatus::Connected,
+                    is_primary: false,
+                    is_coordinator: true,
+                    heartbeat_iso: None,
+                    node_start_iso: None,
+                    active_thread_count: 3,
+                    flow_files_queued: 0,
+                    bytes_queued: 0,
+                    events: vec![],
+                },
+            ],
+            fetched_at: std::time::Instant::now(),
+            fetched_wall: time::OffsetDateTime::now_utc(),
+        };
+        state.cluster.snapshot.cluster_nodes.apply(
+            Ok(cluster),
+            FetchMeta {
+                fetched_at: std::time::Instant::now(),
+                fetch_duration: std::time::Duration::from_millis(1),
+                next_interval: std::time::Duration::from_secs(5),
+            },
+        );
+        crate::view::overview::state::redraw_cluster_nodes(&mut state);
+        insta::assert_snapshot!(
+            "overview_with_cluster_roles",
+            render_to_string(&state.overview)
+        );
+    }
+
+    #[test]
+    fn snapshot_overview_with_dead_node() {
+        use crate::client::health::{ClusterNodeRow, ClusterNodeStatus, ClusterNodesSnapshot};
+        use crate::cluster::snapshot::FetchMeta;
+
+        // node1 connected primary+coordinator; node2 disconnected.
+        // Expected dim/─── cells on the dead row; title "Nodes (1/2 connected)".
+        let mut state = seed_state_with_two_nodes();
+        let cluster = ClusterNodesSnapshot {
+            rows: vec![
+                ClusterNodeRow {
+                    node_id: "id-1".into(),
+                    address: "node1:8080".into(),
+                    status: ClusterNodeStatus::Connected,
+                    is_primary: true,
+                    is_coordinator: true,
+                    heartbeat_iso: None,
+                    node_start_iso: None,
+                    active_thread_count: 4,
+                    flow_files_queued: 0,
+                    bytes_queued: 0,
+                    events: vec![],
+                },
+                ClusterNodeRow {
+                    node_id: "id-2".into(),
+                    address: "node2:8080".into(),
+                    status: ClusterNodeStatus::Disconnected,
+                    is_primary: false,
+                    is_coordinator: false,
+                    heartbeat_iso: None,
+                    node_start_iso: None,
+                    active_thread_count: 0,
+                    flow_files_queued: 0,
+                    bytes_queued: 0,
+                    events: vec![],
+                },
+            ],
+            fetched_at: std::time::Instant::now(),
+            fetched_wall: time::OffsetDateTime::now_utc(),
+        };
+        state.cluster.snapshot.cluster_nodes.apply(
+            Ok(cluster),
+            FetchMeta {
+                fetched_at: std::time::Instant::now(),
+                fetch_duration: std::time::Duration::from_millis(1),
+                next_interval: std::time::Duration::from_secs(5),
+            },
+        );
+        crate::view::overview::state::redraw_cluster_nodes(&mut state);
+        insta::assert_snapshot!("overview_with_dead_node", render_to_string(&state.overview));
+    }
+
+    #[test]
+    fn snapshot_overview_standalone_no_badges() {
+        // No cluster-nodes snapshot applied. Every row has cluster = None,
+        // so any_cluster = false and the pre-T20 4-column layout is
+        // preserved (no badge column, old title format).
+        let state = seed_state_with_two_nodes();
+        insta::assert_snapshot!(
+            "overview_standalone_no_badges",
+            render_to_string(&state.overview)
         );
     }
 }

@@ -8,7 +8,7 @@ use tokio::sync::{Notify, RwLock, mpsc, watch};
 use tokio::task::JoinHandle;
 
 use crate::app::state::ViewId;
-use crate::client::health::SystemDiagSnapshot;
+use crate::client::health::{ClusterNodesSnapshot, SystemDiagSnapshot};
 use crate::client::{
     AboutSnapshot, BulletinSnapshot, ConnectionEndpoints, ControllerServicesSnapshot,
     ControllerStatusSnapshot, NifiClient, RootPgStatusSnapshot,
@@ -16,7 +16,7 @@ use crate::client::{
 use crate::cluster::ClusterEndpoint;
 use crate::cluster::config::ClusterPollingConfig;
 use crate::cluster::fetcher_tasks::{
-    FetchTaskConfig, spawn_about, spawn_bulletins, spawn_connections_by_pg,
+    FetchTaskConfig, spawn_about, spawn_bulletins, spawn_cluster_nodes, spawn_connections_by_pg,
     spawn_controller_services, spawn_controller_status, spawn_root_pg_status,
     spawn_system_diagnostics,
 };
@@ -36,6 +36,7 @@ pub enum ClusterUpdate {
     RootPgStatus(Result<RootPgStatusSnapshot, NifiLensError>, FetchMeta),
     ControllerServices(Result<ControllerServicesSnapshot, NifiLensError>, FetchMeta),
     SystemDiagnostics(Result<SystemDiagSnapshot, NifiLensError>, FetchMeta),
+    ClusterNodes(Result<ClusterNodesSnapshot, NifiLensError>, FetchMeta),
     Connections {
         pg_id: String,
         result: Result<ConnectionEndpoints, NifiLensError>,
@@ -55,6 +56,7 @@ impl ClusterUpdate {
             Self::RootPgStatus(..) => ClusterEndpoint::RootPgStatus,
             Self::ControllerServices(..) => ClusterEndpoint::ControllerServices,
             Self::SystemDiagnostics(..) => ClusterEndpoint::SystemDiagnostics,
+            Self::ClusterNodes(..) => ClusterEndpoint::ClusterNodes,
             Self::Connections { .. } => ClusterEndpoint::ConnectionsByPg,
             Self::BulletinsDelta { .. } => ClusterEndpoint::Bulletins,
         }
@@ -258,6 +260,20 @@ impl ClusterStore {
         };
         self.handles
             .push(spawn_about(client.clone(), tx.clone(), about_cfg));
+
+        let cluster_nodes_cfg = FetchTaskConfig {
+            base_interval: self.config.cluster_nodes,
+            max_interval: self.config.max_interval,
+            jitter_percent: self.config.jitter_percent,
+            force: self.notifies.get(ClusterEndpoint::ClusterNodes),
+            gated: true,
+            subscriber_counter: self.subscribers.counter(ClusterEndpoint::ClusterNodes),
+        };
+        self.handles.push(spawn_cluster_nodes(
+            client.clone(),
+            tx.clone(),
+            cluster_nodes_cfg,
+        ));
     }
 
     pub fn subscribe(&mut self, endpoint: ClusterEndpoint, view: ViewId) {
@@ -292,6 +308,9 @@ impl ClusterStore {
             }
             ClusterUpdate::SystemDiagnostics(result, meta) => {
                 self.snapshot.system_diagnostics.apply(result, meta)
+            }
+            ClusterUpdate::ClusterNodes(result, meta) => {
+                self.snapshot.cluster_nodes.apply(result, meta)
             }
             ClusterUpdate::Connections {
                 pg_id,
@@ -691,6 +710,28 @@ mod tests {
         assert_eq!(store.snapshot.bulletins.buf.front().unwrap().id, 3);
         assert_eq!(store.snapshot.bulletins.buf.back().unwrap().id, 5);
         assert_eq!(store.snapshot.bulletins.last_id, Some(5));
+    }
+
+    #[test]
+    fn cluster_nodes_update_is_applied() {
+        use crate::client::health::ClusterNodesSnapshot;
+        let fake = ClusterNodesSnapshot {
+            rows: vec![],
+            fetched_at: std::time::Instant::now(),
+            fetched_wall: time::OffsetDateTime::now_utc(),
+        };
+        let mut store = ClusterStore::new(ClusterPollingConfig::default(), 5000);
+        let meta = FetchMeta {
+            fetched_at: std::time::Instant::now(),
+            fetch_duration: Duration::from_millis(1),
+            next_interval: Duration::from_secs(5),
+        };
+        let ep = store.apply_update(ClusterUpdate::ClusterNodes(Ok(fake), meta));
+        assert_eq!(ep, ClusterEndpoint::ClusterNodes);
+        assert!(matches!(
+            store.snapshot.cluster_nodes,
+            crate::cluster::snapshot::EndpointState::Ready { .. }
+        ));
     }
 
     #[test]
