@@ -1054,8 +1054,13 @@ fn handle_key(state: &mut AppState, key: KeyEvent, config: &Config) -> UpdateRes
     }
 
     // translate() runs before view dispatch so the InputEvent is ready.
+    // `content_modal_open` shadows outer-tab keys onto ContentModalVerb.
+    // We also gate on `state.modal.is_none()` because an app-wide modal
+    // (e.g. Save) can be opened FROM the content modal; while that modal
+    // is up its input must not be swallowed by the content-modal shadow.
     let content_modal_open = state.current_tab == crate::app::state::ViewId::Tracer
-        && state.tracer.content_modal.is_some();
+        && state.tracer.content_modal.is_some()
+        && state.modal.is_none();
     let input_event = state
         .keymap
         .translate(key, state.current_tab, content_modal_open);
