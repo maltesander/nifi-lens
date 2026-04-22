@@ -617,15 +617,38 @@ impl ViewKeyHandler for TracerHandler {
     }
 
     fn is_text_input_focused(state: &AppState) -> bool {
-        matches!(
+        // Entry mode text input.
+        if matches!(
             state.tracer.mode,
             crate::view::tracer::state::TracerMode::Entry(_)
-        )
+        ) {
+            return true;
+        }
+        // Content modal search input.
+        state
+            .tracer
+            .content_modal
+            .as_ref()
+            .and_then(|m| m.search.as_ref())
+            .map(|s| s.input_active)
+            .unwrap_or(false)
     }
 
     fn handle_text_input(state: &mut AppState, key: KeyEvent) -> Option<UpdateResult> {
         use crate::intent::Intent;
         use crate::view::tracer::state as ts;
+
+        // Modal search input takes priority when active.
+        let modal_search_active = state
+            .tracer
+            .content_modal
+            .as_ref()
+            .and_then(|m| m.search.as_ref())
+            .map(|s| s.input_active)
+            .unwrap_or(false);
+        if modal_search_active {
+            return handle_content_modal_search_input(state, key);
+        }
 
         // Entry mode: character keys go into the UUID input. Ctrl modifiers
         // fall through to global handlers.
@@ -810,6 +833,38 @@ fn lineage_load_detail_intent(
     }))
 }
 
+// ── Content modal search text input ──────────────────────────────────────────
+
+/// Handles text-input keypresses while the content modal's search input is
+/// active. Mirrors the pattern from `bulletins.rs:handle_modal_search_input`.
+fn handle_content_modal_search_input(state: &mut AppState, key: KeyEvent) -> Option<UpdateResult> {
+    use crate::view::tracer::state as ts;
+    match key.code {
+        KeyCode::Esc => ts::content_modal_search_cancel(&mut state.tracer),
+        KeyCode::Enter => {
+            ts::content_modal_search_commit(&mut state.tracer);
+            // Scroll to the first match if one exists.
+            let ceiling = state.tracer_config.modal_streaming_ceiling;
+            let fired = ts::content_modal_scroll_to_match(&mut state.tracer, ceiling);
+            if !fired.is_empty() {
+                return Some(UpdateResult {
+                    redraw: true,
+                    intent: Some(PendingIntent::SpawnModalChunks(fired)),
+                    tracer_followup: None,
+                });
+            }
+        }
+        KeyCode::Backspace => ts::content_modal_search_pop(&mut state.tracer),
+        KeyCode::Char(ch) => ts::content_modal_search_push(&mut state.tracer, ch),
+        _ => return Some(UpdateResult::default()),
+    }
+    Some(UpdateResult {
+        redraw: true,
+        intent: None,
+        tracer_followup: None,
+    })
+}
+
 // ── ContentModalVerb dispatch ─────────────────────────────────────────────────
 
 /// Dispatch a `ContentModalVerb` action. Called when the content viewer modal
@@ -820,8 +875,8 @@ fn handle_content_modal_verb(
 ) -> UpdateResult {
     use crate::input::ContentModalVerb;
     use crate::view::tracer::state::{
-        ContentModalTab, Diffable, close_content_modal, content_modal_copy_text, hunk_next,
-        hunk_prev, switch_content_modal_tab,
+        self as ts, ContentModalTab, Diffable, close_content_modal, content_modal_copy_text,
+        hunk_next, hunk_prev, switch_content_modal_tab,
     };
 
     match v {
@@ -1012,9 +1067,15 @@ fn handle_content_modal_verb(
                 let i = s.current.unwrap_or(0);
                 s.current = Some((i + 1) % s.matches.len());
             }
+            let ceiling = state.tracer_config.modal_streaming_ceiling;
+            let fired = ts::content_modal_scroll_to_match(&mut state.tracer, ceiling);
             UpdateResult {
                 redraw: true,
-                intent: None,
+                intent: if fired.is_empty() {
+                    None
+                } else {
+                    Some(PendingIntent::SpawnModalChunks(fired))
+                },
                 tracer_followup: None,
             }
         }
@@ -1028,9 +1089,15 @@ fn handle_content_modal_verb(
                 let n = s.matches.len();
                 s.current = Some((i + n - 1) % n);
             }
+            let ceiling = state.tracer_config.modal_streaming_ceiling;
+            let fired = ts::content_modal_scroll_to_match(&mut state.tracer, ceiling);
             UpdateResult {
                 redraw: true,
-                intent: None,
+                intent: if fired.is_empty() {
+                    None
+                } else {
+                    Some(PendingIntent::SpawnModalChunks(fired))
+                },
                 tracer_followup: None,
             }
         }
@@ -2011,5 +2078,218 @@ mod tests {
             70,
             "PageDown should advance by viewport rows"
         );
+    }
+
+    // ── Modal search text input (C2) ──────────────────────────────────────────
+
+    fn state_with_searchable_modal(body: &str) -> crate::app::state::AppState {
+        use crate::client::tracer::ContentRender;
+        use crate::view::tracer::state::{
+            ContentModalHeader, ContentModalState, ContentModalTab, Diffable, SideBuffer,
+        };
+        use crate::widget::search::SearchState;
+
+        let mut s = fresh_state();
+        s.current_tab = ViewId::Tracer;
+        let text = body.to_owned();
+        let modal = ContentModalState {
+            event_id: 2,
+            header: ContentModalHeader {
+                event_type: "CONTENT_MODIFIED".into(),
+                event_timestamp_iso: "".into(),
+                component_name: "x".into(),
+                pg_path: "pg".into(),
+                input_size: None,
+                output_size: None,
+                input_mime: None,
+                output_mime: None,
+                input_available: true,
+                output_available: false,
+            },
+            active_tab: ContentModalTab::Input,
+            last_nondiff_tab: ContentModalTab::Input,
+            diffable: Diffable::Pending,
+            input: SideBuffer {
+                loaded: text.clone().into_bytes(),
+                decoded: ContentRender::Text {
+                    text,
+                    pretty_printed: false,
+                },
+                fully_loaded: true,
+                in_flight: false,
+                ceiling_hit: false,
+                last_error: None,
+            },
+            output: SideBuffer::default(),
+            diff_cache: None,
+            scroll_offset: 0,
+            last_viewport_rows: 10,
+            search: Some(SearchState {
+                input_active: true,
+                ..Default::default()
+            }),
+        };
+        s.tracer.content_modal = Some(modal);
+        s
+    }
+
+    #[test]
+    fn modal_search_typing_appends_to_query_and_recomputes_matches() {
+        let body = "error line\nok line\nerror again";
+        let mut s = state_with_searchable_modal(body);
+        let c = tiny_config();
+
+        // Simulate typing 'e', 'r', 'r' while search input is active.
+        update(&mut s, key(KeyCode::Char('e'), KeyModifiers::NONE), &c);
+        update(&mut s, key(KeyCode::Char('r'), KeyModifiers::NONE), &c);
+        update(&mut s, key(KeyCode::Char('r'), KeyModifiers::NONE), &c);
+
+        let modal = s.tracer.content_modal.as_ref().unwrap();
+        let search = modal.search.as_ref().unwrap();
+        assert_eq!(search.query, "err");
+        assert_eq!(search.matches.len(), 2, "2 lines contain 'err'");
+    }
+
+    #[test]
+    fn modal_search_enter_commits_and_picks_first_match() {
+        let body = "alpha\nbeta\nalpha again";
+        let mut s = state_with_searchable_modal(body);
+        let c = tiny_config();
+
+        update(&mut s, key(KeyCode::Char('a'), KeyModifiers::NONE), &c);
+        update(&mut s, key(KeyCode::Char('l'), KeyModifiers::NONE), &c);
+        update(&mut s, key(KeyCode::Enter, KeyModifiers::NONE), &c);
+
+        let modal = s.tracer.content_modal.as_ref().unwrap();
+        let search = modal.search.as_ref().unwrap();
+        assert!(
+            !search.input_active,
+            "Enter should commit (deactivate input)"
+        );
+        assert!(search.committed, "Enter should set committed = true");
+        assert_eq!(search.current, Some(0), "first match selected");
+    }
+
+    #[test]
+    fn modal_search_esc_cancels() {
+        let body = "some text";
+        let mut s = state_with_searchable_modal(body);
+        let c = tiny_config();
+
+        update(&mut s, key(KeyCode::Esc, KeyModifiers::NONE), &c);
+
+        let modal = s.tracer.content_modal.as_ref().unwrap();
+        assert!(
+            modal.search.is_none(),
+            "Esc should clear search state entirely"
+        );
+    }
+
+    #[test]
+    fn modal_search_backspace_removes_char() {
+        let body = "hello world";
+        let mut s = state_with_searchable_modal(body);
+        let c = tiny_config();
+
+        update(&mut s, key(KeyCode::Char('w'), KeyModifiers::NONE), &c);
+        update(&mut s, key(KeyCode::Char('o'), KeyModifiers::NONE), &c);
+        update(&mut s, key(KeyCode::Char('r'), KeyModifiers::NONE), &c);
+
+        {
+            let modal = s.tracer.content_modal.as_ref().unwrap();
+            let search = modal.search.as_ref().unwrap();
+            assert_eq!(search.query, "wor");
+        }
+
+        update(&mut s, key(KeyCode::Backspace, KeyModifiers::NONE), &c);
+
+        let modal = s.tracer.content_modal.as_ref().unwrap();
+        let search = modal.search.as_ref().unwrap();
+        assert_eq!(search.query, "wo");
+    }
+
+    // ── SearchNext scroll-to-match (C3) ───────────────────────────────────────
+
+    #[test]
+    fn modal_search_next_scrolls_offset_into_viewport() {
+        use crate::client::tracer::ContentRender;
+        use crate::input::ContentModalVerb;
+        use crate::view::tracer::state::{
+            ContentModalHeader, ContentModalState, ContentModalTab, Diffable, SideBuffer,
+        };
+        use crate::widget::search::{MatchSpan, SearchState};
+
+        // Build a state where search is committed with matches on lines 0 and 60,
+        // current match at 0, viewport 10 rows at offset 0. SearchNext should
+        // advance current to Some(1) and scroll to line 60.
+        let mut s = fresh_state();
+        s.current_tab = ViewId::Tracer;
+
+        let text = "row\n".repeat(100);
+        let modal = ContentModalState {
+            event_id: 3,
+            header: ContentModalHeader {
+                event_type: "DROP".into(),
+                event_timestamp_iso: "".into(),
+                component_name: "x".into(),
+                pg_path: "pg".into(),
+                input_size: None,
+                output_size: None,
+                input_mime: None,
+                output_mime: None,
+                input_available: true,
+                output_available: false,
+            },
+            active_tab: ContentModalTab::Input,
+            last_nondiff_tab: ContentModalTab::Input,
+            diffable: Diffable::Pending,
+            input: SideBuffer {
+                loaded: text.clone().into_bytes(),
+                decoded: ContentRender::Text {
+                    text,
+                    pretty_printed: false,
+                },
+                fully_loaded: true,
+                in_flight: false,
+                ceiling_hit: false,
+                last_error: None,
+            },
+            output: SideBuffer::default(),
+            diff_cache: None,
+            scroll_offset: 0,
+            last_viewport_rows: 10,
+            search: Some(SearchState {
+                query: "row".to_owned(),
+                input_active: false,
+                committed: true,
+                matches: vec![
+                    MatchSpan {
+                        line_idx: 0,
+                        byte_start: 0,
+                        byte_end: 3,
+                    },
+                    MatchSpan {
+                        line_idx: 60,
+                        byte_start: 0,
+                        byte_end: 3,
+                    },
+                ],
+                current: Some(0),
+            }),
+        };
+        s.tracer.content_modal = Some(modal);
+
+        // Dispatch SearchNext via handle_verb.
+        let r = super::TracerHandler::handle_verb(
+            &mut s,
+            crate::input::ViewVerb::ContentModal(ContentModalVerb::SearchNext),
+        )
+        .expect("SearchNext should be consumed");
+        assert!(r.redraw);
+
+        let modal = s.tracer.content_modal.as_ref().unwrap();
+        let search = modal.search.as_ref().unwrap();
+        assert_eq!(search.current, Some(1), "SearchNext advances to match 1");
+        assert_eq!(modal.scroll_offset, 60, "scroll must jump to match line 60");
     }
 }

@@ -1723,6 +1723,122 @@ pub fn content_modal_copy_text(state: &TracerState) -> Option<String> {
     }
 }
 
+// ── Content modal search helpers ──────────────────────────────────────────────
+
+/// Return the plain-text body for the active tab, used as the search corpus.
+/// Returns an empty string when the modal is not open or the tab has no text.
+fn content_modal_search_body(modal: &ContentModalState) -> String {
+    use crate::client::tracer::ContentRender;
+    match modal.active_tab {
+        ContentModalTab::Input => match &modal.input.decoded {
+            ContentRender::Text { text, .. } => text.clone(),
+            ContentRender::Hex { first_4k } => first_4k.clone(),
+            ContentRender::Empty => String::new(),
+        },
+        ContentModalTab::Output => match &modal.output.decoded {
+            ContentRender::Text { text, .. } => text.clone(),
+            ContentRender::Hex { first_4k } => first_4k.clone(),
+            ContentRender::Empty => String::new(),
+        },
+        ContentModalTab::Diff => {
+            if let Some(cache) = &modal.diff_cache {
+                cache
+                    .lines
+                    .iter()
+                    .map(|l| l.text.as_str())
+                    .collect::<Vec<_>>()
+                    .join("\n")
+            } else {
+                String::new()
+            }
+        }
+    }
+}
+
+/// Append a character to the live modal search query and recompute matches.
+/// No-op if the modal is not open or search input is not active.
+pub fn content_modal_search_push(state: &mut TracerState, ch: char) {
+    // Check preconditions before taking any borrow.
+    {
+        let Some(modal) = state.content_modal.as_ref() else {
+            return;
+        };
+        let Some(search) = modal.search.as_ref() else {
+            return;
+        };
+        if !search.input_active {
+            return;
+        }
+    }
+    // Compute the body while we only have an immutable borrow.
+    let body = content_modal_search_body(state.content_modal.as_ref().unwrap());
+    // Now mutate.
+    let modal = state.content_modal.as_mut().unwrap();
+    let search = modal.search.as_mut().unwrap();
+    search.query.push(ch);
+    search.matches = crate::widget::search::compute_matches(&body, &search.query);
+    search.current = if search.matches.is_empty() {
+        None
+    } else {
+        Some(0)
+    };
+}
+
+/// Remove the last character from the live modal search query and recompute matches.
+/// No-op if the modal is not open or search input is not active.
+pub fn content_modal_search_pop(state: &mut TracerState) {
+    // Check preconditions before taking any borrow.
+    {
+        let Some(modal) = state.content_modal.as_ref() else {
+            return;
+        };
+        let Some(search) = modal.search.as_ref() else {
+            return;
+        };
+        if !search.input_active {
+            return;
+        }
+    }
+    // Compute body with immutable borrow, then mutate.
+    let body = content_modal_search_body(state.content_modal.as_ref().unwrap());
+    let modal = state.content_modal.as_mut().unwrap();
+    let search = modal.search.as_mut().unwrap();
+    search.query.pop();
+    search.matches = crate::widget::search::compute_matches(&body, &search.query);
+    search.current = if search.matches.is_empty() {
+        None
+    } else {
+        Some(0)
+    };
+}
+
+/// Commit the current query. If the query is empty, closes search. Otherwise
+/// flips `input_active` to false and `committed` to true.
+pub fn content_modal_search_commit(state: &mut TracerState) {
+    let Some(modal) = state.content_modal.as_mut() else {
+        return;
+    };
+    let Some(search) = modal.search.as_mut() else {
+        return;
+    };
+    if search.query.is_empty() {
+        modal.search = None;
+        return;
+    }
+    search.input_active = false;
+    search.committed = true;
+    if search.current.is_none() && !search.matches.is_empty() {
+        search.current = Some(0);
+    }
+}
+
+/// Cancel search and clear all search state from the modal.
+pub fn content_modal_search_cancel(state: &mut TracerState) {
+    if let Some(modal) = state.content_modal.as_mut() {
+        modal.search = None;
+    }
+}
+
 // ── Tests ─────────────────────────────────────────────────────────────────────
 
 #[cfg(test)]
@@ -3514,6 +3630,138 @@ mod tests {
             state.content_modal.as_ref().unwrap().scroll_offset,
             30,
             "page-down by viewport rows"
+        );
+    }
+
+    #[test]
+    fn content_modal_search_push_recomputes_matches() {
+        use crate::client::tracer::ContentRender;
+        use crate::widget::search::SearchState;
+
+        let body = "error: foo\nok\nerror: bar";
+        let mut modal = stub_modal(1, ContentModalTab::Input);
+        modal.input.decoded = ContentRender::Text {
+            text: body.to_owned(),
+            pretty_printed: false,
+        };
+        modal.search = Some(SearchState {
+            input_active: true,
+            ..Default::default()
+        });
+        let mut state = TracerState {
+            content_modal: Some(modal),
+            ..TracerState::default()
+        };
+
+        content_modal_search_push(&mut state, 'e');
+        content_modal_search_push(&mut state, 'r');
+        content_modal_search_push(&mut state, 'r');
+
+        let s = state
+            .content_modal
+            .as_ref()
+            .unwrap()
+            .search
+            .as_ref()
+            .unwrap();
+        assert_eq!(s.query, "err");
+        assert_eq!(s.matches.len(), 2);
+    }
+
+    #[test]
+    fn content_modal_search_pop_shrinks_query() {
+        use crate::client::tracer::ContentRender;
+        use crate::widget::search::SearchState;
+
+        let body = "hello world";
+        let mut modal = stub_modal(1, ContentModalTab::Input);
+        modal.input.decoded = ContentRender::Text {
+            text: body.to_owned(),
+            pretty_printed: false,
+        };
+        modal.search = Some(SearchState {
+            query: "wor".to_owned(),
+            input_active: true,
+            matches: vec![],
+            ..Default::default()
+        });
+        let mut state = TracerState {
+            content_modal: Some(modal),
+            ..TracerState::default()
+        };
+
+        content_modal_search_pop(&mut state);
+
+        let s = state
+            .content_modal
+            .as_ref()
+            .unwrap()
+            .search
+            .as_ref()
+            .unwrap();
+        assert_eq!(s.query, "wo");
+    }
+
+    #[test]
+    fn content_modal_search_commit_clears_search_on_empty_query() {
+        use crate::widget::search::SearchState;
+
+        let mut modal = stub_modal(1, ContentModalTab::Input);
+        modal.search = Some(SearchState {
+            input_active: true,
+            ..Default::default()
+        });
+        let mut state = TracerState {
+            content_modal: Some(modal),
+            ..TracerState::default()
+        };
+
+        content_modal_search_commit(&mut state);
+
+        assert!(
+            state.content_modal.as_ref().unwrap().search.is_none(),
+            "empty query commit should clear search"
+        );
+    }
+
+    #[test]
+    fn content_modal_scroll_to_match_scrolls_to_visible_line() {
+        use crate::client::tracer::ContentRender;
+        use crate::widget::search::{MatchSpan, SearchState};
+
+        let text = "a\n".repeat(100);
+        let mut modal = stub_modal(1, ContentModalTab::Input);
+        modal.input.fully_loaded = true;
+        modal.input.decoded = ContentRender::Text {
+            text,
+            pretty_printed: false,
+        };
+        // Match at line 50; viewport at 0..10. Scroll must jump to line 50.
+        modal.scroll_offset = 0;
+        modal.last_viewport_rows = 10;
+        modal.search = Some(SearchState {
+            query: "a".to_owned(),
+            input_active: false,
+            committed: true,
+            matches: vec![MatchSpan {
+                line_idx: 50,
+                byte_start: 0,
+                byte_end: 1,
+            }],
+            current: Some(0),
+        });
+        let mut state = TracerState {
+            content_modal: Some(modal),
+            ..TracerState::default()
+        };
+
+        let fired = content_modal_scroll_to_match(&mut state, None);
+        // fully_loaded — no fetch fires; scroll offset updated.
+        assert!(fired.is_empty(), "no fetch for fully loaded content");
+        assert_eq!(
+            state.content_modal.as_ref().unwrap().scroll_offset,
+            50,
+            "scroll must jump to match line"
         );
     }
 }

@@ -100,6 +100,7 @@ fn render_tab_strip(frame: &mut Frame, area: Rect, modal: &ContentModalState) {
 }
 
 fn render_body(frame: &mut Frame, area: Rect, modal: &ContentModalState) {
+    // TODO: highlight match spans in body — tracked as follow-up
     let lines: Vec<Line<'static>> = match modal.active_tab {
         ContentModalTab::Input => text_body_lines(
             &modal.input.decoded,
