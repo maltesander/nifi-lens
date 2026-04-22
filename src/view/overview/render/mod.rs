@@ -1458,4 +1458,264 @@ mod tests {
             "'alfa' must be scrolled out of view"
         );
     }
+
+    // ── T21 helpers and snapshot tests ───────────────────────────────────────
+
+    /// Build a two-node `AppState` with sysdiag pre-seeded and basic
+    /// controller/root-pg/cs data for a complete render.  The cluster-nodes
+    /// snapshot is NOT yet applied, so every `NodeHealthRow` has
+    /// `cluster = None` — this is the `any_cluster = false` baseline.
+    fn seed_state_with_two_nodes() -> crate::app::state::AppState {
+        use crate::client::health::{
+            GcSnapshot, NodeDiagnostics, RepoUsage, SystemDiagAggregate, SystemDiagSnapshot,
+        };
+        use crate::cluster::snapshot::{EndpointState, FetchMeta};
+        use std::time::Instant;
+
+        let mut state = crate::test_support::fresh_state();
+
+        // Seed controller_status.
+        state.cluster.snapshot.controller_status = EndpointState::Ready {
+            data: ControllerStatusSnapshot {
+                running: 42,
+                stopped: 3,
+                invalid: 0,
+                disabled: 1,
+                active_threads: 5,
+                flow_files_queued: 120,
+                bytes_queued: 4096,
+                stale: 0,
+                locally_modified: 0,
+                sync_failure: 0,
+                up_to_date: 0,
+            },
+            meta: FetchMeta {
+                fetched_at: Instant::now(),
+                fetch_duration: std::time::Duration::from_millis(5),
+                next_interval: std::time::Duration::from_secs(10),
+            },
+        };
+        crate::view::overview::state::redraw_controller_status(&mut state);
+
+        // Seed root-pg status.
+        let root_pg = RootPgStatusSnapshot {
+            flow_files_queued: 120,
+            bytes_queued: 4096,
+            connections: vec![],
+            process_group_count: 5,
+            input_port_count: 2,
+            output_port_count: 1,
+            processors: crate::client::ProcessorStateCounts {
+                running: 42,
+                stopped: 3,
+                invalid: 0,
+                disabled: 1,
+            },
+            process_group_ids: vec![],
+            nodes: vec![],
+        };
+        state.cluster.snapshot.root_pg_status = EndpointState::Ready {
+            data: root_pg,
+            meta: FetchMeta {
+                fetched_at: Instant::now(),
+                fetch_duration: std::time::Duration::from_millis(5),
+                next_interval: std::time::Duration::from_secs(10),
+            },
+        };
+        crate::view::overview::state::redraw_components(&mut state);
+
+        // Seed sysdiag with two nodes.
+        let node = |address: &str| NodeDiagnostics {
+            address: address.into(),
+            heap_used_bytes: 512 * 1024 * 1024,
+            heap_max_bytes: 1024 * 1024 * 1024,
+            gc: vec![GcSnapshot {
+                name: "G1 Young".into(),
+                collection_count: 10,
+                collection_millis: 50,
+            }],
+            load_average: Some(1.5),
+            available_processors: Some(4),
+            total_threads: 50,
+            uptime: "1h".into(),
+            content_repos: vec![RepoUsage {
+                identifier: "content".into(),
+                used_bytes: 60,
+                total_bytes: 100,
+                free_bytes: 40,
+                utilization_percent: 60,
+            }],
+            flowfile_repo: Some(RepoUsage {
+                identifier: "flowfile".into(),
+                used_bytes: 30,
+                total_bytes: 100,
+                free_bytes: 70,
+                utilization_percent: 30,
+            }),
+            provenance_repos: vec![RepoUsage {
+                identifier: "provenance".into(),
+                used_bytes: 20,
+                total_bytes: 100,
+                free_bytes: 80,
+                utilization_percent: 20,
+            }],
+        };
+        let diag = SystemDiagSnapshot {
+            aggregate: SystemDiagAggregate {
+                content_repos: vec![RepoUsage {
+                    identifier: "content".into(),
+                    used_bytes: 60,
+                    total_bytes: 100,
+                    free_bytes: 40,
+                    utilization_percent: 60,
+                }],
+                flowfile_repo: Some(RepoUsage {
+                    identifier: "flowfile".into(),
+                    used_bytes: 30,
+                    total_bytes: 100,
+                    free_bytes: 70,
+                    utilization_percent: 30,
+                }),
+                provenance_repos: vec![RepoUsage {
+                    identifier: "provenance".into(),
+                    used_bytes: 20,
+                    total_bytes: 100,
+                    free_bytes: 80,
+                    utilization_percent: 20,
+                }],
+            },
+            nodes: vec![node("node1:8080"), node("node2:8080")],
+            fetched_at: Instant::now(),
+        };
+        state.cluster.snapshot.system_diagnostics = EndpointState::Ready {
+            data: diag,
+            meta: FetchMeta {
+                fetched_at: Instant::now(),
+                fetch_duration: std::time::Duration::from_millis(5),
+                next_interval: std::time::Duration::from_secs(10),
+            },
+        };
+        crate::view::overview::state::redraw_sysdiag(&mut state);
+
+        state
+    }
+
+    #[test]
+    fn snapshot_overview_with_cluster_roles() {
+        use crate::client::health::{ClusterNodeRow, ClusterNodeStatus, ClusterNodesSnapshot};
+        use crate::cluster::snapshot::FetchMeta;
+
+        // Seed two-node sysdiag, then apply cluster-nodes with primary +
+        // coordinator.  Title: "Nodes (2/2 connected)".
+        let mut state = seed_state_with_two_nodes();
+        let cluster = ClusterNodesSnapshot {
+            rows: vec![
+                ClusterNodeRow {
+                    node_id: "id-1".into(),
+                    address: "node1:8080".into(),
+                    status: ClusterNodeStatus::Connected,
+                    is_primary: true,
+                    is_coordinator: false,
+                    heartbeat_iso: None,
+                    node_start_iso: None,
+                    active_thread_count: 4,
+                    flow_files_queued: 0,
+                    bytes_queued: 0,
+                    events: vec![],
+                },
+                ClusterNodeRow {
+                    node_id: "id-2".into(),
+                    address: "node2:8080".into(),
+                    status: ClusterNodeStatus::Connected,
+                    is_primary: false,
+                    is_coordinator: true,
+                    heartbeat_iso: None,
+                    node_start_iso: None,
+                    active_thread_count: 3,
+                    flow_files_queued: 0,
+                    bytes_queued: 0,
+                    events: vec![],
+                },
+            ],
+            fetched_at: std::time::Instant::now(),
+            fetched_wall: time::OffsetDateTime::now_utc(),
+        };
+        state.cluster.snapshot.cluster_nodes.apply(
+            Ok(cluster),
+            FetchMeta {
+                fetched_at: std::time::Instant::now(),
+                fetch_duration: std::time::Duration::from_millis(1),
+                next_interval: std::time::Duration::from_secs(5),
+            },
+        );
+        crate::view::overview::state::redraw_cluster_nodes(&mut state);
+        insta::assert_snapshot!(
+            "overview_with_cluster_roles",
+            render_to_string(&state.overview)
+        );
+    }
+
+    #[test]
+    fn snapshot_overview_with_dead_node() {
+        use crate::client::health::{ClusterNodeRow, ClusterNodeStatus, ClusterNodesSnapshot};
+        use crate::cluster::snapshot::FetchMeta;
+
+        // node1 connected primary+coordinator; node2 disconnected.
+        // Expected dim/─── cells on the dead row; title "Nodes (1/2 connected)".
+        let mut state = seed_state_with_two_nodes();
+        let cluster = ClusterNodesSnapshot {
+            rows: vec![
+                ClusterNodeRow {
+                    node_id: "id-1".into(),
+                    address: "node1:8080".into(),
+                    status: ClusterNodeStatus::Connected,
+                    is_primary: true,
+                    is_coordinator: true,
+                    heartbeat_iso: None,
+                    node_start_iso: None,
+                    active_thread_count: 4,
+                    flow_files_queued: 0,
+                    bytes_queued: 0,
+                    events: vec![],
+                },
+                ClusterNodeRow {
+                    node_id: "id-2".into(),
+                    address: "node2:8080".into(),
+                    status: ClusterNodeStatus::Disconnected,
+                    is_primary: false,
+                    is_coordinator: false,
+                    heartbeat_iso: None,
+                    node_start_iso: None,
+                    active_thread_count: 0,
+                    flow_files_queued: 0,
+                    bytes_queued: 0,
+                    events: vec![],
+                },
+            ],
+            fetched_at: std::time::Instant::now(),
+            fetched_wall: time::OffsetDateTime::now_utc(),
+        };
+        state.cluster.snapshot.cluster_nodes.apply(
+            Ok(cluster),
+            FetchMeta {
+                fetched_at: std::time::Instant::now(),
+                fetch_duration: std::time::Duration::from_millis(1),
+                next_interval: std::time::Duration::from_secs(5),
+            },
+        );
+        crate::view::overview::state::redraw_cluster_nodes(&mut state);
+        insta::assert_snapshot!("overview_with_dead_node", render_to_string(&state.overview));
+    }
+
+    #[test]
+    fn snapshot_overview_standalone_no_badges() {
+        // No cluster-nodes snapshot applied. Every row has cluster = None,
+        // so any_cluster = false and the pre-T20 4-column layout is
+        // preserved (no badge column, old title format).
+        let state = seed_state_with_two_nodes();
+        insta::assert_snapshot!(
+            "overview_standalone_no_badges",
+            render_to_string(&state.overview)
+        );
+    }
 }
