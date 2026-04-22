@@ -114,7 +114,9 @@ Controller services and queues appear as first-class tree nodes under
 their owning PG, bucketed inside named folders. Input / output ports
 have their own detail panes. The controller-service detail pane lists
 every component that references it, each jumpable. Properties are
-browsable in a dedicated modal.
+browsable in a dedicated modal. The tree loads lazily the first time
+you open the tab — cross-tab `g` / `Shift+F` will only see Browser
+components after Browser has been visited at least once per session.
 
 **Events** — Provenance search with a filter bar (time / type / source /
 flowfile UUID / attribute). Results are colored by event type and
