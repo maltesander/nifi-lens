@@ -26,6 +26,8 @@ pub struct TracerState {
     pub mode: TracerMode,
     /// Last error message from any async operation in this tab.
     pub last_error: Option<String>,
+    /// Open content viewer modal, if any.
+    pub content_modal: Option<ContentModalState>,
 }
 
 impl TracerState {
@@ -34,6 +36,7 @@ impl TracerState {
         Self {
             mode: TracerMode::Entry(EntryState::default()),
             last_error: None,
+            content_modal: None,
         }
     }
 
@@ -1032,6 +1035,101 @@ pub fn entry_submit(state: &mut TracerState) -> Option<String> {
             None
         }
     }
+}
+
+// ── Content viewer modal ─────────────────────────────────────────────
+
+/// Immutable snapshot of modal header facts, captured once at open.
+#[derive(Debug, Clone)]
+pub struct ContentModalHeader {
+    pub event_type: String,
+    pub event_timestamp_iso: String,
+    pub component_name: String,
+    pub pg_path: String,
+    pub input_size: Option<u64>,
+    pub output_size: Option<u64>,
+    pub input_mime: Option<String>,
+    pub output_mime: Option<String>,
+    pub input_available: bool,
+    pub output_available: bool,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ContentModalTab {
+    Input,
+    Output,
+    Diff,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Diffable {
+    /// First chunks not yet landed on both sides. Diff tab gray, no
+    /// reason chip.
+    Pending,
+    /// Eligible.
+    Ok,
+    /// Ineligible with a specific reason.
+    NotAvailable(NotDiffableReason),
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum NotDiffableReason {
+    InputUnavailable,
+    OutputUnavailable,
+    MimeMismatch,
+    SizeExceedsDiffCap,
+    NoDifferences,
+}
+
+#[derive(Debug, Clone, Default)]
+pub struct SideBuffer {
+    pub loaded: Vec<u8>,
+    pub decoded: crate::client::tracer::ContentRender,
+    pub fully_loaded: bool,
+    pub ceiling_hit: bool,
+    pub in_flight: bool,
+    pub last_error: Option<String>,
+}
+
+#[derive(Debug, Clone)]
+pub struct DiffLine {
+    pub tag: similar::ChangeTag,
+    pub text: String,
+    pub input_line: Option<u32>,
+    pub output_line: Option<u32>,
+}
+
+#[derive(Debug, Clone)]
+pub struct HunkAnchor {
+    /// Index into `DiffRender::lines`.
+    pub line_idx: u32,
+    pub input_line: u32,
+    pub output_line: u32,
+}
+
+#[derive(Debug, Clone, Default)]
+pub struct DiffRender {
+    pub lines: Vec<DiffLine>,
+    pub hunks: Vec<HunkAnchor>,
+}
+
+#[derive(Debug, Clone)]
+pub struct ContentModalState {
+    pub event_id: i64,
+    pub header: ContentModalHeader,
+    pub active_tab: ContentModalTab,
+    /// Last non-Diff tab the user was on. Used by Save on Diff tab to
+    /// decide which side to save.
+    pub last_nondiff_tab: ContentModalTab,
+    pub diffable: Diffable,
+    pub input: SideBuffer,
+    pub output: SideBuffer,
+    pub diff_cache: Option<DiffRender>,
+    pub scroll_offset: usize,
+    /// Last viewport row count (body area, excluding header/tab-strip/
+    /// footer/hint). Written by the renderer each frame.
+    pub last_viewport_rows: usize,
+    pub search: Option<crate::widget::search::SearchState>,
 }
 
 // ── Tests ─────────────────────────────────────────────────────────────────────
@@ -2140,6 +2238,7 @@ mod tests {
         let ts = TracerState {
             mode: TracerMode::LatestEvents(view),
             last_error: None,
+            content_modal: None,
         };
         assert_eq!(ts.selected_component_label(), Some("MyProcessor".into()));
     }

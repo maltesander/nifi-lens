@@ -90,7 +90,7 @@ pub enum LineagePoll {
     Finished(LineageSnapshot),
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 pub enum ContentRender {
     /// Valid UTF-8 body. `pretty_printed` is true iff JSON pretty-
     /// printing succeeded AND produced bytes different from the
@@ -99,6 +99,7 @@ pub enum ContentRender {
     /// Non-UTF-8 body, hex dump of up to the first 4 KiB.
     Hex { first_4k: String },
     /// Empty body.
+    #[default]
     Empty,
 }
 
