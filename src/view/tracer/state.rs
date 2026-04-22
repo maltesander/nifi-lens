@@ -1531,7 +1531,15 @@ pub fn resolve_diffable(
             (ContentRender::Empty, _) | (_, ContentRender::Empty)
                 if input.loaded.is_empty() || output.loaded.is_empty() =>
             {
-                return Diffable::Pending;
+                if !input.fully_loaded || !output.fully_loaded {
+                    // At least one side is empty but not yet fully loaded —
+                    // wait for the fetch to complete before deciding.
+                    return Diffable::Pending;
+                }
+                // Both sides fully loaded and at least one is empty.
+                // Fall through as diffable so the byte-equality check below
+                // resolves to NoDifferences for two empty buffers.
+                true
             }
             _ => false,
         },
@@ -3357,6 +3365,25 @@ mod tests {
         assert_eq!(
             resolve_diffable(&header, &input, &output),
             Diffable::NotAvailable(NotDiffableReason::InputUnavailable)
+        );
+    }
+
+    #[test]
+    fn diffable_no_mime_both_empty_fully_loaded_is_no_differences() {
+        let mut header = header_with_mime("", "", 0, 0);
+        header.input_mime = None;
+        header.output_mime = None;
+        let empty = SideBuffer {
+            loaded: Vec::new(),
+            decoded: crate::client::tracer::ContentRender::Empty,
+            fully_loaded: true,
+            ceiling_hit: false,
+            in_flight: false,
+            last_error: None,
+        };
+        assert_eq!(
+            resolve_diffable(&header, &empty, &empty),
+            Diffable::NotAvailable(NotDiffableReason::NoDifferences)
         );
     }
 
