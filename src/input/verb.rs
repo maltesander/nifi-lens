@@ -320,12 +320,134 @@ impl Verb for TracerVerb {
     }
 }
 
+/// Verbs that are only active when the content viewer modal is open.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum ContentModalVerb {
+    SwitchTabNext,
+    SwitchTabPrev,
+    JumpInput,
+    JumpOutput,
+    JumpDiff,
+    OpenSearch,
+    SearchNext,
+    SearchPrev,
+    HunkNext,
+    HunkPrev,
+    Copy,
+    Save,
+    Close,
+}
+
+impl Verb for ContentModalVerb {
+    fn chord(self) -> Chord {
+        match self {
+            Self::SwitchTabNext => Chord::simple(KeyCode::Tab),
+            Self::SwitchTabPrev => Chord::simple(KeyCode::BackTab),
+            Self::JumpInput => Chord::simple(KeyCode::Char('1')),
+            Self::JumpOutput => Chord::simple(KeyCode::Char('2')),
+            Self::JumpDiff => Chord::simple(KeyCode::Char('3')),
+            Self::OpenSearch => Chord::simple(KeyCode::Char('/')),
+            Self::SearchNext => Chord::simple(KeyCode::Char('n')),
+            Self::SearchPrev => Chord::shift(KeyCode::Char('N')),
+            Self::HunkNext => Chord::ctrl(KeyCode::Down),
+            Self::HunkPrev => Chord::ctrl(KeyCode::Up),
+            Self::Copy => Chord::simple(KeyCode::Char('c')),
+            Self::Save => Chord::simple(KeyCode::Char('s')),
+            Self::Close => Chord::simple(KeyCode::Esc),
+        }
+    }
+    fn label(self) -> &'static str {
+        match self {
+            Self::SwitchTabNext => "switch tab forward",
+            Self::SwitchTabPrev => "switch tab backward",
+            Self::JumpInput => "jump to Input tab",
+            Self::JumpOutput => "jump to Output tab",
+            Self::JumpDiff => "jump to Diff tab",
+            Self::OpenSearch => "open text search",
+            Self::SearchNext => "next match",
+            Self::SearchPrev => "previous match",
+            Self::HunkNext => "next diff hunk",
+            Self::HunkPrev => "previous diff hunk",
+            Self::Copy => "copy visible body to clipboard",
+            Self::Save => "save full content to file",
+            Self::Close => "close modal",
+        }
+    }
+    fn hint(self) -> &'static str {
+        match self {
+            Self::SwitchTabNext => "switch",
+            Self::OpenSearch => "find",
+            Self::SearchNext => "match",
+            Self::HunkNext => "hunk",
+            Self::Copy => "copy",
+            Self::Save => "save",
+            Self::Close => "close",
+            _ => "",
+        }
+    }
+    fn priority(self) -> u8 {
+        50
+    }
+    fn show_in_hint_bar(self) -> bool {
+        matches!(
+            self,
+            Self::SwitchTabNext
+                | Self::OpenSearch
+                | Self::SearchNext
+                | Self::HunkNext
+                | Self::Copy
+                | Self::Save
+                | Self::Close
+        )
+    }
+    fn enabled(self, ctx: &HintContext<'_>) -> bool {
+        let Some(modal) = &ctx.state.tracer.content_modal else {
+            return false;
+        };
+        match self {
+            Self::JumpDiff => {
+                matches!(modal.diffable, crate::view::tracer::state::Diffable::Ok)
+            }
+            Self::SearchNext | Self::SearchPrev => {
+                modal.search.as_ref().map(|s| s.committed).unwrap_or(false)
+            }
+            Self::HunkNext | Self::HunkPrev => {
+                modal.active_tab == crate::view::tracer::state::ContentModalTab::Diff
+                    && modal
+                        .diff_cache
+                        .as_ref()
+                        .map(|d| !d.hunks.is_empty())
+                        .unwrap_or(false)
+            }
+            _ => true,
+        }
+    }
+    fn all() -> &'static [Self] {
+        &[
+            Self::SwitchTabNext,
+            Self::SwitchTabPrev,
+            Self::JumpInput,
+            Self::JumpOutput,
+            Self::JumpDiff,
+            Self::OpenSearch,
+            Self::SearchNext,
+            Self::SearchPrev,
+            Self::HunkNext,
+            Self::HunkPrev,
+            Self::Copy,
+            Self::Save,
+            Self::Close,
+        ]
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum ViewVerb {
     Bulletins(BulletinsVerb),
     Browser(BrowserVerb),
     Events(EventsVerb),
     Tracer(TracerVerb),
+    ContentModal(ContentModalVerb),
 }
 
 #[cfg(test)]
@@ -471,7 +593,8 @@ mod tests {
             .map(|v| v.chord())
             .chain(BrowserVerb::all().iter().map(|v| v.chord()))
             .chain(EventsVerb::all().iter().map(|v| v.chord()))
-            .chain(TracerVerb::all().iter().map(|v| v.chord()));
+            .chain(TracerVerb::all().iter().map(|v| v.chord()))
+            .chain(ContentModalVerb::all().iter().map(|v| v.chord()));
         for c in chords {
             assert_ne!(c.key, KeyCode::Char('j'), "no view verb may bind j");
             assert_ne!(c.key, KeyCode::Char('k'), "no view verb may bind k");
