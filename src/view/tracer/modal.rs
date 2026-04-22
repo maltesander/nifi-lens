@@ -341,7 +341,7 @@ fn size_ui(n: Option<u64>) -> String {
 fn delta_ui(i: Option<u64>, o: Option<u64>) -> String {
     match (i, o) {
         (Some(i), Some(o)) => {
-            let d = o as i64 - i as i64;
+            let d = o as i128 - i as i128;
             let sign = if d >= 0 { "+" } else { "-" };
             let abs = d.unsigned_abs();
             if abs >= 1024 {
