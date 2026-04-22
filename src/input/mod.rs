@@ -251,6 +251,15 @@ impl KeyMap {
         // SwitchTabNext, not NextPane). Keys not claimed by ContentModalVerb
         // return Unmapped; outer app keys are blocked while the modal is up.
         if content_modal_open && active_view == ViewId::Tracer {
+            // Ctrl+c / Ctrl+q / Ctrl+Q must always quit, even with the modal open.
+            if matches!(
+                key.code,
+                KeyCode::Char('c') | KeyCode::Char('q') | KeyCode::Char('Q')
+            ) && key.modifiers.contains(KeyModifiers::CONTROL)
+            {
+                return InputEvent::App(AppAction::Quit);
+            }
+
             for &v in ContentModalVerb::all() {
                 if chord_matches(v.chord(), key) {
                     return InputEvent::View(ViewVerb::ContentModal(v));
@@ -721,6 +730,27 @@ mod keymap_tests {
         assert_eq!(
             km.translate(press(KeyCode::Tab), ViewId::Tracer, true),
             InputEvent::View(ViewVerb::ContentModal(ContentModalVerb::SwitchTabNext))
+        );
+    }
+
+    #[test]
+    fn ctrl_c_quits_even_when_modal_open() {
+        let mut km = KeyMap::default();
+        assert_eq!(
+            km.translate(
+                press_mod(KeyCode::Char('c'), KeyModifiers::CONTROL),
+                ViewId::Tracer,
+                true,
+            ),
+            InputEvent::App(AppAction::Quit)
+        );
+        assert_eq!(
+            km.translate(
+                press_mod(KeyCode::Char('q'), KeyModifiers::CONTROL),
+                ViewId::Tracer,
+                true,
+            ),
+            InputEvent::App(AppAction::Quit)
         );
     }
 }
