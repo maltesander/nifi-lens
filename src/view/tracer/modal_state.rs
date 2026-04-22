@@ -603,9 +603,23 @@ pub fn compute_diff_cache(input: &str, output: &str) -> DiffRender {
 pub fn resolve_and_cache_diff(modal: &mut ContentModalState) {
     modal.diffable = resolve_diffable(&modal.header, &modal.input, &modal.output);
     if modal.diffable == Diffable::Ok && modal.diff_cache.is_none() {
-        let input_text = String::from_utf8_lossy(&modal.input.loaded).into_owned();
-        let output_text = String::from_utf8_lossy(&modal.output.loaded).into_owned();
+        let input_text = side_diff_text(&modal.input);
+        let output_text = side_diff_text(&modal.output);
         modal.diff_cache = Some(compute_diff_cache(&input_text, &output_text));
+    }
+}
+
+/// Pick the text to feed into the line-based diff for a side. Prefers
+/// the already-classified `ContentRender::Text` (which JSON has been
+/// pretty-printed into by `classify_content`) over the raw bytes —
+/// otherwise compact JSON would produce a single-line diff that's
+/// effectively unreadable in the modal. Non-text content falls back
+/// to lossy UTF-8 of the loaded bytes; in practice diff is gated to
+/// text-typed sides upstream so the fallback rarely fires.
+fn side_diff_text(buf: &SideBuffer) -> String {
+    match &buf.decoded {
+        crate::client::tracer::ContentRender::Text { text, .. } => text.clone(),
+        _ => String::from_utf8_lossy(&buf.loaded).into_owned(),
     }
 }
 
@@ -1758,6 +1772,65 @@ mod tests {
         resolve_and_cache_diff(&mut modal);
         assert_eq!(modal.diffable, Diffable::Pending);
         assert!(modal.diff_cache.is_none());
+    }
+
+    #[test]
+    fn resolve_and_cache_diff_uses_pretty_printed_text_for_json() {
+        // Compact JSON in the raw bytes…
+        let input_compact = br#"[{"id":1,"v":"a"},{"id":2,"v":"b"}]"#.to_vec();
+        let output_compact = br#"[{"id":1,"v":"A"},{"id":2,"v":"B"}]"#.to_vec();
+        // …but classify_content pretty-prints into the decoded variant.
+        let input_decoded = crate::client::tracer::classify_content(input_compact.clone());
+        let output_decoded = crate::client::tracer::classify_content(output_compact.clone());
+
+        let mut modal = stub_modal(1, ContentModalTab::Input);
+        modal.input = SideBuffer {
+            loaded: input_compact,
+            decoded: input_decoded,
+            fully_loaded: true,
+            ceiling_hit: false,
+            in_flight: false,
+            last_error: None,
+        };
+        modal.output = SideBuffer {
+            loaded: output_compact,
+            decoded: output_decoded,
+            fully_loaded: true,
+            ceiling_hit: false,
+            in_flight: false,
+            last_error: None,
+        };
+
+        resolve_and_cache_diff(&mut modal);
+        let cache = modal
+            .diff_cache
+            .as_ref()
+            .expect("diff cache populated for diffable JSON");
+
+        // If the diff used the compact bytes, every line would be the
+        // entire JSON document → at most ~4 lines (one per change tag).
+        // Pretty-printed across multiple lines, the diff should produce
+        // significantly more rendered lines AND distinct +/- lines for
+        // the changed `v` field (lowercase → uppercase).
+        assert!(
+            cache.lines.len() >= 6,
+            "expected pretty-printed diff to span multiple lines, got {}",
+            cache.lines.len()
+        );
+        let inserts: Vec<&str> = cache
+            .lines
+            .iter()
+            .filter(|l| matches!(l.tag, similar::ChangeTag::Insert))
+            .map(|l| l.text.as_str())
+            .collect();
+        assert!(
+            inserts.iter().any(|t| t.contains("\"A\"")),
+            "uppercase A must appear as an insert; inserts: {inserts:?}"
+        );
+        assert!(
+            inserts.iter().any(|t| t.contains("\"B\"")),
+            "uppercase B must appear as an insert; inserts: {inserts:?}"
+        );
     }
 
     #[test]
