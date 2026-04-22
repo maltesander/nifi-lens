@@ -881,33 +881,118 @@ fn update_inner(state: &mut AppState, event: AppEvent, config: &Config) -> Updat
             }
         }
         AppEvent::Data(ViewPayload::Tracer(payload)) => {
-            // Mirror several tracer outcomes into the global status banner
-            // so the footer surfaces them the same way other tab errors do;
-            // in-pane Failed rendering still shows the detail locally.
-            match &payload {
-                crate::event::TracerPayload::EventDetailFailed { error, .. } => {
-                    state.post_error(format!("event detail failed: {error}"), None);
-                }
-                crate::event::TracerPayload::ContentFailed { error, side, .. } => {
-                    state.post_error(
-                        format!("event {} content failed: {error}", side.as_str()),
-                        None,
+            // Intercept modal-chunk variants before the general apply_payload
+            // dispatch so the reducers run with full AppState context (needed
+            // for `tracer_config.modal_streaming_ceiling` and the lazy diff
+            // cache recompute).
+            match payload {
+                crate::event::TracerPayload::ModalChunk {
+                    event_id,
+                    side,
+                    offset,
+                    bytes,
+                    eof,
+                    requested_len,
+                } => {
+                    let ceiling = state.tracer_config.modal_streaming_ceiling;
+                    crate::view::tracer::state::apply_modal_chunk_with_ceiling(
+                        &mut state.tracer,
+                        event_id,
+                        side,
+                        offset,
+                        bytes,
+                        eof,
+                        requested_len,
+                        ceiling,
                     );
+                    // Recompute diffability after each chunk lands; lazily
+                    // build the diff cache when the Diff tab is active and
+                    // both sides are fully loaded.
+                    if let Some(modal) = state.tracer.content_modal.as_mut() {
+                        modal.diffable = crate::view::tracer::state::resolve_diffable(
+                            &modal.header,
+                            &modal.input,
+                            &modal.output,
+                        );
+                        if matches!(
+                            modal.active_tab,
+                            crate::view::tracer::state::ContentModalTab::Diff
+                        ) && modal.diffable == crate::view::tracer::state::Diffable::Ok
+                            && modal.diff_cache.is_none()
+                        {
+                            let input_text =
+                                String::from_utf8_lossy(&modal.input.loaded).into_owned();
+                            let output_text =
+                                String::from_utf8_lossy(&modal.output.loaded).into_owned();
+                            modal.diff_cache =
+                                Some(crate::view::tracer::state::compute_diff_cache(
+                                    &input_text,
+                                    &output_text,
+                                ));
+                        }
+                    }
+                    state.last_refresh = Instant::now();
+                    UpdateResult {
+                        redraw: true,
+                        intent: None,
+                        tracer_followup: None,
+                    }
                 }
-                crate::event::TracerPayload::ContentSaved { path } => {
-                    state.post_info(format!("saved to {}", path.display()));
+                crate::event::TracerPayload::ModalChunkFailed {
+                    event_id,
+                    side,
+                    offset,
+                    error,
+                } => {
+                    crate::view::tracer::state::apply_modal_chunk_failed(
+                        &mut state.tracer,
+                        event_id,
+                        side,
+                        offset,
+                        error,
+                    );
+                    state.last_refresh = Instant::now();
+                    UpdateResult {
+                        redraw: true,
+                        intent: None,
+                        tracer_followup: None,
+                    }
                 }
-                crate::event::TracerPayload::ContentSaveFailed { path, error } => {
-                    state.post_error(format!("save to {} failed: {error}", path.display()), None);
+                payload => {
+                    // Mirror several tracer outcomes into the global status
+                    // banner so the footer surfaces them the same way other
+                    // tab errors do; in-pane Failed rendering still shows the
+                    // detail locally.
+                    match &payload {
+                        crate::event::TracerPayload::EventDetailFailed { error, .. } => {
+                            state.post_error(format!("event detail failed: {error}"), None);
+                        }
+                        crate::event::TracerPayload::ContentFailed { error, side, .. } => {
+                            state.post_error(
+                                format!("event {} content failed: {error}", side.as_str()),
+                                None,
+                            );
+                        }
+                        crate::event::TracerPayload::ContentSaved { path } => {
+                            state.post_info(format!("saved to {}", path.display()));
+                        }
+                        crate::event::TracerPayload::ContentSaveFailed { path, error } => {
+                            state.post_error(
+                                format!("save to {} failed: {error}", path.display()),
+                                None,
+                            );
+                        }
+                        _ => {}
+                    }
+                    let followup =
+                        crate::view::tracer::state::apply_payload(&mut state.tracer, payload);
+                    state.last_refresh = Instant::now();
+                    UpdateResult {
+                        redraw: true,
+                        intent: None,
+                        tracer_followup: followup,
+                    }
                 }
-                _ => {}
-            }
-            let followup = crate::view::tracer::state::apply_payload(&mut state.tracer, payload);
-            state.last_refresh = Instant::now();
-            UpdateResult {
-                redraw: true,
-                intent: None,
-                tracer_followup: followup,
             }
         }
         AppEvent::Data(ViewPayload::Events(payload)) => {
