@@ -1405,6 +1405,85 @@ fn decoded_line_count(render: &crate::client::tracer::ContentRender) -> usize {
     }
 }
 
+// ── Diff eligibility ──────────────────────────────────────────────────────────
+
+/// MIME allowlist helper. Returns true for a single MIME string that
+/// belongs to the allowlist (literal or wildcard).
+fn mime_is_diffable_single(mime: &str) -> bool {
+    const LITERAL: &[&str] = &[
+        "application/json",
+        "application/xml",
+        "application/x-ndjson",
+        "application/yaml",
+        "text/yaml",
+        "text/csv",
+        "text/tab-separated-values",
+        "text/plain",
+    ];
+    if LITERAL.contains(&mime) {
+        return true;
+    }
+    if mime.starts_with("text/") {
+        return true;
+    }
+    if mime.starts_with("application/") && (mime.ends_with("+json") || mime.ends_with("+xml")) {
+        return true;
+    }
+    false
+}
+
+/// Resolve [`Diffable`] given the modal header and both side buffers.
+///
+/// Evaluation order: availability → mime pair → size cap → byte-equal.
+/// Returns `Pending` when MIME-less UTF-8 fallback cannot decide yet
+/// (either side still loading).
+pub fn resolve_diffable(
+    header: &ContentModalHeader,
+    input: &SideBuffer,
+    output: &SideBuffer,
+) -> Diffable {
+    use crate::client::tracer::ContentRender;
+
+    if !header.input_available {
+        return Diffable::NotAvailable(NotDiffableReason::InputUnavailable);
+    }
+    if !header.output_available {
+        return Diffable::NotAvailable(NotDiffableReason::OutputUnavailable);
+    }
+
+    let mime_ok = match (header.input_mime.as_deref(), header.output_mime.as_deref()) {
+        (Some(i), Some(o)) if i == o && mime_is_diffable_single(i) => true,
+        (Some(_), Some(_)) => false,
+        (None, None) => match (&input.decoded, &output.decoded) {
+            (ContentRender::Text { .. }, ContentRender::Text { .. }) => true,
+            (ContentRender::Empty, _) | (_, ContentRender::Empty)
+                if input.loaded.is_empty() || output.loaded.is_empty() =>
+            {
+                return Diffable::Pending;
+            }
+            _ => false,
+        },
+        _ => false,
+    };
+    if !mime_ok {
+        return Diffable::NotAvailable(NotDiffableReason::MimeMismatch);
+    }
+
+    let isize = header.input_size.unwrap_or(input.loaded.len() as u64);
+    let osize = header.output_size.unwrap_or(output.loaded.len() as u64);
+    if isize > DIFF_SIZE_CAP_BYTES || osize > DIFF_SIZE_CAP_BYTES {
+        return Diffable::NotAvailable(NotDiffableReason::SizeExceedsDiffCap);
+    }
+
+    if input.fully_loaded && output.fully_loaded {
+        if input.loaded == output.loaded {
+            return Diffable::NotAvailable(NotDiffableReason::NoDifferences);
+        }
+        return Diffable::Ok;
+    }
+    Diffable::Pending
+}
+
 // ── Tests ─────────────────────────────────────────────────────────────────────
 
 #[cfg(test)]
@@ -2814,5 +2893,115 @@ mod tests {
         let fired = content_modal_scroll_to(&mut state, 0, Some(1_048_576));
         assert_eq!(fired.len(), 1);
         assert_eq!(fired[0].len, 1_048_576 - 1_000_000);
+    }
+
+    // ── resolve_diffable helpers ──────────────────────────────────────────────
+
+    fn header_with_mime(i: &str, o: &str, isize: u64, osize: u64) -> ContentModalHeader {
+        ContentModalHeader {
+            event_type: "DROP".into(),
+            event_timestamp_iso: "".into(),
+            component_name: "x".into(),
+            pg_path: "pg".into(),
+            input_size: Some(isize),
+            output_size: Some(osize),
+            input_mime: Some(i.into()),
+            output_mime: Some(o.into()),
+            input_available: true,
+            output_available: true,
+        }
+    }
+
+    fn text_buffer(t: &str) -> SideBuffer {
+        use crate::client::tracer::ContentRender;
+        SideBuffer {
+            loaded: t.as_bytes().to_vec(),
+            decoded: ContentRender::Text {
+                text: t.to_string(),
+                pretty_printed: false,
+            },
+            fully_loaded: true,
+            ceiling_hit: false,
+            in_flight: false,
+            last_error: None,
+        }
+    }
+
+    // ── resolve_diffable tests ────────────────────────────────────────────────
+
+    #[test]
+    fn diffable_ok_when_mime_equal_and_allowlisted() {
+        let header = header_with_mime("application/json", "application/json", 1024, 1024);
+        let (input, output) = (text_buffer("a"), text_buffer("b"));
+        assert_eq!(resolve_diffable(&header, &input, &output), Diffable::Ok);
+    }
+
+    #[test]
+    fn diffable_wildcard_text_star() {
+        let header = header_with_mime("text/html", "text/html", 1024, 1024);
+        let (input, output) = (text_buffer("a"), text_buffer("b"));
+        assert_eq!(resolve_diffable(&header, &input, &output), Diffable::Ok);
+    }
+
+    #[test]
+    fn diffable_wildcard_structured_json() {
+        let header = header_with_mime(
+            "application/vnd.api+json",
+            "application/vnd.api+json",
+            1024,
+            1024,
+        );
+        let (input, output) = (text_buffer("a"), text_buffer("b"));
+        assert_eq!(resolve_diffable(&header, &input, &output), Diffable::Ok);
+    }
+
+    #[test]
+    fn diffable_mime_mismatch() {
+        let header = header_with_mime("application/json", "text/csv", 1024, 1024);
+        let (input, output) = (text_buffer("a"), text_buffer("b"));
+        assert_eq!(
+            resolve_diffable(&header, &input, &output),
+            Diffable::NotAvailable(NotDiffableReason::MimeMismatch)
+        );
+    }
+
+    #[test]
+    fn diffable_utf8_fallback_when_no_mime() {
+        let mut header = header_with_mime("", "", 1024, 1024);
+        header.input_mime = None;
+        header.output_mime = None;
+        let (input, output) = (text_buffer("a"), text_buffer("b"));
+        assert_eq!(resolve_diffable(&header, &input, &output), Diffable::Ok);
+    }
+
+    #[test]
+    fn diffable_size_exceeds_cap() {
+        let header = header_with_mime("application/json", "application/json", 600_000, 1024);
+        let (input, output) = (text_buffer("a"), text_buffer("b"));
+        assert_eq!(
+            resolve_diffable(&header, &input, &output),
+            Diffable::NotAvailable(NotDiffableReason::SizeExceedsDiffCap)
+        );
+    }
+
+    #[test]
+    fn diffable_no_differences_when_bytes_equal() {
+        let header = header_with_mime("application/json", "application/json", 10, 10);
+        let (input, output) = (text_buffer("same"), text_buffer("same"));
+        assert_eq!(
+            resolve_diffable(&header, &input, &output),
+            Diffable::NotAvailable(NotDiffableReason::NoDifferences)
+        );
+    }
+
+    #[test]
+    fn diffable_input_unavailable() {
+        let mut header = header_with_mime("application/json", "application/json", 10, 10);
+        header.input_available = false;
+        let (input, output) = (SideBuffer::default(), text_buffer("x"));
+        assert_eq!(
+            resolve_diffable(&header, &input, &output),
+            Diffable::NotAvailable(NotDiffableReason::InputUnavailable)
+        );
     }
 }
