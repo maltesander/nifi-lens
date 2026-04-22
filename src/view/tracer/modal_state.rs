@@ -113,9 +113,17 @@ pub struct ContentModalState {
     pub output: SideBuffer,
     pub diff_cache: Option<DiffRender>,
     pub scroll_offset: usize,
+    /// Horizontal scroll offset in display columns into the body text
+    /// (right of the fixed line-number gutter). Advanced by `←` / `→`;
+    /// used by the renderer to shift wide rows sideways.
+    pub horizontal_scroll_offset: usize,
     /// Last viewport row count (body area, excluding header/tab-strip/
     /// footer/hint). Written by the renderer each frame.
     pub last_viewport_rows: usize,
+    /// Last viewport body-column count (body area minus the gutter).
+    /// Written by the renderer each frame; reducers use it to size
+    /// horizontal page-size scrolls.
+    pub last_viewport_body_cols: usize,
     pub search: Option<crate::widget::search::SearchState>,
 }
 
@@ -188,7 +196,9 @@ pub fn open_content_modal(
         output: SideBuffer::default(),
         diff_cache: None,
         scroll_offset: 0,
+        horizontal_scroll_offset: 0,
         last_viewport_rows: 0,
+        last_viewport_body_cols: 0,
         search: None,
     };
 
@@ -439,6 +449,32 @@ pub fn content_modal_scroll_by(
         current.saturating_sub((-delta) as usize)
     };
     content_modal_scroll_to(state, new_offset, ceiling)
+}
+
+/// Shift the horizontal-scroll offset by `delta` columns (positive =
+/// right, negative = left). Clamps at 0 on the left; no hard upper
+/// bound — the render layer clips whatever the terminal can show.
+pub fn content_modal_scroll_horizontal_by(state: &mut TracerState, delta: isize) {
+    let Some(modal) = state.content_modal.as_mut() else {
+        return;
+    };
+    modal.horizontal_scroll_offset = if delta >= 0 {
+        modal
+            .horizontal_scroll_offset
+            .saturating_add(delta as usize)
+    } else {
+        modal
+            .horizontal_scroll_offset
+            .saturating_sub((-delta) as usize)
+    };
+}
+
+/// Set the horizontal-scroll offset to 0 (leftmost column). Used by
+/// `Home` and on tab switch.
+pub fn content_modal_scroll_horizontal_home(state: &mut TracerState) {
+    if let Some(modal) = state.content_modal.as_mut() {
+        modal.horizontal_scroll_offset = 0;
+    }
 }
 
 /// Scroll the modal so that the current search match (if any) is visible.
@@ -908,6 +944,7 @@ pub fn switch_content_modal_tab(
 
     modal.active_tab = new_tab;
     modal.scroll_offset = 0;
+    modal.horizontal_scroll_offset = 0;
     modal.search = None;
     if !matches!(new_tab, ContentModalTab::Diff) {
         modal.last_nondiff_tab = new_tab;
@@ -1157,7 +1194,9 @@ mod tests {
             output: SideBuffer::default(),
             diff_cache: None,
             scroll_offset: 0,
+            horizontal_scroll_offset: 0,
             last_viewport_rows: 0,
+            last_viewport_body_cols: 0,
             search: None,
         }
     }
@@ -2235,5 +2274,80 @@ mod tests {
             Diffable::NotAvailable(NotDiffableReason::NoDifferences)
         );
         assert!(modal.diff_cache.is_none());
+    }
+
+    // ── horizontal scroll reducer tests ───────────────────────────────────────
+
+    #[test]
+    fn horizontal_scroll_by_advances_and_clamps_at_zero() {
+        let mut state = TracerState {
+            content_modal: Some(stub_modal(1, ContentModalTab::Input)),
+            ..TracerState::default()
+        };
+        content_modal_scroll_horizontal_by(&mut state, 5);
+        assert_eq!(
+            state
+                .content_modal
+                .as_ref()
+                .unwrap()
+                .horizontal_scroll_offset,
+            5
+        );
+        content_modal_scroll_horizontal_by(&mut state, -3);
+        assert_eq!(
+            state
+                .content_modal
+                .as_ref()
+                .unwrap()
+                .horizontal_scroll_offset,
+            2
+        );
+        // Saturates at 0 on the left — scrolling further left is a no-op.
+        content_modal_scroll_horizontal_by(&mut state, -10);
+        assert_eq!(
+            state
+                .content_modal
+                .as_ref()
+                .unwrap()
+                .horizontal_scroll_offset,
+            0
+        );
+    }
+
+    #[test]
+    fn horizontal_scroll_home_resets_offset() {
+        let mut state = TracerState {
+            content_modal: Some(stub_modal(1, ContentModalTab::Input)),
+            ..TracerState::default()
+        };
+        content_modal_scroll_horizontal_by(&mut state, 42);
+        content_modal_scroll_horizontal_home(&mut state);
+        assert_eq!(
+            state
+                .content_modal
+                .as_ref()
+                .unwrap()
+                .horizontal_scroll_offset,
+            0
+        );
+    }
+
+    #[test]
+    fn tab_switch_resets_horizontal_scroll() {
+        let mut state = TracerState {
+            content_modal: Some(stub_modal(1, ContentModalTab::Input)),
+            ..TracerState::default()
+        };
+        content_modal_scroll_horizontal_by(&mut state, 25);
+        switch_content_modal_tab(&mut state, ContentModalTab::Output, None);
+        assert_eq!(
+            state
+                .content_modal
+                .as_ref()
+                .unwrap()
+                .horizontal_scroll_offset,
+            0,
+            "switching tabs must reset horizontal scroll"
+        );
     }
 }

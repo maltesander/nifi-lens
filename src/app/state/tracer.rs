@@ -194,7 +194,10 @@ impl ViewKeyHandler for TracerHandler {
                         .unwrap_or(1) as isize;
                     ts::content_modal_scroll_by(&mut state.tracer, rows, ceiling)
                 }
-                FocusAction::First => ts::content_modal_scroll_to(&mut state.tracer, 0, ceiling),
+                FocusAction::First => {
+                    ts::content_modal_scroll_horizontal_home(&mut state.tracer);
+                    ts::content_modal_scroll_to(&mut state.tracer, 0, ceiling)
+                }
                 FocusAction::Last => {
                     let line_count = ts::content_modal_line_count(&state.tracer);
                     ts::content_modal_scroll_to(
@@ -202,6 +205,17 @@ impl ViewKeyHandler for TracerHandler {
                         line_count.saturating_sub(1),
                         ceiling,
                     )
+                }
+                // Left/Right scroll the body sideways (for wide CSV rows,
+                // long JSON property paths, etc.). Unlike vertical scroll
+                // these don't trigger any fetch — purely a render offset.
+                FocusAction::Left => {
+                    ts::content_modal_scroll_horizontal_by(&mut state.tracer, -1);
+                    Vec::new()
+                }
+                FocusAction::Right => {
+                    ts::content_modal_scroll_horizontal_by(&mut state.tracer, 1);
+                    Vec::new()
                 }
                 // Other focus actions are not modal-scroll; fall through to
                 // the per-mode dispatch (no-op for most cases while modal is open).
@@ -2024,7 +2038,9 @@ mod tests {
             output: SideBuffer::default(),
             diff_cache: None,
             scroll_offset: 50,
+            horizontal_scroll_offset: 0,
             last_viewport_rows: 20,
+            last_viewport_body_cols: 0,
             search: None,
         };
         s.tracer.content_modal = Some(modal);
@@ -2140,7 +2156,9 @@ mod tests {
             output: SideBuffer::default(),
             diff_cache: None,
             scroll_offset: 0,
+            horizontal_scroll_offset: 0,
             last_viewport_rows: 10,
+            last_viewport_body_cols: 0,
             search: Some(SearchState {
                 input_active: true,
                 ..Default::default()
@@ -2274,7 +2292,9 @@ mod tests {
             output: SideBuffer::default(),
             diff_cache: None,
             scroll_offset: 0,
+            horizontal_scroll_offset: 0,
             last_viewport_rows: 10,
+            last_viewport_body_cols: 0,
             search: Some(SearchState {
                 query: "row".to_owned(),
                 input_active: false,
