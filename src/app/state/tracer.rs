@@ -194,7 +194,10 @@ impl ViewKeyHandler for TracerHandler {
                         .unwrap_or(1) as isize;
                     ts::content_modal_scroll_by(&mut state.tracer, rows, ceiling)
                 }
-                FocusAction::First => ts::content_modal_scroll_to(&mut state.tracer, 0, ceiling),
+                FocusAction::First => {
+                    ts::content_modal_scroll_horizontal_home(&mut state.tracer);
+                    ts::content_modal_scroll_to(&mut state.tracer, 0, ceiling)
+                }
                 FocusAction::Last => {
                     let line_count = ts::content_modal_line_count(&state.tracer);
                     ts::content_modal_scroll_to(
@@ -202,6 +205,17 @@ impl ViewKeyHandler for TracerHandler {
                         line_count.saturating_sub(1),
                         ceiling,
                     )
+                }
+                // Left/Right scroll the body sideways (for wide CSV rows,
+                // long JSON property paths, etc.). Unlike vertical scroll
+                // these don't trigger any fetch — purely a render offset.
+                FocusAction::Left => {
+                    ts::content_modal_scroll_horizontal_by(&mut state.tracer, -1);
+                    Vec::new()
+                }
+                FocusAction::Right => {
+                    ts::content_modal_scroll_horizontal_by(&mut state.tracer, 1);
+                    Vec::new()
                 }
                 // Other focus actions are not modal-scroll; fall through to
                 // the per-mode dispatch (no-op for most cases while modal is open).
@@ -795,16 +809,40 @@ fn dispatch_content_fetch_for_active_tab(
     }))
 }
 
-/// Builds a `PendingSave` referencing the currently-shown content
-/// pane's event id and side. Returns `None` if the content pane is
-/// not in the `Shown` state. The worker re-fetches the full body at
-/// save time rather than re-using the preview's (potentially
-/// truncated) bytes.
+/// Builds a `PendingSave` referencing the event + side that should be
+/// saved. Prefers the content viewer modal's active side when the
+/// modal is open (since that's the user's current focus and the save
+/// prompt was opened from there); falls back to the inline content
+/// pane's `Shown` state otherwise. Returns `None` when neither source
+/// can pin down a side.
+///
+/// The worker re-fetches the full body at save time rather than
+/// re-using any preview's (potentially truncated) bytes.
 pub(super) fn build_pending_save(
     state: &AppState,
     path: std::path::PathBuf,
 ) -> Option<PendingIntent> {
-    use crate::view::tracer::state::{ContentPane, EventDetail, TracerMode};
+    use crate::view::tracer::state::{ContentModalTab, ContentPane, EventDetail, TracerMode};
+
+    // 1. Content modal is the authoritative source when open — the
+    //    save prompt was almost certainly triggered from it.
+    if let Some(modal) = state.tracer.content_modal.as_ref() {
+        let side = match modal.active_tab {
+            ContentModalTab::Diff => match modal.last_nondiff_tab {
+                ContentModalTab::Output => crate::client::ContentSide::Output,
+                _ => crate::client::ContentSide::Input,
+            },
+            ContentModalTab::Output => crate::client::ContentSide::Output,
+            ContentModalTab::Input => crate::client::ContentSide::Input,
+        };
+        return Some(PendingIntent::SaveEventContent(PendingSave {
+            path,
+            event_id: modal.event_id,
+            side,
+        }));
+    }
+
+    // 2. Fallback to the inline content pane (TracerVerb::Save path).
     if let TracerMode::Lineage(ref view) = state.tracer.mode
         && let EventDetail::Loaded {
             ref event,
@@ -2024,7 +2062,9 @@ mod tests {
             output: SideBuffer::default(),
             diff_cache: None,
             scroll_offset: 50,
+            horizontal_scroll_offset: 0,
             last_viewport_rows: 20,
+            last_viewport_body_cols: 0,
             search: None,
         };
         s.tracer.content_modal = Some(modal);
@@ -2140,7 +2180,9 @@ mod tests {
             output: SideBuffer::default(),
             diff_cache: None,
             scroll_offset: 0,
+            horizontal_scroll_offset: 0,
             last_viewport_rows: 10,
+            last_viewport_body_cols: 0,
             search: Some(SearchState {
                 input_active: true,
                 ..Default::default()
@@ -2274,7 +2316,9 @@ mod tests {
             output: SideBuffer::default(),
             diff_cache: None,
             scroll_offset: 0,
+            horizontal_scroll_offset: 0,
             last_viewport_rows: 10,
+            last_viewport_body_cols: 0,
             search: Some(SearchState {
                 query: "row".to_owned(),
                 input_active: false,

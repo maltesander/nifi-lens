@@ -266,13 +266,17 @@ impl KeyMap {
                 }
             }
 
-            // Scroll keys (↑/↓/PgUp/PgDn/Home/End) pass through as FocusAction
-            // so handle_focus can scroll the modal body.
+            // Scroll keys (↑/↓/←/→/PgUp/PgDn/Home/End) pass through as
+            // FocusAction so handle_focus can scroll the modal body
+            // vertically (Up/Down/PgUp/PgDn/Home/End) or horizontally
+            // (Left/Right) through wide rows like full-width CSVs.
             for &a in FocusAction::all() {
                 if matches!(
                     a,
                     FocusAction::Up
                         | FocusAction::Down
+                        | FocusAction::Left
+                        | FocusAction::Right
                         | FocusAction::PageUp
                         | FocusAction::PageDown
                         | FocusAction::First

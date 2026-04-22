@@ -49,6 +49,12 @@ pub fn render(frame: &mut Frame, area: Rect, modal: &mut ContentModalState) {
     render_search_strip(frame, rows[7], modal);
     render_footer_hint(frame, rows[8], modal);
     modal.last_viewport_rows = rows[4].height as usize;
+    // Body cols = area width minus the fixed gutter. The renderer
+    // already computed the gutter size above; approximate here as the
+    // total width minus a small default when the renderer hasn't run
+    // through text yet. The first frame is always generous since the
+    // live modal starts with at least one chunk requested.
+    modal.last_viewport_body_cols = rows[4].width as usize;
 }
 
 fn render_header(frame: &mut Frame, area: Rect, modal: &ContentModalState) {
@@ -100,6 +106,12 @@ fn render_tab_strip(frame: &mut Frame, area: Rect, modal: &ContentModalState) {
 }
 
 fn render_body(frame: &mut Frame, area: Rect, modal: &ContentModalState) {
+    // Build the rendered lines once (gutter spans first, then body
+    // spans). For horizontal scroll we need the gutter anchored and
+    // only the body shifted sideways — so split each line's spans
+    // into two Lines, then render gutter and body as two paragraphs
+    // in two adjacent areas. The body uses `Paragraph::scroll((0, x))`
+    // which clips the left `x` display columns.
     let lines: Vec<Line<'static>> = match modal.active_tab {
         ContentModalTab::Input => text_body_lines(
             &modal.input.decoded,
@@ -117,7 +129,51 @@ fn render_body(frame: &mut Frame, area: Rect, modal: &ContentModalState) {
             diff_body_lines(modal, area.height as usize, modal.search.as_ref())
         }
     };
-    frame.render_widget(Paragraph::new(lines), area);
+
+    let gutter_columns = match modal.active_tab {
+        ContentModalTab::Diff => 2,
+        _ => 1,
+    };
+    let gutter_width = total_gutter_width(&lines, gutter_columns);
+
+    let mut gutter_lines: Vec<Line<'static>> = Vec::with_capacity(lines.len());
+    let mut body_lines: Vec<Line<'static>> = Vec::with_capacity(lines.len());
+    for line in lines {
+        let mut spans = line.spans;
+        let take = gutter_columns.min(spans.len());
+        let body_spans: Vec<Span<'static>> = spans.drain(take..).collect();
+        gutter_lines.push(Line::from(spans));
+        body_lines.push(Line::from(body_spans));
+    }
+
+    let cols = Layout::default()
+        .direction(Direction::Horizontal)
+        .constraints([Constraint::Length(gutter_width as u16), Constraint::Fill(1)])
+        .split(area);
+
+    frame.render_widget(Paragraph::new(gutter_lines), cols[0]);
+    frame.render_widget(
+        Paragraph::new(body_lines).scroll((0, modal.horizontal_scroll_offset as u16)),
+        cols[1],
+    );
+}
+
+/// Sum of display widths of the first `gutter_columns` spans across
+/// the rendered lines. Gutter spans are identical per row (all use
+/// the same width), so the first line whose gutter is fully present
+/// is authoritative.
+fn total_gutter_width(lines: &[Line<'static>], gutter_columns: usize) -> usize {
+    for line in lines {
+        if line.spans.len() >= gutter_columns {
+            return line
+                .spans
+                .iter()
+                .take(gutter_columns)
+                .map(|s| s.content.chars().count())
+                .sum();
+        }
+    }
+    0
 }
 
 fn text_body_lines(
@@ -666,7 +722,9 @@ mod tests {
             },
             diff_cache: None,
             scroll_offset: 0,
+            horizontal_scroll_offset: 0,
             last_viewport_rows: 0,
+            last_viewport_body_cols: 0,
             search: None,
         }
     }
