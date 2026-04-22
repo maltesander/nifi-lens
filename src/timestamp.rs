@@ -184,11 +184,14 @@ pub fn format_age(d: Option<Duration>) -> String {
     }
 }
 
-/// Returns a human-readable byte count using power-of-1024 thresholds.
+/// Returns a human-readable byte count using power-of-1024 thresholds
+/// (matches the numbers NiFi prints in `StorageUsageDto`). Values
+/// `>= 100` in the `MB`, `GB`, and `TB` tiers render without a decimal
+/// (`"512 MB"`, not `"512.0 MB"`) so table columns stay aligned; the
+/// `KB` tier always renders with one decimal.
 ///
-/// Matches the numbers NiFi prints in StorageUsageDto. Values >= 100 in the
-/// MB/GB tiers render without a decimal (e.g., 512 MB, not 512.0 MB) so
-/// table columns stay aligned.
+/// Intended for disk-byte counts in the low-petabyte range and below;
+/// the `n as f64` conversion loses precision above `2^53` bytes (~8 PB).
 pub fn format_bytes(n: u64) -> String {
     const KB: u64 = 1024;
     const MB: u64 = KB * 1024;
@@ -213,7 +216,12 @@ pub fn format_bytes(n: u64) -> String {
             format!("{v:.1} GB")
         }
     } else {
-        format!("{:.1} TB", n as f64 / TB as f64)
+        let v = n as f64 / TB as f64;
+        if v >= 100.0 {
+            format!("{v:.0} TB")
+        } else {
+            format!("{v:.1} TB")
+        }
     }
 }
 
@@ -377,5 +385,22 @@ mod tests {
         assert_eq!(format_bytes(1024 * 1024 * 1024), "1.0 GB");
         assert_eq!(format_bytes(190 * 1024 * 1024 * 1024), "190 GB");
         assert_eq!(format_bytes(3 * 1024_u64.pow(4)), "3.0 TB");
+
+        // Tier transitions (1023↔1024 boundary on each tier).
+        assert_eq!(format_bytes(1023), "1023 B");
+        assert_eq!(format_bytes(1024 * 1024 - 1), "1024.0 KB");
+        assert_eq!(format_bytes(1024 * 1024), "1.0 MB");
+        assert_eq!(format_bytes(1024 * 1024 * 1024 - 1), "1024 MB");
+        assert_eq!(format_bytes(1024 * 1024 * 1024), "1.0 GB");
+        assert_eq!(format_bytes(1024_u64.pow(4) - 1), "1024 GB");
+        assert_eq!(format_bytes(1024_u64.pow(4)), "1.0 TB");
+
+        // Decimal-suppression threshold (>= 100) in MB/GB/TB.
+        assert_eq!(format_bytes(99 * 1024 * 1024), "99.0 MB");
+        assert_eq!(format_bytes(100 * 1024 * 1024), "100 MB");
+        assert_eq!(format_bytes(99 * 1024_u64.pow(3)), "99.0 GB");
+        assert_eq!(format_bytes(100 * 1024_u64.pow(3)), "100 GB");
+        assert_eq!(format_bytes(99 * 1024_u64.pow(4)), "99.0 TB");
+        assert_eq!(format_bytes(100 * 1024_u64.pow(4)), "100 TB");
     }
 }
