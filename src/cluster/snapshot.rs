@@ -194,6 +194,7 @@ impl ClusterSnapshot {
                 .map(|m| m.next_interval)
                 .max(),
             ClusterEndpoint::Bulletins => self.bulletins.meta.map(|m| m.next_interval),
+            ClusterEndpoint::ClusterNodes => None, // populated in Task 12
         }
     }
 }
