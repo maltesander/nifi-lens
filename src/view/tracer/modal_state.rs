@@ -67,6 +67,23 @@ pub struct DiffLine {
     pub text: String,
     pub input_line: Option<u32>,
     pub output_line: Option<u32>,
+    /// Byte-range segments marking which parts of `text` differ from
+    /// the paired counterpart line. Populated for `Delete`/`Insert`
+    /// rows produced from a Replace op where N:M pairing matched
+    /// them 1:1 — lets the renderer dim the shared prefix/suffix
+    /// and emphasize only the actually-changed bytes (e.g. the
+    /// `OK → ok` substring inside a 70-byte CSV row). `None` for
+    /// Equal rows, hunk headers, and unpaired Delete/Insert rows.
+    pub inline_diff: Option<Vec<InlineSegment>>,
+}
+
+/// Inline-diff byte range within a paired `DiffLine.text`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct InlineSegment {
+    /// Byte range into the paired `DiffLine.text`.
+    pub range: std::ops::Range<usize>,
+    /// True iff this segment's bytes differ from the paired counterpart.
+    pub differs: bool,
 }
 
 #[derive(Debug, Clone)]
@@ -627,25 +644,43 @@ pub fn compute_diff_cache(input: &str, output: &str) -> DiffRender {
                     let new_range = op.new_range();
                     let pair_count = old_range.len().min(new_range.len());
 
-                    // Interleaved pairs: -old[k] +new[k].
+                    // Interleaved pairs: -old[k] +new[k] with a
+                    // char-level inline diff between each pair so the
+                    // renderer can dim unchanged prefix/suffix bytes
+                    // and emphasize only the actually-differing
+                    // substrings.
                     for k in 0..pair_count {
                         let oi = old_range.start + k;
                         let ni = new_range.start + k;
-                        if let Some(text) = old_lines.get(oi).copied() {
-                            lines.push(make_diff_line(
+                        let old_text = old_lines.get(oi).copied();
+                        let new_text = new_lines.get(ni).copied();
+                        let (old_segments, new_segments) = match (old_text, new_text) {
+                            (Some(o), Some(n)) => {
+                                let trimmed_old = strip_trailing_newline(o);
+                                let trimmed_new = strip_trailing_newline(n);
+                                compute_inline_segments(trimmed_old, trimmed_new)
+                            }
+                            _ => (None, None),
+                        };
+                        if let Some(text) = old_text {
+                            let mut line = make_diff_line(
                                 similar::ChangeTag::Delete,
                                 text,
                                 Some((oi + 1) as u32),
                                 None,
-                            ));
+                            );
+                            line.inline_diff = old_segments;
+                            lines.push(line);
                         }
-                        if let Some(text) = new_lines.get(ni).copied() {
-                            lines.push(make_diff_line(
+                        if let Some(text) = new_text {
+                            let mut line = make_diff_line(
                                 similar::ChangeTag::Insert,
                                 text,
                                 None,
                                 Some((ni + 1) as u32),
-                            ));
+                            );
+                            line.inline_diff = new_segments;
+                            lines.push(line);
                         }
                     }
                     // Trailing unmatched old lines (deletions only).
@@ -680,8 +715,129 @@ pub fn compute_diff_cache(input: &str, output: &str) -> DiffRender {
     DiffRender { lines, hunks }
 }
 
+/// Trim a single trailing `\n` — the counterpart to
+/// `split_inclusive('\n')` for char-level inline diffs that should
+/// not treat the newline itself as a differing byte.
+fn strip_trailing_newline(s: &str) -> &str {
+    s.strip_suffix('\n').unwrap_or(s)
+}
+
+/// Compute char-level inline-diff segments between two paired lines.
+/// Returns `(old_segments, new_segments)` where each segment marks a
+/// byte range into its side's text and whether those bytes differ
+/// from the paired counterpart. Segments cover the full text (no
+/// gaps) so the renderer can walk them without the original string.
+///
+/// Returns `(None, None)` when the two lines are byte-identical — the
+/// caller has no reason to apply inline highlighting in that case
+/// (and won't, since a Replace op with identical lines shouldn't
+/// arise from a line-diff in the first place).
+fn compute_inline_segments(
+    old: &str,
+    new: &str,
+) -> (Option<Vec<InlineSegment>>, Option<Vec<InlineSegment>>) {
+    if old == new {
+        return (None, None);
+    }
+    // Char-level diff. Byte offsets are derived via `char_indices()`
+    // so the returned segments index into the original &str correctly
+    // even for multi-byte UTF-8.
+    let diff = similar::TextDiff::from_chars(old, new);
+    let old_char_boundaries = char_byte_boundaries(old);
+    let new_char_boundaries = char_byte_boundaries(new);
+
+    let mut old_segments: Vec<InlineSegment> = Vec::new();
+    let mut new_segments: Vec<InlineSegment> = Vec::new();
+
+    for op in diff.ops() {
+        match op.tag() {
+            similar::DiffTag::Equal => {
+                let old_r = op.old_range();
+                let new_r = op.new_range();
+                push_segment(
+                    &mut old_segments,
+                    old_char_boundaries[old_r.start],
+                    old_char_boundaries[old_r.end],
+                    false,
+                );
+                push_segment(
+                    &mut new_segments,
+                    new_char_boundaries[new_r.start],
+                    new_char_boundaries[new_r.end],
+                    false,
+                );
+            }
+            similar::DiffTag::Delete => {
+                let old_r = op.old_range();
+                push_segment(
+                    &mut old_segments,
+                    old_char_boundaries[old_r.start],
+                    old_char_boundaries[old_r.end],
+                    true,
+                );
+            }
+            similar::DiffTag::Insert => {
+                let new_r = op.new_range();
+                push_segment(
+                    &mut new_segments,
+                    new_char_boundaries[new_r.start],
+                    new_char_boundaries[new_r.end],
+                    true,
+                );
+            }
+            similar::DiffTag::Replace => {
+                let old_r = op.old_range();
+                let new_r = op.new_range();
+                push_segment(
+                    &mut old_segments,
+                    old_char_boundaries[old_r.start],
+                    old_char_boundaries[old_r.end],
+                    true,
+                );
+                push_segment(
+                    &mut new_segments,
+                    new_char_boundaries[new_r.start],
+                    new_char_boundaries[new_r.end],
+                    true,
+                );
+            }
+        }
+    }
+
+    (Some(old_segments), Some(new_segments))
+}
+
+/// Byte offsets for each char boundary in `s`, with a trailing
+/// sentinel = `s.len()` so `boundaries[char_idx..char_idx+count]`
+/// resolves to the correct byte range for any char slice.
+fn char_byte_boundaries(s: &str) -> Vec<usize> {
+    let mut v: Vec<usize> = s.char_indices().map(|(b, _)| b).collect();
+    v.push(s.len());
+    v
+}
+
+fn push_segment(into: &mut Vec<InlineSegment>, start: usize, end: usize, differs: bool) {
+    if start == end {
+        return;
+    }
+    if let Some(last) = into.last_mut()
+        && last.differs == differs
+        && last.range.end == start
+    {
+        // Merge with previous when adjacent + same flag.
+        last.range.end = end;
+        return;
+    }
+    into.push(InlineSegment {
+        range: start..end,
+        differs,
+    });
+}
+
 /// Strip the trailing newline retained by `split_inclusive` and wrap
-/// the line into a `DiffLine`.
+/// the line into a `DiffLine` with no inline-diff segments. Callers
+/// that want inline highlighting populate `inline_diff` afterwards
+/// via [`compute_inline_segments`].
 fn make_diff_line(
     tag: similar::ChangeTag,
     raw: &str,
@@ -697,6 +853,7 @@ fn make_diff_line(
         text,
         input_line,
         output_line,
+        inline_diff: None,
     }
 }
 
@@ -1580,12 +1737,14 @@ mod tests {
                     text: "x".into(),
                     input_line: Some(1),
                     output_line: None,
+                    inline_diff: None,
                 },
                 DiffLine {
                     tag: similar::ChangeTag::Insert,
                     text: "y".into(),
                     input_line: None,
                     output_line: Some(1),
+                    inline_diff: None,
                 },
             ],
             hunks: Vec::new(),
@@ -1934,6 +2093,76 @@ mod tests {
             ],
             "trailing inserts must follow paired interleave, got {tags:?}"
         );
+    }
+
+    #[test]
+    fn compute_inline_segments_marks_only_differing_bytes() {
+        // CSV-shaped: only the `OK`/`ok` substring differs.
+        let old = "SENSOR-0000,15.0,OK,zone-0";
+        let new = "SENSOR-0000,15.0,ok,zone-0";
+        let (old_segs, new_segs) = compute_inline_segments(old, new);
+        let old_segs = old_segs.expect("segments computed");
+        let new_segs = new_segs.expect("segments computed");
+
+        // Coverage: segments must tile the full string length without gaps.
+        let old_covered: usize = old_segs.iter().map(|s| s.range.end - s.range.start).sum();
+        let new_covered: usize = new_segs.iter().map(|s| s.range.end - s.range.start).sum();
+        assert_eq!(old_covered, old.len());
+        assert_eq!(new_covered, new.len());
+
+        // Changed bytes in old should be exactly "OK" (position 17..19
+        // in "SENSOR-0000,15.0,OK,zone-0").
+        let differing_old: String = old_segs
+            .iter()
+            .filter(|s| s.differs)
+            .map(|s| &old[s.range.clone()])
+            .collect();
+        assert_eq!(differing_old, "OK");
+        let differing_new: String = new_segs
+            .iter()
+            .filter(|s| s.differs)
+            .map(|s| &new[s.range.clone()])
+            .collect();
+        assert_eq!(differing_new, "ok");
+    }
+
+    #[test]
+    fn compute_inline_segments_returns_none_for_identical_inputs() {
+        let (old_segs, new_segs) = compute_inline_segments("same", "same");
+        assert!(old_segs.is_none());
+        assert!(new_segs.is_none());
+    }
+
+    #[test]
+    fn compute_diff_cache_populates_inline_diff_on_replace_pairs() {
+        // Two CSV-shaped rows, every one changed — classic Replace op.
+        let input = "a,1,OK\nb,2,WARN\n";
+        let output = "a,1,ok\nb,2,warn\n";
+        let render = compute_diff_cache(input, output);
+
+        // Every Delete/Insert row must carry inline_diff segments.
+        for line in &render.lines {
+            match line.tag {
+                similar::ChangeTag::Delete | similar::ChangeTag::Insert => {
+                    assert!(
+                        line.inline_diff.is_some(),
+                        "paired Replace rows must carry inline_diff: {line:?}"
+                    );
+                    let segs = line.inline_diff.as_ref().unwrap();
+                    // At least one segment must mark a differing byte range.
+                    assert!(
+                        segs.iter().any(|s| s.differs),
+                        "expected differing segment, got {segs:?}"
+                    );
+                    // And at least one unchanged segment (the shared prefix).
+                    assert!(
+                        segs.iter().any(|s| !s.differs),
+                        "expected unchanged segment (shared prefix), got {segs:?}"
+                    );
+                }
+                _ => {}
+            }
+        }
     }
 
     #[test]
