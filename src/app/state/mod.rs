@@ -164,6 +164,7 @@ pub struct AppState {
     pub status: StatusLine,
     pub timestamp_cfg: crate::timestamp::TimestampConfig,
     pub polling: crate::config::PollingConfig,
+    pub tracer_config: crate::config::TracerConfig,
     pub cluster: crate::cluster::ClusterStore,
     pub error_detail: Option<String>,
     pub should_quit: bool,
@@ -204,6 +205,7 @@ impl AppState {
                 tz: config.ui.timestamp_tz,
             },
             polling: config.polling.clone(),
+            tracer_config: config.tracer.clone(),
             cluster: crate::cluster::ClusterStore::new(
                 config.polling.cluster.clone(),
                 config.bulletins.ring_size,
@@ -255,6 +257,19 @@ impl AppState {
                 view.active_detail_tab,
                 crate::view::tracer::state::DetailTab::Input
                     | crate::view::tracer::state::DetailTab::Output
+            )
+        } else {
+            false
+        }
+    }
+
+    pub fn tracer_has_any_side_available(&self) -> bool {
+        use crate::view::tracer::state::{EventDetail, TracerMode};
+        if let TracerMode::Lineage(ref view) = self.tracer.mode {
+            matches!(
+                &view.event_detail,
+                EventDetail::Loaded { event, .. }
+                    if event.input_available || event.output_available
             )
         } else {
             false
@@ -499,6 +514,7 @@ pub enum PendingIntent {
     RunProvenanceQuery {
         query: crate::client::ProvenanceQuery,
     },
+    SpawnModalChunks(Vec<crate::view::tracer::state::ModalFetchRequest>),
     Quit,
 }
 

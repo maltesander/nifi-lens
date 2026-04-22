@@ -57,6 +57,7 @@ pub enum TracerVerb {
     Copy,
     Save,
     ToggleDiff,
+    OpenContentModal,
 }
 
 impl Verb for BulletinsVerb {
@@ -268,6 +269,7 @@ impl Verb for TracerVerb {
             Self::Copy => Chord::simple(KeyCode::Char('c')),
             Self::Save => Chord::simple(KeyCode::Char('s')),
             Self::ToggleDiff => Chord::simple(KeyCode::Char('d')),
+            Self::OpenContentModal => Chord::simple(KeyCode::Char('i')),
         }
     }
     fn label(self) -> &'static str {
@@ -276,6 +278,7 @@ impl Verb for TracerVerb {
             Self::Copy => "copy UUID / attribute value",
             Self::Save => "save content to file",
             Self::ToggleDiff => "toggle attribute diff",
+            Self::OpenContentModal => "open content viewer modal",
         }
     }
     fn hint(self) -> &'static str {
@@ -284,6 +287,7 @@ impl Verb for TracerVerb {
             Self::Copy => "copy",
             Self::Save => "save",
             Self::ToggleDiff => "diff",
+            Self::OpenContentModal => "view",
         }
     }
     fn enabled(self, ctx: &HintContext<'_>) -> bool {
@@ -294,6 +298,11 @@ impl Verb for TracerVerb {
         match self {
             Self::Save => ctx.state.tracer_content_tab_is_active(),
             Self::ToggleDiff => ctx.state.tracer_attributes_tab_is_active(),
+            Self::OpenContentModal => {
+                ctx.state.tracer_content_tab_is_active()
+                    && ctx.state.tracer.content_modal.is_none()
+                    && ctx.state.tracer_has_any_side_available()
+            }
             _ => true,
         }
     }
@@ -301,7 +310,13 @@ impl Verb for TracerVerb {
         50
     }
     fn all() -> &'static [Self] {
-        &[Self::Refresh, Self::Copy, Self::Save, Self::ToggleDiff]
+        &[
+            Self::Refresh,
+            Self::Copy,
+            Self::Save,
+            Self::ToggleDiff,
+            Self::OpenContentModal,
+        ]
     }
 }
 

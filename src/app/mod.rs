@@ -220,6 +220,9 @@ pub async fn run(
                         save.side,
                     );
                 }
+                // Task 19 will wire the full dispatch; for now just drop the requests
+                // so the modal opens without attempting any fetches.
+                PendingIntent::SpawnModalChunks(_) => {}
                 other => {
                     let intent = match other {
                         PendingIntent::SwitchContext(name) => Some(Intent::SwitchContext(name)),

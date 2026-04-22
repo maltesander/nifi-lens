@@ -110,6 +110,34 @@ impl ViewKeyHandler for TracerHandler {
                 }
                 return Some(UpdateResult::default());
             }
+            TracerVerb::OpenContentModal => {
+                use crate::view::tracer::state::{
+                    ContentModalTab, EventDetail, open_content_modal,
+                };
+                // Extract the data we need before taking a mutable borrow on
+                // `state.tracer` — the immutable borrow on `view` ends here.
+                let extracted = if let TracerMode::Lineage(ref view) = state.tracer.mode
+                    && let EventDetail::Loaded { ref event, .. } = view.event_detail
+                {
+                    let active_tab = match view.active_detail_tab {
+                        DetailTab::Output => ContentModalTab::Output,
+                        _ => ContentModalTab::Input,
+                    };
+                    Some((active_tab, event.as_ref().clone()))
+                } else {
+                    None
+                };
+                if let Some((active_tab, detail)) = extracted {
+                    let ceiling = state.tracer_config.modal_streaming_ceiling;
+                    let fired = open_content_modal(&mut state.tracer, &detail, active_tab, ceiling);
+                    return Some(UpdateResult {
+                        redraw: true,
+                        intent: Some(PendingIntent::SpawnModalChunks(fired)),
+                        tracer_followup: None,
+                    });
+                }
+                return Some(UpdateResult::default());
+            }
         }
 
         Some(UpdateResult {
