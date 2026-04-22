@@ -538,7 +538,9 @@ impl NifiClient {
         let id_str = event_id.to_string();
         let events_api = self.inner.provenanceevents();
         let cluster_node_id = self.inner.cluster_node_id();
-        let end = offset + len;
+        // `offset + len` can overflow on pathological inputs; saturate so the
+        // server returns a short read (treated as EOF) rather than panic.
+        let end = offset.saturating_add(len);
         let range = format!("bytes={offset}-{end}");
 
         let bytes = match side {
