@@ -265,6 +265,24 @@ impl KeyMap {
                     return InputEvent::View(ViewVerb::ContentModal(v));
                 }
             }
+
+            // Scroll keys (↑/↓/PgUp/PgDn/Home/End) pass through as FocusAction
+            // so handle_focus can scroll the modal body.
+            for &a in FocusAction::all() {
+                if matches!(
+                    a,
+                    FocusAction::Up
+                        | FocusAction::Down
+                        | FocusAction::PageUp
+                        | FocusAction::PageDown
+                        | FocusAction::First
+                        | FocusAction::Last
+                ) && chord_matches(a.chord(), key)
+                {
+                    return InputEvent::Focus(a);
+                }
+            }
+
             return InputEvent::Unmapped;
         }
 
@@ -751,6 +769,36 @@ mod keymap_tests {
                 true,
             ),
             InputEvent::App(AppAction::Quit)
+        );
+    }
+
+    #[test]
+    fn modal_scroll_keys_pass_through_as_focus_action() {
+        use crate::input::{FocusAction, InputEvent};
+        let mut km = KeyMap::default();
+        assert_eq!(
+            km.translate(press(KeyCode::Up), ViewId::Tracer, true),
+            InputEvent::Focus(FocusAction::Up)
+        );
+        assert_eq!(
+            km.translate(press(KeyCode::Down), ViewId::Tracer, true),
+            InputEvent::Focus(FocusAction::Down)
+        );
+        assert_eq!(
+            km.translate(press(KeyCode::PageUp), ViewId::Tracer, true),
+            InputEvent::Focus(FocusAction::PageUp)
+        );
+        assert_eq!(
+            km.translate(press(KeyCode::PageDown), ViewId::Tracer, true),
+            InputEvent::Focus(FocusAction::PageDown)
+        );
+        assert_eq!(
+            km.translate(press(KeyCode::Home), ViewId::Tracer, true),
+            InputEvent::Focus(FocusAction::First)
+        );
+        assert_eq!(
+            km.translate(press(KeyCode::End), ViewId::Tracer, true),
+            InputEvent::Focus(FocusAction::Last)
         );
     }
 }

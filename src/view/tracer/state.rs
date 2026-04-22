@@ -1405,6 +1405,78 @@ fn decoded_line_count(render: &crate::client::tracer::ContentRender) -> usize {
     }
 }
 
+/// Total scrollable line count for the currently active tab of the modal.
+/// For Diff, counts `diff_cache.lines`; for Input/Output, counts `decoded_line_count`.
+/// Returns 0 when the modal is not open.
+pub fn content_modal_line_count(state: &TracerState) -> usize {
+    let Some(modal) = state.content_modal.as_ref() else {
+        return 0;
+    };
+    match modal.active_tab {
+        ContentModalTab::Diff => modal
+            .diff_cache
+            .as_ref()
+            .map(|c| c.lines.len())
+            .unwrap_or(0),
+        ContentModalTab::Input => decoded_line_count(&modal.input.decoded),
+        ContentModalTab::Output => decoded_line_count(&modal.output.decoded),
+    }
+}
+
+/// Scroll the modal by `delta` lines (positive = down, negative = up) and
+/// return any auto-stream fetch requests the new position implies.
+/// Clamps offset to `[0, line_count.saturating_sub(1)]`.
+pub fn content_modal_scroll_by(
+    state: &mut TracerState,
+    delta: isize,
+    ceiling: Option<usize>,
+) -> Vec<ModalFetchRequest> {
+    let line_count = content_modal_line_count(state);
+    let current = state
+        .content_modal
+        .as_ref()
+        .map(|m| m.scroll_offset)
+        .unwrap_or(0);
+    let new_offset = if delta >= 0 {
+        current
+            .saturating_add(delta as usize)
+            .min(line_count.saturating_sub(1))
+    } else {
+        current.saturating_sub((-delta) as usize)
+    };
+    content_modal_scroll_to(state, new_offset, ceiling)
+}
+
+/// Scroll the modal so that the current search match (if any) is visible.
+/// Sets `scroll_offset = match.line_idx` when the match is outside the
+/// viewport. Leaves the offset unchanged when the match is already visible
+/// to avoid jitter. Returns any auto-stream requests the new position implies.
+pub fn content_modal_scroll_to_match(
+    state: &mut TracerState,
+    ceiling: Option<usize>,
+) -> Vec<ModalFetchRequest> {
+    let Some(modal) = state.content_modal.as_ref() else {
+        return Vec::new();
+    };
+    let Some(search) = modal.search.as_ref() else {
+        return Vec::new();
+    };
+    let Some(idx) = search.current else {
+        return Vec::new();
+    };
+    let Some(span) = search.matches.get(idx) else {
+        return Vec::new();
+    };
+    let line = span.line_idx;
+    let offset = modal.scroll_offset;
+    let rows = modal.last_viewport_rows.max(1);
+    if line < offset || line >= offset + rows {
+        content_modal_scroll_to(state, line, ceiling)
+    } else {
+        Vec::new()
+    }
+}
+
 // ── Diff eligibility ──────────────────────────────────────────────────────────
 
 /// MIME allowlist helper. Returns true for a single MIME string that
@@ -3332,5 +3404,116 @@ mod tests {
         let text = content_modal_copy_text(&state).unwrap();
         assert!(text.contains("- x"));
         assert!(text.contains("+ y"));
+    }
+
+    #[test]
+    fn content_modal_scroll_down_fires_auto_stream_request() {
+        use crate::client::ContentSide;
+        use crate::client::tracer::ContentRender;
+
+        // Build a modal with 200 lines loaded, not fully loaded, and a
+        // viewport of 30 rows. Scrolling near the tail triggers a fetch.
+        let text = "a\n".repeat(200);
+        let loaded_bytes = text.clone().into_bytes();
+        let len = loaded_bytes.len();
+        let mut modal = stub_modal(1, ContentModalTab::Input);
+        modal.input.loaded = loaded_bytes;
+        modal.input.decoded = ContentRender::Text {
+            text,
+            pretty_printed: false,
+        };
+        modal.last_viewport_rows = 30;
+        let mut state = TracerState {
+            content_modal: Some(modal),
+            ..TracerState::default()
+        };
+
+        // Scroll to line 165: viewport bottom = 195, distance to tail (200) = 5 < 100.
+        let fired = content_modal_scroll_by(&mut state, 165, Some(4 * 1024 * 1024));
+        assert_eq!(
+            fired.len(),
+            1,
+            "auto-stream should fire when near tail after scroll"
+        );
+        assert_eq!(fired[0].side, ContentSide::Input);
+        assert_eq!(fired[0].offset, len);
+    }
+
+    #[test]
+    fn content_modal_scroll_up_clamped_at_zero() {
+        use crate::client::tracer::ContentRender;
+
+        // Fully loaded so no auto-stream fires; 100 lines, scroll at 0.
+        let text = "line\n".repeat(100);
+        let mut modal = stub_modal(1, ContentModalTab::Input);
+        modal.input.fully_loaded = true;
+        modal.input.decoded = ContentRender::Text {
+            text,
+            pretty_printed: false,
+        };
+        modal.scroll_offset = 0;
+        modal.last_viewport_rows = 20;
+        let mut state = TracerState {
+            content_modal: Some(modal),
+            ..TracerState::default()
+        };
+        let fired = content_modal_scroll_by(&mut state, -10, Some(4 * 1024 * 1024));
+        assert!(fired.is_empty(), "no fetch when fully loaded");
+        assert_eq!(
+            state.content_modal.as_ref().unwrap().scroll_offset,
+            0,
+            "scroll must not go below 0"
+        );
+    }
+
+    #[test]
+    fn content_modal_scroll_to_end_jumps_to_tail() {
+        use crate::client::tracer::ContentRender;
+
+        let text = "line\n".repeat(50);
+        let mut modal = stub_modal(1, ContentModalTab::Input);
+        modal.input.fully_loaded = true;
+        modal.input.decoded = ContentRender::Text {
+            text,
+            pretty_printed: false,
+        };
+        modal.last_viewport_rows = 10;
+        let mut state = TracerState {
+            content_modal: Some(modal),
+            ..TracerState::default()
+        };
+        let line_count = content_modal_line_count(&state);
+        let fired = content_modal_scroll_to(&mut state, line_count.saturating_sub(1), None);
+        assert!(fired.is_empty(), "fully loaded: no fetch on Last");
+        assert_eq!(
+            state.content_modal.as_ref().unwrap().scroll_offset,
+            line_count.saturating_sub(1)
+        );
+    }
+
+    #[test]
+    fn content_modal_page_down_advances_by_viewport() {
+        use crate::client::tracer::ContentRender;
+
+        let text = "row\n".repeat(100);
+        let mut modal = stub_modal(1, ContentModalTab::Input);
+        modal.input.fully_loaded = true;
+        modal.input.decoded = ContentRender::Text {
+            text,
+            pretty_printed: false,
+        };
+        modal.scroll_offset = 10;
+        modal.last_viewport_rows = 20;
+        let mut state = TracerState {
+            content_modal: Some(modal),
+            ..TracerState::default()
+        };
+        let fired = content_modal_scroll_by(&mut state, 20, Some(4 * 1024 * 1024));
+        assert!(fired.is_empty(), "fully loaded: no fetch");
+        assert_eq!(
+            state.content_modal.as_ref().unwrap().scroll_offset,
+            30,
+            "page-down by viewport rows"
+        );
     }
 }

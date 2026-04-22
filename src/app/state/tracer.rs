@@ -162,6 +162,58 @@ impl ViewKeyHandler for TracerHandler {
             self as ts, DetailTab, EventDetail, LineageFocus, TracerMode,
         };
 
+        // When the content modal is open, scroll actions are routed here
+        // (the keymap shadow block lets Up/Down/PgUp/PgDn/Home/End through
+        // as FocusAction). Handle them before the per-mode dispatch below.
+        if state.tracer.content_modal.is_some() {
+            let ceiling = state.tracer_config.modal_streaming_ceiling;
+            let fired = match action {
+                FocusAction::Up => ts::content_modal_scroll_by(&mut state.tracer, -1, ceiling),
+                FocusAction::Down => ts::content_modal_scroll_by(&mut state.tracer, 1, ceiling),
+                FocusAction::PageUp => {
+                    let rows = state
+                        .tracer
+                        .content_modal
+                        .as_ref()
+                        .map(|m| m.last_viewport_rows.max(1))
+                        .unwrap_or(1) as isize;
+                    ts::content_modal_scroll_by(&mut state.tracer, -rows, ceiling)
+                }
+                FocusAction::PageDown => {
+                    let rows = state
+                        .tracer
+                        .content_modal
+                        .as_ref()
+                        .map(|m| m.last_viewport_rows.max(1))
+                        .unwrap_or(1) as isize;
+                    ts::content_modal_scroll_by(&mut state.tracer, rows, ceiling)
+                }
+                FocusAction::First => ts::content_modal_scroll_to(&mut state.tracer, 0, ceiling),
+                FocusAction::Last => {
+                    let line_count = ts::content_modal_line_count(&state.tracer);
+                    ts::content_modal_scroll_to(
+                        &mut state.tracer,
+                        line_count.saturating_sub(1),
+                        ceiling,
+                    )
+                }
+                // Other focus actions are not modal-scroll; fall through to
+                // the per-mode dispatch (no-op for most cases while modal is open).
+                _ => {
+                    return Some(UpdateResult::default());
+                }
+            };
+            return Some(UpdateResult {
+                redraw: true,
+                intent: if fired.is_empty() {
+                    None
+                } else {
+                    Some(PendingIntent::SpawnModalChunks(fired))
+                },
+                tracer_followup: None,
+            });
+        }
+
         match &state.tracer.mode {
             TracerMode::Entry(_) => match action {
                 FocusAction::Descend => {
@@ -1841,6 +1893,123 @@ mod tests {
             save_hint.action.as_ref().contains("512.0 MiB"),
             "save hint action should include the human-readable total size; got: {}",
             save_hint.action
+        );
+    }
+
+    // ── Content modal scroll via handle_focus ─────────────────────────────────
+
+    /// Build a state with a content modal open and 100 fully-loaded lines on
+    /// the Input tab.
+    fn state_with_open_modal() -> crate::app::state::AppState {
+        use crate::client::tracer::ContentRender;
+        use crate::view::tracer::state::{
+            ContentModalHeader, ContentModalState, ContentModalTab, Diffable, SideBuffer,
+        };
+
+        let mut s = fresh_state();
+        s.current_tab = ViewId::Tracer;
+        let text = "row\n".repeat(100);
+        let modal = ContentModalState {
+            event_id: 1,
+            header: ContentModalHeader {
+                event_type: "DROP".into(),
+                event_timestamp_iso: "".into(),
+                component_name: "x".into(),
+                pg_path: "pg".into(),
+                input_size: Some(400),
+                output_size: Some(400),
+                input_mime: None,
+                output_mime: None,
+                input_available: true,
+                output_available: true,
+            },
+            active_tab: ContentModalTab::Input,
+            last_nondiff_tab: ContentModalTab::Input,
+            diffable: Diffable::Pending,
+            input: SideBuffer {
+                loaded: text.clone().into_bytes(),
+                decoded: ContentRender::Text {
+                    text,
+                    pretty_printed: false,
+                },
+                in_flight: false,
+                fully_loaded: true,
+                ceiling_hit: false,
+                last_error: None,
+            },
+            output: SideBuffer::default(),
+            diff_cache: None,
+            scroll_offset: 50,
+            last_viewport_rows: 20,
+            search: None,
+        };
+        s.tracer.content_modal = Some(modal);
+        s
+    }
+
+    #[test]
+    fn handle_focus_up_scrolls_modal_when_open() {
+        use crate::input::FocusAction;
+        let mut s = state_with_open_modal();
+        let r = super::TracerHandler::handle_focus(&mut s, FocusAction::Up)
+            .expect("Up must be consumed when modal is open");
+        assert!(r.redraw);
+        assert_eq!(
+            s.tracer.content_modal.as_ref().unwrap().scroll_offset,
+            49,
+            "Up should decrement scroll offset by 1"
+        );
+    }
+
+    #[test]
+    fn handle_focus_down_scrolls_modal_when_open() {
+        use crate::input::FocusAction;
+        let mut s = state_with_open_modal();
+        let r = super::TracerHandler::handle_focus(&mut s, FocusAction::Down)
+            .expect("Down must be consumed when modal is open");
+        assert!(r.redraw);
+        assert_eq!(
+            s.tracer.content_modal.as_ref().unwrap().scroll_offset,
+            51,
+            "Down should increment scroll offset by 1"
+        );
+    }
+
+    #[test]
+    fn handle_focus_first_jumps_to_top_when_modal_open() {
+        use crate::input::FocusAction;
+        let mut s = state_with_open_modal();
+        super::TracerHandler::handle_focus(&mut s, FocusAction::First);
+        assert_eq!(
+            s.tracer.content_modal.as_ref().unwrap().scroll_offset,
+            0,
+            "First/Home should jump to offset 0"
+        );
+    }
+
+    #[test]
+    fn handle_focus_last_jumps_to_tail_when_modal_open() {
+        use crate::input::FocusAction;
+        let mut s = state_with_open_modal();
+        super::TracerHandler::handle_focus(&mut s, FocusAction::Last);
+        // 100 lines fully loaded, last valid offset = 99
+        assert_eq!(
+            s.tracer.content_modal.as_ref().unwrap().scroll_offset,
+            99,
+            "Last/End should jump to last line"
+        );
+    }
+
+    #[test]
+    fn handle_focus_page_down_advances_by_viewport_when_modal_open() {
+        use crate::input::FocusAction;
+        let mut s = state_with_open_modal();
+        // scroll_offset = 50, last_viewport_rows = 20 → new offset = 70
+        super::TracerHandler::handle_focus(&mut s, FocusAction::PageDown);
+        assert_eq!(
+            s.tracer.content_modal.as_ref().unwrap().scroll_offset,
+            70,
+            "PageDown should advance by viewport rows"
         );
     }
 }
