@@ -184,6 +184,23 @@ pub struct ClusterNodesSnapshot {
     pub fetched_at: std::time::Instant,
 }
 
+/// Per-node cluster-membership view joined into `NodeHealthRow`.
+/// `heartbeat_age` is materialized at reducer time so the list and the
+/// modal see identical values and snapshot tests stay deterministic.
+#[derive(Debug, Clone)]
+pub struct ClusterMembership {
+    pub node_id: String,
+    pub status: ClusterNodeStatus,
+    pub is_primary: bool,
+    pub is_coordinator: bool,
+    pub heartbeat_age: Option<std::time::Duration>,
+    pub node_start_iso: Option<String>,
+    pub active_thread_count: u32,
+    pub flow_files_queued: u32,
+    pub bytes_queued: u64,
+    pub events: Vec<ClusterNodeEvent>,
+}
+
 const MAX_NODE_EVENTS: usize = 8;
 
 impl ClusterNodesSnapshot {
@@ -259,6 +276,7 @@ pub struct NodeHealthRow {
     pub content_repos: Vec<RepoUsage>,
     pub flowfile_repo: Option<RepoUsage>,
     pub provenance_repos: Vec<RepoUsage>,
+    pub cluster: Option<ClusterMembership>,
 }
 
 /// Stateful container for the node-health table.
@@ -334,6 +352,7 @@ pub fn update_nodes(state: &mut NodesState, diag: &SystemDiagSnapshot) {
                 content_repos: n.content_repos.clone(),
                 flowfile_repo: n.flowfile_repo.clone(),
                 provenance_repos: n.provenance_repos.clone(),
+                cluster: None,
             }
         })
         .collect();
@@ -956,5 +975,30 @@ mod tests {
         assert!(S::Disconnecting.is_dead());
         assert!(S::Offloading.is_dead());
         assert!(S::Offloaded.is_dead());
+    }
+
+    #[test]
+    fn node_health_row_defaults_cluster_to_none() {
+        use super::{NodeHealthRow, Severity};
+        let row = NodeHealthRow {
+            node_address: "node1:8443".into(),
+            heap_used_bytes: 0,
+            heap_max_bytes: 0,
+            heap_percent: 0,
+            heap_severity: Severity::Green,
+            gc_collection_count: 0,
+            gc_delta: None,
+            gc_millis: 0,
+            load_average: None,
+            available_processors: None,
+            uptime: String::new(),
+            total_threads: 0,
+            gc: vec![],
+            content_repos: vec![],
+            flowfile_repo: None,
+            provenance_repos: vec![],
+            cluster: None,
+        };
+        assert!(row.cluster.is_none());
     }
 }

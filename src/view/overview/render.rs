@@ -1336,6 +1336,7 @@ mod tests {
                 free_bytes: 80,
                 utilization_percent: 20,
             }],
+            cluster: None,
         };
         term.draw(|f| super::render_node_detail_modal(f, f.area(), &row))
             .unwrap();
