@@ -64,6 +64,27 @@ pub fn severity_by_pct(pct: f32) -> Style {
     }
 }
 
+/// Foreground style for an inserted line (`+`) in the content-viewer
+/// diff tab. Plain green so `+`/`-` prefixes carry the distinction for
+/// colorblind fallback.
+pub fn diff_add() -> Style {
+    Style::default().fg(Color::Green)
+}
+
+/// Foreground style for a deleted line (`-`) in the content-viewer
+/// diff tab.
+pub fn diff_del() -> Style {
+    Style::default().fg(Color::Red)
+}
+
+/// Foreground style for the `@@ input L{a} · output L{b} @@` hunk
+/// header line in the content-viewer diff tab.
+pub fn hunk_header() -> Style {
+    Style::default()
+        .fg(Color::Magenta)
+        .add_modifier(Modifier::DIM)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

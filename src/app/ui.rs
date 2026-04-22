@@ -29,7 +29,12 @@ pub fn render(frame: &mut Frame, state: &mut AppState) {
 
     if let Some(modal) = &state.modal {
         match modal {
-            Modal::Help => help_modal::render(frame, root, state.current_tab),
+            Modal::Help => help_modal::render(
+                frame,
+                root,
+                state.current_tab,
+                state.tracer.content_modal.is_some(),
+            ),
             Modal::ContextSwitcher(cs) => context_switcher::render(frame, root, cs),
             Modal::ErrorDetail => render_error_detail(frame, root, state),
             Modal::FuzzyFind(fs) => {
@@ -72,7 +77,12 @@ fn render_content(frame: &mut Frame, area: Rect, state: &mut AppState) {
             &state.bulletins.ring,
         ),
         ViewId::Events => events::render::render(frame, area, &state.events, &state.timestamp_cfg),
-        ViewId::Tracer => tracer::render(frame, area, &state.tracer, &state.timestamp_cfg),
+        ViewId::Tracer => {
+            tracer::render(frame, area, &state.tracer, &state.timestamp_cfg);
+            if let Some(modal) = state.tracer.content_modal.as_mut() {
+                crate::view::tracer::modal::render(frame, area, modal);
+            }
+        }
     }
 }
 

@@ -1,0 +1,48 @@
+---
+source: src/view/tracer/modal.rs
+expression: terminal.backend().buffer()
+---
+Buffer {
+    area: Rect { x: 0, y: 0, width: 100, height: 20 },
+    content: [
+        "┏ Content · UpdateAttribute-enrich · event 8471293 · DROP ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┓",
+        "┃at    2026-04-22T13:42:18.231   pg healthy-pipeline/enrich                                        ┃",
+        "┃sizes in 2.3 KiB → out 2.7 KiB  (+400 B)                                                          ┃",
+        "┃mime  in application/json · out application/json  ⊘ no differences                                ┃",
+        "┃                                                                                                  ┃",
+        "┃   Input     Output     Diff · no differences                                                     ┃",
+        "┃                                                                                                  ┃",
+        "┃{"orderId":"A-1029",                                                                              ┃",
+        "┃  "total":329.99,                                                                                 ┃",
+        "┃  "tax":30.99}                                                                                    ┃",
+        "┃                                                                                                  ┃",
+        "┃                                                                                                  ┃",
+        "┃                                                                                                  ┃",
+        "┃                                                                                                  ┃",
+        "┃                                                                                                  ┃",
+        "┃                                                                                                  ┃",
+        "┃loaded 47 B (complete)                                                                            ┃",
+        "┃                                                                                                  ┃",
+        "┃[Tab] switch · [/] find · [c] copy · [s] save · [Esc] close                                       ┃",
+        "┗━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┛",
+    ],
+    styles: [
+        x: 0, y: 0, fg: Reset, bg: Reset, underline: Reset, modifier: NONE,
+        x: 1, y: 1, fg: DarkGray, bg: Reset, underline: Reset, modifier: NONE,
+        x: 59, y: 1, fg: Reset, bg: Reset, underline: Reset, modifier: NONE,
+        x: 1, y: 2, fg: DarkGray, bg: Reset, underline: Reset, modifier: NONE,
+        x: 41, y: 2, fg: Reset, bg: Reset, underline: Reset, modifier: NONE,
+        x: 1, y: 3, fg: DarkGray, bg: Reset, underline: Reset, modifier: NONE,
+        x: 67, y: 3, fg: Reset, bg: Reset, underline: Reset, modifier: NONE,
+        x: 3, y: 5, fg: Reset, bg: Reset, underline: Reset, modifier: BOLD,
+        x: 10, y: 5, fg: Reset, bg: Reset, underline: Reset, modifier: NONE,
+        x: 13, y: 5, fg: Cyan, bg: Reset, underline: Reset, modifier: BOLD,
+        x: 21, y: 5, fg: Reset, bg: Reset, underline: Reset, modifier: NONE,
+        x: 24, y: 5, fg: DarkGray, bg: Reset, underline: Reset, modifier: NONE,
+        x: 47, y: 5, fg: Reset, bg: Reset, underline: Reset, modifier: NONE,
+        x: 1, y: 16, fg: DarkGray, bg: Reset, underline: Reset, modifier: NONE,
+        x: 23, y: 16, fg: Reset, bg: Reset, underline: Reset, modifier: NONE,
+        x: 1, y: 18, fg: DarkGray, bg: Reset, underline: Reset, modifier: NONE,
+        x: 60, y: 18, fg: Reset, bg: Reset, underline: Reset, modifier: NONE,
+    ]
+}

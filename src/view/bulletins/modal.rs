@@ -11,7 +11,8 @@ use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, BorderType, Clear, Paragraph, Wrap};
 
 use crate::theme;
-use crate::view::bulletins::state::{BulletinsState, DetailModalState, MatchSpan};
+use crate::view::bulletins::state::{BulletinsState, DetailModalState};
+use crate::widget::search::MatchSpan;
 use crate::widget::severity::severity_style;
 
 const HEADER_ROWS: u16 = 3; // timing line · blank · ids line

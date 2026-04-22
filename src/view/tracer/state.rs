@@ -26,6 +26,8 @@ pub struct TracerState {
     pub mode: TracerMode,
     /// Last error message from any async operation in this tab.
     pub last_error: Option<String>,
+    /// Open content viewer modal, if any.
+    pub content_modal: Option<ContentModalState>,
 }
 
 impl TracerState {
@@ -34,6 +36,7 @@ impl TracerState {
         Self {
             mode: TracerMode::Entry(EntryState::default()),
             last_error: None,
+            content_modal: None,
         }
     }
 
@@ -973,6 +976,8 @@ pub fn apply_payload(state: &mut TracerState, payload: TracerPayload) -> Option<
         }
         TracerPayload::ContentSaved { .. } => None,
         TracerPayload::ContentSaveFailed { .. } => None,
+        TracerPayload::ModalChunk { .. } => None,
+        TracerPayload::ModalChunkFailed { .. } => None,
     }
 }
 
@@ -1033,6 +1038,10 @@ pub fn entry_submit(state: &mut TracerState) -> Option<String> {
         }
     }
 }
+
+// Modal types, constants, and reducers live in `modal_state`. Re-exported
+// here so existing `crate::view::tracer::state::*` import paths still work.
+pub use crate::view::tracer::modal_state::*;
 
 // ── Tests ─────────────────────────────────────────────────────────────────────
 
@@ -2140,6 +2149,7 @@ mod tests {
         let ts = TracerState {
             mode: TracerMode::LatestEvents(view),
             last_error: None,
+            content_modal: None,
         };
         assert_eq!(ts.selected_component_label(), Some("MyProcessor".into()));
     }

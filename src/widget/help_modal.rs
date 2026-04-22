@@ -19,7 +19,8 @@ use ratatui::widgets::{Block, Borders, Clear, Paragraph, Wrap};
 
 use crate::app::state::ViewId;
 use crate::input::{
-    AppAction, BrowserVerb, BulletinsVerb, EventsVerb, FocusAction, HistoryAction, TracerVerb, Verb,
+    AppAction, BrowserVerb, BulletinsVerb, ContentModalVerb, EventsVerb, FocusAction,
+    HistoryAction, TracerVerb, Verb,
 };
 use crate::theme;
 
@@ -90,15 +91,25 @@ pub fn general_sections() -> Vec<HelpSection> {
     ]
 }
 
-/// The verbs section for the active tab, if any. Overview has no
-/// view-local verbs so returns `None`.
-pub fn tab_section(active_view: ViewId) -> Option<HelpSection> {
+/// The verbs sections for the active tab.
+///
+/// Returns an empty `Vec` for Overview (no view-local verbs). For
+/// the Tracer tab, when `content_modal_open` is `true`, an additional
+/// "Content viewer" section is appended after the base "Tracer" section
+/// so both sets are visible while the modal is up.
+pub fn tab_sections(active_view: ViewId, content_modal_open: bool) -> Vec<HelpSection> {
     match active_view {
-        ViewId::Overview => None,
-        ViewId::Bulletins => Some(section("Bulletins", BulletinsVerb::all())),
-        ViewId::Browser => Some(section("Browser", BrowserVerb::all())),
-        ViewId::Events => Some(section("Events", EventsVerb::all())),
-        ViewId::Tracer => Some(section("Tracer", TracerVerb::all())),
+        ViewId::Overview => vec![],
+        ViewId::Bulletins => vec![section("Bulletins", BulletinsVerb::all())],
+        ViewId::Browser => vec![section("Browser", BrowserVerb::all())],
+        ViewId::Events => vec![section("Events", EventsVerb::all())],
+        ViewId::Tracer => {
+            let mut out = vec![section("Tracer", TracerVerb::all())];
+            if content_modal_open {
+                out.push(section("Content viewer", ContentModalVerb::all()));
+            }
+            out
+        }
     }
 }
 
@@ -141,7 +152,10 @@ fn push_section_lines(lines: &mut Vec<Line<'static>>, sections: &[HelpSection]) 
 /// 50/50. Left is general, right is tab-specific. The extra row
 /// beyond the raw section count accommodates the `focus next / prev
 /// pane` label wrapping at the 40-col column width.
-pub fn render(frame: &mut Frame, area: Rect, active_view: ViewId) {
+///
+/// `content_modal_open` controls whether the "Content viewer" section
+/// is appended when the Tracer tab is active.
+pub fn render(frame: &mut Frame, area: Rect, active_view: ViewId, content_modal_open: bool) {
     let modal = center(area, 80, 27);
     frame.render_widget(Clear, modal);
 
@@ -167,9 +181,8 @@ pub fn render(frame: &mut Frame, area: Rect, active_view: ViewId) {
 
     // Right: tab-specific.
     let mut right_lines: Vec<Line<'static>> = Vec::new();
-    if let Some(section) = tab_section(active_view) {
-        push_section_lines(&mut right_lines, std::slice::from_ref(&section));
-    } else {
+    let tab_secs = tab_sections(active_view, content_modal_open);
+    if tab_secs.is_empty() {
         // Overview — no view-local verbs. Render a short note so the
         // column isn't empty.
         right_lines.push(Line::from(Span::styled(
@@ -180,6 +193,8 @@ pub fn render(frame: &mut Frame, area: Rect, active_view: ViewId) {
             "  (no view-local keybindings)".to_string(),
             theme::muted(),
         )));
+    } else {
+        push_section_lines(&mut right_lines, &tab_secs);
     }
     frame.render_widget(
         Paragraph::new(right_lines).wrap(Wrap { trim: false }),
@@ -239,12 +254,30 @@ mod tests {
     }
 
     #[test]
-    fn tab_section_adapts_to_view() {
-        assert!(tab_section(ViewId::Overview).is_none());
-        assert_eq!(tab_section(ViewId::Bulletins).unwrap().title, "Bulletins");
-        assert_eq!(tab_section(ViewId::Browser).unwrap().title, "Browser");
-        assert_eq!(tab_section(ViewId::Events).unwrap().title, "Events");
-        assert_eq!(tab_section(ViewId::Tracer).unwrap().title, "Tracer");
+    fn tab_sections_adapts_to_view() {
+        assert!(tab_sections(ViewId::Overview, false).is_empty());
+        assert_eq!(tab_sections(ViewId::Bulletins, false)[0].title, "Bulletins");
+        assert_eq!(tab_sections(ViewId::Browser, false)[0].title, "Browser");
+        assert_eq!(tab_sections(ViewId::Events, false)[0].title, "Events");
+        assert_eq!(tab_sections(ViewId::Tracer, false)[0].title, "Tracer");
+    }
+
+    #[test]
+    fn content_modal_open_adds_content_viewer_section_for_tracer() {
+        let secs = tab_sections(ViewId::Tracer, true);
+        assert_eq!(secs.len(), 2);
+        assert_eq!(secs[0].title, "Tracer");
+        assert_eq!(secs[1].title, "Content viewer");
+        assert_eq!(secs[1].rows.len(), ContentModalVerb::all().len());
+    }
+
+    #[test]
+    fn content_modal_open_does_not_add_section_for_other_views() {
+        // content_modal_open=true is ignored when not on Tracer tab.
+        assert!(tab_sections(ViewId::Overview, true).is_empty());
+        assert_eq!(tab_sections(ViewId::Bulletins, true).len(), 1);
+        assert_eq!(tab_sections(ViewId::Browser, true).len(), 1);
+        assert_eq!(tab_sections(ViewId::Events, true).len(), 1);
     }
 
     #[test]
@@ -260,19 +293,19 @@ mod tests {
     #[test]
     fn tab_section_row_counts_match_verb_counts() {
         assert_eq!(
-            tab_section(ViewId::Bulletins).unwrap().rows.len(),
+            tab_sections(ViewId::Bulletins, false)[0].rows.len(),
             BulletinsVerb::all().len()
         );
         assert_eq!(
-            tab_section(ViewId::Browser).unwrap().rows.len(),
+            tab_sections(ViewId::Browser, false)[0].rows.len(),
             BrowserVerb::all().len()
         );
         assert_eq!(
-            tab_section(ViewId::Events).unwrap().rows.len(),
+            tab_sections(ViewId::Events, false)[0].rows.len(),
             EventsVerb::all().len()
         );
         assert_eq!(
-            tab_section(ViewId::Tracer).unwrap().rows.len(),
+            tab_sections(ViewId::Tracer, false)[0].rows.len(),
             TracerVerb::all().len()
         );
     }

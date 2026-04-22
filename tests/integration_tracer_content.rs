@@ -10,7 +10,12 @@
 use std::time::Duration;
 
 use nifi_lens::client::tracer::ContentSide;
-use nifi_lens::client::{NifiClient, NodeKind, PREVIEW_CAP_BYTES};
+use nifi_lens::client::{NifiClient, NodeKind};
+
+/// 1 MiB cap used by this integration test to exercise the Range-header truncation path.
+/// The bulky-pipeline fixture generates 1.5 MiB flowfiles, so this cap is guaranteed to
+/// produce a truncated response.
+const BULKY_CAP_BYTES: usize = 1 << 20;
 use nifi_lens::config::{ResolvedAuth, ResolvedContext, VersionStrategy};
 use nifi_lens::error::NifiLensError;
 
@@ -174,11 +179,11 @@ async fn make_client(version: &str, username: &str, password: &str, ca_path: &st
 }
 
 /// Integration test: a bulky-pipeline event content fetch is truncated at
-/// `PREVIEW_CAP_BYTES` when a cap is given, and returns the full body when
+/// `BULKY_CAP_BYTES` when a cap is given, and returns the full body when
 /// fetched without a cap.
 ///
 /// The `bulky-pipeline` fixture generates 1536 KB (1_572_864 byte) flowfiles
-/// every 30 seconds, which exceeds `PREVIEW_CAP_BYTES` (1 MiB). This test
+/// every 30 seconds, which exceeds `BULKY_CAP_BYTES` (1 MiB). This test
 /// verifies the Range-header truncation path end-to-end.
 #[tokio::test(flavor = "current_thread")]
 #[ignore]
@@ -247,15 +252,15 @@ async fn bulky_event_content_is_truncated_with_cap() {
 
         let Some(event_id) = event_id else { continue };
 
-        // 3a. Capped fetch: expect exactly PREVIEW_CAP_BYTES with truncated=true.
+        // 3a. Capped fetch: expect exactly BULKY_CAP_BYTES with truncated=true.
         match client
-            .provenance_content(event_id, ContentSide::Output, Some(PREVIEW_CAP_BYTES))
+            .provenance_content(event_id, ContentSide::Output, Some(BULKY_CAP_BYTES))
             .await
         {
             Ok(cs) => {
                 assert_eq!(
-                    cs.bytes_fetched, PREVIEW_CAP_BYTES,
-                    "capped fetch should return exactly PREVIEW_CAP_BYTES on {version}"
+                    cs.bytes_fetched, BULKY_CAP_BYTES,
+                    "capped fetch should return exactly BULKY_CAP_BYTES on {version}"
                 );
                 assert!(
                     cs.truncated,

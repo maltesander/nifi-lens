@@ -204,7 +204,7 @@ pub fn spawn_content(
             .provenance_content(
                 event_id,
                 side,
-                Some(crate::client::tracer::PREVIEW_CAP_BYTES),
+                Some(crate::client::tracer::INLINE_PREVIEW_BYTES),
             )
             .await
         {
@@ -315,6 +315,57 @@ pub fn spawn_delete_lineage(
                 error = %err,
                 "tracer: background lineage delete failed",
             );
+        }
+    })
+}
+
+/// Fetches `len` bytes starting at `offset` for `(event_id, side)` and
+/// emits [`TracerPayload::ModalChunk`] on success or
+/// [`TracerPayload::ModalChunkFailed`] on error.
+///
+/// One-shot worker. Handle is not retained — stale deliveries (e.g.,
+/// the user closed the modal before the chunk arrived) are filtered
+/// by `event_id` in the reducer.
+pub fn spawn_modal_chunk(
+    client: Arc<RwLock<NifiClient>>,
+    tx: mpsc::Sender<AppEvent>,
+    event_id: i64,
+    side: ContentSide,
+    offset: usize,
+    len: usize,
+) -> JoinHandle<()> {
+    tokio::task::spawn_local(async move {
+        let guard = client.read().await;
+        match guard
+            .provenance_content_range(event_id, side, offset, len)
+            .await
+        {
+            Ok(snap) => {
+                let _ = tx
+                    .send(AppEvent::Data(ViewPayload::Tracer(
+                        TracerPayload::ModalChunk {
+                            event_id: snap.event_id,
+                            side: snap.side,
+                            offset: snap.offset,
+                            bytes: snap.bytes,
+                            eof: snap.eof,
+                            requested_len: len,
+                        },
+                    )))
+                    .await;
+            }
+            Err(err) => {
+                let _ = tx
+                    .send(AppEvent::Data(ViewPayload::Tracer(
+                        TracerPayload::ModalChunkFailed {
+                            event_id,
+                            side,
+                            offset,
+                            error: err.to_string(),
+                        },
+                    )))
+                    .await;
+            }
         }
     })
 }

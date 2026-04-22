@@ -140,6 +140,23 @@ pub enum TracerPayload {
         path: std::path::PathBuf,
         error: String,
     },
+    ModalChunk {
+        event_id: i64,
+        side: crate::client::ContentSide,
+        offset: usize,
+        bytes: Vec<u8>,
+        eof: bool,
+        /// The length the worker asked for; the reducer uses this to
+        /// decide whether a short read triggers EOF independently of
+        /// client-side classification.
+        requested_len: usize,
+    },
+    ModalChunkFailed {
+        event_id: i64,
+        side: crate::client::ContentSide,
+        offset: usize,
+        error: String,
+    },
 }
 
 /// Payload variants pushed from the Events tab worker back into the UI loop.

@@ -220,6 +220,18 @@ pub async fn run(
                         save.side,
                     );
                 }
+                PendingIntent::SpawnModalChunks(requests) => {
+                    for req in requests {
+                        crate::view::tracer::worker::spawn_modal_chunk(
+                            client.clone(),
+                            tx.clone(),
+                            req.event_id,
+                            req.side,
+                            req.offset,
+                            req.len,
+                        );
+                    }
+                }
                 other => {
                     let intent = match other {
                         PendingIntent::SwitchContext(name) => Some(Intent::SwitchContext(name)),
@@ -260,6 +272,12 @@ pub async fn run(
             workers.invalidate();
             state.pending_worker_restart = false;
             state.cluster.spawn_fetchers(client.clone(), tx.clone());
+        }
+        // Drop the content viewer modal when leaving the Tracer tab so
+        // stale in-flight chunks don't update a modal that is no longer
+        // visible, and so re-entry always starts from a clean state.
+        if workers.active_view() == Some(ViewId::Tracer) && state.current_tab != ViewId::Tracer {
+            state.tracer.content_modal = None;
         }
         workers.ensure(
             state.current_tab,

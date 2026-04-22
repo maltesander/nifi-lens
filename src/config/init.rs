@@ -95,6 +95,13 @@ insecure_tls = false
 # about               = "5m"    # /flow/about banner info
 # max_interval        = "60s"   # adaptive cap on slow clusters
 # jitter_percent      = 20      # ±20% jitter on each sleep
+
+# Per-side ceiling on bytes loaded into the Tracer content viewer
+# modal (Input and Output tabs). Streamed in 512 KiB chunks as the
+# user scrolls toward the tail. Set to "0" to disable the ceiling and
+# stream until server EOF (memory grows unbounded).
+[tracer]
+modal_streaming_ceiling = "4MiB"
 "#;
 
 pub fn write_template(force: bool) -> Result<PathBuf, NifiLensError> {
@@ -170,5 +177,6 @@ mod tests {
             Duration::from_secs(15)
         );
         assert_eq!(parsed.polling.cluster.bulletins, Duration::from_secs(5));
+        assert_eq!(parsed.tracer.modal_streaming_ceiling, Some(4 * 1024 * 1024));
     }
 }

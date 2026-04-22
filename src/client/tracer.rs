@@ -13,10 +13,11 @@ use crate::client::NifiClient;
 use crate::client::classify_or_fallback;
 use crate::error::NifiLensError;
 
-/// Preview cap applied to Tracer content fetches. Flowfile bodies
-/// above this threshold return `206 Partial Content`; the UI
-/// renders the truncated slice and flags the truncation.
-pub const PREVIEW_CAP_BYTES: usize = 1 << 20; // 1 MiB
+/// Byte cap on the inline content-pane preview in the Tracer tab.
+/// The full-screen content viewer modal uses `provenance_content_range`
+/// with its own streaming ceiling; this constant only bounds the inline
+/// mini-preview.
+pub const INLINE_PREVIEW_BYTES: usize = 8 * 1024;
 
 /// Direction of a content claim on a provenance event.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -89,7 +90,7 @@ pub enum LineagePoll {
     Finished(LineageSnapshot),
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 pub enum ContentRender {
     /// Valid UTF-8 body. `pretty_printed` is true iff JSON pretty-
     /// printing succeeded AND produced bytes different from the
@@ -98,6 +99,7 @@ pub enum ContentRender {
     /// Non-UTF-8 body, hex dump of up to the first 4 KiB.
     Hex { first_4k: String },
     /// Empty body.
+    #[default]
     Empty,
 }
 
@@ -116,6 +118,24 @@ pub struct ContentSnapshot {
     pub render: ContentRender,
     pub bytes_fetched: usize,
     pub truncated: bool,
+}
+
+/// Byte-range slice of a provenance event's content. Produced by
+/// `NifiClient::provenance_content_range`.
+#[derive(Debug, Clone)]
+pub struct ContentRangeSnapshot {
+    pub event_id: i64,
+    pub side: ContentSide,
+    /// Absolute byte offset into the content claim for the first byte
+    /// of `bytes`.
+    pub offset: usize,
+    /// Response body bytes. Length may be less than the requested len
+    /// when the server reached end-of-claim.
+    pub bytes: Vec<u8>,
+    /// True iff `bytes.len() < requested_len`, i.e. the server sent
+    /// fewer bytes than asked for — treated as end-of-claim by the
+    /// modal reducer.
+    pub eof: bool,
 }
 
 impl NifiClient {
@@ -492,6 +512,71 @@ impl NifiClient {
 
         Ok(stream)
     }
+
+    /// Fetches a byte range `[offset, offset + len)` of a provenance
+    /// event's content. NiFi treats the `Range` header's end value as
+    /// exclusive (unlike RFC 7233), so we ask for `bytes={offset}-{end}`
+    /// with `end = offset + len` — the server returns exactly `len` bytes
+    /// unless it reaches EOF first.
+    ///
+    /// Errors map to `NifiLensError::ProvenanceContentFetchFailed`.
+    pub async fn provenance_content_range(
+        &self,
+        event_id: i64,
+        side: ContentSide,
+        offset: usize,
+        len: usize,
+    ) -> Result<ContentRangeSnapshot, NifiLensError> {
+        tracing::debug!(
+            context = %self.context_name(),
+            event_id,
+            side = side.as_str(),
+            offset,
+            len,
+            "fetching provenance event content range",
+        );
+
+        let id_str = event_id.to_string();
+        let events_api = self.inner.provenanceevents();
+        let cluster_node_id = self.inner.cluster_node_id();
+        // `offset + len` can overflow on pathological inputs; saturate so the
+        // server returns a short read (treated as EOF) rather than panic.
+        let end = offset.saturating_add(len);
+        let range = format!("bytes={offset}-{end}");
+
+        let bytes = match side {
+            ContentSide::Input => {
+                events_api
+                    .get_input_content(&id_str, cluster_node_id, Some(&range))
+                    .await
+            }
+            ContentSide::Output => {
+                events_api
+                    .get_output_content(&id_str, cluster_node_id, Some(&range))
+                    .await
+            }
+        }
+        .map_err(|err| {
+            classify_or_fallback(self.context_name(), Box::new(err), |source| {
+                NifiLensError::ProvenanceContentFetchFailed {
+                    context: self.context_name().to_string(),
+                    event_id,
+                    side: side.as_str(),
+                    source,
+                }
+            })
+        })?;
+
+        let eof = bytes.len() < len;
+
+        Ok(ContentRangeSnapshot {
+            event_id,
+            side,
+            offset,
+            bytes,
+            eof,
+        })
+    }
 }
 
 /// Classifies raw bytes into a [`ContentRender`] variant.
@@ -499,7 +584,7 @@ impl NifiClient {
 /// - Empty slice → [`ContentRender::Empty`]
 /// - Valid UTF-8 text → [`ContentRender::Text`] with JSON pretty-printing if parseable
 /// - Non-UTF-8 bytes → [`ContentRender::Hex`] with the first 4 KiB hex-dumped
-pub(crate) fn classify_content(bytes: Vec<u8>) -> ContentRender {
+pub fn classify_content(bytes: Vec<u8>) -> ContentRender {
     if bytes.is_empty() {
         return ContentRender::Empty;
     }
@@ -888,5 +973,69 @@ mod tests {
             }
             other => panic!("expected Hex, got {other:?}"),
         }
+    }
+
+    #[tokio::test]
+    async fn provenance_content_range_sends_correct_range_header() {
+        let server = wiremock::MockServer::start().await;
+        wiremock::Mock::given(wiremock::matchers::method("GET"))
+            .and(wiremock::matchers::path(
+                "/nifi-api/provenance-events/42/content/output",
+            ))
+            .and(wiremock::matchers::header("Range", "bytes=1024-2048"))
+            .respond_with(wiremock::ResponseTemplate::new(206).set_body_bytes(vec![b'x'; 1024]))
+            .mount(&server)
+            .await;
+
+        let client = test_client(&server).await;
+        let snap = client
+            .provenance_content_range(42, ContentSide::Output, 1024, 1024)
+            .await
+            .unwrap();
+        assert_eq!(snap.offset, 1024);
+        assert_eq!(snap.bytes.len(), 1024);
+        assert!(!snap.eof);
+    }
+
+    #[tokio::test]
+    async fn provenance_content_range_short_read_sets_eof() {
+        let server = wiremock::MockServer::start().await;
+        wiremock::Mock::given(wiremock::matchers::method("GET"))
+            .and(wiremock::matchers::path(
+                "/nifi-api/provenance-events/9/content/input",
+            ))
+            .respond_with(wiremock::ResponseTemplate::new(206).set_body_bytes(vec![b'a'; 300]))
+            .mount(&server)
+            .await;
+
+        let client = test_client(&server).await;
+        let snap = client
+            .provenance_content_range(9, ContentSide::Input, 0, 1024)
+            .await
+            .unwrap();
+        assert_eq!(snap.bytes.len(), 300);
+        assert!(snap.eof);
+    }
+
+    #[tokio::test]
+    async fn provenance_content_range_failure_maps_to_typed_error() {
+        let server = wiremock::MockServer::start().await;
+        wiremock::Mock::given(wiremock::matchers::method("GET"))
+            .and(wiremock::matchers::path(
+                "/nifi-api/provenance-events/3/content/input",
+            ))
+            .respond_with(wiremock::ResponseTemplate::new(500))
+            .mount(&server)
+            .await;
+
+        let client = test_client(&server).await;
+        let err = client
+            .provenance_content_range(3, ContentSide::Input, 0, 512)
+            .await
+            .unwrap_err();
+        assert!(matches!(
+            err,
+            crate::error::NifiLensError::ProvenanceContentFetchFailed { .. }
+        ));
     }
 }

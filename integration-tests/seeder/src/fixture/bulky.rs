@@ -8,8 +8,9 @@
 //! ```
 //!
 //! Produces ~1.5 MiB flowfiles at a low rate. Provenance events in
-//! this PG exceed the Tracer's 1 MiB preview cap, exercising the
-//! Range-header truncation path end-to-end.
+//! this PG exceed both the 8 KiB inline preview cap and the
+//! integration test's 1 MiB `BULKY_CAP_BYTES` truncation cap,
+//! exercising the Range-header truncation path end-to-end.
 
 use nifi_rust_client::dynamic::DynamicClient;
 

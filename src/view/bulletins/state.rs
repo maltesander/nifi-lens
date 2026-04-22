@@ -10,6 +10,7 @@ use std::time::{Duration, SystemTime};
 use crate::app::navigation::ListNavigation;
 use crate::app::state::AppState;
 use crate::client::BulletinSnapshot;
+pub use crate::widget::search::{MatchSpan, SearchState, compute_matches};
 
 /// Strip NiFi's `ComponentName[id=<uuid>] ` boilerplate prefix from a
 /// bulletin message. NiFi emits this prefix on every bulletin; it eats
@@ -77,32 +78,6 @@ pub fn normalize_dynamic_brackets(s: &str) -> String {
         let next = s[i..].find('[').map(|rel| i + rel).unwrap_or(bytes.len());
         out.push_str(&s[i..next]);
         i = next;
-    }
-    out
-}
-
-/// Case-insensitive, non-overlapping substring search. Returns matches
-/// in pre-wrap coordinates. Input is split on `\n`; each line is
-/// searched independently. Empty `query` returns an empty vec.
-pub fn compute_matches(body: &str, query: &str) -> Vec<MatchSpan> {
-    if query.is_empty() {
-        return Vec::new();
-    }
-    let lq = query.to_ascii_lowercase();
-    let mut out = Vec::new();
-    for (line_idx, line) in body.split('\n').enumerate() {
-        let ll = line.to_ascii_lowercase();
-        let mut from = 0;
-        while let Some(rel) = ll[from..].find(&lq) {
-            let start = from + rel;
-            let end = start + lq.len();
-            out.push(MatchSpan {
-                line_idx,
-                byte_start: start,
-                byte_end: end,
-            });
-            from = end;
-        }
     }
     out
 }
@@ -316,29 +291,6 @@ pub struct GroupKey {
     /// doesn't use the message).
     pub message_stem: String,
     pub mode: GroupMode,
-}
-
-/// A substring match in the pre-wrap raw message. Byte offsets into
-/// the specific line (split on `\n`); `line_idx` is the pre-wrap line.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct MatchSpan {
-    pub line_idx: usize,
-    pub byte_start: usize,
-    pub byte_end: usize,
-}
-
-#[derive(Debug, Clone, Default)]
-pub struct SearchState {
-    pub query: String,
-    /// True while the user is still typing the query (/ just pressed,
-    /// Enter not yet). Consumes keystrokes as literal text.
-    pub input_active: bool,
-    /// True once the user pressed Enter. `n`/`N` only work in this state.
-    pub committed: bool,
-    /// Matches in pre-wrap coordinates. Recomputed on every query edit.
-    pub matches: Vec<MatchSpan>,
-    /// Index into `matches`; `None` when `matches` is empty.
-    pub current: Option<usize>,
 }
 
 #[derive(Debug, Clone)]
@@ -1022,37 +974,6 @@ pub fn redraw_bulletins(state: &mut AppState) {
 mod tests {
     use super::*;
 
-    #[test]
-    fn compute_matches_finds_case_insensitive_substrings() {
-        let body = "Error: connection refused\nRetrying ERROR\nerror happens";
-        let m = compute_matches(body, "error");
-        assert_eq!(m.len(), 3);
-        assert_eq!(m[0].line_idx, 0);
-        assert_eq!(m[0].byte_start, 0);
-        assert_eq!(m[1].line_idx, 1);
-        assert_eq!(m[2].line_idx, 2);
-    }
-
-    #[test]
-    fn compute_matches_empty_query_returns_empty() {
-        assert_eq!(compute_matches("any text", "").len(), 0);
-    }
-
-    #[test]
-    fn compute_matches_no_match_returns_empty() {
-        assert_eq!(compute_matches("abc", "xyz").len(), 0);
-    }
-
-    #[test]
-    fn compute_matches_does_not_overlap() {
-        // "aaaa" searching "aa" should return non-overlapping matches.
-        let m = compute_matches("aaaa", "aa");
-        assert_eq!(m.len(), 2);
-        assert_eq!(m[0].byte_start, 0);
-        assert_eq!(m[0].byte_end, 2);
-        assert_eq!(m[1].byte_start, 2);
-        assert_eq!(m[1].byte_end, 4);
-    }
     use crate::client::BulletinSnapshot;
     use std::time::{Duration, UNIX_EPOCH};
 

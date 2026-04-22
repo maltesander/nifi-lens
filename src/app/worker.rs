@@ -206,6 +206,12 @@ impl WorkerRegistry {
         }
     }
 
+    /// Returns the currently-active view, if any. Exposed so the app
+    /// loop can detect outgoing-tab identity before calling `ensure`.
+    pub fn active_view(&self) -> Option<ViewId> {
+        self.active
+    }
+
     /// Abort the current worker so the next `ensure()` call spawns a
     /// fresh one. Used after context switch — the view tab hasn't changed
     /// but the backing client has. Subscribers are managed by the caller

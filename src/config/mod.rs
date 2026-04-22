@@ -19,6 +19,8 @@ pub struct Config {
     #[serde(default)]
     pub polling: PollingConfig,
     #[serde(default)]
+    pub tracer: TracerConfig,
+    #[serde(default)]
     pub contexts: Vec<Context>,
 }
 
@@ -272,6 +274,76 @@ password = "x"
         let from_serde: PollingConfig = toml::from_str("").expect("empty table parses as default");
         assert_eq!(from_default, from_serde);
     }
+}
+
+/// Configuration for the Tracer tab.
+#[derive(Debug, Clone, Deserialize, PartialEq, Eq)]
+pub struct TracerConfig {
+    /// Maximum bytes streamed into the content viewer modal per side
+    /// (Input / Output). `None` means unbounded (stream until server EOF).
+    #[serde(
+        default = "default_modal_streaming_ceiling",
+        deserialize_with = "deserialize_byte_size_or_zero"
+    )]
+    pub modal_streaming_ceiling: Option<usize>,
+}
+
+impl Default for TracerConfig {
+    fn default() -> Self {
+        Self {
+            modal_streaming_ceiling: default_modal_streaming_ceiling(),
+        }
+    }
+}
+
+fn default_modal_streaming_ceiling() -> Option<usize> {
+    Some(4 * 1024 * 1024)
+}
+
+/// Deserialize a human-readable byte-size string into `Option<usize>`.
+///
+/// Accepts `"N"`, `"N B"`, `"N KiB"`, `"N MiB"`, `"N GiB"`.
+/// `"0"` (or any integer ≤ 0) maps to `None` (unbounded).
+/// Unparseable values warn-log and fall back to the default (4 MiB).
+fn deserialize_byte_size_or_zero<'de, D>(deserializer: D) -> Result<Option<usize>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    use serde::Deserialize;
+    let raw = String::deserialize(deserializer)?;
+    Ok(parse_byte_size_or_zero(&raw))
+}
+
+fn parse_byte_size_or_zero(raw: &str) -> Option<usize> {
+    let trimmed = raw.trim();
+    if let Ok(n) = trimmed.parse::<i64>() {
+        if n <= 0 {
+            return None;
+        }
+        return Some(n as usize);
+    }
+    let suffixes: &[(&str, usize)] = &[
+        ("GiB", 1024 * 1024 * 1024),
+        ("MiB", 1024 * 1024),
+        ("KiB", 1024),
+        ("B", 1),
+    ];
+    for (sfx, mult) in suffixes {
+        if let Some(num) = trimmed.strip_suffix(sfx)
+            && let Ok(n) = num.trim().parse::<i64>()
+        {
+            return if n <= 0 {
+                None
+            } else {
+                Some((n as usize).saturating_mul(*mult))
+            };
+        }
+    }
+    tracing::warn!(
+        value = %raw,
+        "tracer.modal_streaming_ceiling: unparseable size, falling back to default 4 MiB"
+    );
+    default_modal_streaming_ceiling()
 }
 
 #[cfg(test)]
@@ -541,5 +613,67 @@ mod tests {
             result.is_err(),
             "expected parse error for invalid timestamp_format"
         );
+    }
+
+    #[test]
+    fn tracer_section_default_is_4mib_ceiling() {
+        let toml = r#"
+            current_context = "dev"
+        "#;
+        let cfg: Config = toml::from_str(toml).unwrap();
+        assert_eq!(cfg.tracer.modal_streaming_ceiling, Some(4 * 1024 * 1024));
+    }
+
+    #[test]
+    fn tracer_section_parses_mib_suffix() {
+        let toml = r#"
+            current_context = "dev"
+            [tracer]
+            modal_streaming_ceiling = "16MiB"
+        "#;
+        let cfg: Config = toml::from_str(toml).unwrap();
+        assert_eq!(cfg.tracer.modal_streaming_ceiling, Some(16 * 1024 * 1024));
+    }
+
+    #[test]
+    fn tracer_section_parses_kib_and_bare_bytes() {
+        let toml = r#"
+            current_context = "dev"
+            [tracer]
+            modal_streaming_ceiling = "512KiB"
+        "#;
+        let cfg: Config = toml::from_str(toml).unwrap();
+        assert_eq!(cfg.tracer.modal_streaming_ceiling, Some(512 * 1024));
+
+        let toml2 = r#"
+            current_context = "dev"
+            [tracer]
+            modal_streaming_ceiling = "65536"
+        "#;
+        let cfg2: Config = toml::from_str(toml2).unwrap();
+        assert_eq!(cfg2.tracer.modal_streaming_ceiling, Some(65536));
+    }
+
+    #[test]
+    fn tracer_section_zero_means_unbounded() {
+        let toml = r#"
+            current_context = "dev"
+            [tracer]
+            modal_streaming_ceiling = "0"
+        "#;
+        let cfg: Config = toml::from_str(toml).unwrap();
+        assert_eq!(cfg.tracer.modal_streaming_ceiling, None);
+    }
+
+    #[test]
+    fn tracer_section_bad_value_falls_back_to_default() {
+        let toml = r#"
+            current_context = "dev"
+            [tracer]
+            modal_streaming_ceiling = "not-a-size"
+        "#;
+        let cfg: Config = toml::from_str(toml).unwrap();
+        // Bad values warn-log but fall back to the 4 MiB default.
+        assert_eq!(cfg.tracer.modal_streaming_ceiling, Some(4 * 1024 * 1024));
     }
 }
