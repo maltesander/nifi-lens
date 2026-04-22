@@ -8,7 +8,7 @@ use tokio::sync::{Notify, RwLock, mpsc, watch};
 use tokio::task::JoinHandle;
 
 use crate::app::state::ViewId;
-use crate::client::health::SystemDiagSnapshot;
+use crate::client::health::{ClusterNodesSnapshot, SystemDiagSnapshot};
 use crate::client::{
     AboutSnapshot, BulletinSnapshot, ConnectionEndpoints, ControllerServicesSnapshot,
     ControllerStatusSnapshot, NifiClient, RootPgStatusSnapshot,
@@ -36,6 +36,7 @@ pub enum ClusterUpdate {
     RootPgStatus(Result<RootPgStatusSnapshot, NifiLensError>, FetchMeta),
     ControllerServices(Result<ControllerServicesSnapshot, NifiLensError>, FetchMeta),
     SystemDiagnostics(Result<SystemDiagSnapshot, NifiLensError>, FetchMeta),
+    ClusterNodes(Result<ClusterNodesSnapshot, NifiLensError>, FetchMeta),
     Connections {
         pg_id: String,
         result: Result<ConnectionEndpoints, NifiLensError>,
@@ -55,6 +56,7 @@ impl ClusterUpdate {
             Self::RootPgStatus(..) => ClusterEndpoint::RootPgStatus,
             Self::ControllerServices(..) => ClusterEndpoint::ControllerServices,
             Self::SystemDiagnostics(..) => ClusterEndpoint::SystemDiagnostics,
+            Self::ClusterNodes(..) => ClusterEndpoint::ClusterNodes,
             Self::Connections { .. } => ClusterEndpoint::ConnectionsByPg,
             Self::BulletinsDelta { .. } => ClusterEndpoint::Bulletins,
         }
@@ -292,6 +294,9 @@ impl ClusterStore {
             }
             ClusterUpdate::SystemDiagnostics(result, meta) => {
                 self.snapshot.system_diagnostics.apply(result, meta)
+            }
+            ClusterUpdate::ClusterNodes(result, meta) => {
+                self.snapshot.cluster_nodes.apply(result, meta)
             }
             ClusterUpdate::Connections {
                 pg_id,
@@ -691,6 +696,28 @@ mod tests {
         assert_eq!(store.snapshot.bulletins.buf.front().unwrap().id, 3);
         assert_eq!(store.snapshot.bulletins.buf.back().unwrap().id, 5);
         assert_eq!(store.snapshot.bulletins.last_id, Some(5));
+    }
+
+    #[test]
+    fn cluster_nodes_update_is_applied() {
+        use crate::client::health::ClusterNodesSnapshot;
+        let fake = ClusterNodesSnapshot {
+            rows: vec![],
+            fetched_at: std::time::Instant::now(),
+            fetched_wall: time::OffsetDateTime::now_utc(),
+        };
+        let mut store = ClusterStore::new(ClusterPollingConfig::default(), 5000);
+        let meta = FetchMeta {
+            fetched_at: std::time::Instant::now(),
+            fetch_duration: Duration::from_millis(1),
+            next_interval: Duration::from_secs(5),
+        };
+        let ep = store.apply_update(ClusterUpdate::ClusterNodes(Ok(fake), meta));
+        assert_eq!(ep, ClusterEndpoint::ClusterNodes);
+        assert!(matches!(
+            store.snapshot.cluster_nodes,
+            crate::cluster::snapshot::EndpointState::Ready { .. }
+        ));
     }
 
     #[test]
