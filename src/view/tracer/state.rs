@@ -1334,6 +1334,77 @@ pub fn apply_modal_chunk_failed(
     buf.last_error = Some(error);
 }
 
+/// Distance in rendered lines from the viewport bottom to the tail at
+/// which we fire the next fetch.
+const STREAM_LOOKAHEAD_LINES: usize = 100;
+
+/// Scroll to `new_offset` and return any fetch requests the scroll
+/// implies (auto-stream).
+pub fn content_modal_scroll_to(
+    state: &mut TracerState,
+    new_offset: usize,
+    ceiling: Option<usize>,
+) -> Vec<ModalFetchRequest> {
+    let Some(modal) = state.content_modal.as_mut() else {
+        return Vec::new();
+    };
+    modal.scroll_offset = new_offset;
+
+    let side = match modal.active_tab {
+        ContentModalTab::Input => crate::client::ContentSide::Input,
+        ContentModalTab::Output => crate::client::ContentSide::Output,
+        // Diff streams only on open; no auto-stream beyond the 512 KiB
+        // cap — nothing to fire here.
+        ContentModalTab::Diff => return Vec::new(),
+    };
+    let buf = match side {
+        crate::client::ContentSide::Input => &modal.input,
+        crate::client::ContentSide::Output => &modal.output,
+    };
+    if buf.fully_loaded || buf.in_flight {
+        return Vec::new();
+    }
+
+    let line_count = decoded_line_count(&buf.decoded);
+    let viewport_bottom = modal.scroll_offset.saturating_add(modal.last_viewport_rows);
+    let distance_to_tail = line_count.saturating_sub(viewport_bottom);
+
+    if distance_to_tail > STREAM_LOOKAHEAD_LINES {
+        return Vec::new();
+    }
+
+    let remaining = match ceiling {
+        Some(cap) => cap.saturating_sub(buf.loaded.len()),
+        None => MODAL_CHUNK_BYTES,
+    };
+    if remaining == 0 {
+        return Vec::new();
+    }
+    let len = MODAL_CHUNK_BYTES.min(remaining);
+
+    let buf = match side {
+        crate::client::ContentSide::Input => &mut modal.input,
+        crate::client::ContentSide::Output => &mut modal.output,
+    };
+    buf.in_flight = true;
+
+    vec![ModalFetchRequest {
+        event_id: modal.event_id,
+        side,
+        offset: buf.loaded.len(),
+        len,
+    }]
+}
+
+fn decoded_line_count(render: &crate::client::tracer::ContentRender) -> usize {
+    use crate::client::tracer::ContentRender;
+    match render {
+        ContentRender::Text { text, .. } => text.lines().count().max(1),
+        ContentRender::Hex { first_4k } => first_4k.lines().count().max(1),
+        ContentRender::Empty => 1,
+    }
+}
+
 // ── Tests ─────────────────────────────────────────────────────────────────────
 
 #[cfg(test)]
@@ -2667,5 +2738,81 @@ mod tests {
         assert_eq!(fired[0].side, ContentSide::Input);
         assert_eq!(fired[0].offset, 0);
         assert_eq!(fired[0].len, 524_288);
+    }
+
+    #[test]
+    fn content_modal_scroll_triggers_fetch_near_tail() {
+        use crate::client::ContentSide;
+        use crate::client::tracer::ContentRender;
+
+        let text = "a\n".repeat(1000);
+        let loaded_bytes = text.clone().into_bytes();
+        let len = loaded_bytes.len();
+        let mut modal = stub_modal(1, ContentModalTab::Input);
+        modal.input.loaded = loaded_bytes;
+        modal.input.decoded = ContentRender::Text {
+            text,
+            pretty_printed: false,
+        };
+        modal.last_viewport_rows = 30;
+        let state = TracerState {
+            content_modal: Some(modal),
+            ..TracerState::default()
+        };
+        let mut state = state;
+
+        // Viewport bottom = 965 + 30 = 995 → distance to tail (1000) = 5 < 100.
+        let fired = content_modal_scroll_to(&mut state, 965, Some(4 * 1024 * 1024));
+        assert_eq!(fired.len(), 1);
+        assert_eq!(fired[0].side, ContentSide::Input);
+        assert_eq!(fired[0].offset, len);
+        assert_eq!(fired[0].len, MODAL_CHUNK_BYTES);
+    }
+
+    #[test]
+    fn content_modal_scroll_does_not_fetch_when_fully_loaded() {
+        let mut modal = stub_modal(1, ContentModalTab::Input);
+        modal.input.fully_loaded = true;
+        let mut state = TracerState {
+            content_modal: Some(modal),
+            ..TracerState::default()
+        };
+        let fired = content_modal_scroll_to(&mut state, 0, Some(4 * 1024 * 1024));
+        assert!(fired.is_empty());
+    }
+
+    #[test]
+    fn content_modal_scroll_does_not_fetch_when_in_flight() {
+        let mut modal = stub_modal(1, ContentModalTab::Input);
+        modal.input.in_flight = true;
+        let mut state = TracerState {
+            content_modal: Some(modal),
+            ..TracerState::default()
+        };
+        let fired = content_modal_scroll_to(&mut state, 0, Some(4 * 1024 * 1024));
+        assert!(fired.is_empty());
+    }
+
+    #[test]
+    fn content_modal_scroll_respects_ceiling() {
+        use crate::client::tracer::ContentRender;
+
+        let text = "a\n".repeat(10);
+        let mut modal = stub_modal(1, ContentModalTab::Input);
+        modal.input.loaded = vec![b'a'; 1_000_000];
+        modal.input.decoded = ContentRender::Text {
+            text,
+            pretty_printed: false,
+        };
+        modal.last_viewport_rows = 30;
+        let mut state = TracerState {
+            content_modal: Some(modal),
+            ..TracerState::default()
+        };
+
+        // Ceiling = 1 MiB; already at 1_000_000. Remaining = 48_576.
+        let fired = content_modal_scroll_to(&mut state, 0, Some(1_048_576));
+        assert_eq!(fired.len(), 1);
+        assert_eq!(fired[0].len, 1_048_576 - 1_000_000);
     }
 }
