@@ -9,6 +9,7 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicI64, Ordering};
 use std::time::{Duration, Instant};
 
+use time::OffsetDateTime;
 use tokio::sync::{Notify, RwLock, mpsc, watch};
 use tokio::task::JoinHandle;
 
@@ -481,6 +482,86 @@ pub(crate) fn spawn_connections_by_pg(
             }
         }
     })
+}
+
+/// Spawns the cluster-nodes fetch loop. Emits
+/// `AppEvent::ClusterUpdate(ClusterUpdate::ClusterNodes(..))` on every
+/// cycle — success or failure — so `EndpointState::apply` can preserve
+/// `last_ok`.
+///
+/// Standalone NiFi returns HTTP 409 for `/controller/cluster`. This
+/// fetcher recognizes that specific case and emits an empty-rows
+/// `Ok(ClusterNodesSnapshot)` rather than a failure — the 409 is the
+/// expected steady state on a non-clustered server. The fetcher logs
+/// the standalone detection once (at `info`) and then stays silent.
+#[allow(dead_code)]
+pub(crate) fn spawn_cluster_nodes(
+    client: Arc<RwLock<NifiClient>>,
+    tx: mpsc::Sender<AppEvent>,
+    cfg: FetchTaskConfig,
+) -> JoinHandle<()> {
+    tokio::task::spawn_local(async move {
+        let mut next_interval = cfg.base_interval;
+        let mut standalone_logged = false;
+        loop {
+            if cfg.gated && !subscribers_present(&cfg.subscriber_counter) {
+                cfg.force.notified().await;
+                continue;
+            }
+            let t0 = Instant::now();
+            let raw = {
+                let guard = client.read().await;
+                guard.cluster_nodes().await
+            };
+            let result = match raw {
+                Ok(snap) => Ok(snap),
+                Err(ref err) if error_is_standalone_409(err) => {
+                    if !standalone_logged {
+                        tracing::info!(
+                            "cluster_nodes: standalone NiFi (409 on /controller/cluster); serving empty snapshot"
+                        );
+                        standalone_logged = true;
+                    }
+                    Ok(crate::client::health::ClusterNodesSnapshot {
+                        rows: vec![],
+                        fetched_at: t0,
+                        fetched_wall: OffsetDateTime::now_utc(),
+                    })
+                }
+                Err(err) => Err(err),
+            };
+            let duration = t0.elapsed();
+            let meta = FetchMeta {
+                fetched_at: t0,
+                fetch_duration: duration,
+                next_interval,
+            };
+            if tx
+                .send(AppEvent::ClusterUpdate(ClusterUpdate::ClusterNodes(
+                    result, meta,
+                )))
+                .await
+                .is_err()
+            {
+                tracing::debug!("cluster_nodes fetch: channel closed, exiting");
+                return;
+            }
+            next_interval = adaptive_interval(cfg.base_interval, duration, cfg.max_interval);
+            sleep_with_jitter(next_interval, cfg.jitter_percent, &cfg.force).await;
+        }
+    })
+}
+
+/// Detect the standalone-NiFi 409 shape on `/controller/cluster`. Matches
+/// on the debug representation of the source error (the error type is
+/// boxed via `NifiLensError::ClusterNodesFailed.source`). Conservative
+/// — if the shape changes across nifi-rust-client versions this falls
+/// back to the generic failure path and the endpoint shows as `Failed`,
+/// which is safe.
+#[allow(dead_code)]
+fn error_is_standalone_409(err: &NifiLensError) -> bool {
+    let debug_repr = format!("{err:?}");
+    debug_repr.contains("409") || debug_repr.contains("NotClustered")
 }
 
 /// Fan-out fetch: one `/process-groups/{id}/connections` call per PG,
