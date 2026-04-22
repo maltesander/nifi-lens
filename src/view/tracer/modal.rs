@@ -47,7 +47,7 @@ pub fn render(frame: &mut Frame, area: Rect, modal: &mut ContentModalState) {
     render_body(frame, rows[4], modal);
     render_stream_status(frame, rows[6], modal);
     render_search_strip(frame, rows[7], modal);
-    render_footer_hint(frame, rows[8]);
+    render_footer_hint(frame, rows[8], modal);
     modal.last_viewport_rows = rows[4].height as usize;
 }
 
@@ -376,8 +376,45 @@ fn render_search_strip(frame: &mut Frame, area: Rect, modal: &ContentModalState)
     frame.render_widget(Paragraph::new(line), area);
 }
 
-fn render_footer_hint(frame: &mut Frame, area: Rect) {
-    let text = "[Tab] switch · [/] find · [n/N] match · [Ctrl ↓↑] hunk · [c] copy · [s] save · [Esc] close";
+/// Build the footer hint by iterating `ContentModalVerb::all()`, filtering to
+/// verbs that are both `show_in_hint_bar()` and enabled given the current modal
+/// state. This mirrors what the top-level hint_bar does for outer tabs, but uses
+/// a local enabled predicate instead of `HintContext` (which requires `&AppState`
+/// and cannot be constructed here due to split borrow constraints).
+fn render_footer_hint(frame: &mut Frame, area: Rect, modal: &ContentModalState) {
+    use crate::input::Verb;
+    use crate::input::verb::ContentModalVerb;
+
+    // Inline enabled check mirroring ContentModalVerb::enabled() but
+    // operating on the modal reference directly (no AppState needed).
+    let enabled = |v: ContentModalVerb| -> bool {
+        match v {
+            ContentModalVerb::JumpDiff => {
+                matches!(modal.diffable, crate::view::tracer::state::Diffable::Ok)
+            }
+            ContentModalVerb::SearchNext | ContentModalVerb::SearchPrev => {
+                modal.search.as_ref().map(|s| s.committed).unwrap_or(false)
+            }
+            ContentModalVerb::HunkNext | ContentModalVerb::HunkPrev => {
+                modal.active_tab == crate::view::tracer::state::ContentModalTab::Diff
+                    && modal
+                        .diff_cache
+                        .as_ref()
+                        .map(|d| !d.hunks.is_empty())
+                        .unwrap_or(false)
+            }
+            _ => true,
+        }
+    };
+
+    let parts: Vec<String> = ContentModalVerb::all()
+        .iter()
+        .copied()
+        .filter(|v| v.show_in_hint_bar() && !v.hint().is_empty() && enabled(*v))
+        .map(|v| format!("[{}] {}", v.chord().display(), v.hint()))
+        .collect();
+
+    let text = parts.join(" · ");
     frame.render_widget(
         Paragraph::new(Line::from(Span::styled(text, theme::muted()))),
         area,

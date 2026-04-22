@@ -23,7 +23,7 @@ Buffer {
         "┃                                                                                                  ┃",
         "┃loaded 35 B (complete)                                                                            ┃",
         "┃/ total (1/1)                                                                                     ┃",
-        "┃[Tab] switch · [/] find · [n/N] match · [Ctrl ↓↑] hunk · [c] copy · [s] save · [Esc] close        ┃",
+        "┃[Tab] switch · [/] find · [n] match · [c] copy · [s] save · [Esc] close                           ┃",
         "┗━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┛",
     ],
     styles: [
@@ -49,6 +49,6 @@ Buffer {
         x: 8, y: 17, fg: DarkGray, bg: Reset, underline: Reset, modifier: NONE,
         x: 14, y: 17, fg: Reset, bg: Reset, underline: Reset, modifier: NONE,
         x: 1, y: 18, fg: DarkGray, bg: Reset, underline: Reset, modifier: NONE,
-        x: 91, y: 18, fg: Reset, bg: Reset, underline: Reset, modifier: NONE,
+        x: 72, y: 18, fg: Reset, bg: Reset, underline: Reset, modifier: NONE,
     ]
 }
