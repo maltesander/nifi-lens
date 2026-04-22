@@ -850,7 +850,7 @@ mod tests {
     /// `apply_payload(SystemDiag(..))` path in render tests.
     fn seed_sysdiag(state: &mut OverviewState, diag: &crate::client::health::SystemDiagSnapshot) {
         use crate::view::overview::state::RepositoriesSummary;
-        crate::client::health::update_nodes(&mut state.nodes, diag);
+        crate::client::health::update_nodes(&mut state.nodes, diag, None);
         let avg = |repos: &[crate::client::health::RepoUsage]| -> u32 {
             if repos.is_empty() {
                 0

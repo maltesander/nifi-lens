@@ -195,7 +195,7 @@ pub(crate) fn redraw_sysdiag(state: &mut crate::app::state::AppState) {
         return;
     };
 
-    crate::client::health::update_nodes(&mut state.overview.nodes, diag);
+    crate::client::health::update_nodes(&mut state.overview.nodes, diag, None);
     state.overview.repositories_summary = build_repositories_summary(diag);
     state.overview.last_sysdiag_refresh = Some(std::time::Instant::now());
     state.cluster_summary.total_nodes = Some(diag.nodes.len());
