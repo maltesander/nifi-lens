@@ -100,18 +100,21 @@ fn render_tab_strip(frame: &mut Frame, area: Rect, modal: &ContentModalState) {
 }
 
 fn render_body(frame: &mut Frame, area: Rect, modal: &ContentModalState) {
-    // TODO: highlight match spans in body — tracked as follow-up
     let lines: Vec<Line<'static>> = match modal.active_tab {
         ContentModalTab::Input => text_body_lines(
             &modal.input.decoded,
             modal.scroll_offset,
             area.height as usize,
+            modal.search.as_ref(),
         ),
         ContentModalTab::Output => text_body_lines(
             &modal.output.decoded,
             modal.scroll_offset,
             area.height as usize,
+            modal.search.as_ref(),
         ),
+        // Search highlighting on the Diff tab is a follow-up; Diff is
+        // line-based and has its own renderer.
         ContentModalTab::Diff => diff_body_lines(modal, area.height as usize),
     };
     frame.render_widget(Paragraph::new(lines), area);
@@ -121,23 +124,85 @@ fn text_body_lines(
     render: &crate::client::tracer::ContentRender,
     scroll: usize,
     height: usize,
+    search: Option<&crate::widget::search::SearchState>,
 ) -> Vec<Line<'static>> {
     use crate::client::tracer::ContentRender;
-    match render {
-        ContentRender::Empty => vec![Line::from(Span::styled("<empty>", theme::muted()))],
+
+    // Collect the raw line strings for the visible window.
+    let raw: Vec<(usize, String)> = match render {
+        ContentRender::Empty => {
+            return vec![Line::from(Span::styled("<empty>", theme::muted()))];
+        }
         ContentRender::Text { text, .. } => text
             .lines()
+            .enumerate()
             .skip(scroll)
             .take(height)
-            .map(|l| Line::from(Span::raw(l.to_string())))
+            .map(|(abs_idx, l)| (abs_idx, l.to_string()))
             .collect(),
         ContentRender::Hex { first_4k } => first_4k
             .lines()
+            .enumerate()
             .skip(scroll)
             .take(height)
-            .map(|l| Line::from(Span::raw(l.to_string())))
+            .map(|(abs_idx, l)| (abs_idx, l.to_string()))
             .collect(),
+    };
+
+    // Fast path: no committed search — plain spans, no allocation overhead.
+    let Some(s) = search else {
+        return raw
+            .into_iter()
+            .map(|(_, l)| Line::from(Span::raw(l)))
+            .collect();
+    };
+    if !s.committed || s.matches.is_empty() {
+        return raw
+            .into_iter()
+            .map(|(_, l)| Line::from(Span::raw(l)))
+            .collect();
     }
+
+    raw.into_iter()
+        .map(|(abs_idx, line_text)| {
+            // Find all matches on this line.
+            let line_matches: Vec<(usize, usize, bool)> = s
+                .matches
+                .iter()
+                .enumerate()
+                .filter(|(_, m)| m.line_idx == abs_idx)
+                .map(|(mi, m)| (m.byte_start, m.byte_end, Some(mi) == s.current))
+                .collect();
+
+            if line_matches.is_empty() {
+                return Line::from(Span::raw(line_text));
+            }
+
+            // Split the line into spans, applying highlight styles at match boundaries.
+            let mut spans: Vec<Span<'static>> = Vec::new();
+            let bytes = line_text.as_bytes();
+            let mut cursor = 0usize;
+            for (start, end, is_current) in &line_matches {
+                let start = (*start).min(bytes.len());
+                let end = (*end).min(bytes.len());
+                if cursor < start {
+                    spans.push(Span::raw(line_text[cursor..start].to_string()));
+                }
+                let matched = line_text[start..end].to_string();
+                let style = if *is_current {
+                    theme::highlight()
+                } else {
+                    theme::bold()
+                };
+                spans.push(Span::styled(matched, style));
+                cursor = end;
+            }
+            if cursor < line_text.len() {
+                spans.push(Span::raw(line_text[cursor..].to_string()));
+            }
+            Line::from(spans)
+        })
+        .collect()
 }
 
 fn diff_body_lines(modal: &ContentModalState, height: usize) -> Vec<Line<'static>> {
@@ -477,12 +542,14 @@ mod tests {
     #[test]
     fn modal_search_with_matches() {
         let mut modal = stub_modal(ContentModalTab::Input);
+        // Input text line 1 is `  "total":299.00}`.
+        // "total" starts at byte 3 (after `  "`).
         modal.search = Some(crate::widget::search::SearchState {
             query: "total".to_string(),
             input_active: false,
             committed: true,
             matches: vec![crate::widget::search::MatchSpan {
-                line_idx: 2,
+                line_idx: 1,
                 byte_start: 3,
                 byte_end: 8,
             }],
