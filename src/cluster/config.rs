@@ -21,6 +21,8 @@ pub struct ClusterPollingConfig {
     pub system_diagnostics: Duration,
     #[serde(default = "default_bulletins", with = "humantime_serde")]
     pub bulletins: Duration,
+    #[serde(default = "default_cluster_nodes", with = "humantime_serde")]
+    pub cluster_nodes: Duration,
     #[serde(default = "default_connections_by_pg", with = "humantime_serde")]
     pub connections_by_pg: Duration,
     #[serde(default = "default_about", with = "humantime_serde")]
@@ -39,6 +41,7 @@ impl Default for ClusterPollingConfig {
             controller_status: default_controller_status(),
             system_diagnostics: default_system_diagnostics(),
             bulletins: default_bulletins(),
+            cluster_nodes: default_cluster_nodes(),
             connections_by_pg: default_connections_by_pg(),
             about: default_about(),
             max_interval: default_max_interval(),
@@ -60,6 +63,9 @@ fn default_system_diagnostics() -> Duration {
     Duration::from_secs(30)
 }
 fn default_bulletins() -> Duration {
+    Duration::from_secs(5)
+}
+fn default_cluster_nodes() -> Duration {
     Duration::from_secs(5)
 }
 fn default_connections_by_pg() -> Duration {
@@ -85,9 +91,17 @@ mod tests {
         assert_eq!(c.root_pg_status, Duration::from_secs(10));
         assert_eq!(c.system_diagnostics, Duration::from_secs(30));
         assert_eq!(c.bulletins, Duration::from_secs(5));
+        assert_eq!(c.cluster_nodes, Duration::from_secs(5));
         assert_eq!(c.about, Duration::from_secs(300));
         assert_eq!(c.max_interval, Duration::from_secs(60));
         assert_eq!(c.jitter_percent, 20);
+    }
+
+    #[test]
+    fn parses_cluster_nodes_override() {
+        let toml = r#"cluster_nodes = "3s""#;
+        let c: ClusterPollingConfig = toml::from_str(toml).unwrap();
+        assert_eq!(c.cluster_nodes, Duration::from_secs(3));
     }
 
     #[test]
