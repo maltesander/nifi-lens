@@ -146,6 +146,100 @@ impl ClusterNodeStatus {
     }
 }
 
+/// One historical event recorded against a cluster node. Newest-first
+/// inside `ClusterNodeRow.events`; capped to 8 at parse time.
+#[derive(Debug, Clone)]
+pub struct ClusterNodeEvent {
+    pub timestamp_iso: String,
+    pub category: Option<String>,
+    pub message: String,
+}
+
+/// Per-node cluster-membership row from `/controller/cluster`.
+#[derive(Debug, Clone)]
+pub struct ClusterNodeRow {
+    pub node_id: String,
+    /// `"host:apiPort"` — composed identically to `SystemDiagSnapshot`
+    /// node addresses so the Overview reducer can join on this string.
+    pub address: String,
+    pub status: ClusterNodeStatus,
+    pub is_primary: bool,
+    pub is_coordinator: bool,
+    pub heartbeat_iso: Option<String>,
+    pub node_start_iso: Option<String>,
+    pub active_thread_count: u32,
+    pub flow_files_queued: u32,
+    pub bytes_queued: u64,
+    pub events: Vec<ClusterNodeEvent>,
+}
+
+/// Snapshot of `GET /controller/cluster`. `fetched_at` is the reducer-
+/// anchor used to compute per-node heartbeat ages.
+///
+/// No `Default` impl: `Instant` has no sensible default, and the
+/// sibling `SystemDiagSnapshot` is declared the same way.
+#[derive(Debug, Clone)]
+pub struct ClusterNodesSnapshot {
+    pub rows: Vec<ClusterNodeRow>,
+    pub fetched_at: std::time::Instant,
+}
+
+const MAX_NODE_EVENTS: usize = 8;
+
+impl ClusterNodesSnapshot {
+    /// Project a `ClusterDto` into the store-owned snapshot shape. Pure;
+    /// no I/O. Unknown wire statuses become `ClusterNodeStatus::Other`.
+    /// Events are truncated to `MAX_NODE_EVENTS`, preserving newest-first
+    /// order as NiFi returns them.
+    pub fn from_cluster_dto(dto: &nifi_rust_client::dynamic::types::ClusterDto) -> Self {
+        let rows = dto
+            .nodes
+            .as_deref()
+            .unwrap_or_default()
+            .iter()
+            .map(|n| {
+                let address = format!(
+                    "{}:{}",
+                    n.address.as_deref().unwrap_or("unknown"),
+                    n.api_port.unwrap_or(0),
+                );
+                let roles = n.roles.as_deref().unwrap_or_default();
+                let is_primary = roles.iter().any(|r| r == "Primary Node");
+                let is_coordinator = roles.iter().any(|r| r == "Cluster Coordinator");
+                let events = n
+                    .events
+                    .as_deref()
+                    .unwrap_or_default()
+                    .iter()
+                    .take(MAX_NODE_EVENTS)
+                    .map(|e| ClusterNodeEvent {
+                        timestamp_iso: e.timestamp.clone().unwrap_or_default(),
+                        category: e.category.clone(),
+                        message: e.message.clone().unwrap_or_default(),
+                    })
+                    .collect();
+                ClusterNodeRow {
+                    node_id: n.node_id.clone().unwrap_or_default(),
+                    address,
+                    status: ClusterNodeStatus::from_wire(n.status.as_deref().unwrap_or("")),
+                    is_primary,
+                    is_coordinator,
+                    heartbeat_iso: n.heartbeat.clone(),
+                    node_start_iso: n.node_start_time.clone(),
+                    active_thread_count: n.active_thread_count.unwrap_or(0).max(0) as u32,
+                    flow_files_queued: n.flow_files_queued.unwrap_or(0).max(0) as u32,
+                    bytes_queued: n.bytes_queued.unwrap_or(0).max(0) as u64,
+                    events,
+                }
+            })
+            .collect();
+        Self {
+            rows,
+            fetched_at: std::time::Instant::now(),
+        }
+    }
+}
+
 /// One row in the node-health table.
 #[derive(Debug, Clone)]
 pub struct NodeHealthRow {
@@ -696,6 +790,120 @@ mod tests {
         assert_eq!(state.nodes[0].heap_used_bytes, 4_000);
         assert_eq!(state.nodes[0].heap_max_bytes, 8_000);
         assert_eq!(state.nodes[0].gc_collection_count, 42);
+    }
+
+    // -----------------------------------------------------------------------
+    // ClusterNodesSnapshot tests
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn cluster_nodes_snapshot_from_empty_cluster_is_empty() {
+        use nifi_rust_client::dynamic::types::ClusterDto;
+        let dto = ClusterDto::default();
+        let snap = super::ClusterNodesSnapshot::from_cluster_dto(&dto);
+        assert!(snap.rows.is_empty());
+    }
+
+    #[test]
+    fn cluster_nodes_snapshot_parses_all_fields() {
+        use nifi_rust_client::dynamic::types::{ClusterDto, NodeDto, NodeEventDto};
+        let mut ev = NodeEventDto::default();
+        ev.timestamp = Some("04/22/2026 10:14:03 UTC".into());
+        ev.category = Some("CONNECTED".into());
+        ev.message = Some("Node connected".into());
+
+        let mut node = NodeDto::default();
+        node.node_id = Some("5f2b8a17-1234-1234-1234-c394e97c3000".into());
+        node.address = Some("node2.nifi".into());
+        node.api_port = Some(8443);
+        node.status = Some("CONNECTED".into());
+        node.roles = Some(vec!["Primary Node".into(), "Cluster Coordinator".into()]);
+        node.heartbeat = Some("04/22/2026 14:03:17 UTC".into());
+        node.node_start_time = Some("04/22/2026 09:12:04 UTC".into());
+        node.active_thread_count = Some(42);
+        node.flow_files_queued = Some(1234);
+        node.bytes_queued = Some(456 * 1024 * 1024);
+        node.events = Some(vec![ev]);
+
+        let mut dto = ClusterDto::default();
+        dto.nodes = Some(vec![node]);
+
+        let snap = super::ClusterNodesSnapshot::from_cluster_dto(&dto);
+        assert_eq!(snap.rows.len(), 1);
+        let row = &snap.rows[0];
+        assert_eq!(row.node_id, "5f2b8a17-1234-1234-1234-c394e97c3000");
+        assert_eq!(row.address, "node2.nifi:8443");
+        assert_eq!(row.status, super::ClusterNodeStatus::Connected);
+        assert!(row.is_primary);
+        assert!(row.is_coordinator);
+        assert_eq!(
+            row.heartbeat_iso.as_deref(),
+            Some("04/22/2026 14:03:17 UTC")
+        );
+        assert_eq!(row.active_thread_count, 42);
+        assert_eq!(row.flow_files_queued, 1234);
+        assert_eq!(row.bytes_queued, 456 * 1024 * 1024);
+        assert_eq!(row.events.len(), 1);
+        assert_eq!(row.events[0].category.as_deref(), Some("CONNECTED"));
+    }
+
+    #[test]
+    fn cluster_nodes_snapshot_handles_unknown_status() {
+        use nifi_rust_client::dynamic::types::{ClusterDto, NodeDto};
+        let mut node = NodeDto::default();
+        node.address = Some("node1".into());
+        node.api_port = Some(8443);
+        node.status = Some("WEIRD_FUTURE_STATE".into());
+
+        let mut dto = ClusterDto::default();
+        dto.nodes = Some(vec![node]);
+
+        let snap = super::ClusterNodesSnapshot::from_cluster_dto(&dto);
+        assert_eq!(snap.rows[0].status, super::ClusterNodeStatus::Other);
+    }
+
+    #[test]
+    fn cluster_nodes_snapshot_caps_events_at_eight() {
+        use nifi_rust_client::dynamic::types::{ClusterDto, NodeDto, NodeEventDto};
+        let ev = |ts: &str| {
+            let mut e = NodeEventDto::default();
+            e.timestamp = Some(ts.to_string());
+            e.category = Some("HEARTBEAT_RECEIVED".into());
+            e.message = Some("x".into());
+            e
+        };
+        let events = (0..20)
+            .map(|i| ev(&format!("04/22/2026 10:14:{:02} UTC", i)))
+            .collect();
+
+        let mut node = NodeDto::default();
+        node.address = Some("node1".into());
+        node.api_port = Some(8443);
+        node.status = Some("CONNECTED".into());
+        node.events = Some(events);
+
+        let mut dto = ClusterDto::default();
+        dto.nodes = Some(vec![node]);
+
+        let snap = super::ClusterNodesSnapshot::from_cluster_dto(&dto);
+        assert_eq!(snap.rows[0].events.len(), 8);
+        assert_eq!(
+            snap.rows[0].events[0].timestamp_iso,
+            "04/22/2026 10:14:00 UTC"
+        );
+    }
+
+    #[test]
+    fn cluster_nodes_snapshot_address_defaults_when_missing() {
+        use nifi_rust_client::dynamic::types::{ClusterDto, NodeDto};
+        let mut node = NodeDto::default();
+        node.status = Some("CONNECTED".into());
+
+        let mut dto = ClusterDto::default();
+        dto.nodes = Some(vec![node]);
+
+        let snap = super::ClusterNodesSnapshot::from_cluster_dto(&dto);
+        assert_eq!(snap.rows[0].address, "unknown:0");
     }
 
     // -----------------------------------------------------------------------
