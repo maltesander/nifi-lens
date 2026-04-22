@@ -46,7 +46,8 @@ pub fn render(frame: &mut Frame, area: Rect, modal: &mut ContentModalState) {
     render_tab_strip(frame, rows[2], modal);
     render_body(frame, rows[4], modal);
     render_stream_status(frame, rows[6], modal);
-    // Search strip / hint added in T22.
+    render_search_strip(frame, rows[7], modal);
+    render_footer_hint(frame, rows[8]);
     modal.last_viewport_rows = rows[4].height as usize;
 }
 
@@ -285,4 +286,34 @@ fn delta_ui(i: Option<u64>, o: Option<u64>) -> String {
         }
         _ => "—".into(),
     }
+}
+
+fn render_search_strip(frame: &mut Frame, area: Rect, modal: &ContentModalState) {
+    let Some(s) = modal.search.as_ref() else {
+        return;
+    };
+    if !s.input_active && !s.committed {
+        return;
+    }
+    let match_info = match s.matches.len() {
+        0 if s.committed => " (0 matches)".to_string(),
+        0 => String::new(),
+        n => format!(" ({}/{})", s.current.map(|i| i + 1).unwrap_or(0), n),
+    };
+    let line = Line::from(vec![
+        Span::styled("/", theme::accent()),
+        Span::raw(" "),
+        Span::raw(s.query.clone()),
+        Span::styled(if s.input_active { "_" } else { "" }, theme::accent()),
+        Span::styled(match_info, theme::muted()),
+    ]);
+    frame.render_widget(Paragraph::new(line), area);
+}
+
+fn render_footer_hint(frame: &mut Frame, area: Rect) {
+    let text = "[Tab] switch · [/] find · [n/N] match · [Ctrl ↓↑] hunk · [c] copy · [s] save · [Esc] close";
+    frame.render_widget(
+        Paragraph::new(Line::from(Span::styled(text, theme::muted()))),
+        area,
+    );
 }
