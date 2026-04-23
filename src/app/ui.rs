@@ -80,7 +80,12 @@ fn render_content(frame: &mut Frame, area: Rect, state: &mut AppState) {
         ViewId::Tracer => {
             tracer::render(frame, area, &state.tracer, &state.timestamp_cfg);
             if let Some(modal) = state.tracer.content_modal.as_mut() {
-                crate::view::tracer::modal::render(frame, area, modal);
+                crate::view::tracer::modal::render(
+                    frame,
+                    area,
+                    modal,
+                    &state.tracer_config.ceiling,
+                );
             }
         }
     }
