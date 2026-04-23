@@ -90,12 +90,38 @@ pub enum LineagePoll {
     Finished(LineageSnapshot),
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TabularFormat {
+    Parquet,
+    Avro,
+}
+
+impl TabularFormat {
+    pub fn label(self) -> &'static str {
+        match self {
+            TabularFormat::Parquet => "parquet",
+            TabularFormat::Avro => "avro",
+        }
+    }
+}
+
 #[derive(Debug, Clone, Default)]
 pub enum ContentRender {
     /// Valid UTF-8 body. `pretty_printed` is true iff JSON pretty-
     /// printing succeeded AND produced bytes different from the
     /// original. `text` is always the authoritative render target.
     Text { text: String, pretty_printed: bool },
+    /// Decoded Parquet or Avro container. `body` is JSON-Lines, one
+    /// record per line. `schema_summary` is one column per line in
+    /// the format's native type names. `decoded_bytes` equals
+    /// `body.len()`.
+    Tabular {
+        format: TabularFormat,
+        schema_summary: String,
+        body: String,
+        decoded_bytes: usize,
+        truncated: bool,
+    },
     /// Non-UTF-8 body, hex dump of up to the first 4 KiB.
     Hex { first_4k: String },
     /// Empty body.
@@ -1037,5 +1063,26 @@ mod tests {
             err,
             crate::error::NifiLensError::ProvenanceContentFetchFailed { .. }
         ));
+    }
+
+    #[test]
+    fn tabular_format_variants_exist() {
+        use ContentRender::*;
+        let _ = Tabular {
+            format: TabularFormat::Parquet,
+            schema_summary: String::new(),
+            body: String::new(),
+            decoded_bytes: 0,
+            truncated: false,
+        };
+        let _ = Tabular {
+            format: TabularFormat::Avro,
+            schema_summary: String::new(),
+            body: String::new(),
+            decoded_bytes: 0,
+            truncated: false,
+        };
+        // Default still works and matches Empty.
+        assert!(matches!(ContentRender::default(), Empty));
     }
 }

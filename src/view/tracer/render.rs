@@ -618,6 +618,9 @@ fn render_content_panel(
                 ContentRender::Text { text, .. } => text.clone(),
                 ContentRender::Hex { first_4k } => first_4k.clone(),
                 ContentRender::Empty => "(empty)".to_string(),
+                ContentRender::Tabular { .. } => {
+                    unreachable!("Tabular variant: render & diff handled in later tasks (see plan)")
+                }
             };
             let total_lines = body.lines().count().max(1);
             let suffix = if matches!(render, ContentRender::Empty) {

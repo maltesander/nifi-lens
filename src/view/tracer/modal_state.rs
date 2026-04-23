@@ -412,6 +412,9 @@ fn decoded_line_count(render: &crate::client::tracer::ContentRender) -> usize {
         ContentRender::Text { text, .. } => text.lines().count().max(1),
         ContentRender::Hex { first_4k } => first_4k.lines().count().max(1),
         ContentRender::Empty => 1,
+        ContentRender::Tabular { .. } => {
+            unreachable!("Tabular variant: render & diff handled in later tasks (see plan)")
+        }
     }
 }
 
@@ -1093,11 +1096,17 @@ fn content_modal_search_body(modal: &ContentModalState) -> String {
             ContentRender::Text { text, .. } => text.clone(),
             ContentRender::Hex { first_4k } => first_4k.clone(),
             ContentRender::Empty => String::new(),
+            ContentRender::Tabular { .. } => {
+                unreachable!("Tabular variant: render & diff handled in later tasks (see plan)")
+            }
         },
         ContentModalTab::Output => match &modal.output.decoded {
             ContentRender::Text { text, .. } => text.clone(),
             ContentRender::Hex { first_4k } => first_4k.clone(),
             ContentRender::Empty => String::new(),
+            ContentRender::Tabular { .. } => {
+                unreachable!("Tabular variant: render & diff handled in later tasks (see plan)")
+            }
         },
         ContentModalTab::Diff => {
             if let Some(cache) = &modal.diff_cache {

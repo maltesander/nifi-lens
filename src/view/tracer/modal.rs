@@ -221,6 +221,9 @@ fn text_body_lines(
                 .collect();
             (window, total)
         }
+        ContentRender::Tabular { .. } => {
+            unreachable!("Tabular variant: render & diff handled in later tasks (see plan)")
+        }
     };
 
     let gutter_width = line_number_width(total_lines);
