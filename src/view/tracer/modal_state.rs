@@ -437,9 +437,11 @@ fn decoded_line_count(render: &crate::client::tracer::ContentRender) -> usize {
         ContentRender::Text { text, .. } => text.lines().count().max(1),
         ContentRender::Hex { first_4k } => first_4k.lines().count().max(1),
         ContentRender::Empty => 1,
-        ContentRender::Tabular { .. } => {
-            unreachable!("Tabular variant: render & diff handled in later tasks (see plan)")
-        }
+        ContentRender::Tabular {
+            schema_summary,
+            body,
+            ..
+        } => schema_summary.lines().count() + 1 + body.lines().count(),
     }
 }
 
@@ -1175,17 +1177,21 @@ fn content_modal_search_body(modal: &ContentModalState) -> String {
             ContentRender::Text { text, .. } => text.clone(),
             ContentRender::Hex { first_4k } => first_4k.clone(),
             ContentRender::Empty => String::new(),
-            ContentRender::Tabular { .. } => {
-                unreachable!("Tabular variant: render & diff handled in later tasks (see plan)")
-            }
+            ContentRender::Tabular {
+                schema_summary,
+                body,
+                ..
+            } => format!("{}\n-- schema --\n{}", schema_summary, body),
         },
         ContentModalTab::Output => match &modal.output.decoded {
             ContentRender::Text { text, .. } => text.clone(),
             ContentRender::Hex { first_4k } => first_4k.clone(),
             ContentRender::Empty => String::new(),
-            ContentRender::Tabular { .. } => {
-                unreachable!("Tabular variant: render & diff handled in later tasks (see plan)")
-            }
+            ContentRender::Tabular {
+                schema_summary,
+                body,
+                ..
+            } => format!("{}\n-- schema --\n{}", schema_summary, body),
         },
         ContentModalTab::Diff => {
             if let Some(cache) = &modal.diff_cache {
@@ -2964,5 +2970,80 @@ mod tests {
             tags.contains(&similar::ChangeTag::Delete),
             "expected at least one Delete tag"
         );
+    }
+
+    #[test]
+    fn tabular_scroll_decoded_line_count_includes_schema_and_separator() {
+        use crate::client::tracer::{ContentRender, TabularFormat};
+        let render = ContentRender::Tabular {
+            format: TabularFormat::Parquet,
+            schema_summary: "id : Int64\nname : Utf8".into(), // 2 lines
+            body: "{\"id\":0}\n{\"id\":1}\n{\"id\":2}".into(), // 3 lines
+            decoded_bytes: 24,
+            truncated: false,
+        };
+        // 2 schema + 1 separator + 3 body = 6
+        assert_eq!(decoded_line_count(&render), 6);
+    }
+
+    #[test]
+    fn tabular_search_body_includes_schema_separator_and_body() {
+        use crate::client::tracer::{ContentRender, TabularFormat};
+        let mut modal = stub_modal(1, ContentModalTab::Input);
+        modal.input.decoded = ContentRender::Tabular {
+            format: TabularFormat::Parquet,
+            schema_summary: "active : Boolean".into(),
+            body: "{\"active\":true}".into(),
+            decoded_bytes: 16,
+            truncated: false,
+        };
+        let body = content_modal_search_body(&modal);
+        assert!(
+            body.contains("active : Boolean"),
+            "schema column name must be searchable"
+        );
+        assert!(body.contains("-- schema --"), "separator must be present");
+        assert!(
+            body.contains("\"active\":true"),
+            "body content must be searchable"
+        );
+    }
+
+    #[test]
+    fn tabular_scroll_does_not_panic() {
+        use crate::client::tracer::{ContentRender, TabularFormat};
+
+        // Construct a Tabular modal with enough lines to scroll.
+        let schema = "id : Int64\nname : Utf8".to_string(); // 2 lines
+        let body_rows: Vec<String> = (0..20).map(|i| format!("{{\"id\":{}}}", i)).collect();
+        let body = body_rows.join("\n"); // 20 lines
+        // total = 2 + 1 + 20 = 23
+
+        let mut modal = stub_modal(1, ContentModalTab::Input);
+        modal.input.fully_loaded = true;
+        modal.input.decoded = ContentRender::Tabular {
+            format: TabularFormat::Parquet,
+            schema_summary: schema,
+            body,
+            decoded_bytes: 200,
+            truncated: false,
+        };
+        modal.last_viewport_rows = 10;
+        let mut state = TracerState {
+            content_modal: Some(modal),
+            ..TracerState::default()
+        };
+
+        // Scroll forward — must not panic and must advance offset.
+        let cfg = crate::config::TracerCeilingConfig::default();
+        let fired = content_modal_scroll_by(&mut state, 5, &cfg);
+        assert!(fired.is_empty(), "fully_loaded: no fetch request expected");
+        let offset = state.content_modal.as_ref().unwrap().scroll_offset;
+        assert_eq!(offset, 5, "scroll_offset should advance to 5");
+
+        // Scroll backward to zero.
+        content_modal_scroll_by(&mut state, -10, &cfg);
+        let offset = state.content_modal.as_ref().unwrap().scroll_offset;
+        assert_eq!(offset, 0, "scroll_offset must clamp at 0");
     }
 }

@@ -227,21 +227,30 @@ fn text_body_lines(
             body,
             ..
         } => {
-            let schema_lines: Vec<&str> = schema_summary.lines().collect();
-            let body_lines: Vec<&str> = body.lines().collect();
-            let mut lines: Vec<Line<'static>> =
-                Vec::with_capacity(schema_lines.len() + body_lines.len() + 2);
-            for s in &schema_lines {
-                lines.push(Line::from(Span::styled(s.to_string(), theme::muted())));
-            }
-            lines.push(Line::from(Span::styled(
-                "-- schema --",
-                theme::muted().add_modifier(Modifier::BOLD),
-            )));
-            for b in &body_lines {
-                lines.push(Line::from(b.to_string()));
-            }
-            return lines;
+            // Build the full ordered line list (schema → separator → body),
+            // then apply the same skip(scroll).take(height) window the Text/Hex
+            // arms use. Each line gets a zero-width empty gutter span first so
+            // the render_body gutter-splitter finds gutter_width = 0 and routes
+            // the content span into the body column (not the gutter column).
+            let empty_gutter = Span::raw("");
+            let all_lines: Vec<Line<'static>> = schema_summary
+                .lines()
+                .map(|s| {
+                    Line::from(vec![
+                        empty_gutter.clone(),
+                        Span::styled(s.to_string(), theme::muted()),
+                    ])
+                })
+                .chain(std::iter::once(Line::from(vec![
+                    empty_gutter.clone(),
+                    Span::styled("-- schema --", theme::muted().add_modifier(Modifier::BOLD)),
+                ])))
+                .chain(
+                    body.lines()
+                        .map(|b| Line::from(vec![empty_gutter.clone(), Span::raw(b.to_string())])),
+                )
+                .collect();
+            return all_lines.into_iter().skip(scroll).take(height).collect();
         }
     };
 
