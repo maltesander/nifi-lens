@@ -49,10 +49,10 @@ use nifi_rust_client::{NifiError, wait};
 
 use crate::entities::{make_controller_service, make_processor, props};
 use crate::error::{Result, SeederError};
-use crate::fixture::custom_text_property_key;
 use crate::fixture::healthy::{
     create_child_pg, create_connection_in_pg, create_processor, start_processor, wait_for_valid,
 };
+use crate::fixture::{custom_text_property_key, query_record_io_property_keys};
 
 /// Embedded JSON payload used as GenerateFlowFile's Custom Text. ~180 KiB
 /// of structured sensor data (1000 records) — small enough to stay under
@@ -67,7 +67,9 @@ struct DiffServices {
     csv_reader_id: String,
     csv_writer_id: String,
     csv_writer_out_id: String,
+    avro_reader_id: String,
     avro_writer_id: String,
+    parquet_reader_id: String,
     parquet_writer_id: String,
 }
 
@@ -196,7 +198,10 @@ pub async fn seed(
     )
     .await?;
 
-    // Parquet sink: ConvertRecord (JSON in → Parquet out) → LogAttribute.
+    // Parquet sink: ConvertRecord → UpdateRecord → QueryRecord → LogAttribute.
+    // UpdateRecord rewrites only the WARN status rows (≈⅓ of records) so
+    // the diff shows a partial mutation.
+    // QueryRecord drops records with id ≥ SENSOR-0500, halving the row count.
     let convert_parquet_id = create_processor(
         client,
         &pg_id,
@@ -214,6 +219,43 @@ pub async fn seed(
     )
     .await?;
 
+    let upd_parquet_id = create_processor(
+        client,
+        &pg_id,
+        make_processor(
+            "UpdateRecord-parquet",
+            "org.apache.nifi.processors.standard.UpdateRecord",
+            props(&[
+                ("Record Reader", &services.parquet_reader_id),
+                ("Record Writer", &services.parquet_writer_id),
+                ("/status", "${field.value:replaceFirst('WARN', 'WARNING')}"),
+            ]),
+            None,
+            vec!["failure"],
+        ),
+        "UpdateRecord-parquet",
+    )
+    .await?;
+
+    let (qr_reader_key, qr_writer_key) = query_record_io_property_keys(version);
+    let query_parquet_id = create_processor(
+        client,
+        &pg_id,
+        make_processor(
+            "QueryRecord-parquet",
+            "org.apache.nifi.processors.standard.QueryRecord",
+            props(&[
+                (qr_reader_key, &services.parquet_reader_id),
+                (qr_writer_key, &services.parquet_writer_id),
+                ("kept", "SELECT * FROM FLOWFILE WHERE id < 'SENSOR-0500'"),
+            ]),
+            None,
+            vec!["original", "failure"],
+        ),
+        "QueryRecord-parquet",
+    )
+    .await?;
+
     let log_parquet_id = create_processor(
         client,
         &pg_id,
@@ -228,7 +270,7 @@ pub async fn seed(
     )
     .await?;
 
-    // Avro sink: ConvertRecord (JSON in → Avro out) → LogAttribute.
+    // Avro sink: same shape as parquet.
     let convert_avro_id = create_processor(
         client,
         &pg_id,
@@ -243,6 +285,42 @@ pub async fn seed(
             vec!["failure"],
         ),
         "ConvertRecord-avro",
+    )
+    .await?;
+
+    let upd_avro_id = create_processor(
+        client,
+        &pg_id,
+        make_processor(
+            "UpdateRecord-avro",
+            "org.apache.nifi.processors.standard.UpdateRecord",
+            props(&[
+                ("Record Reader", &services.avro_reader_id),
+                ("Record Writer", &services.avro_writer_id),
+                ("/status", "${field.value:replaceFirst('WARN', 'WARNING')}"),
+            ]),
+            None,
+            vec!["failure"],
+        ),
+        "UpdateRecord-avro",
+    )
+    .await?;
+
+    let query_avro_id = create_processor(
+        client,
+        &pg_id,
+        make_processor(
+            "QueryRecord-avro",
+            "org.apache.nifi.processors.standard.QueryRecord",
+            props(&[
+                (qr_reader_key, &services.avro_reader_id),
+                (qr_writer_key, &services.avro_writer_id),
+                ("kept", "SELECT * FROM FLOWFILE WHERE id < 'SENSOR-0500'"),
+            ]),
+            None,
+            vec!["original", "failure"],
+        ),
+        "QueryRecord-avro",
     )
     .await?;
 
@@ -262,19 +340,21 @@ pub async fn seed(
 
     // Connections. Each hop carries success from the upstream processor.
     // The CSV chain is the original linear path.
-    let hops = [
+    let hops_success = [
         (&gen_id, &mime_json_id),
         (&mime_json_id, &upd_json_id),
         (&upd_json_id, &convert_id),
         (&convert_id, &mime_csv_id),
         (&mime_csv_id, &upd_csv_id),
         (&upd_csv_id, &log_id),
-        // Parquet branch from UpdateRecord-json.
-        (&convert_parquet_id, &log_parquet_id),
-        // Avro branch from UpdateRecord-json.
-        (&convert_avro_id, &log_avro_id),
+        // Parquet chain.
+        (&convert_parquet_id, &upd_parquet_id),
+        (&upd_parquet_id, &query_parquet_id),
+        // Avro chain.
+        (&convert_avro_id, &upd_avro_id),
+        (&upd_avro_id, &query_avro_id),
     ];
-    for (src, dst) in hops {
+    for (src, dst) in hops_success {
         create_connection_in_pg(
             client,
             &pg_id,
@@ -283,6 +363,22 @@ pub async fn seed(
             dst,
             "PROCESSOR",
             vec!["success"],
+        )
+        .await?;
+    }
+    // QueryRecord routes its dynamic "kept" relationship into the terminator.
+    for (src, dst) in [
+        (&query_parquet_id, &log_parquet_id),
+        (&query_avro_id, &log_avro_id),
+    ] {
+        create_connection_in_pg(
+            client,
+            &pg_id,
+            src,
+            "PROCESSOR",
+            dst,
+            "PROCESSOR",
+            vec!["kept"],
         )
         .await?;
     }
@@ -316,8 +412,12 @@ pub async fn seed(
         (&mime_csv_id, "UpdateAttribute-mime-csv"),
         (&convert_id, "ConvertRecord"),
         (&log_parquet_id, "LogAttribute-parquet"),
+        (&query_parquet_id, "QueryRecord-parquet"),
+        (&upd_parquet_id, "UpdateRecord-parquet"),
         (&convert_parquet_id, "ConvertRecord-parquet"),
         (&log_avro_id, "LogAttribute-avro"),
+        (&query_avro_id, "QueryRecord-avro"),
+        (&upd_avro_id, "UpdateRecord-avro"),
         (&convert_avro_id, "ConvertRecord-avro"),
         (&upd_json_id, "UpdateRecord-json"),
         (&mime_json_id, "UpdateAttribute-mime-json"),
@@ -371,11 +471,25 @@ async fn create_controller_services(client: &DynamicClient, pg_id: &str) -> Resu
         "org.apache.nifi.csv.CSVRecordSetWriter",
     )
     .await?;
+    let avro_reader_id = create_and_enable_cs(
+        client,
+        pg_id,
+        "diff-avro-reader",
+        "org.apache.nifi.avro.AvroReader",
+    )
+    .await?;
     let avro_writer_id = create_and_enable_cs(
         client,
         pg_id,
         "diff-avro-writer",
         "org.apache.nifi.avro.AvroRecordSetWriter",
+    )
+    .await?;
+    let parquet_reader_id = create_and_enable_cs(
+        client,
+        pg_id,
+        "diff-parquet-reader",
+        "org.apache.nifi.parquet.ParquetReader",
     )
     .await?;
     let parquet_writer_id = create_and_enable_cs(
@@ -392,7 +506,9 @@ async fn create_controller_services(client: &DynamicClient, pg_id: &str) -> Resu
         csv_reader_id,
         csv_writer_id,
         csv_writer_out_id,
+        avro_reader_id,
         avro_writer_id,
+        parquet_reader_id,
         parquet_writer_id,
     })
 }

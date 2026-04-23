@@ -366,12 +366,34 @@ The `diff` ceiling caps the per-side input fed into
 `similar::TextDiff::from_lines`.
 
 **Fixture:** the integration test fixture's `diff-pipeline` includes
-two new sink chains (`ConvertRecord-parquet` → `LogAttribute-parquet`
-and `ConvertRecord-avro` → `LogAttribute-avro`) that produce
-parquet/avro provenance content for live-cluster decode coverage.
-The two new controller services are `diff-parquet-writer`
-(`ParquetRecordSetWriter`) and `diff-avro-writer`
-(`AvroRecordSetWriter`).
+two sink chains that produce parquet/avro provenance content for
+live-cluster decode coverage:
+
+- `ConvertRecord-parquet` → `UpdateRecord-parquet` → `QueryRecord-parquet` → `LogAttribute-parquet`
+- `ConvertRecord-avro` → `UpdateRecord-avro` → `QueryRecord-avro` → `LogAttribute-avro`
+
+`UpdateRecord-{fmt}` rewrites only the `WARN` status rows
+(`/status` ↦ `replaceFirst('WARN', 'WARNING')`, ≈⅓ of records) so
+its provenance event shows a partial mutation diff. `QueryRecord-{fmt}`
+keeps records with `id < 'SENSOR-0500'` (halves the row count) so
+its event shows a major content change. Each stage's input/output
+content claims are same-format Parquet↔Parquet or Avro↔Avro,
+exercising the Tabular diff path.
+
+Four scoped controller services back the chains:
+`diff-parquet-reader`/`diff-parquet-writer` (`ParquetReader` /
+`ParquetRecordSetWriter`) and `diff-avro-reader`/`diff-avro-writer`
+(`AvroReader` / `AvroRecordSetWriter`).
+
+`QueryRecord` exhibits property-key drift across NiFi versions: 2.6.0
+uses kebab-case keys (`record-reader`, `record-writer`) while 2.9.0
+uses display-name keys (`Record Reader`, `Record Writer`). The seeder
+selects the right pair via `query_record_io_property_keys(version)`
+in `integration-tests/seeder/src/fixture/mod.rs`. Setting the wrong
+key creates dynamic properties — and dynamic properties on QueryRecord
+are interpreted as SQL queries, which validation rejects with
+"Non-query expression encountered in illegal context". UpdateRecord
+does NOT have this drift.
 
 ### Poll intervals
 

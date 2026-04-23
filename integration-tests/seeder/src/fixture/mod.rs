@@ -69,6 +69,24 @@ pub fn custom_text_property_key(version: &semver::Version) -> &'static str {
     }
 }
 
+/// Property keys for QueryRecord's Record Reader / Record Writer fields.
+///
+/// Returns `(reader_key, writer_key)`. Drift case symmetric with
+/// [`custom_text_property_key`]: 2.6.0 uses kebab-case descriptor
+/// keys (`record-reader`, `record-writer`) while 2.9.0 reverted them
+/// to the display-name form (`Record Reader`, `Record Writer`).
+/// Setting the wrong key creates dynamic properties — and dynamic
+/// properties on QueryRecord are interpreted as SQL queries, which
+/// validation rejects with "Non-query expression encountered in
+/// illegal context". UpdateRecord doesn't have this drift.
+pub fn query_record_io_property_keys(version: &semver::Version) -> (&'static str, &'static str) {
+    if version.major < 2 || (version.major == 2 && version.minor < 9) {
+        ("record-reader", "record-writer")
+    } else {
+        ("Record Reader", "Record Writer")
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
