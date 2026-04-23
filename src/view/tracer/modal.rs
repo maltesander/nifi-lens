@@ -568,10 +568,7 @@ fn render_stream_status(
         Some(b) if matches!(b.decoded, ContentRender::Tabular { .. }) => {
             footer_chip_text(&b.decoded, cfg, b.loaded.len())
         }
-        Some(b) if b.ceiling_hit => format!(
-            "loaded {} · ceiling reached — press 's' to save full content",
-            bytes_ui(b.loaded.len()),
-        ),
+        Some(b) if b.ceiling_hit => ceiling_hit_chip(b, cfg),
         Some(b) if b.fully_loaded => format!("loaded {} (complete)", bytes_ui(b.loaded.len())),
         Some(b) if b.in_flight => format!("loaded {} · fetching…", bytes_ui(b.loaded.len())),
         Some(b) => format!("loaded {}", bytes_ui(b.loaded.len())),
@@ -581,6 +578,39 @@ fn render_stream_status(
         _ => theme::muted(),
     };
     frame.render_widget(Paragraph::new(Line::from(Span::styled(text, style))), area);
+}
+
+/// Returns the chip text to show when a side has hit its per-side ceiling.
+///
+/// If the loaded buffer starts with the Parquet magic bytes (`PAR1`) AND
+/// `decoded` is `Hex` (meaning the partial parquet could not be decoded),
+/// this surfaces a distinct, actionable message pointing the user at the
+/// relevant config knob. All other ceiling-hit cases fall through to the
+/// legacy chip text.
+pub fn ceiling_hit_chip(
+    side: &crate::view::tracer::modal_state::SideBuffer,
+    cfg: &crate::config::TracerCeilingConfig,
+) -> String {
+    use crate::client::tracer::ContentRender;
+    let parquet_truncated =
+        side.loaded.starts_with(b"PAR1") && matches!(side.decoded, ContentRender::Hex { .. });
+    if parquet_truncated {
+        let cap = cfg
+            .tabular
+            .map(fmt_bytes)
+            .unwrap_or_else(|| "unbounded".into());
+        return format!(
+            "parquet truncated at {cap} — raise [tracer.ceiling] tabular or use \"s\" to save"
+        );
+    }
+    legacy_ceiling_hit_chip(side)
+}
+
+fn legacy_ceiling_hit_chip(side: &crate::view::tracer::modal_state::SideBuffer) -> String {
+    format!(
+        "loaded {} · ceiling reached — press 's' to save full content",
+        bytes_ui(side.loaded.len()),
+    )
 }
 
 fn bytes_ui(n: usize) -> String {
@@ -1139,5 +1169,109 @@ mod tests {
         // the stream-status renderer handles them inline. Just confirm
         // that calling the helper does not panic.
         let _ = chip;
+    }
+
+    #[test]
+    fn ceiling_hit_chip_for_parquet_truncation_uses_distinct_message() {
+        use crate::client::tracer::ContentRender;
+        use crate::config::TracerCeilingConfig;
+
+        // Construct a SideBuffer mimicking the post-truncation state:
+        // - loaded.starts_with(b"PAR1") (so we know it's parquet)
+        // - decoded = Hex (because the partial parquet couldn't be decoded)
+        // - ceiling_hit = true (because the fetch hit the tabular ceiling)
+        let mut bytes = b"PAR1".to_vec();
+        bytes.extend_from_slice(&[0u8; 100]);
+        let buf = SideBuffer {
+            loaded: bytes,
+            decoded: ContentRender::Hex {
+                first_4k: "50 41 52 31 ...".into(),
+            },
+            fully_loaded: false,
+            ceiling_hit: true,
+            in_flight: false,
+            last_error: None,
+            effective_ceiling: Some(Some(64 * 1024 * 1024)),
+        };
+        let cfg = TracerCeilingConfig {
+            text: Some(4 * 1024 * 1024),
+            tabular: Some(64 * 1024 * 1024),
+            diff: Some(16 * 1024 * 1024),
+        };
+
+        let chip = ceiling_hit_chip(&buf, &cfg);
+        assert!(
+            chip.contains("parquet truncated"),
+            "expected 'parquet truncated', got: {chip}"
+        );
+        assert!(
+            chip.contains("64 MiB"),
+            "expected '64 MiB' in message, got: {chip}"
+        );
+        assert!(
+            chip.contains("[tracer.ceiling] tabular"),
+            "expected config-key reference, got: {chip}"
+        );
+        assert!(chip.contains("\"s\""), "expected save hint, got: {chip}");
+    }
+
+    #[test]
+    fn ceiling_hit_chip_for_text_uses_existing_message() {
+        // Sanity check: text content with ceiling_hit still produces the
+        // pre-existing chip text (whatever it is). The new helper should
+        // route non-parquet-truncated cases to the legacy chip.
+        use crate::client::tracer::ContentRender;
+        use crate::config::TracerCeilingConfig;
+        let buf = SideBuffer {
+            loaded: vec![b'a'; 4 * 1024 * 1024],
+            decoded: ContentRender::Text {
+                text: "a".repeat(4 * 1024 * 1024),
+                pretty_printed: false,
+            },
+            fully_loaded: false,
+            ceiling_hit: true,
+            in_flight: false,
+            last_error: None,
+            effective_ceiling: Some(Some(4 * 1024 * 1024)),
+        };
+        let cfg = TracerCeilingConfig::default();
+        let chip = ceiling_hit_chip(&buf, &cfg);
+        assert!(
+            !chip.contains("parquet truncated"),
+            "text content should NOT use parquet message"
+        );
+        // The exact text isn't asserted here — just that it's not the parquet variant.
+    }
+
+    #[test]
+    fn modal_tabular_ceiling_hit_parquet_chip() {
+        use crate::client::tracer::ContentRender;
+        // Construct a modal state with a parquet-truncated Input side:
+        // loaded starts with PAR1 magic, decoded is Hex (failed decode),
+        // ceiling_hit is true.
+        let mut modal = stub_modal(ContentModalTab::Input);
+        let mut parquet_bytes = b"PAR1".to_vec();
+        parquet_bytes.extend_from_slice(&[0u8; 64 * 1024 * 1024 - 4]);
+        modal.input.loaded = parquet_bytes;
+        modal.input.decoded = ContentRender::Hex {
+            first_4k: "50 41 52 31 ...".into(),
+        };
+        modal.input.fully_loaded = false;
+        modal.input.ceiling_hit = true;
+        modal.input.effective_ceiling = Some(Some(64 * 1024 * 1024));
+        let cfg = crate::config::TracerCeilingConfig {
+            text: Some(4 * 1024 * 1024),
+            tabular: Some(64 * 1024 * 1024),
+            diff: Some(16 * 1024 * 1024),
+        };
+        let backend = TestBackend::new(100, 24);
+        let mut terminal = Terminal::new(backend).unwrap();
+        terminal
+            .draw(|f| render(f, f.area(), &mut modal, &cfg))
+            .unwrap();
+        insta::assert_debug_snapshot!(
+            "modal_tabular_ceiling_hit_parquet_chip",
+            terminal.backend().buffer()
+        );
     }
 }
