@@ -662,6 +662,23 @@ fn hex_dump(bytes: &[u8]) -> String {
     out
 }
 
+/// Returns the tabular format implied by the leading magic bytes, if any.
+///
+/// - Parquet files start with `PAR1` (the format also ends with `PAR1`,
+///   but the streaming chunk only sees the prefix).
+/// - Avro Object Container Files start with `Obj\x01`.
+/// - Anything shorter than 4 bytes returns `None`.
+pub fn detect_tabular_format(bytes: &[u8]) -> Option<TabularFormat> {
+    if bytes.len() < 4 {
+        return None;
+    }
+    match &bytes[..4] {
+        b"PAR1" => Some(TabularFormat::Parquet),
+        b"Obj\x01" => Some(TabularFormat::Avro),
+        _ => None,
+    }
+}
+
 /// Converts lineage graph nodes into a chronological list of event summaries.
 ///
 /// Filters to nodes whose `type` field equals `"EVENT"`, sorts ascending by
@@ -1093,5 +1110,32 @@ mod tests {
         };
         // Default still works and matches Empty.
         assert!(matches!(ContentRender::default(), Empty));
+    }
+
+    #[test]
+    fn detect_parquet_magic() {
+        let mut bytes = b"PAR1".to_vec();
+        bytes.extend_from_slice(&[0u8; 100]);
+        assert_eq!(detect_tabular_format(&bytes), Some(TabularFormat::Parquet));
+    }
+
+    #[test]
+    fn detect_avro_magic() {
+        let mut bytes = b"Obj\x01".to_vec();
+        bytes.extend_from_slice(&[0u8; 100]);
+        assert_eq!(detect_tabular_format(&bytes), Some(TabularFormat::Avro));
+    }
+
+    #[test]
+    fn detect_no_magic_for_text() {
+        assert_eq!(detect_tabular_format(b"{\"a\":1}"), None);
+        assert_eq!(detect_tabular_format(b"hello world"), None);
+    }
+
+    #[test]
+    fn detect_short_input_returns_none() {
+        assert_eq!(detect_tabular_format(b""), None);
+        assert_eq!(detect_tabular_format(b"PAR"), None);
+        assert_eq!(detect_tabular_format(b"Obj"), None);
     }
 }
