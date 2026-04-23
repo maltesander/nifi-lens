@@ -267,9 +267,10 @@ fn mime_pair_from_attributes(
 /// Drops chunks whose `event_id` doesn't match the currently-open
 /// modal (stale delivery after modal close or event change).
 ///
-/// Uses `TracerCeilingConfig::default()` (no ceiling). For runtime
-/// use where a per-context config is available, prefer
-/// `apply_modal_chunk_with_ceiling`.
+/// Uses `TracerCeilingConfig::default()` — `text` 4 MiB, `tabular`
+/// 64 MiB, `diff` 16 MiB. Test-only convenience wrapper; runtime
+/// callers must use `apply_modal_chunk_with_ceiling` so the user-
+/// configured ceilings are honored.
 pub fn apply_modal_chunk(
     state: &mut TracerState,
     event_id: i64,
@@ -394,9 +395,14 @@ pub fn content_modal_scroll_to(
     if buf.fully_loaded || buf.in_flight {
         return Vec::new();
     }
-    if !should_fire_next_chunk(buf, cfg) {
-        return Vec::new();
-    }
+
+    // Resolve the per-side cap once. Used for both the room-remaining
+    // gate (replaces should_fire_next_chunk) and the chunk-length
+    // calculation below.
+    let cap = match buf.effective_ceiling {
+        Some(resolved) => resolved,
+        None => provisional_ceiling(cfg),
+    };
 
     let line_count = decoded_line_count(&buf.decoded);
     let viewport_bottom = modal.scroll_offset.saturating_add(modal.last_viewport_rows);
@@ -406,11 +412,6 @@ pub fn content_modal_scroll_to(
         return Vec::new();
     }
 
-    // Compute how many bytes we can still fetch under the resolved (or provisional) ceiling.
-    let cap = match buf.effective_ceiling {
-        Some(resolved) => resolved,
-        None => provisional_ceiling(cfg),
-    };
     let remaining = match cap {
         Some(c) => c.saturating_sub(buf.loaded.len()),
         None => MODAL_CHUNK_BYTES,
