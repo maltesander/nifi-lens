@@ -177,6 +177,8 @@ mod tests {
             Duration::from_secs(15)
         );
         assert_eq!(parsed.polling.cluster.bulletins, Duration::from_secs(5));
-        assert_eq!(parsed.tracer.modal_streaming_ceiling, Some(4 * 1024 * 1024));
+        // Legacy key in the template maps onto ceiling.text via the shim.
+        let tracer = crate::config::apply_legacy_tracer_keys(parsed.tracer);
+        assert_eq!(tracer.ceiling.text, Some(4 * 1024 * 1024));
     }
 }
