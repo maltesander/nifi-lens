@@ -139,7 +139,7 @@ impl ViewKeyHandler for TracerHandler {
                     None
                 };
                 if let Some((active_tab, detail)) = extracted {
-                    let ceiling = state.tracer_config.modal_streaming_ceiling;
+                    let ceiling = state.tracer_config.ceiling.text;
                     let fired = open_content_modal(&mut state.tracer, &detail, active_tab, ceiling);
                     return Some(UpdateResult {
                         redraw: true,
@@ -172,7 +172,7 @@ impl ViewKeyHandler for TracerHandler {
         // (the keymap shadow block lets Up/Down/PgUp/PgDn/Home/End through
         // as FocusAction). Handle them before the per-mode dispatch below.
         if state.tracer.content_modal.is_some() {
-            let ceiling = state.tracer_config.modal_streaming_ceiling;
+            let ceiling = state.tracer_config.ceiling.text;
             let fired = match action {
                 FocusAction::Up => ts::content_modal_scroll_by(&mut state.tracer, -1, ceiling),
                 FocusAction::Down => ts::content_modal_scroll_by(&mut state.tracer, 1, ceiling),
@@ -888,7 +888,7 @@ fn handle_content_modal_search_input(state: &mut AppState, key: KeyEvent) -> Opt
         KeyCode::Enter => {
             ts::content_modal_search_commit(&mut state.tracer);
             // Scroll to the first match if one exists.
-            let ceiling = state.tracer_config.modal_streaming_ceiling;
+            let ceiling = state.tracer_config.ceiling.text;
             let fired = ts::content_modal_scroll_to_match(&mut state.tracer, ceiling);
             if !fired.is_empty() {
                 return Some(UpdateResult {
@@ -980,7 +980,7 @@ fn handle_content_modal_verb(
                 }
                 ContentModalTab::Diff => ContentModalTab::Input,
             };
-            let ceiling = state.tracer_config.modal_streaming_ceiling;
+            let ceiling = state.tracer_config.ceiling.text;
             let fired = switch_content_modal_tab(&mut state.tracer, next, ceiling);
             UpdateResult {
                 redraw: true,
@@ -1016,7 +1016,7 @@ fn handle_content_modal_verb(
                     }
                 }
             };
-            let ceiling = state.tracer_config.modal_streaming_ceiling;
+            let ceiling = state.tracer_config.ceiling.text;
             let fired = switch_content_modal_tab(&mut state.tracer, prev, ceiling);
             UpdateResult {
                 redraw: true,
@@ -1030,7 +1030,7 @@ fn handle_content_modal_verb(
         }
 
         ContentModalVerb::JumpInput => {
-            let ceiling = state.tracer_config.modal_streaming_ceiling;
+            let ceiling = state.tracer_config.ceiling.text;
             let fired =
                 switch_content_modal_tab(&mut state.tracer, ContentModalTab::Input, ceiling);
             UpdateResult {
@@ -1045,7 +1045,7 @@ fn handle_content_modal_verb(
         }
 
         ContentModalVerb::JumpOutput => {
-            let ceiling = state.tracer_config.modal_streaming_ceiling;
+            let ceiling = state.tracer_config.ceiling.text;
             let fired =
                 switch_content_modal_tab(&mut state.tracer, ContentModalTab::Output, ceiling);
             UpdateResult {
@@ -1070,7 +1070,7 @@ fn handle_content_modal_verb(
             if !diffable_ok {
                 return UpdateResult::default();
             }
-            let ceiling = state.tracer_config.modal_streaming_ceiling;
+            let ceiling = state.tracer_config.ceiling.text;
             let fired = switch_content_modal_tab(&mut state.tracer, ContentModalTab::Diff, ceiling);
             UpdateResult {
                 redraw: true,
@@ -1124,7 +1124,7 @@ fn handle_content_modal_verb(
                 let i = s.current.unwrap_or(0);
                 s.current = Some((i + 1) % s.matches.len());
             }
-            let ceiling = state.tracer_config.modal_streaming_ceiling;
+            let ceiling = state.tracer_config.ceiling.text;
             let fired = ts::content_modal_scroll_to_match(&mut state.tracer, ceiling);
             UpdateResult {
                 redraw: true,
@@ -1146,7 +1146,7 @@ fn handle_content_modal_verb(
                 let n = s.matches.len();
                 s.current = Some((i + n - 1) % n);
             }
-            let ceiling = state.tracer_config.modal_streaming_ceiling;
+            let ceiling = state.tracer_config.ceiling.text;
             let fired = ts::content_modal_scroll_to_match(&mut state.tracer, ceiling);
             UpdateResult {
                 redraw: true,
