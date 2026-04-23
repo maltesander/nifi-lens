@@ -90,13 +90,17 @@ pub enum LineagePoll {
     Finished(LineageSnapshot),
 }
 
+/// Identifies the binary container format for a [`ContentRender::Tabular`] payload.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum TabularFormat {
+    /// Apache Parquet columnar file (magic bytes `PAR1`).
     Parquet,
+    /// Apache Avro Object Container File (magic bytes `Obj\x01`).
     Avro,
 }
 
 impl TabularFormat {
+    /// Lowercase format name suitable for footer chips and log messages.
     pub fn label(self) -> &'static str {
         match self {
             TabularFormat::Parquet => "parquet",
@@ -113,12 +117,17 @@ pub enum ContentRender {
     Text { text: String, pretty_printed: bool },
     /// Decoded Parquet or Avro container. `body` is JSON-Lines, one
     /// record per line. `schema_summary` is one column per line in
-    /// the format's native type names. `decoded_bytes` equals
-    /// `body.len()`.
+    /// the format's native type names.
     Tabular {
         format: TabularFormat,
         schema_summary: String,
         body: String,
+        /// Byte length of the decoded JSON-Lines `body`. This is the
+        /// quantity the modal compares against the diff cap, not the byte
+        /// length of the source Parquet/Avro container. Maintained equal
+        /// to `body.len()` by every code path that constructs this
+        /// variant; the cached field exists so the modal can size the diff
+        /// cap chip in O(1) without re-counting bytes.
         decoded_bytes: usize,
         truncated: bool,
     },
