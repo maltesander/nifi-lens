@@ -583,9 +583,11 @@ pub fn lineage_content_line_count(view: &LineageView) -> usize {
             ContentRender::Text { text, .. } => text.lines().count().max(1),
             ContentRender::Hex { first_4k } => first_4k.lines().count().max(1),
             ContentRender::Empty => 1,
-            ContentRender::Tabular { .. } => {
-                unreachable!("Tabular variant: render & diff handled in later tasks (see plan)")
-            }
+            ContentRender::Tabular {
+                schema_summary,
+                body,
+                ..
+            } => (schema_summary.lines().count() + 1 + body.lines().count()).max(1),
         }
     } else {
         0

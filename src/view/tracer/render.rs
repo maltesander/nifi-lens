@@ -618,9 +618,11 @@ fn render_content_panel(
                 ContentRender::Text { text, .. } => text.clone(),
                 ContentRender::Hex { first_4k } => first_4k.clone(),
                 ContentRender::Empty => "(empty)".to_string(),
-                ContentRender::Tabular { .. } => {
-                    unreachable!("Tabular variant: render & diff handled in later tasks (see plan)")
-                }
+                ContentRender::Tabular {
+                    schema_summary,
+                    body,
+                    ..
+                } => format!("{schema_summary}\n-- schema --\n{body}"),
             };
             let total_lines = body.lines().count().max(1);
             let suffix = if matches!(render, ContentRender::Empty) {
@@ -1230,5 +1232,63 @@ mod tests {
             };
         }
         insta::assert_snapshot!("lineage_view_diff_mode_changed", snap(&state));
+    }
+
+    #[test]
+    fn lineage_view_tabular_parquet_inline_preview() {
+        use crate::client::tracer::{ContentRender, ContentSide, TabularFormat};
+        use crate::view::tracer::state::{ContentPane, DetailTab, EventDetail, LineageFocus};
+
+        let mut state = TracerState::new();
+        seed_lineage_state(&mut state);
+        if let TracerMode::Lineage(ref mut view) = state.mode {
+            view.active_detail_tab = DetailTab::Output;
+            view.focus = LineageFocus::Content { scroll: 0 };
+            view.event_detail = EventDetail::Loaded {
+                event: Box::new(make_lineage_detail(2)),
+                content: ContentPane::Shown {
+                    side: ContentSide::Output,
+                    render: ContentRender::Tabular {
+                        format: TabularFormat::Parquet,
+                        schema_summary: "id : Int64\nname : Utf8".into(),
+                        body: "{\"id\":0,\"name\":\"a\"}\n{\"id\":1,\"name\":\"b\"}".into(),
+                        decoded_bytes: 38,
+                        truncated: false,
+                    },
+                    bytes_fetched: 38,
+                    truncated: false,
+                },
+            };
+        }
+        insta::assert_snapshot!("lineage_view_tabular_parquet_inline_preview", snap(&state));
+    }
+
+    #[test]
+    fn lineage_view_tabular_avro_inline_preview() {
+        use crate::client::tracer::{ContentRender, ContentSide, TabularFormat};
+        use crate::view::tracer::state::{ContentPane, DetailTab, EventDetail, LineageFocus};
+
+        let mut state = TracerState::new();
+        seed_lineage_state(&mut state);
+        if let TracerMode::Lineage(ref mut view) = state.mode {
+            view.active_detail_tab = DetailTab::Output;
+            view.focus = LineageFocus::Content { scroll: 0 };
+            view.event_detail = EventDetail::Loaded {
+                event: Box::new(make_lineage_detail(2)),
+                content: ContentPane::Shown {
+                    side: ContentSide::Output,
+                    render: ContentRender::Tabular {
+                        format: TabularFormat::Avro,
+                        schema_summary: "id : long\nname : string".into(),
+                        body: "{\"id\":0,\"name\":\"a\"}\n{\"id\":1,\"name\":\"b\"}".into(),
+                        decoded_bytes: 38,
+                        truncated: false,
+                    },
+                    bytes_fetched: 38,
+                    truncated: false,
+                },
+            };
+        }
+        insta::assert_snapshot!("lineage_view_tabular_avro_inline_preview", snap(&state));
     }
 }
