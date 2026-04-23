@@ -40,6 +40,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `KeyCode::BackTab` with the redundant `SHIFT` modifier bit set. The
   bit is now stripped at the keymap boundary so the `BackTab` chord
   matches again across every view.
+- **Bulletins**: time column no longer renders `--:--:--` on NiFi < 2.7.2.
+  Those versions omit `timestampIso` on `BulletinDTO` and ship `timestamp`
+  as wall-clock time only (`HH:MM:SS UTC`); the client now synthesizes
+  an ISO-8601 value at fetch time by combining it with today's UTC
+  date (with a one-minute grace window that backs off by a day for
+  bulletins emitted just before midnight and polled just after). Same
+  fix also unblocks the Overview histogram and the detail modal on
+  NiFi 2.6.0.
 
 ### Security
 

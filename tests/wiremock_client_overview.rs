@@ -213,3 +213,56 @@ async fn bulletin_board_returns_bulletins() {
     assert_eq!(board.bulletins[0].source_name, "FailingProcessor");
     assert_eq!(board.bulletins[0].timestamp_iso, "2026-04-11T10:14:22.123Z");
 }
+
+/// NiFi < 2.7.2 omits `timestampIso` on `BulletinDTO` and ships
+/// `timestamp` as time-only ("HH:MM:SS UTC"). The client must synthesize
+/// an ISO string by combining the time with today's UTC date so
+/// downstream consumers (Bulletins tab time column, Overview histogram,
+/// detail modal) render uniformly across versions.
+#[tokio::test]
+async fn bulletin_board_synthesizes_iso_from_legacy_time_only() {
+    let server = MockServer::start().await;
+    stub_login_and_about(&server).await;
+
+    let body = serde_json::json!({
+        "bulletinBoard": {
+            "bulletins": [
+                {
+                    "id": 7,
+                    "groupId": "root",
+                    "sourceId": "proc-legacy",
+                    "bulletin": {
+                        "id": 7,
+                        "level": "WARN",
+                        "message": "legacy-format",
+                        "sourceId": "proc-legacy",
+                        "sourceName": "LegacyProcessor",
+                        "sourceType": "PROCESSOR",
+                        "groupId": "root",
+                        "timestamp": "12:13:58 UTC"
+                    }
+                }
+            ],
+            "generated": "12:13:58 UTC"
+        }
+    });
+    Mock::given(method("GET"))
+        .and(path("/nifi-api/flow/bulletin-board"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(body))
+        .mount(&server)
+        .await;
+
+    let client = NifiClient::connect(&ctx(server.uri())).await.unwrap();
+    let board = client.bulletin_board(None, Some(50)).await.expect("ok");
+    assert_eq!(board.bulletins.len(), 1);
+    let iso = &board.bulletins[0].timestamp_iso;
+    assert!(
+        iso.ends_with("T12:13:58.000Z"),
+        "expected synthesized ISO ending in T12:13:58.000Z; got {iso:?}"
+    );
+    // Shape: YYYY-MM-DDTHH:MM:SS.mmmZ (24 chars).
+    assert_eq!(iso.len(), 24, "expected 24-char ISO-8601; got {iso:?}");
+    // `timestamp_human` is preserved verbatim — downstream code may rely
+    // on the raw server string for display fallbacks.
+    assert_eq!(board.bulletins[0].timestamp_human, "12:13:58 UTC");
+}

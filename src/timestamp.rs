@@ -167,6 +167,53 @@ pub fn format(
     }
 }
 
+/// Synthesize an ISO-8601 timestamp for NiFi's legacy time-only bulletin
+/// format (`HH:MM:SS UTC` or `HH:MM:SS.mmm UTC`). NiFi < 2.7.2 omits
+/// `timestampIso` on bulletin entities and ships `timestamp` as wall-clock
+/// time only — no date — so [`parse_nifi_timestamp`] rejects it. Combining
+/// the time with `now`'s UTC date lets the rest of the app treat all
+/// versions uniformly.
+///
+/// Wrap-around: if the synthesized moment lands more than 60 seconds in
+/// the future relative to `now`, back it up by one day. Covers the narrow
+/// window where a bulletin emitted just before midnight UTC is polled
+/// just after.
+///
+/// Returns `None` when `raw` is not in the legacy time-only shape (full
+/// ISO-8601 and `MM/DD/YYYY HH:MM:SS UTC` intentionally route through
+/// [`parse_nifi_timestamp`] instead).
+pub fn synthesize_iso_from_time_only(raw: &str, now: OffsetDateTime) -> Option<String> {
+    let raw = raw.trim();
+    let (ts_part, tz_part) = raw.rsplit_once(' ')?;
+    if tz_part != "UTC" {
+        return None;
+    }
+
+    let with_ms = format_description!("[hour]:[minute]:[second].[subsecond digits:3]");
+    let without_ms = format_description!("[hour]:[minute]:[second]");
+
+    let t = time::Time::parse(ts_part, with_ms)
+        .or_else(|_| time::Time::parse(ts_part, without_ms))
+        .ok()?;
+
+    let now_utc = now.to_offset(time::UtcOffset::UTC);
+    let mut candidate = time::PrimitiveDateTime::new(now_utc.date(), t).assume_utc();
+    if candidate > now_utc + time::Duration::seconds(60) {
+        candidate -= time::Duration::days(1);
+    }
+
+    Some(format!(
+        "{:04}-{:02}-{:02}T{:02}:{:02}:{:02}.{:03}Z",
+        candidate.year(),
+        candidate.month() as u8,
+        candidate.day(),
+        candidate.hour(),
+        candidate.minute(),
+        candidate.second(),
+        candidate.millisecond(),
+    ))
+}
+
 /// Returns a compact, floor-rounded age string suitable for a fixed-width
 /// table column: `"Ns"` (0–59 s), `"Nm"` (1–59 min), `"Nh"` (≥ 1 h).
 /// Returns an em-dash for `None`.
@@ -345,6 +392,57 @@ mod tests {
             format(dt, now, &utc_cfg(TimestampFormat::Human), true),
             "Apr 12 14:32:18.456"
         );
+    }
+
+    #[test]
+    fn synthesize_iso_combines_time_with_today() {
+        let now = datetime!(2026-04-23 14:00:00 UTC);
+        let got = synthesize_iso_from_time_only("12:13:58 UTC", now).unwrap();
+        assert_eq!(got, "2026-04-23T12:13:58.000Z");
+    }
+
+    #[test]
+    fn synthesize_iso_preserves_milliseconds() {
+        let now = datetime!(2026-04-23 14:00:00 UTC);
+        let got = synthesize_iso_from_time_only("12:13:58.456 UTC", now).unwrap();
+        assert_eq!(got, "2026-04-23T12:13:58.456Z");
+    }
+
+    #[test]
+    fn synthesize_iso_wraps_back_one_day_across_midnight() {
+        // now = 00:01 UTC; bulletin ts = 23:58 UTC → must be yesterday.
+        let now = datetime!(2026-04-23 00:01:00 UTC);
+        let got = synthesize_iso_from_time_only("23:58:42 UTC", now).unwrap();
+        assert_eq!(got, "2026-04-22T23:58:42.000Z");
+    }
+
+    #[test]
+    fn synthesize_iso_accepts_same_minute_slightly_ahead() {
+        // 60-second grace window: clock-skew within +60s stays "today".
+        let now = datetime!(2026-04-23 10:00:00 UTC);
+        let got = synthesize_iso_from_time_only("10:00:30 UTC", now).unwrap();
+        assert_eq!(got, "2026-04-23T10:00:30.000Z");
+    }
+
+    #[test]
+    fn synthesize_iso_rejects_full_human_format() {
+        // The full MM/DD/YYYY shape is parse_nifi_timestamp's territory.
+        let now = datetime!(2026-04-23 14:00:00 UTC);
+        assert!(synthesize_iso_from_time_only("04/12/2026 14:32:18 UTC", now).is_none());
+    }
+
+    #[test]
+    fn synthesize_iso_rejects_non_utc_suffix() {
+        let now = datetime!(2026-04-23 14:00:00 UTC);
+        assert!(synthesize_iso_from_time_only("12:13:58 PST", now).is_none());
+    }
+
+    #[test]
+    fn synthesize_iso_rejects_garbage() {
+        let now = datetime!(2026-04-23 14:00:00 UTC);
+        assert!(synthesize_iso_from_time_only("", now).is_none());
+        assert!(synthesize_iso_from_time_only("not a time", now).is_none());
+        assert!(synthesize_iso_from_time_only("12:13 UTC", now).is_none());
     }
 
     #[test]

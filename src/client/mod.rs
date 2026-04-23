@@ -332,12 +332,21 @@ impl NifiClient {
                 })
             })?;
 
+        let now = time::OffsetDateTime::now_utc();
         let bulletins = board
             .bulletins
             .unwrap_or_default()
             .into_iter()
             .filter_map(|entity| {
                 let dto = entity.bulletin?;
+                let timestamp_iso = match dto.timestamp_iso {
+                    Some(iso) if !iso.is_empty() => iso,
+                    _ => dto
+                        .timestamp
+                        .as_deref()
+                        .and_then(|t| crate::timestamp::synthesize_iso_from_time_only(t, now))
+                        .unwrap_or_default(),
+                };
                 Some(BulletinSnapshot {
                     id: dto.id.or(entity.id).unwrap_or(0),
                     level: dto.level.unwrap_or_default(),
@@ -346,7 +355,7 @@ impl NifiClient {
                     source_name: dto.source_name.unwrap_or_default(),
                     source_type: dto.source_type.unwrap_or_default(),
                     group_id: dto.group_id.or(entity.group_id).unwrap_or_default(),
-                    timestamp_iso: dto.timestamp_iso.unwrap_or_default(),
+                    timestamp_iso,
                     timestamp_human: dto.timestamp.unwrap_or_default(),
                 })
             })
@@ -602,12 +611,16 @@ pub struct BulletinSnapshot {
     pub source_name: String,
     pub source_type: String,
     pub group_id: String,
-    /// RFC-3339 / ISO-8601 timestamp ("2026-04-11T10:14:22.123Z"). Empty if
-    /// the server did not populate `timestampIso`.
+    /// RFC-3339 / ISO-8601 timestamp ("2026-04-11T10:14:22.123Z"). On
+    /// NiFi < 2.7.2 the server does not send `timestampIso` at all and
+    /// `timestamp` is time-only (`HH:MM:SS UTC`); the client synthesizes
+    /// an ISO string by combining it with the fetch-time UTC date
+    /// (see `crate::timestamp::synthesize_iso_from_time_only`). Empty
+    /// only when neither field was parseable.
     pub timestamp_iso: String,
-    /// Human-readable timestamp ("04/12/2026 11:44:00 UTC"). Populated from
-    /// the `timestamp` field of the NiFi API; used as fallback when
-    /// `timestamp_iso` is empty (NiFi < 2.8.0).
+    /// Human-readable timestamp. Full date on NiFi >= 2.7.2
+    /// ("04/12/2026 11:44:00 UTC"); time-only on NiFi < 2.7.2
+    /// ("11:44:00 UTC"). Kept verbatim from the server.
     pub timestamp_human: String,
 }
 
