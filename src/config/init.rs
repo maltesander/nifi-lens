@@ -96,12 +96,11 @@ insecure_tls = false
 # max_interval        = "60s"   # adaptive cap on slow clusters
 # jitter_percent      = 20      # ±20% jitter on each sleep
 
-# Per-side ceiling on bytes loaded into the Tracer content viewer
-# modal (Input and Output tabs). Streamed in 512 KiB chunks as the
-# user scrolls toward the tail. Set to "0" to disable the ceiling and
-# stream until server EOF (memory grows unbounded).
-[tracer]
-modal_streaming_ceiling = "4MiB"
+# Tracer content modal byte ceilings. "0" disables the ceiling (unbounded).
+[tracer.ceiling]
+text    = "4 MiB"     # plain text/hex content per side
+tabular = "64 MiB"    # parquet/avro fetched bytes per side
+diff    = "16 MiB"    # bytes fed into the unified text diff per side
 "#;
 
 pub fn write_template(force: bool) -> Result<PathBuf, NifiLensError> {
@@ -177,6 +176,8 @@ mod tests {
             Duration::from_secs(15)
         );
         assert_eq!(parsed.polling.cluster.bulletins, Duration::from_secs(5));
-        assert_eq!(parsed.tracer.modal_streaming_ceiling, Some(4 * 1024 * 1024));
+        assert_eq!(parsed.tracer.ceiling.text, Some(4 * 1024 * 1024));
+        assert_eq!(parsed.tracer.ceiling.tabular, Some(64 * 1024 * 1024));
+        assert_eq!(parsed.tracer.ceiling.diff, Some(16 * 1024 * 1024));
     }
 }

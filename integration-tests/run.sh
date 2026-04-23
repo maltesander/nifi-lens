@@ -29,6 +29,9 @@ fi
 # nifi-lens config loader rejects.
 chmod 0600 "$CONFIG"
 
+# Download Parquet NAR for fixture (apache/nifi images don't bundle it).
+"$ROOT/scripts/download-nars.sh"
+
 echo "--- Booting NiFi containers..."
 docker compose -f "$COMPOSE_FILE" up -d
 

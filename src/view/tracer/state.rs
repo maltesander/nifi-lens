@@ -583,6 +583,11 @@ pub fn lineage_content_line_count(view: &LineageView) -> usize {
             ContentRender::Text { text, .. } => text.lines().count().max(1),
             ContentRender::Hex { first_4k } => first_4k.lines().count().max(1),
             ContentRender::Empty => 1,
+            ContentRender::Tabular {
+                schema_summary,
+                body,
+                ..
+            } => (schema_summary.lines().count() + 1 + body.lines().count()).max(1),
         }
     } else {
         0
@@ -978,6 +983,8 @@ pub fn apply_payload(state: &mut TracerState, payload: TracerPayload) -> Option<
         TracerPayload::ContentSaveFailed { .. } => None,
         TracerPayload::ModalChunk { .. } => None,
         TracerPayload::ModalChunkFailed { .. } => None,
+        // Handled upstream in state/mod.rs before reaching apply_payload.
+        TracerPayload::ContentDecoded { .. } => None,
     }
 }
 

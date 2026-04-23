@@ -32,3 +32,6 @@ docs
 # cTags index
 tags
 *.snap.new
+
+# Cached NARs downloaded by integration-tests/scripts/download-nars.sh
+integration-tests/scripts/nars/

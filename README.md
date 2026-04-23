@@ -216,6 +216,20 @@ reference; you don't need to memorise them.
 | `s`                    | Save the full raw content to file (uncapped)     |
 | `Esc`                  | Close the modal                                  |
 
+#### Tabular content (Parquet & Avro)
+
+Apache Parquet (`PAR1`-magic) and Apache Avro Object Container Files
+(`Obj\x01`-magic) are decoded into a schema header followed by
+JSON-Lines, one record per line. The same `/` search and Diff tab
+work as on text content. Diff between two sides requires the same
+format on both sides — Parquet ↔ Avro shows `Mime mismatch`.
+
+**Parquet caveat:** Parquet's metadata footer lives at end-of-file,
+so the full file must fit under `[tracer.ceiling] tabular` to decode.
+If the fetch hits the ceiling mid-file, the side falls back to a
+hex view with a chip explaining the truncation; raise `tabular` or
+use `s` to save the partial bytes to disk.
+
 ## Configuration
 
 Config file lives at `~/.config/nifilens/config.toml` and is kubeconfig-style:
@@ -229,8 +243,11 @@ current_context = "dev"
 ring_size = 5000
 
 # Optional: Tracer tab options.
-[tracer]
-modal_streaming_ceiling = "4MiB"   # "0" disables the ceiling (unbounded)
+[tracer.ceiling]
+text    = "4 MiB"     # plain text/hex content per side
+tabular = "64 MiB"    # parquet/avro fetched bytes per side
+diff    = "16 MiB"    # bytes fed into the unified text diff per side
+# Set any value to "0" to disable the ceiling (unbounded).
 
 # Optional: UI rendering options. All fields are optional; the defaults
 # below match what the tool uses if you omit the section.

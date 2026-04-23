@@ -277,27 +277,98 @@ password = "x"
 }
 
 /// Configuration for the Tracer tab.
-#[derive(Debug, Clone, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Default, Deserialize, PartialEq, Eq)]
 pub struct TracerConfig {
-    /// Maximum bytes streamed into the content viewer modal per side
-    /// (Input / Output). `None` means unbounded (stream until server EOF).
-    #[serde(
-        default = "default_modal_streaming_ceiling",
-        deserialize_with = "deserialize_byte_size_or_zero"
-    )]
-    pub modal_streaming_ceiling: Option<usize>,
+    #[serde(default)]
+    pub ceiling: TracerCeilingConfig,
+
+    /// **Deprecated:** legacy flat key from v0.1. If present, its value
+    /// is mapped onto `ceiling.text` with a `tracing::warn!` (handled
+    /// by `apply_legacy_tracer_keys` in the loader). Removed after v0.2.
+    #[serde(default, deserialize_with = "deserialize_optional_byte_size")]
+    pub modal_streaming_ceiling: Option<Option<usize>>,
 }
 
-impl Default for TracerConfig {
+/// Per-content-type streaming ceilings for the Tracer content viewer modal.
+#[derive(Debug, Clone, Deserialize, PartialEq, Eq)]
+pub struct TracerCeilingConfig {
+    /// Per-side cap for `Text` / `Hex` / `Empty` bodies.
+    #[serde(
+        default = "default_ceiling_text",
+        deserialize_with = "deserialize_byte_size_or_zero"
+    )]
+    pub text: Option<usize>,
+    /// Per-side cap for fetched bytes that reach the Parquet/Avro decoder.
+    #[serde(
+        default = "default_ceiling_tabular",
+        deserialize_with = "deserialize_byte_size_or_zero"
+    )]
+    pub tabular: Option<usize>,
+    /// Per-side cap for bytes fed into `similar::TextDiff`.
+    #[serde(
+        default = "default_ceiling_diff",
+        deserialize_with = "deserialize_byte_size_or_zero"
+    )]
+    pub diff: Option<usize>,
+}
+
+impl Default for TracerCeilingConfig {
     fn default() -> Self {
         Self {
-            modal_streaming_ceiling: default_modal_streaming_ceiling(),
+            text: default_ceiling_text(),
+            tabular: default_ceiling_tabular(),
+            diff: default_ceiling_diff(),
         }
     }
 }
 
-fn default_modal_streaming_ceiling() -> Option<usize> {
+fn default_ceiling_text() -> Option<usize> {
     Some(4 * 1024 * 1024)
+}
+
+fn default_ceiling_tabular() -> Option<usize> {
+    Some(64 * 1024 * 1024)
+}
+
+fn default_ceiling_diff() -> Option<usize> {
+    Some(16 * 1024 * 1024)
+}
+
+/// Migrate the deprecated flat `modal_streaming_ceiling` key onto
+/// `ceiling.text` if the user has not also set `[ceiling] text`
+/// explicitly. Emits a `tracing::warn!` whenever the legacy key is
+/// seen so users notice the deprecation.
+///
+/// **Edge case:** explicit-set detection compares `ceiling.text`
+/// against the default value. A user who writes `text = "4MiB"`
+/// (matching the default) AND sets the legacy key will have the
+/// legacy value silently win. This is acceptable for a one-release
+/// deprecation window — the warn still fires either way.
+fn apply_legacy_tracer_keys(mut cfg: TracerConfig) -> TracerConfig {
+    if let Some(legacy) = cfg.modal_streaming_ceiling.take() {
+        let explicit_text_set = cfg.ceiling.text != default_ceiling_text();
+        if !explicit_text_set {
+            cfg.ceiling.text = legacy;
+        }
+        tracing::warn!(
+            "[tracer] modal_streaming_ceiling is deprecated; use [tracer.ceiling] text instead"
+        );
+    }
+    cfg
+}
+
+/// Same byte-size parsing as `deserialize_byte_size_or_zero`, but
+/// wrapped in an outer `Option` so a missing key parses as `None`
+/// (i.e. "user didn't set the legacy key at all").
+fn deserialize_optional_byte_size<'de, D>(
+    deserializer: D,
+) -> Result<Option<Option<usize>>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    use serde::Deserialize;
+    let raw = Option::<String>::deserialize(deserializer)?;
+    Ok(raw.map(|s| parse_byte_size_or_zero(&s)))
 }
 
 /// Deserialize a human-readable byte-size string into `Option<usize>`.
@@ -341,9 +412,9 @@ fn parse_byte_size_or_zero(raw: &str) -> Option<usize> {
     }
     tracing::warn!(
         value = %raw,
-        "tracer.modal_streaming_ceiling: unparseable size, falling back to default 4 MiB"
+        "tracer byte-size config: unparseable value, falling back to default"
     );
-    default_modal_streaming_ceiling()
+    default_ceiling_text()
 }
 
 #[cfg(test)]
@@ -616,64 +687,144 @@ mod tests {
     }
 
     #[test]
-    fn tracer_section_default_is_4mib_ceiling() {
-        let toml = r#"
-            current_context = "dev"
-        "#;
-        let cfg: Config = toml::from_str(toml).unwrap();
-        assert_eq!(cfg.tracer.modal_streaming_ceiling, Some(4 * 1024 * 1024));
+    fn tracer_section_legacy_key_default_when_absent() {
+        // No [tracer] section → defaults.
+        let cfg: TracerConfig = toml::from_str("").unwrap();
+        let cfg = apply_legacy_tracer_keys(cfg);
+        assert_eq!(cfg.ceiling.text, Some(4 * 1024 * 1024));
     }
 
     #[test]
-    fn tracer_section_parses_mib_suffix() {
-        let toml = r#"
-            current_context = "dev"
-            [tracer]
+    fn tracer_section_legacy_key_parses_mib_suffix() {
+        let cfg: TracerConfig = toml::from_str(
+            r#"
             modal_streaming_ceiling = "16MiB"
-        "#;
-        let cfg: Config = toml::from_str(toml).unwrap();
-        assert_eq!(cfg.tracer.modal_streaming_ceiling, Some(16 * 1024 * 1024));
+            "#,
+        )
+        .unwrap();
+        let cfg = apply_legacy_tracer_keys(cfg);
+        assert_eq!(cfg.ceiling.text, Some(16 * 1024 * 1024));
     }
 
     #[test]
-    fn tracer_section_parses_kib_and_bare_bytes() {
-        let toml = r#"
-            current_context = "dev"
-            [tracer]
+    fn tracer_section_legacy_key_parses_kib_and_bare_bytes() {
+        let cfg: TracerConfig = toml::from_str(
+            r#"
             modal_streaming_ceiling = "512KiB"
-        "#;
-        let cfg: Config = toml::from_str(toml).unwrap();
-        assert_eq!(cfg.tracer.modal_streaming_ceiling, Some(512 * 1024));
+            "#,
+        )
+        .unwrap();
+        let cfg = apply_legacy_tracer_keys(cfg);
+        assert_eq!(cfg.ceiling.text, Some(512 * 1024));
 
-        let toml2 = r#"
-            current_context = "dev"
-            [tracer]
+        let cfg2: TracerConfig = toml::from_str(
+            r#"
             modal_streaming_ceiling = "65536"
-        "#;
-        let cfg2: Config = toml::from_str(toml2).unwrap();
-        assert_eq!(cfg2.tracer.modal_streaming_ceiling, Some(65536));
+            "#,
+        )
+        .unwrap();
+        let cfg2 = apply_legacy_tracer_keys(cfg2);
+        assert_eq!(cfg2.ceiling.text, Some(65536));
     }
 
     #[test]
-    fn tracer_section_zero_means_unbounded() {
-        let toml = r#"
-            current_context = "dev"
-            [tracer]
+    fn tracer_section_legacy_key_zero_means_unbounded() {
+        let cfg: TracerConfig = toml::from_str(
+            r#"
             modal_streaming_ceiling = "0"
-        "#;
-        let cfg: Config = toml::from_str(toml).unwrap();
-        assert_eq!(cfg.tracer.modal_streaming_ceiling, None);
+            "#,
+        )
+        .unwrap();
+        let cfg = apply_legacy_tracer_keys(cfg);
+        assert_eq!(cfg.ceiling.text, None);
     }
 
     #[test]
-    fn tracer_section_bad_value_falls_back_to_default() {
-        let toml = r#"
-            current_context = "dev"
-            [tracer]
+    fn tracer_section_legacy_key_bad_value_falls_back_to_default() {
+        let cfg: TracerConfig = toml::from_str(
+            r#"
             modal_streaming_ceiling = "not-a-size"
-        "#;
-        let cfg: Config = toml::from_str(toml).unwrap();
+            "#,
+        )
+        .unwrap();
+        let cfg = apply_legacy_tracer_keys(cfg);
         // Bad values warn-log but fall back to the 4 MiB default.
-        assert_eq!(cfg.tracer.modal_streaming_ceiling, Some(4 * 1024 * 1024));
+        assert_eq!(cfg.ceiling.text, Some(4 * 1024 * 1024));
+    }
+
+    #[test]
+    fn tracer_legacy_modal_streaming_ceiling_maps_to_text() {
+        let cfg: TracerConfig = toml::from_str(
+            r#"
+            modal_streaming_ceiling = "16MiB"
+            "#,
+        )
+        .unwrap();
+        let cfg = apply_legacy_tracer_keys(cfg);
+        // Legacy key wins for `text` ceiling; others stay default.
+        assert_eq!(cfg.ceiling.text, Some(16 * 1024 * 1024));
+        assert_eq!(cfg.ceiling.tabular, Some(64 * 1024 * 1024));
+        assert_eq!(cfg.ceiling.diff, Some(16 * 1024 * 1024));
+    }
+
+    #[test]
+    fn tracer_explicit_text_overrides_legacy_key() {
+        let cfg: TracerConfig = toml::from_str(
+            r#"
+            modal_streaming_ceiling = "16MiB"
+            [ceiling]
+            text = "8MiB"
+            "#,
+        )
+        .unwrap();
+        let cfg = apply_legacy_tracer_keys(cfg);
+        // Explicit `[ceiling] text` wins over the legacy key.
+        assert_eq!(cfg.ceiling.text, Some(8 * 1024 * 1024));
+    }
+
+    #[test]
+    fn tracer_no_legacy_key_means_no_warn_and_no_change() {
+        let cfg: TracerConfig = toml::from_str("").unwrap();
+        let cfg = apply_legacy_tracer_keys(cfg);
+        assert_eq!(cfg.ceiling.text, Some(4 * 1024 * 1024));
+        assert_eq!(cfg.modal_streaming_ceiling, None);
+    }
+
+    #[test]
+    fn tracer_ceiling_section_defaults() {
+        let cfg: TracerConfig = toml::from_str("").unwrap();
+        assert_eq!(cfg.ceiling.text, Some(4 * 1024 * 1024));
+        assert_eq!(cfg.ceiling.tabular, Some(64 * 1024 * 1024));
+        assert_eq!(cfg.ceiling.diff, Some(16 * 1024 * 1024));
+    }
+
+    #[test]
+    fn tracer_ceiling_section_parses_all_three_keys() {
+        let cfg: TracerConfig = toml::from_str(
+            r#"
+            [ceiling]
+            text    = "8MiB"
+            tabular = "256MiB"
+            diff    = "32MiB"
+            "#,
+        )
+        .unwrap();
+        assert_eq!(cfg.ceiling.text, Some(8 * 1024 * 1024));
+        assert_eq!(cfg.ceiling.tabular, Some(256 * 1024 * 1024));
+        assert_eq!(cfg.ceiling.diff, Some(32 * 1024 * 1024));
+    }
+
+    #[test]
+    fn tracer_ceiling_zero_is_unbounded() {
+        let cfg: TracerConfig = toml::from_str(
+            r#"
+            [ceiling]
+            tabular = "0"
+            "#,
+        )
+        .unwrap();
+        assert_eq!(cfg.ceiling.tabular, None);
+        // Other keys keep defaults.
+        assert_eq!(cfg.ceiling.text, Some(4 * 1024 * 1024));
     }
 }

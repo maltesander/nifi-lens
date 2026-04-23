@@ -1,9 +1,8 @@
-//! diff-pipeline fixture: JSON → UpdateRecord → ConvertRecord (CSV) →
-//! UpdateRecord → LogAttribute. Produces provenance events where the
-//! input and output content claims differ in small, diffable ways
-//! (modified status field, JSON↔CSV conversion), plus a mime.type
-//! attribute on each flowfile so the Tracer content viewer modal's
-//! mime-match gate is exercised.
+//! diff-pipeline fixture: JSON → UpdateRecord → three parallel sink chains.
+//! Produces provenance events where the input and output content claims
+//! differ in small, diffable ways (modified status field, JSON↔CSV/Avro/Parquet
+//! conversion), plus a mime.type attribute on each flowfile so the Tracer
+//! content viewer modal's mime-match gate is exercised.
 //!
 //! ```text
 //! diff-pipeline/
@@ -12,33 +11,36 @@
 //! ├── UpdateRecord-json          (diff-json-reader + diff-json-writer,
 //! │                               uppercases /status — content diff,
 //! │                               same mime both sides)
-//! ├── ConvertRecord              (diff-json-reader → diff-csv-writer;
-//! │                               flips mime.type to text/csv on output)
-//! ├── UpdateAttribute-mime-csv   (sets mime.type = text/csv explicitly —
-//! │                               ConvertRecord already sets it, but
-//! │                               making it explicit shields us from
-//! │                               cross-version ConvertRecord behavior
-//! │                               differences)
-//! ├── UpdateRecord-csv           (diff-csv-reader + diff-csv-writer-out,
-//! │                               lowercases /status — content diff,
-//! │                               same mime both sides)
-//! └── LogAttribute-INFO          (auto-terminate success)
+//! │   ├── ConvertRecord              (diff-json-reader → diff-csv-writer;
+//! │   │                               flips mime.type to text/csv on output)
+//! │   │   ├── UpdateAttribute-mime-csv
+//! │   │   ├── UpdateRecord-csv       (diff-csv-reader + diff-csv-writer-out,
+//! │   │   │                           lowercases /status)
+//! │   │   └── LogAttribute-INFO      (auto-terminate success)
+//! │   ├── ConvertRecord-parquet      (diff-json-reader → diff-parquet-writer)
+//! │   │   └── LogAttribute-parquet   (auto-terminate success)
+//! │   └── ConvertRecord-avro         (diff-json-reader → diff-avro-writer)
+//! │       └── LogAttribute-avro      (auto-terminate success)
 //! ```
 //!
 //! Controller services created inside this PG (scoped locally, not at root):
-//!   - diff-json-reader       (JsonTreeReader)      ENABLED
-//!   - diff-json-writer       (JsonRecordSetWriter) ENABLED
-//!   - diff-csv-reader        (CSVReader)           ENABLED
-//!   - diff-csv-writer        (CSVRecordSetWriter)  ENABLED (for ConvertRecord)
-//!   - diff-csv-writer-out    (CSVRecordSetWriter)  ENABLED (for UpdateRecord-csv)
+//!   - diff-json-reader       (JsonTreeReader)           ENABLED
+//!   - diff-json-writer       (JsonRecordSetWriter)      ENABLED
+//!   - diff-csv-reader        (CSVReader)                ENABLED
+//!   - diff-csv-writer        (CSVRecordSetWriter)       ENABLED (for ConvertRecord)
+//!   - diff-csv-writer-out    (CSVRecordSetWriter)       ENABLED (for UpdateRecord-csv)
+//!   - diff-avro-writer       (AvroRecordSetWriter)      ENABLED (for ConvertRecord-avro)
+//!   - diff-parquet-writer    (ParquetRecordSetWriter)   ENABLED (for ConvertRecord-parquet)
 //!
-//! Integration tests use the three record-processor events as diff-
-//! testable content-modification pairs:
+//! Integration tests use the record-processor events as diff-testable
+//! content-modification pairs:
 //!
-//! 1. UpdateRecord-json: input JSON ↔ output JSON (same mime, byte diff)
-//! 2. ConvertRecord:     input JSON ↔ output CSV (mime mismatch —
+//! 1. UpdateRecord-json:      input JSON ↔ output JSON (same mime, byte diff)
+//! 2. ConvertRecord:          input JSON ↔ output CSV (mime mismatch —
 //!    exercises the diff-disabled path)
-//! 3. UpdateRecord-csv:  input CSV  ↔ output CSV  (same mime, byte diff)
+//! 3. UpdateRecord-csv:       input CSV  ↔ output CSV  (same mime, byte diff)
+//! 4. ConvertRecord-parquet:  input JSON ↔ output Parquet (tabular decode path)
+//! 5. ConvertRecord-avro:     input JSON ↔ output Avro   (tabular decode path)
 
 use std::time::Duration;
 
@@ -65,6 +67,8 @@ struct DiffServices {
     csv_reader_id: String,
     csv_writer_id: String,
     csv_writer_out_id: String,
+    avro_writer_id: String,
+    parquet_writer_id: String,
 }
 
 pub async fn seed(
@@ -192,7 +196,72 @@ pub async fn seed(
     )
     .await?;
 
+    // Parquet sink: ConvertRecord (JSON in → Parquet out) → LogAttribute.
+    let convert_parquet_id = create_processor(
+        client,
+        &pg_id,
+        make_processor(
+            "ConvertRecord-parquet",
+            "org.apache.nifi.processors.standard.ConvertRecord",
+            props(&[
+                ("Record Reader", &services.json_reader_id),
+                ("Record Writer", &services.parquet_writer_id),
+            ]),
+            None,
+            vec!["failure"],
+        ),
+        "ConvertRecord-parquet",
+    )
+    .await?;
+
+    let log_parquet_id = create_processor(
+        client,
+        &pg_id,
+        make_processor(
+            "LogAttribute-parquet",
+            "org.apache.nifi.processors.standard.LogAttribute",
+            props(&[("Log Level", "info"), ("Log Payload", "false")]),
+            None,
+            vec!["success"],
+        ),
+        "LogAttribute-parquet",
+    )
+    .await?;
+
+    // Avro sink: ConvertRecord (JSON in → Avro out) → LogAttribute.
+    let convert_avro_id = create_processor(
+        client,
+        &pg_id,
+        make_processor(
+            "ConvertRecord-avro",
+            "org.apache.nifi.processors.standard.ConvertRecord",
+            props(&[
+                ("Record Reader", &services.json_reader_id),
+                ("Record Writer", &services.avro_writer_id),
+            ]),
+            None,
+            vec!["failure"],
+        ),
+        "ConvertRecord-avro",
+    )
+    .await?;
+
+    let log_avro_id = create_processor(
+        client,
+        &pg_id,
+        make_processor(
+            "LogAttribute-avro",
+            "org.apache.nifi.processors.standard.LogAttribute",
+            props(&[("Log Level", "info"), ("Log Payload", "false")]),
+            None,
+            vec!["success"],
+        ),
+        "LogAttribute-avro",
+    )
+    .await?;
+
     // Connections. Each hop carries success from the upstream processor.
+    // The CSV chain is the original linear path.
     let hops = [
         (&gen_id, &mime_json_id),
         (&mime_json_id, &upd_json_id),
@@ -200,6 +269,10 @@ pub async fn seed(
         (&convert_id, &mime_csv_id),
         (&mime_csv_id, &upd_csv_id),
         (&upd_csv_id, &log_id),
+        // Parquet branch from UpdateRecord-json.
+        (&convert_parquet_id, &log_parquet_id),
+        // Avro branch from UpdateRecord-json.
+        (&convert_avro_id, &log_avro_id),
     ];
     for (src, dst) in hops {
         create_connection_in_pg(
@@ -213,6 +286,28 @@ pub async fn seed(
         )
         .await?;
     }
+    // Branch from UpdateRecord-json into the two new sink chains.
+    // NiFi duplicates the flowfile to each downstream on the same relationship.
+    create_connection_in_pg(
+        client,
+        &pg_id,
+        &upd_json_id,
+        "PROCESSOR",
+        &convert_parquet_id,
+        "PROCESSOR",
+        vec!["success"],
+    )
+    .await?;
+    create_connection_in_pg(
+        client,
+        &pg_id,
+        &upd_json_id,
+        "PROCESSOR",
+        &convert_avro_id,
+        "PROCESSOR",
+        vec!["success"],
+    )
+    .await?;
 
     // Start downstream-first so nothing backs up on startup.
     let startup_order = [
@@ -220,6 +315,10 @@ pub async fn seed(
         (&upd_csv_id, "UpdateRecord-csv"),
         (&mime_csv_id, "UpdateAttribute-mime-csv"),
         (&convert_id, "ConvertRecord"),
+        (&log_parquet_id, "LogAttribute-parquet"),
+        (&convert_parquet_id, "ConvertRecord-parquet"),
+        (&log_avro_id, "LogAttribute-avro"),
+        (&convert_avro_id, "ConvertRecord-avro"),
         (&upd_json_id, "UpdateRecord-json"),
         (&mime_json_id, "UpdateAttribute-mime-json"),
         (&gen_id, "GenerateFlowFile"),
@@ -272,6 +371,20 @@ async fn create_controller_services(client: &DynamicClient, pg_id: &str) -> Resu
         "org.apache.nifi.csv.CSVRecordSetWriter",
     )
     .await?;
+    let avro_writer_id = create_and_enable_cs(
+        client,
+        pg_id,
+        "diff-avro-writer",
+        "org.apache.nifi.avro.AvroRecordSetWriter",
+    )
+    .await?;
+    let parquet_writer_id = create_and_enable_cs(
+        client,
+        pg_id,
+        "diff-parquet-writer",
+        "org.apache.nifi.parquet.ParquetRecordSetWriter",
+    )
+    .await?;
 
     Ok(DiffServices {
         json_reader_id,
@@ -279,6 +392,8 @@ async fn create_controller_services(client: &DynamicClient, pg_id: &str) -> Resu
         csv_reader_id,
         csv_writer_id,
         csv_writer_out_id,
+        avro_writer_id,
+        parquet_writer_id,
     })
 }
 

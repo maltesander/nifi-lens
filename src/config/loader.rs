@@ -26,8 +26,10 @@ pub fn load(args: &Args) -> Result<(Config, ResolvedContext), NifiLensError> {
     check_permissions(&path)?;
 
     let contents = std::fs::read_to_string(&path).map_err(|source| NifiLensError::Io { source })?;
-    let config: Config =
+    let mut config: Config =
         toml::from_str(&contents).context(ConfigParseSnafu { path: path.clone() })?;
+
+    config.tracer = crate::config::apply_legacy_tracer_keys(config.tracer);
 
     validate_bulletins(&config.bulletins)?;
     crate::config::polling::warn_if_out_of_band(&config.polling);

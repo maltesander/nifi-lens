@@ -10,6 +10,11 @@ targets = [
 
 [advisories]
 yanked = "deny"
+ignore = [
+    # paste is a transitive dep of parquet 58; it is unmaintained upstream
+    # but there is no safe upgrade available and it is compile-time-only.
+    { id = "RUSTSEC-2024-0436", reason = "compile-time macro, no runtime risk; no parquet upgrade available" },
+]
 
 [bans]
 multiple-versions = "allow"

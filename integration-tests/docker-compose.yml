@@ -19,6 +19,8 @@ services:
       - ./scripts/nifi-entrypoint.sh:/opt/nifi/scripts/nifi-entrypoint.sh:ro
       - ./scripts/certs/keystore.p12:/opt/nifi/nifi-current/conf/keystore.p12:ro
       - ./scripts/certs/truststore.p12:/opt/nifi/nifi-current/conf/truststore.p12:ro
+      - ./scripts/nars/nifi-hadoop-libraries-nar-2.6.0.nar:/opt/nifi/nifi-current/nar_extensions/nifi-hadoop-libraries-nar-2.6.0.nar:ro
+      - ./scripts/nars/nifi-parquet-nar-2.6.0.nar:/opt/nifi/nifi-current/nar_extensions/nifi-parquet-nar-2.6.0.nar:ro
     healthcheck:
       test:
         ["CMD-SHELL", "grep -q 'Started Server on https://' /opt/nifi/nifi-current/logs/nifi-app.log 2>/dev/null"]
@@ -73,6 +75,8 @@ services:
       - ./scripts/nifi-entrypoint.sh:/opt/nifi/scripts/nifi-entrypoint.sh:ro
       - ./scripts/certs/keystore.p12:/opt/nifi/nifi-current/conf/keystore.p12:ro
       - ./scripts/certs/truststore.p12:/opt/nifi/nifi-current/conf/truststore.p12:ro
+      - ./scripts/nars/nifi-hadoop-libraries-nar-2.9.0.nar:/opt/nifi/nifi-current/nar_extensions/nifi-hadoop-libraries-nar-2.9.0.nar:ro
+      - ./scripts/nars/nifi-parquet-nar-2.9.0.nar:/opt/nifi/nifi-current/nar_extensions/nifi-parquet-nar-2.9.0.nar:ro
     healthcheck:
       test:
         ["CMD-SHELL", "grep -q 'Started Server on https://' /opt/nifi/nifi-current/logs/nifi-app.log 2>/dev/null"]
@@ -112,6 +116,8 @@ services:
       - ./scripts/nifi-entrypoint.sh:/opt/nifi/scripts/nifi-entrypoint.sh:ro
       - ./scripts/certs/keystore.p12:/opt/nifi/nifi-current/conf/keystore.p12:ro
       - ./scripts/certs/truststore.p12:/opt/nifi/nifi-current/conf/truststore.p12:ro
+      - ./scripts/nars/nifi-hadoop-libraries-nar-2.9.0.nar:/opt/nifi/nifi-current/nar_extensions/nifi-hadoop-libraries-nar-2.9.0.nar:ro
+      - ./scripts/nars/nifi-parquet-nar-2.9.0.nar:/opt/nifi/nifi-current/nar_extensions/nifi-parquet-nar-2.9.0.nar:ro
     healthcheck:
       test:
         ["CMD-SHELL", "grep -q 'Started Server on https://' /opt/nifi/nifi-current/logs/nifi-app.log 2>/dev/null"]

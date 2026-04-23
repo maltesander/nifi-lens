@@ -59,6 +59,17 @@ pub struct SideBuffer {
     pub ceiling_hit: bool,
     pub in_flight: bool,
     pub last_error: Option<String>,
+    /// `None` until the first chunk lands and the magic-byte sniff
+    /// resolves which `[tracer.ceiling]` knob applies. After
+    /// resolution, the inner `Option<usize>` follows the existing
+    /// "Some = cap, None = unbounded" convention.
+    pub effective_ceiling: Option<Option<usize>>,
+    /// Set to `true` when a `spawn_blocking` tabular decode is in
+    /// flight. Cleared when the `ContentDecoded` event lands.
+    /// Guards against double-spawning if a second completion event
+    /// races in (rare; only possible if the modal is reopened mid-
+    /// stream).
+    pub in_flight_decode: bool,
 }
 
 #[derive(Debug, Clone)]
@@ -138,10 +149,6 @@ pub struct ContentModalState {
 /// Byte size of a single streaming fetch chunk.
 pub const MODAL_CHUNK_BYTES: usize = 512 * 1024;
 
-/// Maximum bytes loaded per side in Diff mode. Fixed; unlike the
-/// single-side ceiling this is not configurable.
-pub const DIFF_SIZE_CAP_BYTES: u64 = 512 * 1024;
-
 /// One pending fetch request — the reducer returns these instead of
 /// spawning directly so `AppState` code can route through the
 /// `tokio::spawn_local` wiring.
@@ -161,7 +168,7 @@ pub fn open_content_modal(
     state: &mut TracerState,
     detail: &crate::client::tracer::ProvenanceEventDetail,
     active_tab: ContentModalTab,
-    ceiling: Option<usize>,
+    cfg: &crate::config::TracerCeilingConfig,
 ) -> Vec<ModalFetchRequest> {
     let (input_mime, output_mime) = mime_pair_from_attributes(&detail.attributes);
     let header = ContentModalHeader {
@@ -210,7 +217,7 @@ pub fn open_content_modal(
 
     let mut fired: Vec<ModalFetchRequest> = Vec::new();
     let event_id = modal.event_id;
-    let initial_len = match ceiling {
+    let initial_len = match provisional_ceiling(cfg) {
         Some(cap) => MODAL_CHUNK_BYTES.min(cap),
         None => MODAL_CHUNK_BYTES,
     };
@@ -261,6 +268,11 @@ fn mime_pair_from_attributes(
 ///
 /// Drops chunks whose `event_id` doesn't match the currently-open
 /// modal (stale delivery after modal close or event change).
+///
+/// Uses `TracerCeilingConfig::default()` — `text` 4 MiB, `tabular`
+/// 64 MiB, `diff` 16 MiB. Test-only convenience wrapper; runtime
+/// callers must use `apply_modal_chunk_with_ceiling` so the user-
+/// configured ceilings are honored.
 pub fn apply_modal_chunk(
     state: &mut TracerState,
     event_id: i64,
@@ -278,7 +290,7 @@ pub fn apply_modal_chunk(
         bytes,
         eof,
         requested_len,
-        None,
+        &crate::config::TracerCeilingConfig::default(),
     );
 }
 
@@ -291,7 +303,7 @@ pub fn apply_modal_chunk_with_ceiling(
     bytes: Vec<u8>,
     eof: bool,
     _requested_len: usize,
-    ceiling: Option<usize>,
+    cfg: &crate::config::TracerCeilingConfig,
 ) {
     let Some(modal) = state.content_modal.as_mut() else {
         return;
@@ -309,16 +321,101 @@ pub fn apply_modal_chunk_with_ceiling(
     buf.loaded.extend_from_slice(&bytes);
     buf.in_flight = false;
     buf.last_error = None;
-    buf.decoded = crate::client::tracer::classify_content(buf.loaded.clone());
-    if eof {
+    // Resolve the per-side ceiling on the first chunk (idempotent).
+    apply_first_chunk_and_resolve_ceiling(buf, &bytes, cfg);
+    // Enforce the now-resolved ceiling: truncate if we've exceeded it.
+    let cap = match buf.effective_ceiling {
+        Some(resolved) => resolved,
+        None => provisional_ceiling(cfg),
+    };
+    if let Some(c) = cap {
+        if buf.loaded.len() > c {
+            buf.loaded.truncate(c);
+            buf.ceiling_hit = true;
+            buf.fully_loaded = true;
+        } else if buf.loaded.len() == c {
+            buf.ceiling_hit = true;
+            buf.fully_loaded = true;
+        }
+    }
+    // For tabular content (detected by magic bytes) we defer decode to
+    // fetch completion and run it off-thread via `spawn_blocking`.
+    // Text / Hex content stays synchronous — it is cheap and enables
+    // incremental rendering.
+    let is_tabular = crate::client::tracer::detect_tabular_format(&buf.loaded).is_some();
+    if is_tabular {
+        // Leave `decoded` as-is (Empty until the off-thread decode lands).
+        // The caller (state/mod.rs) will read `in_flight_decode` after this
+        // call and spawn the decode when `fully_loaded || ceiling_hit`.
+    } else {
+        buf.decoded = crate::client::tracer::classify_content(buf.loaded.clone());
+    }
+    if eof && !buf.fully_loaded {
         buf.fully_loaded = true;
     }
-    if let Some(cap) = ceiling
-        && buf.loaded.len() >= cap
-    {
-        buf.ceiling_hit = true;
-        buf.fully_loaded = true;
+    modal.diff_cache = None;
+}
+
+/// Check whether the given side now needs an off-thread tabular decode.
+///
+/// Returns `Some((event_id, side, bytes))` when ALL of:
+/// - the modal is open with a matching `event_id`
+/// - the side buffer has tabular magic bytes
+/// - the side is now fully loaded (EOF or ceiling hit)
+/// - no decode is already in flight for this side
+///
+/// Sets `in_flight_decode = true` on the buffer before returning so
+/// the caller can unconditionally spawn without a second check.
+pub fn take_pending_tabular_decode(
+    state: &mut TracerState,
+    event_id: i64,
+    side: crate::client::ContentSide,
+) -> Option<(i64, crate::client::ContentSide, Vec<u8>)> {
+    let modal = state.content_modal.as_mut()?;
+    if modal.event_id != event_id {
+        return None;
     }
+    let buf = match side {
+        crate::client::ContentSide::Input => &mut modal.input,
+        crate::client::ContentSide::Output => &mut modal.output,
+    };
+    if !buf.fully_loaded && !buf.ceiling_hit {
+        return None;
+    }
+    if buf.in_flight_decode {
+        return None;
+    }
+    crate::client::tracer::detect_tabular_format(&buf.loaded)?;
+    buf.in_flight_decode = true;
+    Some((event_id, side, buf.loaded.clone()))
+}
+
+/// Apply the result of an off-thread tabular decode back onto the modal.
+///
+/// Drops the result when:
+/// - the modal is closed or belongs to a different `event_id` (stale)
+/// - `in_flight_decode` is false (e.g., the modal was reset mid-decode)
+pub fn apply_tabular_decode_result(
+    state: &mut TracerState,
+    event_id: i64,
+    side: crate::client::ContentSide,
+    render: crate::client::tracer::ContentRender,
+) {
+    let Some(modal) = state.content_modal.as_mut() else {
+        return;
+    };
+    if modal.event_id != event_id {
+        return;
+    }
+    let buf = match side {
+        crate::client::ContentSide::Input => &mut modal.input,
+        crate::client::ContentSide::Output => &mut modal.output,
+    };
+    if !buf.in_flight_decode {
+        return;
+    }
+    buf.in_flight_decode = false;
+    buf.decoded = render;
     modal.diff_cache = None;
 }
 
@@ -352,7 +449,7 @@ const STREAM_LOOKAHEAD_LINES: usize = 100;
 pub fn content_modal_scroll_to(
     state: &mut TracerState,
     new_offset: usize,
-    ceiling: Option<usize>,
+    cfg: &crate::config::TracerCeilingConfig,
 ) -> Vec<ModalFetchRequest> {
     let Some(modal) = state.content_modal.as_mut() else {
         return Vec::new();
@@ -362,7 +459,7 @@ pub fn content_modal_scroll_to(
     let side = match modal.active_tab {
         ContentModalTab::Input => crate::client::ContentSide::Input,
         ContentModalTab::Output => crate::client::ContentSide::Output,
-        // Diff is capped at 512 KiB per side (fixed via DIFF_SIZE_CAP_BYTES);
+        // Diff is capped per `[tracer.ceiling] diff` (default 16 MiB);
         // both sides are loaded eagerly on modal open when Diff is the
         // landing tab. No auto-stream here — ever.
         ContentModalTab::Diff => return Vec::new(),
@@ -375,6 +472,14 @@ pub fn content_modal_scroll_to(
         return Vec::new();
     }
 
+    // Resolve the per-side cap once. Used for both the room-remaining
+    // gate (replaces should_fire_next_chunk) and the chunk-length
+    // calculation below.
+    let cap = match buf.effective_ceiling {
+        Some(resolved) => resolved,
+        None => provisional_ceiling(cfg),
+    };
+
     let line_count = decoded_line_count(&buf.decoded);
     let viewport_bottom = modal.scroll_offset.saturating_add(modal.last_viewport_rows);
     let distance_to_tail = line_count.saturating_sub(viewport_bottom);
@@ -383,8 +488,8 @@ pub fn content_modal_scroll_to(
         return Vec::new();
     }
 
-    let remaining = match ceiling {
-        Some(cap) => cap.saturating_sub(buf.loaded.len()),
+    let remaining = match cap {
+        Some(c) => c.saturating_sub(buf.loaded.len()),
         None => MODAL_CHUNK_BYTES,
     };
     if remaining == 0 {
@@ -412,6 +517,11 @@ fn decoded_line_count(render: &crate::client::tracer::ContentRender) -> usize {
         ContentRender::Text { text, .. } => text.lines().count().max(1),
         ContentRender::Hex { first_4k } => first_4k.lines().count().max(1),
         ContentRender::Empty => 1,
+        ContentRender::Tabular {
+            schema_summary,
+            body,
+            ..
+        } => schema_summary.lines().count() + 1 + body.lines().count(),
     }
 }
 
@@ -439,7 +549,7 @@ pub fn content_modal_line_count(state: &TracerState) -> usize {
 pub fn content_modal_scroll_by(
     state: &mut TracerState,
     delta: isize,
-    ceiling: Option<usize>,
+    cfg: &crate::config::TracerCeilingConfig,
 ) -> Vec<ModalFetchRequest> {
     let line_count = content_modal_line_count(state);
     let current = state
@@ -454,7 +564,7 @@ pub fn content_modal_scroll_by(
     } else {
         current.saturating_sub((-delta) as usize)
     };
-    content_modal_scroll_to(state, new_offset, ceiling)
+    content_modal_scroll_to(state, new_offset, cfg)
 }
 
 /// Shift the horizontal-scroll offset by `delta` columns (positive =
@@ -489,7 +599,7 @@ pub fn content_modal_scroll_horizontal_home(state: &mut TracerState) {
 /// to avoid jitter. Returns any auto-stream requests the new position implies.
 pub fn content_modal_scroll_to_match(
     state: &mut TracerState,
-    ceiling: Option<usize>,
+    cfg: &crate::config::TracerCeilingConfig,
 ) -> Vec<ModalFetchRequest> {
     let Some(modal) = state.content_modal.as_ref() else {
         return Vec::new();
@@ -507,7 +617,7 @@ pub fn content_modal_scroll_to_match(
     let offset = modal.scroll_offset;
     let rows = modal.last_viewport_rows.max(1);
     if line < offset || line >= offset + rows {
-        content_modal_scroll_to(state, line, ceiling)
+        content_modal_scroll_to(state, line, cfg)
     } else {
         Vec::new()
     }
@@ -549,6 +659,7 @@ pub fn resolve_diffable(
     header: &ContentModalHeader,
     input: &SideBuffer,
     output: &SideBuffer,
+    cfg: &crate::config::TracerCeilingConfig,
 ) -> Diffable {
     use crate::client::tracer::ContentRender;
 
@@ -557,6 +668,39 @@ pub fn resolve_diffable(
     }
     if !header.output_available {
         return Diffable::NotAvailable(NotDiffableReason::OutputUnavailable);
+    }
+
+    // Tabular sides bypass the mime allowlist — the format tag is authoritative.
+    match (&input.decoded, &output.decoded) {
+        (
+            ContentRender::Tabular {
+                format: a,
+                decoded_bytes: a_bytes,
+                ..
+            },
+            ContentRender::Tabular {
+                format: b,
+                decoded_bytes: b_bytes,
+                ..
+            },
+        ) => {
+            if a != b {
+                return Diffable::NotAvailable(NotDiffableReason::MimeMismatch);
+            }
+            // Same format: gate on the diff cap (decoded_bytes is the JSON-Lines
+            // byte length, the same quantity the existing size check uses).
+            if let Some(cap) = cfg.diff
+                && (*a_bytes > cap || *b_bytes > cap)
+            {
+                return Diffable::NotAvailable(NotDiffableReason::SizeExceedsDiffCap);
+            }
+            return Diffable::Ok;
+        }
+        (ContentRender::Tabular { .. }, _) | (_, ContentRender::Tabular { .. }) => {
+            // One side tabular, the other not — mixed binary/text isn't diffable.
+            return Diffable::NotAvailable(NotDiffableReason::MimeMismatch);
+        }
+        _ => {} // Fall through to existing mime/size checks for non-Tabular pairs.
     }
 
     let mime_ok = match (header.input_mime.as_deref(), header.output_mime.as_deref()) {
@@ -587,7 +731,11 @@ pub fn resolve_diffable(
 
     let isize = header.input_size.unwrap_or(input.loaded.len() as u64);
     let osize = header.output_size.unwrap_or(output.loaded.len() as u64);
-    if isize > DIFF_SIZE_CAP_BYTES || osize > DIFF_SIZE_CAP_BYTES {
+    let exceeds = match cfg.diff {
+        Some(cap) => isize > cap as u64 || osize > cap as u64,
+        None => false,
+    };
+    if exceeds {
         return Diffable::NotAvailable(NotDiffableReason::SizeExceedsDiffCap);
     }
 
@@ -611,7 +759,18 @@ const DIFF_CONTEXT_LINES: usize = 3;
 /// "all deletes followed by all inserts" when many or every line of a
 /// CSV / table-like body has changed. When `N != M`, leftover lines
 /// from the longer side are appended after the paired block.
-pub fn compute_diff_cache(input: &str, output: &str) -> DiffRender {
+pub fn compute_diff_cache(
+    input: &str,
+    output: &str,
+    cfg: &crate::config::TracerCeilingConfig,
+) -> DiffRender {
+    // Defensive: honour the configured cap even if resolve_diffable was
+    // bypassed or stale. Return an empty render for oversized input.
+    if let Some(cap) = cfg.diff
+        && (input.len() > cap || output.len() > cap)
+    {
+        return DiffRender::default();
+    }
     let diff = similar::TextDiff::from_lines(input, output);
     // Pre-split both bodies so we can index by line number for the
     // interleave path. `split_inclusive('\n')` keeps the trailing
@@ -936,26 +1095,31 @@ fn make_diff_line(
 /// Input/Output and switch to Diff *after* both chunks have already
 /// arrived, by which point no further chunks fire and a tab-gated
 /// compute would never trigger.
-pub fn resolve_and_cache_diff(modal: &mut ContentModalState) {
-    modal.diffable = resolve_diffable(&modal.header, &modal.input, &modal.output);
+pub fn resolve_and_cache_diff(
+    modal: &mut ContentModalState,
+    cfg: &crate::config::TracerCeilingConfig,
+) {
+    modal.diffable = resolve_diffable(&modal.header, &modal.input, &modal.output, cfg);
     if modal.diffable == Diffable::Ok && modal.diff_cache.is_none() {
         let input_text = side_diff_text(&modal.input);
         let output_text = side_diff_text(&modal.output);
-        modal.diff_cache = Some(compute_diff_cache(&input_text, &output_text));
+        modal.diff_cache = Some(compute_diff_cache(&input_text, &output_text, cfg));
     }
 }
 
 /// Pick the text to feed into the line-based diff for a side. Prefers
-/// the already-classified `ContentRender::Text` (which JSON has been
-/// pretty-printed into by `classify_content`) over the raw bytes —
-/// otherwise compact JSON would produce a single-line diff that's
-/// effectively unreadable in the modal. Non-text content falls back
-/// to lossy UTF-8 of the loaded bytes; in practice diff is gated to
-/// text-typed sides upstream so the fallback rarely fires.
+/// the already-classified `ContentRender` variant over the raw bytes —
+/// `Text` carries pretty-printed JSON (single-line diff would be
+/// unreadable), and `Tabular` carries JSON-Lines rows (one record per
+/// line, ideal for line-based diffing). `Hex` and `Empty` are never
+/// reached in practice because diff eligibility is gated upstream on
+/// text-typed or tabular-typed MIME pairs.
 fn side_diff_text(buf: &SideBuffer) -> String {
     match &buf.decoded {
         crate::client::tracer::ContentRender::Text { text, .. } => text.clone(),
-        _ => String::from_utf8_lossy(&buf.loaded).into_owned(),
+        crate::client::tracer::ContentRender::Tabular { body, .. } => body.clone(),
+        crate::client::tracer::ContentRender::Hex { first_4k } => first_4k.clone(),
+        crate::client::tracer::ContentRender::Empty => String::new(),
     }
 }
 
@@ -966,7 +1130,7 @@ pub fn close_content_modal(state: &mut TracerState) {
 pub fn switch_content_modal_tab(
     state: &mut TracerState,
     new_tab: ContentModalTab,
-    ceiling: Option<usize>,
+    cfg: &crate::config::TracerCeilingConfig,
 ) -> Vec<ModalFetchRequest> {
     let Some(modal) = state.content_modal.as_mut() else {
         return Vec::new();
@@ -984,7 +1148,7 @@ pub fn switch_content_modal_tab(
     }
 
     let event_id = modal.event_id;
-    let initial_len = match ceiling {
+    let initial_len = match provisional_ceiling(cfg) {
         Some(cap) => MODAL_CHUNK_BYTES.min(cap),
         None => MODAL_CHUNK_BYTES,
     };
@@ -1093,11 +1257,21 @@ fn content_modal_search_body(modal: &ContentModalState) -> String {
             ContentRender::Text { text, .. } => text.clone(),
             ContentRender::Hex { first_4k } => first_4k.clone(),
             ContentRender::Empty => String::new(),
+            ContentRender::Tabular {
+                schema_summary,
+                body,
+                ..
+            } => format!("{}\n-- schema --\n{}", schema_summary, body),
         },
         ContentModalTab::Output => match &modal.output.decoded {
             ContentRender::Text { text, .. } => text.clone(),
             ContentRender::Hex { first_4k } => first_4k.clone(),
             ContentRender::Empty => String::new(),
+            ContentRender::Tabular {
+                schema_summary,
+                body,
+                ..
+            } => format!("{}\n-- schema --\n{}", schema_summary, body),
         },
         ContentModalTab::Diff => {
             if let Some(cache) = &modal.diff_cache {
@@ -1198,6 +1372,60 @@ pub fn content_modal_search_cancel(state: &mut TracerState) {
     }
 }
 
+// ---------------------------------------------------------------------------
+// Ceiling resolution helpers
+// ---------------------------------------------------------------------------
+
+/// Resolve the per-side ceiling once enough bytes have landed to
+/// sniff the format. Idempotent — returns early if already resolved.
+///
+/// Called by the modal reducer after each chunk append; the first
+/// call decides whether `cfg.text` or `cfg.tabular` applies, based
+/// on the buffer's leading magic bytes.
+pub fn apply_first_chunk_and_resolve_ceiling(
+    side: &mut SideBuffer,
+    chunk: &[u8],
+    cfg: &crate::config::TracerCeilingConfig,
+) {
+    if side.effective_ceiling.is_some() {
+        return;
+    }
+    let resolved = match crate::client::tracer::detect_tabular_format(chunk) {
+        Some(_) => cfg.tabular,
+        None => cfg.text,
+    };
+    side.effective_ceiling = Some(resolved);
+}
+
+/// Provisional ceiling = `max(text, tabular)`. Used for the first
+/// chunk fetch before the format is known. If either knob is
+/// unbounded (`None`), the provisional ceiling is also unbounded.
+pub fn provisional_ceiling(cfg: &crate::config::TracerCeilingConfig) -> Option<usize> {
+    match (cfg.text, cfg.tabular) {
+        (Some(a), Some(b)) => Some(a.max(b)),
+        (None, _) | (_, None) => None,
+    }
+}
+
+/// Returns `true` iff there is still budget for fetching another chunk
+/// on this side, given the per-side resolved ceiling (or the provisional
+/// `max(text, tabular)` ceiling if not yet resolved).
+///
+/// `effective_ceiling = Some(None)` means "decided: unbounded" and
+/// `effective_ceiling = None` means "not decided yet". Both cases use
+/// the appropriate path via the `match` before falling back to
+/// `provisional_ceiling` — `Option::flatten` would conflate the two.
+pub fn should_fire_next_chunk(side: &SideBuffer, cfg: &crate::config::TracerCeilingConfig) -> bool {
+    let cap = match side.effective_ceiling {
+        Some(resolved) => resolved,       // decided (Some=cap, None=unbounded)
+        None => provisional_ceiling(cfg), // not decided yet → provisional max
+    };
+    match cap {
+        None => true,                     // unbounded
+        Some(c) => side.loaded.len() < c, // room remains
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1294,6 +1522,7 @@ mod tests {
     #[test]
     fn apply_modal_chunk_hits_ceiling() {
         use crate::client::ContentSide;
+        use crate::config::TracerCeilingConfig;
 
         let mut modal = stub_modal(1, ContentModalTab::Input);
         modal.input.in_flight = true;
@@ -1302,7 +1531,12 @@ mod tests {
             ..TracerState::default()
         };
 
-        // Ceiling = 10, chunk = 20 bytes → ceiling_hit
+        // Ceiling = 10 bytes (text & tabular both set to 10), chunk = 20 bytes → ceiling_hit
+        let cfg = TracerCeilingConfig {
+            text: Some(10),
+            tabular: Some(10),
+            diff: Some(512 * 1024),
+        };
         apply_modal_chunk_with_ceiling(
             &mut state,
             1,
@@ -1311,7 +1545,7 @@ mod tests {
             vec![0u8; 20],
             false,
             20,
-            Some(10),
+            &cfg,
         );
 
         let buf = &state.content_modal.as_ref().unwrap().input;
@@ -1322,6 +1556,7 @@ mod tests {
     #[test]
     fn apply_modal_chunk_unbounded_ceiling_keeps_streaming() {
         use crate::client::ContentSide;
+        use crate::config::TracerCeilingConfig;
 
         let mut modal = stub_modal(1, ContentModalTab::Input);
         modal.input.in_flight = true;
@@ -1330,6 +1565,12 @@ mod tests {
             ..TracerState::default()
         };
 
+        // Unbounded config (text = None, tabular = None)
+        let cfg = TracerCeilingConfig {
+            text: None,
+            tabular: None,
+            diff: Some(512 * 1024),
+        };
         apply_modal_chunk_with_ceiling(
             &mut state,
             1,
@@ -1338,7 +1579,7 @@ mod tests {
             vec![0u8; 20],
             false,
             20,
-            None,
+            &cfg,
         );
 
         let buf = &state.content_modal.as_ref().unwrap().input;
@@ -1408,12 +1649,8 @@ mod tests {
         let mut state = TracerState::default();
         let detail = stub_event_detail();
 
-        let fired = open_content_modal(
-            &mut state,
-            &detail,
-            ContentModalTab::Input,
-            Some(4 * 1024 * 1024),
-        );
+        let cfg = crate::config::TracerCeilingConfig::default();
+        let fired = open_content_modal(&mut state, &detail, ContentModalTab::Input, &cfg);
         let modal = state.content_modal.as_ref().expect("modal open");
         assert_eq!(modal.event_id, 42);
         assert_eq!(modal.active_tab, ContentModalTab::Input);
@@ -1434,10 +1671,16 @@ mod tests {
     #[test]
     fn content_modal_open_with_tiny_ceiling_clamps_first_chunk() {
         use crate::client::ContentSide;
+        use crate::config::TracerCeilingConfig;
 
         let detail = stub_event_detail();
         let mut state = TracerState::default();
-        let fired = open_content_modal(&mut state, &detail, ContentModalTab::Input, Some(100_000));
+        let cfg = TracerCeilingConfig {
+            text: Some(100_000),
+            tabular: Some(100_000),
+            diff: Some(512 * 1024),
+        };
+        let fired = open_content_modal(&mut state, &detail, ContentModalTab::Input, &cfg);
         assert_eq!(fired.len(), 1);
         assert_eq!(fired[0].side, ContentSide::Input);
         assert_eq!(fired[0].len, 100_000);
@@ -1465,7 +1708,8 @@ mod tests {
         let mut state = state;
 
         // Viewport bottom = 965 + 30 = 995 → distance to tail (1000) = 5 < 100.
-        let fired = content_modal_scroll_to(&mut state, 965, Some(4 * 1024 * 1024));
+        let cfg = crate::config::TracerCeilingConfig::default();
+        let fired = content_modal_scroll_to(&mut state, 965, &cfg);
         assert_eq!(fired.len(), 1);
         assert_eq!(fired[0].side, ContentSide::Input);
         assert_eq!(fired[0].offset, len);
@@ -1488,7 +1732,8 @@ mod tests {
             content_modal: Some(modal),
             ..TracerState::default()
         };
-        let fired = content_modal_scroll_to(&mut state, 965, Some(4 * 1024 * 1024));
+        let cfg = crate::config::TracerCeilingConfig::default();
+        let fired = content_modal_scroll_to(&mut state, 965, &cfg);
         assert!(fired.is_empty());
     }
 
@@ -1509,13 +1754,15 @@ mod tests {
             content_modal: Some(modal),
             ..TracerState::default()
         };
-        let fired = content_modal_scroll_to(&mut state, 965, Some(4 * 1024 * 1024));
+        let cfg = crate::config::TracerCeilingConfig::default();
+        let fired = content_modal_scroll_to(&mut state, 965, &cfg);
         assert!(fired.is_empty());
     }
 
     #[test]
     fn content_modal_scroll_respects_ceiling() {
         use crate::client::tracer::ContentRender;
+        use crate::config::TracerCeilingConfig;
 
         let text = "a\n".repeat(1000);
         let loaded_bytes = text.as_bytes().to_vec();
@@ -1526,13 +1773,17 @@ mod tests {
             text,
             pretty_printed: false,
         };
+        // Pre-resolve the effective ceiling so the scroll reducer sees it.
+        let cap = loaded_len + 48_576;
+        modal.input.effective_ceiling = Some(Some(cap));
         modal.last_viewport_rows = 30;
         let mut state = TracerState {
             content_modal: Some(modal),
             ..TracerState::default()
         };
-        // Ceiling = loaded_len + 48576 bytes remaining, chunk = min(512K, 48576)
-        let fired = content_modal_scroll_to(&mut state, 965, Some(loaded_len + 48_576));
+        // ceiling resolved to loaded_len + 48576; remaining = 48576, chunk = min(512K, 48576)
+        let cfg = TracerCeilingConfig::default();
+        let fired = content_modal_scroll_to(&mut state, 965, &cfg);
         assert_eq!(fired.len(), 1);
         assert_eq!(fired[0].len, 48_576);
     }
@@ -1566,23 +1817,35 @@ mod tests {
             ceiling_hit: false,
             in_flight: false,
             last_error: None,
+            effective_ceiling: None,
+            in_flight_decode: false,
         }
     }
 
     // ── resolve_diffable tests ────────────────────────────────────────────────
 
+    fn default_ceiling() -> crate::config::TracerCeilingConfig {
+        crate::config::TracerCeilingConfig::default()
+    }
+
     #[test]
     fn diffable_ok_when_mime_equal_and_allowlisted() {
         let header = header_with_mime("application/json", "application/json", 1024, 1024);
         let (input, output) = (text_buffer("a"), text_buffer("b"));
-        assert_eq!(resolve_diffable(&header, &input, &output), Diffable::Ok);
+        assert_eq!(
+            resolve_diffable(&header, &input, &output, &default_ceiling()),
+            Diffable::Ok
+        );
     }
 
     #[test]
     fn diffable_wildcard_text_star() {
         let header = header_with_mime("text/html", "text/html", 1024, 1024);
         let (input, output) = (text_buffer("a"), text_buffer("b"));
-        assert_eq!(resolve_diffable(&header, &input, &output), Diffable::Ok);
+        assert_eq!(
+            resolve_diffable(&header, &input, &output, &default_ceiling()),
+            Diffable::Ok
+        );
     }
 
     #[test]
@@ -1594,7 +1857,10 @@ mod tests {
             1024,
         );
         let (input, output) = (text_buffer("a"), text_buffer("b"));
-        assert_eq!(resolve_diffable(&header, &input, &output), Diffable::Ok);
+        assert_eq!(
+            resolve_diffable(&header, &input, &output, &default_ceiling()),
+            Diffable::Ok
+        );
     }
 
     #[test]
@@ -1602,7 +1868,7 @@ mod tests {
         let header = header_with_mime("application/json", "text/csv", 1024, 1024);
         let (input, output) = (text_buffer("a"), text_buffer("b"));
         assert_eq!(
-            resolve_diffable(&header, &input, &output),
+            resolve_diffable(&header, &input, &output, &default_ceiling()),
             Diffable::NotAvailable(NotDiffableReason::MimeMismatch)
         );
     }
@@ -1613,15 +1879,25 @@ mod tests {
         header.input_mime = None;
         header.output_mime = None;
         let (input, output) = (text_buffer("a"), text_buffer("b"));
-        assert_eq!(resolve_diffable(&header, &input, &output), Diffable::Ok);
+        assert_eq!(
+            resolve_diffable(&header, &input, &output, &default_ceiling()),
+            Diffable::Ok
+        );
     }
 
     #[test]
     fn diffable_size_exceeds_cap() {
+        // 600_000 bytes exceeds the default 16 MiB cap only if the cap is set
+        // small; use an explicit 512 KiB cap to match the original hardcoded
+        // constant.
         let header = header_with_mime("application/json", "application/json", 600_000, 1024);
         let (input, output) = (text_buffer("a"), text_buffer("b"));
+        let cfg = crate::config::TracerCeilingConfig {
+            diff: Some(512 * 1024),
+            ..crate::config::TracerCeilingConfig::default()
+        };
         assert_eq!(
-            resolve_diffable(&header, &input, &output),
+            resolve_diffable(&header, &input, &output, &cfg),
             Diffable::NotAvailable(NotDiffableReason::SizeExceedsDiffCap)
         );
     }
@@ -1631,7 +1907,7 @@ mod tests {
         let header = header_with_mime("application/json", "application/json", 10, 10);
         let (input, output) = (text_buffer("same"), text_buffer("same"));
         assert_eq!(
-            resolve_diffable(&header, &input, &output),
+            resolve_diffable(&header, &input, &output, &default_ceiling()),
             Diffable::NotAvailable(NotDiffableReason::NoDifferences)
         );
     }
@@ -1642,7 +1918,7 @@ mod tests {
         header.input_available = false;
         let (input, output) = (SideBuffer::default(), text_buffer("x"));
         assert_eq!(
-            resolve_diffable(&header, &input, &output),
+            resolve_diffable(&header, &input, &output, &default_ceiling()),
             Diffable::NotAvailable(NotDiffableReason::InputUnavailable)
         );
     }
@@ -1659,9 +1935,11 @@ mod tests {
             ceiling_hit: false,
             in_flight: false,
             last_error: None,
+            effective_ceiling: None,
+            in_flight_decode: false,
         };
         assert_eq!(
-            resolve_diffable(&header, &empty, &empty),
+            resolve_diffable(&header, &empty, &empty, &default_ceiling()),
             Diffable::NotAvailable(NotDiffableReason::NoDifferences)
         );
     }
@@ -1670,7 +1948,7 @@ mod tests {
     fn compute_diff_cache_produces_lines_and_hunks() {
         let input = "line a\nline b\nline c\n";
         let output = "line a\nline B\nline c\n";
-        let render = compute_diff_cache(input, output);
+        let render = compute_diff_cache(input, output, &default_ceiling());
         let inserts = render
             .lines
             .iter()
@@ -1702,8 +1980,8 @@ mod tests {
             content_modal: Some(stub_modal(1, ContentModalTab::Input)),
             ..TracerState::default()
         };
-        let fired =
-            switch_content_modal_tab(&mut state, ContentModalTab::Output, Some(4 * 1024 * 1024));
+        let cfg = crate::config::TracerCeilingConfig::default();
+        let fired = switch_content_modal_tab(&mut state, ContentModalTab::Output, &cfg);
         let modal = state.content_modal.as_ref().unwrap();
         assert_eq!(modal.active_tab, ContentModalTab::Output);
         assert_eq!(modal.scroll_offset, 0);
@@ -1720,8 +1998,8 @@ mod tests {
             content_modal: Some(modal),
             ..TracerState::default()
         };
-        let fired =
-            switch_content_modal_tab(&mut state, ContentModalTab::Output, Some(4 * 1024 * 1024));
+        let cfg = crate::config::TracerCeilingConfig::default();
+        let fired = switch_content_modal_tab(&mut state, ContentModalTab::Output, &cfg);
         assert!(fired.is_empty());
     }
 
@@ -1780,7 +2058,7 @@ mod tests {
             input.push_str(&format!("{i},42,OK\n"));
             output.push_str(&format!("{i},42,ok\n"));
         }
-        let render = compute_diff_cache(&input, &output);
+        let render = compute_diff_cache(&input, &output, &default_ceiling());
         assert_eq!(render.hunks.len(), 1, "grouped_ops collapses to 1 hunk");
         assert_eq!(
             render.change_stops.len(),
@@ -1856,7 +2134,8 @@ mod tests {
         };
 
         // Scroll to line 165: viewport bottom = 195, distance to tail (200) = 5 < 100.
-        let fired = content_modal_scroll_by(&mut state, 165, Some(4 * 1024 * 1024));
+        let cfg = crate::config::TracerCeilingConfig::default();
+        let fired = content_modal_scroll_by(&mut state, 165, &cfg);
         assert_eq!(
             fired.len(),
             1,
@@ -1884,7 +2163,8 @@ mod tests {
             content_modal: Some(modal),
             ..TracerState::default()
         };
-        let fired = content_modal_scroll_by(&mut state, -10, Some(4 * 1024 * 1024));
+        let cfg = crate::config::TracerCeilingConfig::default();
+        let fired = content_modal_scroll_by(&mut state, -10, &cfg);
         assert!(fired.is_empty(), "no fetch when fully loaded");
         assert_eq!(
             state.content_modal.as_ref().unwrap().scroll_offset,
@@ -1909,8 +2189,9 @@ mod tests {
             content_modal: Some(modal),
             ..TracerState::default()
         };
+        let cfg = crate::config::TracerCeilingConfig::default();
         let line_count = content_modal_line_count(&state);
-        let fired = content_modal_scroll_to(&mut state, line_count.saturating_sub(1), None);
+        let fired = content_modal_scroll_to(&mut state, line_count.saturating_sub(1), &cfg);
         assert!(fired.is_empty(), "fully loaded: no fetch on Last");
         assert_eq!(
             state.content_modal.as_ref().unwrap().scroll_offset,
@@ -1935,7 +2216,8 @@ mod tests {
             content_modal: Some(modal),
             ..TracerState::default()
         };
-        let fired = content_modal_scroll_by(&mut state, 20, Some(4 * 1024 * 1024));
+        let cfg = crate::config::TracerCeilingConfig::default();
+        let fired = content_modal_scroll_by(&mut state, 20, &cfg);
         assert!(fired.is_empty(), "fully loaded: no fetch");
         assert_eq!(
             state.content_modal.as_ref().unwrap().scroll_offset,
@@ -2066,7 +2348,8 @@ mod tests {
             ..TracerState::default()
         };
 
-        let fired = content_modal_scroll_to_match(&mut state, None);
+        let cfg = crate::config::TracerCeilingConfig::default();
+        let fired = content_modal_scroll_to_match(&mut state, &cfg);
         // fully_loaded — no fetch fires; scroll offset updated.
         assert!(fired.is_empty(), "no fetch for fully loaded content");
         assert_eq!(
@@ -2085,7 +2368,7 @@ mod tests {
         modal.output = text_buffer("line a\nline B\nline c\n");
         // Active tab is Input — cache must still populate (this is the
         // bug the helper fixes).
-        resolve_and_cache_diff(&mut modal);
+        resolve_and_cache_diff(&mut modal, &default_ceiling());
         assert_eq!(modal.diffable, Diffable::Ok);
         assert!(modal.diff_cache.is_some());
         let cache = modal.diff_cache.as_ref().unwrap();
@@ -2098,10 +2381,10 @@ mod tests {
         let mut modal = stub_modal(1, ContentModalTab::Input);
         modal.input = text_buffer("alpha\nbeta\n");
         modal.output = text_buffer("alpha\nBETA\n");
-        resolve_and_cache_diff(&mut modal);
+        resolve_and_cache_diff(&mut modal, &default_ceiling());
         let first_ptr = modal.diff_cache.as_ref().unwrap() as *const DiffRender;
         // Second call must not reallocate — same Box address.
-        resolve_and_cache_diff(&mut modal);
+        resolve_and_cache_diff(&mut modal, &default_ceiling());
         let second_ptr = modal.diff_cache.as_ref().unwrap() as *const DiffRender;
         assert_eq!(first_ptr, second_ptr, "cached diff must not be recomputed");
     }
@@ -2113,7 +2396,7 @@ mod tests {
         // returns Pending → cache stays None.
         modal.input = text_buffer("anything");
         modal.output.in_flight = true;
-        resolve_and_cache_diff(&mut modal);
+        resolve_and_cache_diff(&mut modal, &default_ceiling());
         assert_eq!(modal.diffable, Diffable::Pending);
         assert!(modal.diff_cache.is_none());
     }
@@ -2124,7 +2407,7 @@ mod tests {
         // "every line is a delete" case that the interleave fix targets.
         let input = "a,1,OK\nb,2,WARN\nc,3,OK\n";
         let output = "a,1,ok\nb,2,warn\nc,3,ok\n";
-        let render = compute_diff_cache(input, output);
+        let render = compute_diff_cache(input, output, &default_ceiling());
 
         // Expected order: -a OK, +a ok, -b WARN, +b warn, -c OK, +c ok
         let tags: Vec<similar::ChangeTag> = render.lines.iter().map(|l| l.tag).collect();
@@ -2154,7 +2437,7 @@ mod tests {
         // the third trails as a pure insert.
         let input = "alpha\nbeta\n";
         let output = "ALPHA\nBETA\nGAMMA\n";
-        let render = compute_diff_cache(input, output);
+        let render = compute_diff_cache(input, output, &default_ceiling());
 
         let tags: Vec<similar::ChangeTag> = render.lines.iter().map(|l| l.tag).collect();
         assert_eq!(
@@ -2213,7 +2496,7 @@ mod tests {
         // Two CSV-shaped rows, every one changed — classic Replace op.
         let input = "a,1,OK\nb,2,WARN\n";
         let output = "a,1,ok\nb,2,warn\n";
-        let render = compute_diff_cache(input, output);
+        let render = compute_diff_cache(input, output, &default_ceiling());
 
         // Every Delete/Insert row must carry inline_diff segments.
         for line in &render.lines {
@@ -2257,6 +2540,8 @@ mod tests {
             ceiling_hit: false,
             in_flight: false,
             last_error: None,
+            effective_ceiling: None,
+            in_flight_decode: false,
         };
         modal.output = SideBuffer {
             loaded: output_compact,
@@ -2265,9 +2550,11 @@ mod tests {
             ceiling_hit: false,
             in_flight: false,
             last_error: None,
+            effective_ceiling: None,
+            in_flight_decode: false,
         };
 
-        resolve_and_cache_diff(&mut modal);
+        resolve_and_cache_diff(&mut modal, &default_ceiling());
         let cache = modal
             .diff_cache
             .as_ref()
@@ -2304,7 +2591,7 @@ mod tests {
         let mut modal = stub_modal(1, ContentModalTab::Input);
         modal.input = text_buffer("identical content");
         modal.output = text_buffer("identical content");
-        resolve_and_cache_diff(&mut modal);
+        resolve_and_cache_diff(&mut modal, &default_ceiling());
         assert_eq!(
             modal.diffable,
             Diffable::NotAvailable(NotDiffableReason::NoDifferences)
@@ -2374,8 +2661,9 @@ mod tests {
             content_modal: Some(stub_modal(1, ContentModalTab::Input)),
             ..TracerState::default()
         };
+        let cfg = crate::config::TracerCeilingConfig::default();
         content_modal_scroll_horizontal_by(&mut state, 25);
-        switch_content_modal_tab(&mut state, ContentModalTab::Output, None);
+        switch_content_modal_tab(&mut state, ContentModalTab::Output, &cfg);
         assert_eq!(
             state
                 .content_modal
@@ -2385,5 +2673,626 @@ mod tests {
             0,
             "switching tabs must reset horizontal scroll"
         );
+    }
+
+    #[test]
+    fn first_chunk_with_parquet_magic_resolves_to_tabular_ceiling() {
+        use crate::config::TracerCeilingConfig;
+        let cfg = TracerCeilingConfig {
+            text: Some(4 * 1024 * 1024),
+            tabular: Some(64 * 1024 * 1024),
+            diff: Some(16 * 1024 * 1024),
+        };
+        let mut buf = SideBuffer::default();
+        let mut chunk = b"PAR1".to_vec();
+        chunk.extend_from_slice(&[0u8; 100]);
+        apply_first_chunk_and_resolve_ceiling(&mut buf, &chunk, &cfg);
+        assert_eq!(buf.effective_ceiling, Some(Some(64 * 1024 * 1024)));
+    }
+
+    #[test]
+    fn first_chunk_without_tabular_magic_resolves_to_text_ceiling() {
+        use crate::config::TracerCeilingConfig;
+        let cfg = TracerCeilingConfig {
+            text: Some(4 * 1024 * 1024),
+            tabular: Some(64 * 1024 * 1024),
+            diff: Some(16 * 1024 * 1024),
+        };
+        let mut buf = SideBuffer::default();
+        apply_first_chunk_and_resolve_ceiling(&mut buf, b"hello world", &cfg);
+        assert_eq!(buf.effective_ceiling, Some(Some(4 * 1024 * 1024)));
+    }
+
+    #[test]
+    fn first_chunk_with_avro_magic_resolves_to_tabular_ceiling() {
+        use crate::config::TracerCeilingConfig;
+        let cfg = TracerCeilingConfig::default();
+        let mut buf = SideBuffer::default();
+        let mut chunk = b"Obj\x01".to_vec();
+        chunk.extend_from_slice(&[0u8; 100]);
+        apply_first_chunk_and_resolve_ceiling(&mut buf, &chunk, &cfg);
+        assert_eq!(buf.effective_ceiling, Some(cfg.tabular));
+    }
+
+    #[test]
+    fn apply_is_idempotent_after_first_resolution() {
+        use crate::config::TracerCeilingConfig;
+        let cfg = TracerCeilingConfig::default();
+        let mut buf = SideBuffer::default();
+        apply_first_chunk_and_resolve_ceiling(&mut buf, b"hello world", &cfg);
+        let resolved_first = buf.effective_ceiling;
+        // Second call (e.g. with parquet magic) must NOT overwrite the first
+        // resolution — once decided, the ceiling is sticky.
+        apply_first_chunk_and_resolve_ceiling(&mut buf, b"PAR1\0\0\0\0", &cfg);
+        assert_eq!(buf.effective_ceiling, resolved_first);
+    }
+
+    #[test]
+    fn provisional_ceiling_is_max_of_text_and_tabular() {
+        use crate::config::TracerCeilingConfig;
+        let cfg = TracerCeilingConfig {
+            text: Some(4 * 1024 * 1024),
+            tabular: Some(64 * 1024 * 1024),
+            diff: Some(16 * 1024 * 1024),
+        };
+        assert_eq!(provisional_ceiling(&cfg), Some(64 * 1024 * 1024));
+
+        let cfg2 = TracerCeilingConfig {
+            text: Some(64 * 1024 * 1024),
+            tabular: Some(4 * 1024 * 1024),
+            diff: Some(16 * 1024 * 1024),
+        };
+        assert_eq!(provisional_ceiling(&cfg2), Some(64 * 1024 * 1024));
+    }
+
+    #[test]
+    fn provisional_ceiling_is_unbounded_when_either_is() {
+        use crate::config::TracerCeilingConfig;
+        let cfg = TracerCeilingConfig {
+            text: None,
+            tabular: Some(64 * 1024 * 1024),
+            diff: Some(16 * 1024 * 1024),
+        };
+        assert_eq!(provisional_ceiling(&cfg), None);
+
+        let cfg2 = TracerCeilingConfig {
+            text: Some(4 * 1024 * 1024),
+            tabular: None,
+            diff: Some(16 * 1024 * 1024),
+        };
+        assert_eq!(provisional_ceiling(&cfg2), None);
+    }
+
+    #[test]
+    fn should_fire_next_chunk_uses_resolved_ceiling_when_decided() {
+        use crate::config::TracerCeilingConfig;
+        let cfg = TracerCeilingConfig::default();
+        let mut side = SideBuffer {
+            loaded: vec![0u8; 100],
+            ..SideBuffer::default()
+        };
+        // Not yet resolved → falls back to provisional (max(text, tabular)) = 64 MiB.
+        assert!(should_fire_next_chunk(&side, &cfg));
+
+        // Mark as resolved with a tiny cap.
+        side.effective_ceiling = Some(Some(50));
+        assert!(!should_fire_next_chunk(&side, &cfg)); // 100 >= 50, no room
+
+        // Resolved as unbounded.
+        side.effective_ceiling = Some(None);
+        assert!(should_fire_next_chunk(&side, &cfg));
+    }
+
+    #[test]
+    fn diffable_size_exceeds_diff_cap_uses_config_value() {
+        use crate::client::tracer::ContentRender;
+        use crate::config::TracerCeilingConfig;
+        let header = ContentModalHeader {
+            event_type: "FORK".into(),
+            event_timestamp_iso: "".into(),
+            component_name: "".into(),
+            pg_path: "".into(),
+            input_size: Some(2_000_000),
+            output_size: Some(2_000_000),
+            input_mime: Some("application/json".into()),
+            output_mime: Some("application/json".into()),
+            input_available: true,
+            output_available: true,
+        };
+        let mut input = SideBuffer::default();
+        let mut output = SideBuffer::default();
+        input.loaded = vec![b'a'; 2_000_000];
+        output.loaded = vec![b'b'; 2_000_000];
+        input.fully_loaded = true;
+        output.fully_loaded = true;
+        input.decoded = ContentRender::Text {
+            text: "a".repeat(2_000_000),
+            pretty_printed: false,
+        };
+        output.decoded = ContentRender::Text {
+            text: "b".repeat(2_000_000),
+            pretty_printed: false,
+        };
+
+        let cfg = TracerCeilingConfig {
+            text: Some(4 * 1024 * 1024),
+            tabular: Some(64 * 1024 * 1024),
+            diff: Some(1_000_000), // 1 MB — both sides exceed this
+        };
+        let result = resolve_diffable(&header, &input, &output, &cfg);
+        assert!(matches!(
+            result,
+            Diffable::NotAvailable(NotDiffableReason::SizeExceedsDiffCap)
+        ));
+    }
+
+    #[test]
+    fn diffable_ok_for_two_parquet_sides() {
+        use crate::client::tracer::{ContentRender, TabularFormat};
+        use crate::config::TracerCeilingConfig;
+        let header = ContentModalHeader {
+            event_type: "FORK".into(),
+            event_timestamp_iso: "".into(),
+            component_name: "".into(),
+            pg_path: "".into(),
+            input_size: Some(100),
+            output_size: Some(100),
+            input_mime: None,
+            output_mime: None,
+            input_available: true,
+            output_available: true,
+        };
+        let cfg = TracerCeilingConfig::default();
+        let mut input = SideBuffer {
+            fully_loaded: true,
+            ..SideBuffer::default()
+        };
+        let mut output = SideBuffer {
+            fully_loaded: true,
+            ..SideBuffer::default()
+        };
+        input.loaded = vec![0u8; 100];
+        output.loaded = vec![0u8; 100];
+        input.decoded = ContentRender::Tabular {
+            format: TabularFormat::Parquet,
+            schema_summary: "id : Int64".into(),
+            body: r#"{"id":0}"#.into(),
+            decoded_bytes: 8,
+            truncated: false,
+        };
+        output.decoded = ContentRender::Tabular {
+            format: TabularFormat::Parquet,
+            schema_summary: "id : Int64".into(),
+            body: r#"{"id":1}"#.into(),
+            decoded_bytes: 8,
+            truncated: false,
+        };
+        assert!(matches!(
+            resolve_diffable(&header, &input, &output, &cfg),
+            Diffable::Ok
+        ));
+    }
+
+    #[test]
+    fn diffable_mime_mismatch_for_parquet_vs_avro() {
+        use crate::client::tracer::{ContentRender, TabularFormat};
+        use crate::config::TracerCeilingConfig;
+        let header = ContentModalHeader {
+            event_type: "FORK".into(),
+            event_timestamp_iso: "".into(),
+            component_name: "".into(),
+            pg_path: "".into(),
+            input_size: Some(100),
+            output_size: Some(100),
+            input_mime: None,
+            output_mime: None,
+            input_available: true,
+            output_available: true,
+        };
+        let cfg = TracerCeilingConfig::default();
+        let make = |format| {
+            let mut s = SideBuffer {
+                fully_loaded: true,
+                ..SideBuffer::default()
+            };
+            s.loaded = vec![0u8; 100];
+            s.decoded = ContentRender::Tabular {
+                format,
+                schema_summary: String::new(),
+                body: r#"{"id":0}"#.into(),
+                decoded_bytes: 8,
+                truncated: false,
+            };
+            s
+        };
+        let result = resolve_diffable(
+            &header,
+            &make(TabularFormat::Parquet),
+            &make(TabularFormat::Avro),
+            &cfg,
+        );
+        assert!(matches!(
+            result,
+            Diffable::NotAvailable(NotDiffableReason::MimeMismatch)
+        ));
+    }
+
+    #[test]
+    fn diffable_mime_mismatch_for_tabular_vs_text() {
+        use crate::client::tracer::{ContentRender, TabularFormat};
+        use crate::config::TracerCeilingConfig;
+        let header = ContentModalHeader {
+            event_type: "FORK".into(),
+            event_timestamp_iso: "".into(),
+            component_name: "".into(),
+            pg_path: "".into(),
+            input_size: Some(100),
+            output_size: Some(100),
+            input_mime: None,
+            output_mime: None,
+            input_available: true,
+            output_available: true,
+        };
+        let cfg = TracerCeilingConfig::default();
+        let mut input = SideBuffer {
+            fully_loaded: true,
+            ..SideBuffer::default()
+        };
+        let mut output = SideBuffer {
+            fully_loaded: true,
+            ..SideBuffer::default()
+        };
+        input.loaded = vec![0u8; 100];
+        output.loaded = vec![0u8; 100];
+        input.decoded = ContentRender::Tabular {
+            format: TabularFormat::Parquet,
+            schema_summary: String::new(),
+            body: r#"{"id":0}"#.into(),
+            decoded_bytes: 8,
+            truncated: false,
+        };
+        output.decoded = ContentRender::Text {
+            text: "hello".into(),
+            pretty_printed: false,
+        };
+        let result = resolve_diffable(&header, &input, &output, &cfg);
+        assert!(matches!(
+            result,
+            Diffable::NotAvailable(NotDiffableReason::MimeMismatch)
+        ));
+    }
+
+    #[test]
+    fn diffable_size_exceeds_diff_cap_for_tabular() {
+        use crate::client::tracer::{ContentRender, TabularFormat};
+        use crate::config::TracerCeilingConfig;
+        let header = ContentModalHeader {
+            event_type: "FORK".into(),
+            event_timestamp_iso: "".into(),
+            component_name: "".into(),
+            pg_path: "".into(),
+            input_size: Some(2_000_000),
+            output_size: Some(2_000_000),
+            input_mime: None,
+            output_mime: None,
+            input_available: true,
+            output_available: true,
+        };
+        let cfg = TracerCeilingConfig {
+            text: Some(4 * 1024 * 1024),
+            tabular: Some(64 * 1024 * 1024),
+            diff: Some(1_000_000),
+        };
+        let mut input = SideBuffer {
+            fully_loaded: true,
+            ..SideBuffer::default()
+        };
+        let mut output = SideBuffer {
+            fully_loaded: true,
+            ..SideBuffer::default()
+        };
+        input.loaded = vec![0u8; 100];
+        output.loaded = vec![0u8; 100];
+        input.decoded = ContentRender::Tabular {
+            format: TabularFormat::Parquet,
+            schema_summary: String::new(),
+            body: "x".repeat(2_000_000),
+            decoded_bytes: 2_000_000,
+            truncated: false,
+        };
+        output.decoded = ContentRender::Tabular {
+            format: TabularFormat::Parquet,
+            schema_summary: String::new(),
+            body: "y".repeat(2_000_000),
+            decoded_bytes: 2_000_000,
+            truncated: false,
+        };
+        let result = resolve_diffable(&header, &input, &output, &cfg);
+        assert!(matches!(
+            result,
+            Diffable::NotAvailable(NotDiffableReason::SizeExceedsDiffCap)
+        ));
+    }
+
+    #[test]
+    fn modal_diff_tabular_parquet_yields_changed_lines() {
+        use crate::client::tracer::{ContentRender, TabularFormat};
+        use crate::config::TracerCeilingConfig;
+        let mut input = SideBuffer {
+            fully_loaded: true,
+            ..SideBuffer::default()
+        };
+        let mut output = SideBuffer {
+            fully_loaded: true,
+            ..SideBuffer::default()
+        };
+        input.decoded = ContentRender::Tabular {
+            format: TabularFormat::Parquet,
+            schema_summary: "id : Int64".into(),
+            body: "{\"id\":0}\n{\"id\":1}\n{\"id\":2}".into(),
+            decoded_bytes: 24,
+            truncated: false,
+        };
+        output.decoded = ContentRender::Tabular {
+            format: TabularFormat::Parquet,
+            schema_summary: "id : Int64".into(),
+            body: "{\"id\":0}\n{\"id\":2}\n{\"id\":3}".into(),
+            decoded_bytes: 24,
+            truncated: false,
+        };
+        let cfg = TracerCeilingConfig::default();
+        let input_text = side_diff_text(&input);
+        let output_text = side_diff_text(&output);
+        let render = compute_diff_cache(&input_text, &output_text, &cfg);
+        // Three lines diffed; expect at least one Insert and one Delete.
+        let tags: Vec<_> = render.lines.iter().map(|l| l.tag).collect();
+        assert!(
+            tags.contains(&similar::ChangeTag::Insert),
+            "expected at least one Insert tag"
+        );
+        assert!(
+            tags.contains(&similar::ChangeTag::Delete),
+            "expected at least one Delete tag"
+        );
+    }
+
+    #[test]
+    fn tabular_scroll_decoded_line_count_includes_schema_and_separator() {
+        use crate::client::tracer::{ContentRender, TabularFormat};
+        let render = ContentRender::Tabular {
+            format: TabularFormat::Parquet,
+            schema_summary: "id : Int64\nname : Utf8".into(), // 2 lines
+            body: "{\"id\":0}\n{\"id\":1}\n{\"id\":2}".into(), // 3 lines
+            decoded_bytes: 24,
+            truncated: false,
+        };
+        // 2 schema + 1 separator + 3 body = 6
+        assert_eq!(decoded_line_count(&render), 6);
+    }
+
+    #[test]
+    fn tabular_search_body_includes_schema_separator_and_body() {
+        use crate::client::tracer::{ContentRender, TabularFormat};
+        let mut modal = stub_modal(1, ContentModalTab::Input);
+        modal.input.decoded = ContentRender::Tabular {
+            format: TabularFormat::Parquet,
+            schema_summary: "active : Boolean".into(),
+            body: "{\"active\":true}".into(),
+            decoded_bytes: 16,
+            truncated: false,
+        };
+        let body = content_modal_search_body(&modal);
+        assert!(
+            body.contains("active : Boolean"),
+            "schema column name must be searchable"
+        );
+        assert!(body.contains("-- schema --"), "separator must be present");
+        assert!(
+            body.contains("\"active\":true"),
+            "body content must be searchable"
+        );
+    }
+
+    #[test]
+    fn tabular_scroll_does_not_panic() {
+        use crate::client::tracer::{ContentRender, TabularFormat};
+
+        // Construct a Tabular modal with enough lines to scroll.
+        let schema = "id : Int64\nname : Utf8".to_string(); // 2 lines
+        let body_rows: Vec<String> = (0..20).map(|i| format!("{{\"id\":{}}}", i)).collect();
+        let body = body_rows.join("\n"); // 20 lines
+        // total = 2 + 1 + 20 = 23
+
+        let mut modal = stub_modal(1, ContentModalTab::Input);
+        modal.input.fully_loaded = true;
+        modal.input.decoded = ContentRender::Tabular {
+            format: TabularFormat::Parquet,
+            schema_summary: schema,
+            body,
+            decoded_bytes: 200,
+            truncated: false,
+        };
+        modal.last_viewport_rows = 10;
+        let mut state = TracerState {
+            content_modal: Some(modal),
+            ..TracerState::default()
+        };
+
+        // Scroll forward — must not panic and must advance offset.
+        let cfg = crate::config::TracerCeilingConfig::default();
+        let fired = content_modal_scroll_by(&mut state, 5, &cfg);
+        assert!(fired.is_empty(), "fully_loaded: no fetch request expected");
+        let offset = state.content_modal.as_ref().unwrap().scroll_offset;
+        assert_eq!(offset, 5, "scroll_offset should advance to 5");
+
+        // Scroll backward to zero.
+        content_modal_scroll_by(&mut state, -10, &cfg);
+        let offset = state.content_modal.as_ref().unwrap().scroll_offset;
+        assert_eq!(offset, 0, "scroll_offset must clamp at 0");
+    }
+
+    // ── Finding 1: deferred tabular decode tests ─────────────────────────────
+
+    /// `take_pending_tabular_decode` returns `Some` and sets `in_flight_decode`
+    /// when the buffer has tabular magic bytes AND is fully loaded.
+    /// Verifies `decoded` stays `Empty` until the off-thread result lands.
+    #[test]
+    fn tabular_chunk_fully_loaded_yields_pending_decode() {
+        use crate::client::ContentSide;
+        use crate::client::tracer::ContentRender;
+        use crate::config::TracerCeilingConfig;
+
+        let mut modal = stub_modal(7, ContentModalTab::Input);
+        modal.input.in_flight = true;
+        let mut state = TracerState {
+            content_modal: Some(modal),
+            ..TracerState::default()
+        };
+
+        // Build a minimal chunk with PAR1 magic. Ceiling matches exactly so
+        // ceiling_hit fires without a second chunk.
+        let mut parquet_magic = b"PAR1".to_vec();
+        parquet_magic.extend_from_slice(&[0u8; 6]); // 10 bytes total
+        let cfg = TracerCeilingConfig {
+            text: Some(10),
+            tabular: Some(10),
+            diff: Some(512 * 1024),
+        };
+        apply_modal_chunk_with_ceiling(
+            &mut state,
+            7,
+            ContentSide::Input,
+            0,
+            parquet_magic.clone(),
+            false,
+            parquet_magic.len(),
+            &cfg,
+        );
+
+        // decoded must remain Empty while the off-thread decode is pending.
+        let buf = &state.content_modal.as_ref().unwrap().input;
+        assert!(
+            matches!(buf.decoded, ContentRender::Empty),
+            "decoded must remain Empty until off-thread decode lands"
+        );
+        assert!(buf.ceiling_hit, "ceiling must be hit");
+        assert!(buf.fully_loaded);
+        assert!(!buf.in_flight_decode, "guard not set yet before take");
+
+        // take_pending_tabular_decode should fire and set in_flight_decode.
+        let pending = take_pending_tabular_decode(&mut state, 7, ContentSide::Input);
+        assert!(pending.is_some(), "expected pending decode to be returned");
+        let (eid, s, _bytes) = pending.unwrap();
+        assert_eq!(eid, 7);
+        assert!(matches!(s, ContentSide::Input));
+
+        let buf = &state.content_modal.as_ref().unwrap().input;
+        assert!(
+            buf.in_flight_decode,
+            "in_flight_decode must be set after take"
+        );
+    }
+
+    /// Calling `take_pending_tabular_decode` a second time while
+    /// `in_flight_decode` is true must return `None` (prevents double-spawn).
+    #[test]
+    fn tabular_in_flight_guard_prevents_double_spawn() {
+        use crate::client::ContentSide;
+        use crate::config::TracerCeilingConfig;
+
+        let mut modal = stub_modal(8, ContentModalTab::Input);
+        modal.input.in_flight = true;
+        let mut state = TracerState {
+            content_modal: Some(modal),
+            ..TracerState::default()
+        };
+
+        let mut parquet_magic = b"PAR1".to_vec();
+        parquet_magic.extend_from_slice(&[0u8; 6]);
+        let cfg = TracerCeilingConfig {
+            text: Some(10),
+            tabular: Some(10),
+            diff: Some(512 * 1024),
+        };
+        apply_modal_chunk_with_ceiling(
+            &mut state,
+            8,
+            ContentSide::Input,
+            0,
+            parquet_magic,
+            false,
+            10,
+            &cfg,
+        );
+
+        // First take: sets in_flight_decode.
+        let first = take_pending_tabular_decode(&mut state, 8, ContentSide::Input);
+        assert!(first.is_some());
+
+        // Second take: guard fires, returns None.
+        let second = take_pending_tabular_decode(&mut state, 8, ContentSide::Input);
+        assert!(second.is_none(), "in-flight guard must block double-spawn");
+    }
+
+    /// `apply_tabular_decode_result` drops results whose `event_id` doesn't
+    /// match the currently-open modal.
+    #[test]
+    fn stale_decode_result_is_dropped() {
+        use crate::client::ContentSide;
+        use crate::client::tracer::ContentRender;
+
+        let modal = stub_modal(9, ContentModalTab::Input);
+        let mut state = TracerState {
+            content_modal: Some(modal),
+            ..TracerState::default()
+        };
+        // Manually mark in_flight_decode to simulate an in-progress decode.
+        state.content_modal.as_mut().unwrap().input.in_flight_decode = true;
+
+        // Deliver result for event_id=999 (does not match modal's 9).
+        apply_tabular_decode_result(
+            &mut state,
+            999,
+            ContentSide::Input,
+            ContentRender::Text {
+                text: "stale".into(),
+                pretty_printed: false,
+            },
+        );
+
+        let buf = &state.content_modal.as_ref().unwrap().input;
+        // guard still set, decoded unchanged
+        assert!(buf.in_flight_decode, "guard must survive a stale drop");
+        assert!(matches!(buf.decoded, ContentRender::Empty));
+    }
+
+    // ── Finding 2: spec-mandated ceiling tests ───────────────────────────────
+
+    #[test]
+    fn ceiling_selection_prefers_tabular_on_parquet_magic() {
+        use crate::config::TracerCeilingConfig;
+        let cfg = TracerCeilingConfig {
+            text: Some(4 * 1024 * 1024),
+            tabular: Some(64 * 1024 * 1024),
+            diff: Some(16 * 1024 * 1024),
+        };
+        let mut buf = SideBuffer::default();
+        let mut chunk = b"PAR1".to_vec();
+        chunk.extend_from_slice(&[0u8; 100]);
+        apply_first_chunk_and_resolve_ceiling(&mut buf, &chunk, &cfg);
+        assert_eq!(buf.effective_ceiling, Some(Some(64 * 1024 * 1024)));
+    }
+
+    #[test]
+    fn ceiling_selection_prefers_text_when_no_tabular_magic() {
+        use crate::config::TracerCeilingConfig;
+        let cfg = TracerCeilingConfig {
+            text: Some(4 * 1024 * 1024),
+            tabular: Some(64 * 1024 * 1024),
+            diff: Some(16 * 1024 * 1024),
+        };
+        let mut buf = SideBuffer::default();
+        apply_first_chunk_and_resolve_ceiling(&mut buf, b"hello world", &cfg);
+        assert_eq!(buf.effective_ceiling, Some(Some(4 * 1024 * 1024)));
     }
 }
