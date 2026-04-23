@@ -157,6 +157,14 @@ pub enum TracerPayload {
         offset: usize,
         error: String,
     },
+    /// Result of an off-thread tabular decode (Parquet/Avro) spawned
+    /// via `tokio::task::spawn_blocking`. The UI-task handler calls
+    /// `apply_tabular_decode_result` to install the render.
+    ContentDecoded {
+        event_id: i64,
+        side: crate::client::ContentSide,
+        render: crate::client::tracer::ContentRender,
+    },
 }
 
 /// Payload variants pushed from the Events tab worker back into the UI loop.

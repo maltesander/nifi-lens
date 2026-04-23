@@ -515,6 +515,14 @@ pub enum PendingIntent {
         query: crate::client::ProvenanceQuery,
     },
     SpawnModalChunks(Vec<crate::view::tracer::state::ModalFetchRequest>),
+    /// Spawn an off-thread tabular decode (Parquet/Avro) via
+    /// `tokio::task::spawn_blocking`. The dispatcher calls
+    /// `classify_content` and emits `TracerPayload::ContentDecoded`.
+    DecodeTabular {
+        event_id: i64,
+        side: crate::client::ContentSide,
+        bytes: Vec<u8>,
+    },
     Quit,
 }
 
@@ -905,10 +913,45 @@ fn update_inner(state: &mut AppState, event: AppEvent, config: &Config) -> Updat
                         requested_len,
                         &cfg,
                     );
+                    // For tabular content, check whether a deferred off-thread
+                    // decode should be spawned now that the buffer is complete.
+                    let decode_intent = crate::view::tracer::state::take_pending_tabular_decode(
+                        &mut state.tracer,
+                        event_id,
+                        side,
+                    )
+                    .map(|(eid, s, bytes)| PendingIntent::DecodeTabular {
+                        event_id: eid,
+                        side: s,
+                        bytes,
+                    });
                     // Recompute diffability and (lazily) populate the
                     // diff cache after every chunk — independent of the
                     // currently active tab, since the user may switch to
                     // Diff after both sides have already loaded.
+                    if let Some(modal) = state.tracer.content_modal.as_mut() {
+                        crate::view::tracer::state::resolve_and_cache_diff(modal, &cfg);
+                    }
+                    state.last_refresh = Instant::now();
+                    UpdateResult {
+                        redraw: true,
+                        intent: decode_intent,
+                        tracer_followup: None,
+                    }
+                }
+                crate::event::TracerPayload::ContentDecoded {
+                    event_id,
+                    side,
+                    render,
+                } => {
+                    let cfg = state.tracer_config.ceiling.clone();
+                    crate::view::tracer::state::apply_tabular_decode_result(
+                        &mut state.tracer,
+                        event_id,
+                        side,
+                        render,
+                    );
+                    // Re-evaluate diff eligibility now that decoded is populated.
                     if let Some(modal) = state.tracer.content_modal.as_mut() {
                         crate::view::tracer::state::resolve_and_cache_diff(modal, &cfg);
                     }

@@ -237,6 +237,23 @@ pub async fn run(
                         );
                     }
                 }
+                PendingIntent::DecodeTabular {
+                    event_id,
+                    side,
+                    bytes,
+                } => {
+                    let tx = tx.clone();
+                    tokio::task::spawn_blocking(move || {
+                        let render = crate::client::tracer::classify_content(bytes);
+                        let _ = tx.try_send(AppEvent::Data(crate::event::ViewPayload::Tracer(
+                            crate::event::TracerPayload::ContentDecoded {
+                                event_id,
+                                side,
+                                render,
+                            },
+                        )));
+                    });
+                }
                 other => {
                     let intent = match other {
                         PendingIntent::SwitchContext(name) => Some(Intent::SwitchContext(name)),

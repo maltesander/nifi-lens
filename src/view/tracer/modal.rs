@@ -849,6 +849,7 @@ mod tests {
                 in_flight: false,
                 last_error: None,
                 effective_ceiling: None,
+                in_flight_decode: false,
             },
             output: SideBuffer {
                 loaded: br#"{"orderId":"A-1029","total":329.99,"tax":30.99}"#.to_vec(),
@@ -862,6 +863,7 @@ mod tests {
                 in_flight: false,
                 last_error: None,
                 effective_ceiling: None,
+                in_flight_decode: false,
             },
             diff_cache: None,
             scroll_offset: 0,
@@ -1192,6 +1194,7 @@ mod tests {
             in_flight: false,
             last_error: None,
             effective_ceiling: Some(Some(64 * 1024 * 1024)),
+            in_flight_decode: false,
         };
         let cfg = TracerCeilingConfig {
             text: Some(4 * 1024 * 1024),
@@ -1233,6 +1236,7 @@ mod tests {
             in_flight: false,
             last_error: None,
             effective_ceiling: Some(Some(4 * 1024 * 1024)),
+            in_flight_decode: false,
         };
         let cfg = TracerCeilingConfig::default();
         let chip = ceiling_hit_chip(&buf, &cfg);

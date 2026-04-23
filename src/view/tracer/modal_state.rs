@@ -64,6 +64,12 @@ pub struct SideBuffer {
     /// resolution, the inner `Option<usize>` follows the existing
     /// "Some = cap, None = unbounded" convention.
     pub effective_ceiling: Option<Option<usize>>,
+    /// Set to `true` when a `spawn_blocking` tabular decode is in
+    /// flight. Cleared when the `ContentDecoded` event lands.
+    /// Guards against double-spawning if a second completion event
+    /// races in (rare; only possible if the modal is reopened mid-
+    /// stream).
+    pub in_flight_decode: bool,
 }
 
 #[derive(Debug, Clone)]
@@ -332,10 +338,84 @@ pub fn apply_modal_chunk_with_ceiling(
             buf.fully_loaded = true;
         }
     }
-    buf.decoded = crate::client::tracer::classify_content(buf.loaded.clone());
+    // For tabular content (detected by magic bytes) we defer decode to
+    // fetch completion and run it off-thread via `spawn_blocking`.
+    // Text / Hex content stays synchronous — it is cheap and enables
+    // incremental rendering.
+    let is_tabular = crate::client::tracer::detect_tabular_format(&buf.loaded).is_some();
+    if is_tabular {
+        // Leave `decoded` as-is (Empty until the off-thread decode lands).
+        // The caller (state/mod.rs) will read `in_flight_decode` after this
+        // call and spawn the decode when `fully_loaded || ceiling_hit`.
+    } else {
+        buf.decoded = crate::client::tracer::classify_content(buf.loaded.clone());
+    }
     if eof && !buf.fully_loaded {
         buf.fully_loaded = true;
     }
+    modal.diff_cache = None;
+}
+
+/// Check whether the given side now needs an off-thread tabular decode.
+///
+/// Returns `Some((event_id, side, bytes))` when ALL of:
+/// - the modal is open with a matching `event_id`
+/// - the side buffer has tabular magic bytes
+/// - the side is now fully loaded (EOF or ceiling hit)
+/// - no decode is already in flight for this side
+///
+/// Sets `in_flight_decode = true` on the buffer before returning so
+/// the caller can unconditionally spawn without a second check.
+pub fn take_pending_tabular_decode(
+    state: &mut TracerState,
+    event_id: i64,
+    side: crate::client::ContentSide,
+) -> Option<(i64, crate::client::ContentSide, Vec<u8>)> {
+    let modal = state.content_modal.as_mut()?;
+    if modal.event_id != event_id {
+        return None;
+    }
+    let buf = match side {
+        crate::client::ContentSide::Input => &mut modal.input,
+        crate::client::ContentSide::Output => &mut modal.output,
+    };
+    if !buf.fully_loaded && !buf.ceiling_hit {
+        return None;
+    }
+    if buf.in_flight_decode {
+        return None;
+    }
+    crate::client::tracer::detect_tabular_format(&buf.loaded)?;
+    buf.in_flight_decode = true;
+    Some((event_id, side, buf.loaded.clone()))
+}
+
+/// Apply the result of an off-thread tabular decode back onto the modal.
+///
+/// Drops the result when:
+/// - the modal is closed or belongs to a different `event_id` (stale)
+/// - `in_flight_decode` is false (e.g., the modal was reset mid-decode)
+pub fn apply_tabular_decode_result(
+    state: &mut TracerState,
+    event_id: i64,
+    side: crate::client::ContentSide,
+    render: crate::client::tracer::ContentRender,
+) {
+    let Some(modal) = state.content_modal.as_mut() else {
+        return;
+    };
+    if modal.event_id != event_id {
+        return;
+    }
+    let buf = match side {
+        crate::client::ContentSide::Input => &mut modal.input,
+        crate::client::ContentSide::Output => &mut modal.output,
+    };
+    if !buf.in_flight_decode {
+        return;
+    }
+    buf.in_flight_decode = false;
+    buf.decoded = render;
     modal.diff_cache = None;
 }
 
@@ -1738,6 +1818,7 @@ mod tests {
             in_flight: false,
             last_error: None,
             effective_ceiling: None,
+            in_flight_decode: false,
         }
     }
 
@@ -1855,6 +1936,7 @@ mod tests {
             in_flight: false,
             last_error: None,
             effective_ceiling: None,
+            in_flight_decode: false,
         };
         assert_eq!(
             resolve_diffable(&header, &empty, &empty, &default_ceiling()),
@@ -2459,6 +2541,7 @@ mod tests {
             in_flight: false,
             last_error: None,
             effective_ceiling: None,
+            in_flight_decode: false,
         };
         modal.output = SideBuffer {
             loaded: output_compact,
@@ -2468,6 +2551,7 @@ mod tests {
             in_flight: false,
             last_error: None,
             effective_ceiling: None,
+            in_flight_decode: false,
         };
 
         resolve_and_cache_diff(&mut modal, &default_ceiling());
@@ -3045,5 +3129,170 @@ mod tests {
         content_modal_scroll_by(&mut state, -10, &cfg);
         let offset = state.content_modal.as_ref().unwrap().scroll_offset;
         assert_eq!(offset, 0, "scroll_offset must clamp at 0");
+    }
+
+    // ── Finding 1: deferred tabular decode tests ─────────────────────────────
+
+    /// `take_pending_tabular_decode` returns `Some` and sets `in_flight_decode`
+    /// when the buffer has tabular magic bytes AND is fully loaded.
+    /// Verifies `decoded` stays `Empty` until the off-thread result lands.
+    #[test]
+    fn tabular_chunk_fully_loaded_yields_pending_decode() {
+        use crate::client::ContentSide;
+        use crate::client::tracer::ContentRender;
+        use crate::config::TracerCeilingConfig;
+
+        let mut modal = stub_modal(7, ContentModalTab::Input);
+        modal.input.in_flight = true;
+        let mut state = TracerState {
+            content_modal: Some(modal),
+            ..TracerState::default()
+        };
+
+        // Build a minimal chunk with PAR1 magic. Ceiling matches exactly so
+        // ceiling_hit fires without a second chunk.
+        let mut parquet_magic = b"PAR1".to_vec();
+        parquet_magic.extend_from_slice(&[0u8; 6]); // 10 bytes total
+        let cfg = TracerCeilingConfig {
+            text: Some(10),
+            tabular: Some(10),
+            diff: Some(512 * 1024),
+        };
+        apply_modal_chunk_with_ceiling(
+            &mut state,
+            7,
+            ContentSide::Input,
+            0,
+            parquet_magic.clone(),
+            false,
+            parquet_magic.len(),
+            &cfg,
+        );
+
+        // decoded must remain Empty while the off-thread decode is pending.
+        let buf = &state.content_modal.as_ref().unwrap().input;
+        assert!(
+            matches!(buf.decoded, ContentRender::Empty),
+            "decoded must remain Empty until off-thread decode lands"
+        );
+        assert!(buf.ceiling_hit, "ceiling must be hit");
+        assert!(buf.fully_loaded);
+        assert!(!buf.in_flight_decode, "guard not set yet before take");
+
+        // take_pending_tabular_decode should fire and set in_flight_decode.
+        let pending = take_pending_tabular_decode(&mut state, 7, ContentSide::Input);
+        assert!(pending.is_some(), "expected pending decode to be returned");
+        let (eid, s, _bytes) = pending.unwrap();
+        assert_eq!(eid, 7);
+        assert!(matches!(s, ContentSide::Input));
+
+        let buf = &state.content_modal.as_ref().unwrap().input;
+        assert!(
+            buf.in_flight_decode,
+            "in_flight_decode must be set after take"
+        );
+    }
+
+    /// Calling `take_pending_tabular_decode` a second time while
+    /// `in_flight_decode` is true must return `None` (prevents double-spawn).
+    #[test]
+    fn tabular_in_flight_guard_prevents_double_spawn() {
+        use crate::client::ContentSide;
+        use crate::config::TracerCeilingConfig;
+
+        let mut modal = stub_modal(8, ContentModalTab::Input);
+        modal.input.in_flight = true;
+        let mut state = TracerState {
+            content_modal: Some(modal),
+            ..TracerState::default()
+        };
+
+        let mut parquet_magic = b"PAR1".to_vec();
+        parquet_magic.extend_from_slice(&[0u8; 6]);
+        let cfg = TracerCeilingConfig {
+            text: Some(10),
+            tabular: Some(10),
+            diff: Some(512 * 1024),
+        };
+        apply_modal_chunk_with_ceiling(
+            &mut state,
+            8,
+            ContentSide::Input,
+            0,
+            parquet_magic,
+            false,
+            10,
+            &cfg,
+        );
+
+        // First take: sets in_flight_decode.
+        let first = take_pending_tabular_decode(&mut state, 8, ContentSide::Input);
+        assert!(first.is_some());
+
+        // Second take: guard fires, returns None.
+        let second = take_pending_tabular_decode(&mut state, 8, ContentSide::Input);
+        assert!(second.is_none(), "in-flight guard must block double-spawn");
+    }
+
+    /// `apply_tabular_decode_result` drops results whose `event_id` doesn't
+    /// match the currently-open modal.
+    #[test]
+    fn stale_decode_result_is_dropped() {
+        use crate::client::ContentSide;
+        use crate::client::tracer::ContentRender;
+
+        let modal = stub_modal(9, ContentModalTab::Input);
+        let mut state = TracerState {
+            content_modal: Some(modal),
+            ..TracerState::default()
+        };
+        // Manually mark in_flight_decode to simulate an in-progress decode.
+        state.content_modal.as_mut().unwrap().input.in_flight_decode = true;
+
+        // Deliver result for event_id=999 (does not match modal's 9).
+        apply_tabular_decode_result(
+            &mut state,
+            999,
+            ContentSide::Input,
+            ContentRender::Text {
+                text: "stale".into(),
+                pretty_printed: false,
+            },
+        );
+
+        let buf = &state.content_modal.as_ref().unwrap().input;
+        // guard still set, decoded unchanged
+        assert!(buf.in_flight_decode, "guard must survive a stale drop");
+        assert!(matches!(buf.decoded, ContentRender::Empty));
+    }
+
+    // ── Finding 2: spec-mandated ceiling tests ───────────────────────────────
+
+    #[test]
+    fn ceiling_selection_prefers_tabular_on_parquet_magic() {
+        use crate::config::TracerCeilingConfig;
+        let cfg = TracerCeilingConfig {
+            text: Some(4 * 1024 * 1024),
+            tabular: Some(64 * 1024 * 1024),
+            diff: Some(16 * 1024 * 1024),
+        };
+        let mut buf = SideBuffer::default();
+        let mut chunk = b"PAR1".to_vec();
+        chunk.extend_from_slice(&[0u8; 100]);
+        apply_first_chunk_and_resolve_ceiling(&mut buf, &chunk, &cfg);
+        assert_eq!(buf.effective_ceiling, Some(Some(64 * 1024 * 1024)));
+    }
+
+    #[test]
+    fn ceiling_selection_prefers_text_when_no_tabular_magic() {
+        use crate::config::TracerCeilingConfig;
+        let cfg = TracerCeilingConfig {
+            text: Some(4 * 1024 * 1024),
+            tabular: Some(64 * 1024 * 1024),
+            diff: Some(16 * 1024 * 1024),
+        };
+        let mut buf = SideBuffer::default();
+        apply_first_chunk_and_resolve_ceiling(&mut buf, b"hello world", &cfg);
+        assert_eq!(buf.effective_ceiling, Some(Some(4 * 1024 * 1024)));
     }
 }
