@@ -21,7 +21,9 @@ name = "nifilens"
 path = "src/main.rs"
 
 [dependencies]
+apache-avro = "0.21"
 arboard = "3"
+arrow = { version = "58", default-features = false, features = ["json"] }
 clap = { version = "4", features = ["derive"] }
 color-eyre = "0.6"
 crossterm = "0.29"
@@ -29,6 +31,7 @@ futures = "0.3"
 humantime-serde = "1.1"
 nifi-rust-client = { version = "0.11.0", features = ["dynamic"] }
 nucleo = "0.5"
+parquet = { version = "58", default-features = false, features = ["arrow", "snap", "brotli", "lz4", "zstd"] }
 rand = "0.10"
 ratatui = "0.30"
 semver = "1"
