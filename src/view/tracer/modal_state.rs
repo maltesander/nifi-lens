@@ -59,6 +59,11 @@ pub struct SideBuffer {
     pub ceiling_hit: bool,
     pub in_flight: bool,
     pub last_error: Option<String>,
+    /// `None` until the first chunk lands and the magic-byte sniff
+    /// resolves which `[tracer.ceiling]` knob applies. After
+    /// resolution, the inner `Option<usize>` follows the existing
+    /// "Some = cap, None = unbounded" convention.
+    pub effective_ceiling: Option<Option<usize>>,
 }
 
 #[derive(Debug, Clone)]
@@ -1207,6 +1212,41 @@ pub fn content_modal_search_cancel(state: &mut TracerState) {
     }
 }
 
+// ---------------------------------------------------------------------------
+// Ceiling resolution helpers
+// ---------------------------------------------------------------------------
+
+/// Resolve the per-side ceiling once enough bytes have landed to
+/// sniff the format. Idempotent — returns early if already resolved.
+///
+/// Called by the modal reducer after each chunk append; the first
+/// call decides whether `cfg.text` or `cfg.tabular` applies, based
+/// on the buffer's leading magic bytes.
+pub fn apply_first_chunk_and_resolve_ceiling(
+    side: &mut SideBuffer,
+    chunk: &[u8],
+    cfg: &crate::config::TracerCeilingConfig,
+) {
+    if side.effective_ceiling.is_some() {
+        return;
+    }
+    let resolved = match crate::client::tracer::detect_tabular_format(chunk) {
+        Some(_) => cfg.tabular,
+        None => cfg.text,
+    };
+    side.effective_ceiling = Some(resolved);
+}
+
+/// Provisional ceiling = `max(text, tabular)`. Used for the first
+/// chunk fetch before the format is known. If either knob is
+/// unbounded (`None`), the provisional ceiling is also unbounded.
+pub fn provisional_ceiling(cfg: &crate::config::TracerCeilingConfig) -> Option<usize> {
+    match (cfg.text, cfg.tabular) {
+        (Some(a), Some(b)) => Some(a.max(b)),
+        (None, _) | (_, None) => None,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1575,6 +1615,7 @@ mod tests {
             ceiling_hit: false,
             in_flight: false,
             last_error: None,
+            effective_ceiling: None,
         }
     }
 
@@ -1668,6 +1709,7 @@ mod tests {
             ceiling_hit: false,
             in_flight: false,
             last_error: None,
+            effective_ceiling: None,
         };
         assert_eq!(
             resolve_diffable(&header, &empty, &empty),
@@ -2266,6 +2308,7 @@ mod tests {
             ceiling_hit: false,
             in_flight: false,
             last_error: None,
+            effective_ceiling: None,
         };
         modal.output = SideBuffer {
             loaded: output_compact,
@@ -2274,6 +2317,7 @@ mod tests {
             ceiling_hit: false,
             in_flight: false,
             last_error: None,
+            effective_ceiling: None,
         };
 
         resolve_and_cache_diff(&mut modal);
@@ -2394,5 +2438,93 @@ mod tests {
             0,
             "switching tabs must reset horizontal scroll"
         );
+    }
+
+    #[test]
+    fn first_chunk_with_parquet_magic_resolves_to_tabular_ceiling() {
+        use crate::config::TracerCeilingConfig;
+        let cfg = TracerCeilingConfig {
+            text: Some(4 * 1024 * 1024),
+            tabular: Some(64 * 1024 * 1024),
+            diff: Some(16 * 1024 * 1024),
+        };
+        let mut buf = SideBuffer::default();
+        let mut chunk = b"PAR1".to_vec();
+        chunk.extend_from_slice(&[0u8; 100]);
+        apply_first_chunk_and_resolve_ceiling(&mut buf, &chunk, &cfg);
+        assert_eq!(buf.effective_ceiling, Some(Some(64 * 1024 * 1024)));
+    }
+
+    #[test]
+    fn first_chunk_without_tabular_magic_resolves_to_text_ceiling() {
+        use crate::config::TracerCeilingConfig;
+        let cfg = TracerCeilingConfig {
+            text: Some(4 * 1024 * 1024),
+            tabular: Some(64 * 1024 * 1024),
+            diff: Some(16 * 1024 * 1024),
+        };
+        let mut buf = SideBuffer::default();
+        apply_first_chunk_and_resolve_ceiling(&mut buf, b"hello world", &cfg);
+        assert_eq!(buf.effective_ceiling, Some(Some(4 * 1024 * 1024)));
+    }
+
+    #[test]
+    fn first_chunk_with_avro_magic_resolves_to_tabular_ceiling() {
+        use crate::config::TracerCeilingConfig;
+        let cfg = TracerCeilingConfig::default();
+        let mut buf = SideBuffer::default();
+        let mut chunk = b"Obj\x01".to_vec();
+        chunk.extend_from_slice(&[0u8; 100]);
+        apply_first_chunk_and_resolve_ceiling(&mut buf, &chunk, &cfg);
+        assert_eq!(buf.effective_ceiling, Some(cfg.tabular));
+    }
+
+    #[test]
+    fn apply_is_idempotent_after_first_resolution() {
+        use crate::config::TracerCeilingConfig;
+        let cfg = TracerCeilingConfig::default();
+        let mut buf = SideBuffer::default();
+        apply_first_chunk_and_resolve_ceiling(&mut buf, b"hello world", &cfg);
+        let resolved_first = buf.effective_ceiling;
+        // Second call (e.g. with parquet magic) must NOT overwrite the first
+        // resolution — once decided, the ceiling is sticky.
+        apply_first_chunk_and_resolve_ceiling(&mut buf, b"PAR1\0\0\0\0", &cfg);
+        assert_eq!(buf.effective_ceiling, resolved_first);
+    }
+
+    #[test]
+    fn provisional_ceiling_is_max_of_text_and_tabular() {
+        use crate::config::TracerCeilingConfig;
+        let cfg = TracerCeilingConfig {
+            text: Some(4 * 1024 * 1024),
+            tabular: Some(64 * 1024 * 1024),
+            diff: Some(16 * 1024 * 1024),
+        };
+        assert_eq!(provisional_ceiling(&cfg), Some(64 * 1024 * 1024));
+
+        let cfg2 = TracerCeilingConfig {
+            text: Some(64 * 1024 * 1024),
+            tabular: Some(4 * 1024 * 1024),
+            diff: Some(16 * 1024 * 1024),
+        };
+        assert_eq!(provisional_ceiling(&cfg2), Some(64 * 1024 * 1024));
+    }
+
+    #[test]
+    fn provisional_ceiling_is_unbounded_when_either_is() {
+        use crate::config::TracerCeilingConfig;
+        let cfg = TracerCeilingConfig {
+            text: None,
+            tabular: Some(64 * 1024 * 1024),
+            diff: Some(16 * 1024 * 1024),
+        };
+        assert_eq!(provisional_ceiling(&cfg), None);
+
+        let cfg2 = TracerCeilingConfig {
+            text: Some(4 * 1024 * 1024),
+            tabular: None,
+            diff: Some(16 * 1024 * 1024),
+        };
+        assert_eq!(provisional_ceiling(&cfg2), None);
     }
 }

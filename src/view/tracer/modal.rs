@@ -719,6 +719,7 @@ mod tests {
                 ceiling_hit: false,
                 in_flight: false,
                 last_error: None,
+                effective_ceiling: None,
             },
             output: SideBuffer {
                 loaded: br#"{"orderId":"A-1029","total":329.99,"tax":30.99}"#.to_vec(),
@@ -731,6 +732,7 @@ mod tests {
                 ceiling_hit: false,
                 in_flight: false,
                 last_error: None,
+                effective_ceiling: None,
             },
             diff_cache: None,
             scroll_offset: 0,
