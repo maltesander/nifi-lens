@@ -49,10 +49,10 @@ use nifi_rust_client::{NifiError, wait};
 
 use crate::entities::{make_controller_service, make_processor, props};
 use crate::error::{Result, SeederError};
+use crate::fixture::custom_text_property_key;
 use crate::fixture::healthy::{
     create_child_pg, create_connection_in_pg, create_processor, start_processor, wait_for_valid,
 };
-use crate::fixture::{custom_text_property_key, query_record_io_property_keys};
 
 /// Embedded JSON payload used as GenerateFlowFile's Custom Text. ~180 KiB
 /// of structured sensor data (1000 records) — small enough to stay under
@@ -198,10 +198,17 @@ pub async fn seed(
     )
     .await?;
 
-    // Parquet sink: ConvertRecord → UpdateRecord → QueryRecord → LogAttribute.
-    // UpdateRecord rewrites only the WARN status rows (≈⅓ of records) so
-    // the diff shows a partial mutation.
-    // QueryRecord drops records with id ≥ SENSOR-0500, halving the row count.
+    // Parquet sink: ConvertRecord → UpdateRecord → UpdateRecord-mark-deleted → LogAttribute.
+    //
+    // UpdateRecord-{fmt} rewrites only the WARN status rows (≈⅓ of records).
+    // UpdateRecord-{fmt}-mark-deleted rewrites /id on records SENSOR-0500…0999
+    // (≈½ of records) to "DELETED-5xx"…"DELETED-9xx" — a tombstone marker.
+    // Both stages emit CONTENT_MODIFIED provenance events with same-format
+    // input/output content claims, so the Tracer Tabular diff shows real
+    // per-row changes. (NiFi's QueryRecord *does* filter records, but its
+    // provenance events route the original claim through unchanged — there
+    // is no input/output pair the diff viewer can compare. Hence the
+    // mark-deleted approach instead of true row deletion.)
     let convert_parquet_id = create_processor(
         client,
         &pg_id,
@@ -237,22 +244,24 @@ pub async fn seed(
     )
     .await?;
 
-    let (qr_reader_key, qr_writer_key) = query_record_io_property_keys(version);
-    let query_parquet_id = create_processor(
+    let mark_parquet_id = create_processor(
         client,
         &pg_id,
         make_processor(
-            "QueryRecord-parquet",
-            "org.apache.nifi.processors.standard.QueryRecord",
+            "UpdateRecord-parquet-mark-deleted",
+            "org.apache.nifi.processors.standard.UpdateRecord",
             props(&[
-                (qr_reader_key, &services.parquet_reader_id),
-                (qr_writer_key, &services.parquet_writer_id),
-                ("kept", "SELECT * FROM FLOWFILE WHERE id < 'SENSOR-0500'"),
+                ("Record Reader", &services.parquet_reader_id),
+                ("Record Writer", &services.parquet_writer_id),
+                (
+                    "/id",
+                    "${field.value:replaceFirst('SENSOR-0([5-9]\\d\\d)', 'DELETED-$1')}",
+                ),
             ]),
             None,
-            vec!["original", "failure"],
+            vec!["failure"],
         ),
-        "QueryRecord-parquet",
+        "UpdateRecord-parquet-mark-deleted",
     )
     .await?;
 
@@ -306,21 +315,24 @@ pub async fn seed(
     )
     .await?;
 
-    let query_avro_id = create_processor(
+    let mark_avro_id = create_processor(
         client,
         &pg_id,
         make_processor(
-            "QueryRecord-avro",
-            "org.apache.nifi.processors.standard.QueryRecord",
+            "UpdateRecord-avro-mark-deleted",
+            "org.apache.nifi.processors.standard.UpdateRecord",
             props(&[
-                (qr_reader_key, &services.avro_reader_id),
-                (qr_writer_key, &services.avro_writer_id),
-                ("kept", "SELECT * FROM FLOWFILE WHERE id < 'SENSOR-0500'"),
+                ("Record Reader", &services.avro_reader_id),
+                ("Record Writer", &services.avro_writer_id),
+                (
+                    "/id",
+                    "${field.value:replaceFirst('SENSOR-0([5-9]\\d\\d)', 'DELETED-$1')}",
+                ),
             ]),
             None,
-            vec!["original", "failure"],
+            vec!["failure"],
         ),
-        "QueryRecord-avro",
+        "UpdateRecord-avro-mark-deleted",
     )
     .await?;
 
@@ -349,10 +361,12 @@ pub async fn seed(
         (&upd_csv_id, &log_id),
         // Parquet chain.
         (&convert_parquet_id, &upd_parquet_id),
-        (&upd_parquet_id, &query_parquet_id),
+        (&upd_parquet_id, &mark_parquet_id),
+        (&mark_parquet_id, &log_parquet_id),
         // Avro chain.
         (&convert_avro_id, &upd_avro_id),
-        (&upd_avro_id, &query_avro_id),
+        (&upd_avro_id, &mark_avro_id),
+        (&mark_avro_id, &log_avro_id),
     ];
     for (src, dst) in hops_success {
         create_connection_in_pg(
@@ -363,22 +377,6 @@ pub async fn seed(
             dst,
             "PROCESSOR",
             vec!["success"],
-        )
-        .await?;
-    }
-    // QueryRecord routes its dynamic "kept" relationship into the terminator.
-    for (src, dst) in [
-        (&query_parquet_id, &log_parquet_id),
-        (&query_avro_id, &log_avro_id),
-    ] {
-        create_connection_in_pg(
-            client,
-            &pg_id,
-            src,
-            "PROCESSOR",
-            dst,
-            "PROCESSOR",
-            vec!["kept"],
         )
         .await?;
     }
@@ -412,11 +410,11 @@ pub async fn seed(
         (&mime_csv_id, "UpdateAttribute-mime-csv"),
         (&convert_id, "ConvertRecord"),
         (&log_parquet_id, "LogAttribute-parquet"),
-        (&query_parquet_id, "QueryRecord-parquet"),
+        (&mark_parquet_id, "UpdateRecord-parquet-mark-deleted"),
         (&upd_parquet_id, "UpdateRecord-parquet"),
         (&convert_parquet_id, "ConvertRecord-parquet"),
         (&log_avro_id, "LogAttribute-avro"),
-        (&query_avro_id, "QueryRecord-avro"),
+        (&mark_avro_id, "UpdateRecord-avro-mark-deleted"),
         (&upd_avro_id, "UpdateRecord-avro"),
         (&convert_avro_id, "ConvertRecord-avro"),
         (&upd_json_id, "UpdateRecord-json"),

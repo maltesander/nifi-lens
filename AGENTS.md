@@ -369,31 +369,31 @@ The `diff` ceiling caps the per-side input fed into
 two sink chains that produce parquet/avro provenance content for
 live-cluster decode coverage:
 
-- `ConvertRecord-parquet` → `UpdateRecord-parquet` → `QueryRecord-parquet` → `LogAttribute-parquet`
-- `ConvertRecord-avro` → `UpdateRecord-avro` → `QueryRecord-avro` → `LogAttribute-avro`
+- `ConvertRecord-parquet` → `UpdateRecord-parquet` → `UpdateRecord-parquet-mark-deleted` → `LogAttribute-parquet`
+- `ConvertRecord-avro` → `UpdateRecord-avro` → `UpdateRecord-avro-mark-deleted` → `LogAttribute-avro`
 
 `UpdateRecord-{fmt}` rewrites only the `WARN` status rows
 (`/status` ↦ `replaceFirst('WARN', 'WARNING')`, ≈⅓ of records) so
-its provenance event shows a partial mutation diff. `QueryRecord-{fmt}`
-keeps records with `id < 'SENSOR-0500'` (halves the row count) so
-its event shows a major content change. Each stage's input/output
-content claims are same-format Parquet↔Parquet or Avro↔Avro,
-exercising the Tabular diff path.
+its provenance event shows a partial mutation diff.
+`UpdateRecord-{fmt}-mark-deleted` rewrites `/id` on records
+`SENSOR-0500…0999` (≈½ of records) to a `DELETED-5xx…9xx`
+tombstone, so its event shows a larger row-by-row diff.
+
+Both stages emit `CONTENT_MODIFIED` provenance events with
+same-format input/output content claims, so the Tracer Tabular
+diff renders real per-row changes. (NiFi's `QueryRecord` *does*
+filter records, but its provenance events route the original claim
+through unchanged — there is no input/output pair the diff viewer
+can compare. Hence the mark-deleted UpdateRecord pattern instead
+of true row deletion. NiFi often reports
+`inputContentClaim == outputContentClaim` on `CONTENT_MODIFIED`
+events even when bytes differ — the claim ID is a logical handle,
+not a content hash. Always fetch both sides and compare.)
 
 Four scoped controller services back the chains:
 `diff-parquet-reader`/`diff-parquet-writer` (`ParquetReader` /
 `ParquetRecordSetWriter`) and `diff-avro-reader`/`diff-avro-writer`
 (`AvroReader` / `AvroRecordSetWriter`).
-
-`QueryRecord` exhibits property-key drift across NiFi versions: 2.6.0
-uses kebab-case keys (`record-reader`, `record-writer`) while 2.9.0
-uses display-name keys (`Record Reader`, `Record Writer`). The seeder
-selects the right pair via `query_record_io_property_keys(version)`
-in `integration-tests/seeder/src/fixture/mod.rs`. Setting the wrong
-key creates dynamic properties — and dynamic properties on QueryRecord
-are interpreted as SQL queries, which validation rejects with
-"Non-query expression encountered in illegal context". UpdateRecord
-does NOT have this drift.
 
 ### Poll intervals
 
