@@ -704,6 +704,10 @@ pub fn decode_avro(
     let mut truncated = false;
 
     for (idx, value) in reader.enumerate() {
+        // Pre-check both limits before decoding the next record. The byte
+        // limit is a "soft" cap: the previous iteration may have pushed
+        // body.len() slightly past the limit, but no further record is
+        // added once we cross.
         if idx >= TABULAR_RECORD_LIMIT || body.len() >= TABULAR_BODY_LIMIT {
             truncated = true;
             break;
@@ -777,6 +781,10 @@ fn format_avro_type(schema: &apache_avro::Schema) -> String {
         Schema::Enum(e) => format!("enum<{}>", e.name.name),
         Schema::Fixed(f) => format!("fixed<{}>", f.name.name),
         Schema::Ref { name } => format!("ref<{}>", name.name),
+        // Catch-all for Schema variants added in future apache-avro releases:
+        // degrade gracefully to "?" rather than failing to compile.
+        #[allow(unreachable_patterns)]
+        _ => "?".into(),
     }
 }
 
@@ -1295,7 +1303,11 @@ mod tests {
     }
 
     #[test]
-    fn decode_avro_respects_record_limit() {
+    fn decode_avro_small_file_is_not_truncated() {
+        // Verifies the happy path leaves `truncated = false`. Triggering
+        // `truncated = true` would require building > TABULAR_RECORD_LIMIT
+        // (50 000) records inline; the integration test (Task 22) exercises
+        // real-world sizing instead.
         let bytes = build_avro_fixture(10);
         let render = decode_avro(&bytes).unwrap();
         if let ContentRender::Tabular {
