@@ -244,9 +244,9 @@ ring_size = 5000
 
 # Optional: Tracer tab options.
 [tracer.ceiling]
-text    = "4MiB"     # plain text/hex content per side
-tabular = "64MiB"    # parquet/avro fetched bytes per side
-diff    = "16MiB"    # bytes fed into the unified text diff per side
+text    = "4 MiB"     # plain text/hex content per side
+tabular = "64 MiB"    # parquet/avro fetched bytes per side
+diff    = "16 MiB"    # bytes fed into the unified text diff per side
 # Set any value to "0" to disable the ceiling (unbounded).
 
 # Optional: UI rendering options. All fields are optional; the defaults

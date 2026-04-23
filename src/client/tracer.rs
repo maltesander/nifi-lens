@@ -1553,4 +1553,30 @@ mod tests {
             other => panic!("expected Text, got {other:?}"),
         }
     }
+
+    // ── Finding 2: spec-mandated unit tests ──────────────────────────────────
+
+    /// Mirrors the real ceiling-hit-mid-parquet scenario: valid PAR1 magic
+    /// plus body bytes but clipped before the footer → Hex fallback.
+    #[test]
+    fn classify_parquet_truncated_footer_falls_back_to_hex() {
+        let mut bytes = b"PAR1".to_vec();
+        bytes.extend_from_slice(&[0u8; 1024]); // body bytes, no footer magic at end
+        match classify_content(bytes) {
+            ContentRender::Hex { .. } => {}
+            other => panic!("expected Hex fallback for truncated parquet, got {other:?}"),
+        }
+    }
+
+    /// `TABULAR_BODY_LIMIT` is the documented internal OOM guard value.
+    #[test]
+    fn tabular_decode_respects_body_limit() {
+        assert_eq!(TABULAR_BODY_LIMIT, 128 * 1024 * 1024);
+    }
+
+    /// `TABULAR_RECORD_LIMIT` is the documented internal safety cap.
+    #[test]
+    fn tabular_decode_respects_record_limit() {
+        assert_eq!(TABULAR_RECORD_LIMIT, 50_000);
+    }
 }

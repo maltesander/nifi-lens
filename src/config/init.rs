@@ -98,9 +98,9 @@ insecure_tls = false
 
 # Tracer content modal byte ceilings. "0" disables the ceiling (unbounded).
 [tracer.ceiling]
-text    = "4MiB"     # plain text/hex content per side
-tabular = "64MiB"    # parquet/avro fetched bytes per side
-diff    = "16MiB"    # bytes fed into the unified text diff per side
+text    = "4 MiB"     # plain text/hex content per side
+tabular = "64 MiB"    # parquet/avro fetched bytes per side
+diff    = "16 MiB"    # bytes fed into the unified text diff per side
 "#;
 
 pub fn write_template(force: bool) -> Result<PathBuf, NifiLensError> {
