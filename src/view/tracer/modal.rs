@@ -8,6 +8,7 @@
 
 use ratatui::Frame;
 use ratatui::layout::{Constraint, Direction, Layout, Rect};
+use ratatui::style::Modifier;
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, BorderType, Clear, Paragraph};
 
@@ -221,8 +222,26 @@ fn text_body_lines(
                 .collect();
             (window, total)
         }
-        ContentRender::Tabular { .. } => {
-            unreachable!("Tabular variant: render & diff handled in later tasks (see plan)")
+        ContentRender::Tabular {
+            schema_summary,
+            body,
+            ..
+        } => {
+            let schema_lines: Vec<&str> = schema_summary.lines().collect();
+            let body_lines: Vec<&str> = body.lines().collect();
+            let mut lines: Vec<Line<'static>> =
+                Vec::with_capacity(schema_lines.len() + body_lines.len() + 2);
+            for s in &schema_lines {
+                lines.push(Line::from(Span::styled(s.to_string(), theme::muted())));
+            }
+            lines.push(Line::from(Span::styled(
+                "-- schema --",
+                theme::muted().add_modifier(Modifier::BOLD),
+            )));
+            for b in &body_lines {
+                lines.push(Line::from(b.to_string()));
+            }
+            return lines;
         }
     };
 
@@ -837,6 +856,26 @@ mod tests {
         let mut terminal = Terminal::new(backend).unwrap();
         terminal.draw(|f| render(f, f.area(), &mut modal)).unwrap();
         insta::assert_debug_snapshot!("modal_diff_size_exceeds_cap", terminal.backend().buffer());
+    }
+
+    #[test]
+    fn modal_input_tabular_parquet_renders_schema_then_body() {
+        use crate::client::tracer::TabularFormat;
+        let mut modal = stub_modal(ContentModalTab::Input);
+        modal.input.decoded = ContentRender::Tabular {
+            format: TabularFormat::Parquet,
+            schema_summary: "id : Int64\nname : Utf8".into(),
+            body: "{\"id\":0,\"name\":\"a\"}\n{\"id\":1,\"name\":\"b\"}".into(),
+            decoded_bytes: 38,
+            truncated: false,
+        };
+        let backend = TestBackend::new(80, 20);
+        let mut terminal = Terminal::new(backend).unwrap();
+        terminal.draw(|f| render(f, f.area(), &mut modal)).unwrap();
+        insta::assert_debug_snapshot!(
+            "modal_input_tabular_parquet_renders_schema_then_body",
+            terminal.backend().buffer()
+        );
     }
 
     #[test]
