@@ -288,9 +288,12 @@ into a single row with an `×N` count column. Grouping mode is cycled by
 
 `i` on a selected bulletin opens a full-screen detail modal showing the
 full raw message with scroll (`↑↓`/`PgUp`/`PgDn`/`Home`/`End`),
-plain-substring `/`-search with `n`/`N` cycling, `c` to copy, and
-`Enter` to jump to the source in Browser. `Esc` closes. The modal lives
-as `BulletinsState::detail_modal` (not an app-wide `Modal`) because it
+plain-substring `/`-search with `n`/`N` cycling, and `c` to copy.
+`Esc` closes. `Enter` is intentionally a no-op inside the modal —
+committing a search with Enter used to fall through to a Browser jump
+on the next Enter press, which surprised users; use `g` on the main
+Bulletins tab to jump to the source. The modal lives as
+`BulletinsState::detail_modal` (not an app-wide `Modal`) because it
 carries per-view semantics. `open_detail_modal` captures a `GroupKey`
 and `GroupDetails` snapshot at open time; subsequent ring mutations do
 not disturb the open modal.

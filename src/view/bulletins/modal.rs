@@ -206,7 +206,7 @@ fn render_footer(frame: &mut Frame, area: Rect, modal: &DetailModalState) {
     {
         hint.push_str(" · n next · N prev");
     }
-    hint.push_str(" · Enter Browser · Esc close");
+    hint.push_str(" · Esc close");
 
     // Blank separator row above the hint line. When the search strip is
     // showing, the separator appears between the strip and the hint for

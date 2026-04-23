@@ -1,5 +1,6 @@
 ---
 source: src/view/bulletins/modal.rs
+assertion_line: 351
 expression: terminal.backend().buffer()
 ---
 Buffer {
@@ -18,7 +19,7 @@ Buffer {
         "│line 11                                                   │",
         "│line 12                                                   │",
         "│                                                          │",
-        "│↑↓ scroll · PgUp/PgDn page · c copy · / find · Enter Brows│",
+        "│↑↓ scroll · PgUp/PgDn page · c copy · / find · Esc close  │",
         "└──────────────────────────────────────────────────────────┘",
     ],
     styles: [
@@ -52,6 +53,7 @@ Buffer {
         x: 1, y: 12, fg: Reset, bg: Reset, underline: Reset, modifier: NONE,
         x: 59, y: 12, fg: Red, bg: Reset, underline: Reset, modifier: BOLD,
         x: 1, y: 13, fg: DarkGray, bg: Reset, underline: Reset, modifier: NONE,
+        x: 57, y: 13, fg: Reset, bg: Reset, underline: Reset, modifier: NONE,
         x: 59, y: 13, fg: Red, bg: Reset, underline: Reset, modifier: BOLD,
     ]
 }

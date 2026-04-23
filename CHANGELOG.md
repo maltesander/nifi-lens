@@ -32,6 +32,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **Tracer**: inline content preview cap lowered from 1 MiB to 8 KiB.
   Use `i` to open the new modal for full streamed content.
+- **Bulletins detail modal**: `Enter` is now a no-op. Previously it
+  jumped to the source in Browser, which caused an accidental
+  navigation when committing a `/`-search with Enter and then pressing
+  Enter a second time. To jump to the source, close the modal and use
+  `g` on the Bulletins tab.
 
 ### Fixed
 

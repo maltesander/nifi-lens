@@ -136,7 +136,6 @@ impl ViewKeyHandler for BulletinsHandler {
 
 /// Handles focus actions while the detail modal is open.
 fn handle_modal_focus(state: &mut AppState, action: FocusAction) -> Option<UpdateResult> {
-    use crate::intent::CrossLink;
     match action {
         FocusAction::Up => state.bulletins.modal_scroll_by(-1),
         FocusAction::Down => state.bulletins.modal_scroll_by(1),
@@ -144,25 +143,11 @@ fn handle_modal_focus(state: &mut AppState, action: FocusAction) -> Option<Updat
         FocusAction::PageDown => state.bulletins.modal_page_down(),
         FocusAction::First => state.bulletins.modal_jump_top(),
         FocusAction::Last => state.bulletins.modal_jump_bottom(),
-        FocusAction::Descend => {
-            // Enter → jump to source in Browser + close modal.
-            let link = state
-                .bulletins
-                .detail_modal
-                .as_ref()
-                .map(|m| CrossLink::OpenInBrowser {
-                    component_id: m.details.source_id.clone(),
-                    group_id: m.details.group_id.clone(),
-                });
-            state.bulletins.close_detail_modal();
-            if let Some(link) = link {
-                return Some(UpdateResult {
-                    redraw: true,
-                    intent: Some(crate::app::state::PendingIntent::Goto(link)),
-                    tracer_followup: None,
-                });
-            }
-        }
+        // Enter is intentionally a no-op inside the modal: double-pressing
+        // Enter while using `/` search used to commit the search and then
+        // jump to Browser, which was a surprising navigation. Use `g` on
+        // the Bulletins tab to jump to the source in Browser.
+        FocusAction::Descend => return Some(UpdateResult::default()),
         FocusAction::Ascend => state.bulletins.close_detail_modal(),
         FocusAction::Left | FocusAction::Right | FocusAction::NextPane | FocusAction::PrevPane => {
             return Some(UpdateResult::default());
@@ -877,7 +862,11 @@ mod tests {
     }
 
     #[test]
-    fn modal_open_enter_jumps_to_browser_and_closes() {
+    fn modal_open_enter_is_noop_does_not_jump_or_close() {
+        // Regression: double-Enter while using `/`-search inside the modal
+        // used to commit the search and then jump to Browser. Enter inside
+        // the modal is now a no-op; `g` on the Bulletins tab is the sole
+        // way to jump to the source.
         let mut s = fresh_state();
         let c = tiny_config();
         s.current_tab = ViewId::Bulletins;
@@ -885,15 +874,14 @@ mod tests {
         update(&mut s, key(KeyCode::Char('i'), KeyModifiers::NONE), &c);
         let r = update(&mut s, key(KeyCode::Enter, KeyModifiers::NONE), &c);
         assert!(
-            s.bulletins.detail_modal.is_none(),
-            "Enter in modal closes it"
+            s.bulletins.detail_modal.is_some(),
+            "Enter in modal must not close it"
         );
-        assert!(matches!(
-            r.intent,
-            Some(PendingIntent::Goto(
-                crate::intent::CrossLink::OpenInBrowser { .. }
-            ))
-        ));
+        assert!(
+            r.intent.is_none(),
+            "Enter in modal must not emit a jump intent; got {:?}",
+            r.intent
+        );
     }
 
     #[test]
