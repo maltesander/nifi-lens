@@ -588,6 +588,39 @@ pub fn resolve_diffable(
         return Diffable::NotAvailable(NotDiffableReason::OutputUnavailable);
     }
 
+    // Tabular sides bypass the mime allowlist — the format tag is authoritative.
+    match (&input.decoded, &output.decoded) {
+        (
+            ContentRender::Tabular {
+                format: a,
+                decoded_bytes: a_bytes,
+                ..
+            },
+            ContentRender::Tabular {
+                format: b,
+                decoded_bytes: b_bytes,
+                ..
+            },
+        ) => {
+            if a != b {
+                return Diffable::NotAvailable(NotDiffableReason::MimeMismatch);
+            }
+            // Same format: gate on the diff cap (decoded_bytes is the JSON-Lines
+            // byte length, the same quantity the existing size check uses).
+            if let Some(cap) = cfg.diff
+                && (*a_bytes > cap || *b_bytes > cap)
+            {
+                return Diffable::NotAvailable(NotDiffableReason::SizeExceedsDiffCap);
+            }
+            return Diffable::Ok;
+        }
+        (ContentRender::Tabular { .. }, _) | (_, ContentRender::Tabular { .. }) => {
+            // One side tabular, the other not — mixed binary/text isn't diffable.
+            return Diffable::NotAvailable(NotDiffableReason::MimeMismatch);
+        }
+        _ => {} // Fall through to existing mime/size checks for non-Tabular pairs.
+    }
+
     let mime_ok = match (header.input_mime.as_deref(), header.output_mime.as_deref()) {
         (Some(i), Some(o)) if i == o && mime_is_diffable_single(i) => true,
         (Some(_), Some(_)) => false,
@@ -2693,6 +2726,194 @@ mod tests {
             text: Some(4 * 1024 * 1024),
             tabular: Some(64 * 1024 * 1024),
             diff: Some(1_000_000), // 1 MB — both sides exceed this
+        };
+        let result = resolve_diffable(&header, &input, &output, &cfg);
+        assert!(matches!(
+            result,
+            Diffable::NotAvailable(NotDiffableReason::SizeExceedsDiffCap)
+        ));
+    }
+
+    #[test]
+    fn diffable_ok_for_two_parquet_sides() {
+        use crate::client::tracer::{ContentRender, TabularFormat};
+        use crate::config::TracerCeilingConfig;
+        let header = ContentModalHeader {
+            event_type: "FORK".into(),
+            event_timestamp_iso: "".into(),
+            component_name: "".into(),
+            pg_path: "".into(),
+            input_size: Some(100),
+            output_size: Some(100),
+            input_mime: None,
+            output_mime: None,
+            input_available: true,
+            output_available: true,
+        };
+        let cfg = TracerCeilingConfig::default();
+        let mut input = SideBuffer {
+            fully_loaded: true,
+            ..SideBuffer::default()
+        };
+        let mut output = SideBuffer {
+            fully_loaded: true,
+            ..SideBuffer::default()
+        };
+        input.loaded = vec![0u8; 100];
+        output.loaded = vec![0u8; 100];
+        input.decoded = ContentRender::Tabular {
+            format: TabularFormat::Parquet,
+            schema_summary: "id : Int64".into(),
+            body: r#"{"id":0}"#.into(),
+            decoded_bytes: 8,
+            truncated: false,
+        };
+        output.decoded = ContentRender::Tabular {
+            format: TabularFormat::Parquet,
+            schema_summary: "id : Int64".into(),
+            body: r#"{"id":1}"#.into(),
+            decoded_bytes: 8,
+            truncated: false,
+        };
+        assert!(matches!(
+            resolve_diffable(&header, &input, &output, &cfg),
+            Diffable::Ok
+        ));
+    }
+
+    #[test]
+    fn diffable_mime_mismatch_for_parquet_vs_avro() {
+        use crate::client::tracer::{ContentRender, TabularFormat};
+        use crate::config::TracerCeilingConfig;
+        let header = ContentModalHeader {
+            event_type: "FORK".into(),
+            event_timestamp_iso: "".into(),
+            component_name: "".into(),
+            pg_path: "".into(),
+            input_size: Some(100),
+            output_size: Some(100),
+            input_mime: None,
+            output_mime: None,
+            input_available: true,
+            output_available: true,
+        };
+        let cfg = TracerCeilingConfig::default();
+        let make = |format| {
+            let mut s = SideBuffer {
+                fully_loaded: true,
+                ..SideBuffer::default()
+            };
+            s.loaded = vec![0u8; 100];
+            s.decoded = ContentRender::Tabular {
+                format,
+                schema_summary: String::new(),
+                body: r#"{"id":0}"#.into(),
+                decoded_bytes: 8,
+                truncated: false,
+            };
+            s
+        };
+        let result = resolve_diffable(
+            &header,
+            &make(TabularFormat::Parquet),
+            &make(TabularFormat::Avro),
+            &cfg,
+        );
+        assert!(matches!(
+            result,
+            Diffable::NotAvailable(NotDiffableReason::MimeMismatch)
+        ));
+    }
+
+    #[test]
+    fn diffable_mime_mismatch_for_tabular_vs_text() {
+        use crate::client::tracer::{ContentRender, TabularFormat};
+        use crate::config::TracerCeilingConfig;
+        let header = ContentModalHeader {
+            event_type: "FORK".into(),
+            event_timestamp_iso: "".into(),
+            component_name: "".into(),
+            pg_path: "".into(),
+            input_size: Some(100),
+            output_size: Some(100),
+            input_mime: None,
+            output_mime: None,
+            input_available: true,
+            output_available: true,
+        };
+        let cfg = TracerCeilingConfig::default();
+        let mut input = SideBuffer {
+            fully_loaded: true,
+            ..SideBuffer::default()
+        };
+        let mut output = SideBuffer {
+            fully_loaded: true,
+            ..SideBuffer::default()
+        };
+        input.loaded = vec![0u8; 100];
+        output.loaded = vec![0u8; 100];
+        input.decoded = ContentRender::Tabular {
+            format: TabularFormat::Parquet,
+            schema_summary: String::new(),
+            body: r#"{"id":0}"#.into(),
+            decoded_bytes: 8,
+            truncated: false,
+        };
+        output.decoded = ContentRender::Text {
+            text: "hello".into(),
+            pretty_printed: false,
+        };
+        let result = resolve_diffable(&header, &input, &output, &cfg);
+        assert!(matches!(
+            result,
+            Diffable::NotAvailable(NotDiffableReason::MimeMismatch)
+        ));
+    }
+
+    #[test]
+    fn diffable_size_exceeds_diff_cap_for_tabular() {
+        use crate::client::tracer::{ContentRender, TabularFormat};
+        use crate::config::TracerCeilingConfig;
+        let header = ContentModalHeader {
+            event_type: "FORK".into(),
+            event_timestamp_iso: "".into(),
+            component_name: "".into(),
+            pg_path: "".into(),
+            input_size: Some(2_000_000),
+            output_size: Some(2_000_000),
+            input_mime: None,
+            output_mime: None,
+            input_available: true,
+            output_available: true,
+        };
+        let cfg = TracerCeilingConfig {
+            text: Some(4 * 1024 * 1024),
+            tabular: Some(64 * 1024 * 1024),
+            diff: Some(1_000_000),
+        };
+        let mut input = SideBuffer {
+            fully_loaded: true,
+            ..SideBuffer::default()
+        };
+        let mut output = SideBuffer {
+            fully_loaded: true,
+            ..SideBuffer::default()
+        };
+        input.loaded = vec![0u8; 100];
+        output.loaded = vec![0u8; 100];
+        input.decoded = ContentRender::Tabular {
+            format: TabularFormat::Parquet,
+            schema_summary: String::new(),
+            body: "x".repeat(2_000_000),
+            decoded_bytes: 2_000_000,
+            truncated: false,
+        };
+        output.decoded = ContentRender::Tabular {
+            format: TabularFormat::Parquet,
+            schema_summary: String::new(),
+            body: "y".repeat(2_000_000),
+            decoded_bytes: 2_000_000,
+            truncated: false,
         };
         let result = resolve_diffable(&header, &input, &output, &cfg);
         assert!(matches!(
