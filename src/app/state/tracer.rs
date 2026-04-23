@@ -139,8 +139,8 @@ impl ViewKeyHandler for TracerHandler {
                     None
                 };
                 if let Some((active_tab, detail)) = extracted {
-                    let ceiling = state.tracer_config.ceiling.text;
-                    let fired = open_content_modal(&mut state.tracer, &detail, active_tab, ceiling);
+                    let cfg = state.tracer_config.ceiling.clone();
+                    let fired = open_content_modal(&mut state.tracer, &detail, active_tab, &cfg);
                     return Some(UpdateResult {
                         redraw: true,
                         intent: Some(PendingIntent::SpawnModalChunks(fired)),
@@ -172,10 +172,10 @@ impl ViewKeyHandler for TracerHandler {
         // (the keymap shadow block lets Up/Down/PgUp/PgDn/Home/End through
         // as FocusAction). Handle them before the per-mode dispatch below.
         if state.tracer.content_modal.is_some() {
-            let ceiling = state.tracer_config.ceiling.text;
+            let cfg = state.tracer_config.ceiling.clone();
             let fired = match action {
-                FocusAction::Up => ts::content_modal_scroll_by(&mut state.tracer, -1, ceiling),
-                FocusAction::Down => ts::content_modal_scroll_by(&mut state.tracer, 1, ceiling),
+                FocusAction::Up => ts::content_modal_scroll_by(&mut state.tracer, -1, &cfg),
+                FocusAction::Down => ts::content_modal_scroll_by(&mut state.tracer, 1, &cfg),
                 FocusAction::PageUp => {
                     let rows = state
                         .tracer
@@ -183,7 +183,7 @@ impl ViewKeyHandler for TracerHandler {
                         .as_ref()
                         .map(|m| m.last_viewport_rows.max(1))
                         .unwrap_or(1) as isize;
-                    ts::content_modal_scroll_by(&mut state.tracer, -rows, ceiling)
+                    ts::content_modal_scroll_by(&mut state.tracer, -rows, &cfg)
                 }
                 FocusAction::PageDown => {
                     let rows = state
@@ -192,18 +192,18 @@ impl ViewKeyHandler for TracerHandler {
                         .as_ref()
                         .map(|m| m.last_viewport_rows.max(1))
                         .unwrap_or(1) as isize;
-                    ts::content_modal_scroll_by(&mut state.tracer, rows, ceiling)
+                    ts::content_modal_scroll_by(&mut state.tracer, rows, &cfg)
                 }
                 FocusAction::First => {
                     ts::content_modal_scroll_horizontal_home(&mut state.tracer);
-                    ts::content_modal_scroll_to(&mut state.tracer, 0, ceiling)
+                    ts::content_modal_scroll_to(&mut state.tracer, 0, &cfg)
                 }
                 FocusAction::Last => {
                     let line_count = ts::content_modal_line_count(&state.tracer);
                     ts::content_modal_scroll_to(
                         &mut state.tracer,
                         line_count.saturating_sub(1),
-                        ceiling,
+                        &cfg,
                     )
                 }
                 // Left/Right scroll the body sideways (for wide CSV rows,
@@ -888,8 +888,8 @@ fn handle_content_modal_search_input(state: &mut AppState, key: KeyEvent) -> Opt
         KeyCode::Enter => {
             ts::content_modal_search_commit(&mut state.tracer);
             // Scroll to the first match if one exists.
-            let ceiling = state.tracer_config.ceiling.text;
-            let fired = ts::content_modal_scroll_to_match(&mut state.tracer, ceiling);
+            let cfg = state.tracer_config.ceiling.clone();
+            let fired = ts::content_modal_scroll_to_match(&mut state.tracer, &cfg);
             if !fired.is_empty() {
                 return Some(UpdateResult {
                     redraw: true,
@@ -980,8 +980,8 @@ fn handle_content_modal_verb(
                 }
                 ContentModalTab::Diff => ContentModalTab::Input,
             };
-            let ceiling = state.tracer_config.ceiling.text;
-            let fired = switch_content_modal_tab(&mut state.tracer, next, ceiling);
+            let cfg = state.tracer_config.ceiling.clone();
+            let fired = switch_content_modal_tab(&mut state.tracer, next, &cfg);
             UpdateResult {
                 redraw: true,
                 intent: if fired.is_empty() {
@@ -1016,8 +1016,8 @@ fn handle_content_modal_verb(
                     }
                 }
             };
-            let ceiling = state.tracer_config.ceiling.text;
-            let fired = switch_content_modal_tab(&mut state.tracer, prev, ceiling);
+            let cfg = state.tracer_config.ceiling.clone();
+            let fired = switch_content_modal_tab(&mut state.tracer, prev, &cfg);
             UpdateResult {
                 redraw: true,
                 intent: if fired.is_empty() {
@@ -1030,9 +1030,8 @@ fn handle_content_modal_verb(
         }
 
         ContentModalVerb::JumpInput => {
-            let ceiling = state.tracer_config.ceiling.text;
-            let fired =
-                switch_content_modal_tab(&mut state.tracer, ContentModalTab::Input, ceiling);
+            let cfg = state.tracer_config.ceiling.clone();
+            let fired = switch_content_modal_tab(&mut state.tracer, ContentModalTab::Input, &cfg);
             UpdateResult {
                 redraw: true,
                 intent: if fired.is_empty() {
@@ -1045,9 +1044,8 @@ fn handle_content_modal_verb(
         }
 
         ContentModalVerb::JumpOutput => {
-            let ceiling = state.tracer_config.ceiling.text;
-            let fired =
-                switch_content_modal_tab(&mut state.tracer, ContentModalTab::Output, ceiling);
+            let cfg = state.tracer_config.ceiling.clone();
+            let fired = switch_content_modal_tab(&mut state.tracer, ContentModalTab::Output, &cfg);
             UpdateResult {
                 redraw: true,
                 intent: if fired.is_empty() {
@@ -1070,8 +1068,8 @@ fn handle_content_modal_verb(
             if !diffable_ok {
                 return UpdateResult::default();
             }
-            let ceiling = state.tracer_config.ceiling.text;
-            let fired = switch_content_modal_tab(&mut state.tracer, ContentModalTab::Diff, ceiling);
+            let cfg = state.tracer_config.ceiling.clone();
+            let fired = switch_content_modal_tab(&mut state.tracer, ContentModalTab::Diff, &cfg);
             UpdateResult {
                 redraw: true,
                 intent: if fired.is_empty() {
@@ -1124,8 +1122,8 @@ fn handle_content_modal_verb(
                 let i = s.current.unwrap_or(0);
                 s.current = Some((i + 1) % s.matches.len());
             }
-            let ceiling = state.tracer_config.ceiling.text;
-            let fired = ts::content_modal_scroll_to_match(&mut state.tracer, ceiling);
+            let cfg = state.tracer_config.ceiling.clone();
+            let fired = ts::content_modal_scroll_to_match(&mut state.tracer, &cfg);
             UpdateResult {
                 redraw: true,
                 intent: if fired.is_empty() {
@@ -1146,8 +1144,8 @@ fn handle_content_modal_verb(
                 let n = s.matches.len();
                 s.current = Some((i + n - 1) % n);
             }
-            let ceiling = state.tracer_config.ceiling.text;
-            let fired = ts::content_modal_scroll_to_match(&mut state.tracer, ceiling);
+            let cfg = state.tracer_config.ceiling.clone();
+            let fired = ts::content_modal_scroll_to_match(&mut state.tracer, &cfg);
             UpdateResult {
                 redraw: true,
                 intent: if fired.is_empty() {

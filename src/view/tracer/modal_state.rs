@@ -166,7 +166,7 @@ pub fn open_content_modal(
     state: &mut TracerState,
     detail: &crate::client::tracer::ProvenanceEventDetail,
     active_tab: ContentModalTab,
-    ceiling: Option<usize>,
+    cfg: &crate::config::TracerCeilingConfig,
 ) -> Vec<ModalFetchRequest> {
     let (input_mime, output_mime) = mime_pair_from_attributes(&detail.attributes);
     let header = ContentModalHeader {
@@ -215,7 +215,7 @@ pub fn open_content_modal(
 
     let mut fired: Vec<ModalFetchRequest> = Vec::new();
     let event_id = modal.event_id;
-    let initial_len = match ceiling {
+    let initial_len = match provisional_ceiling(cfg) {
         Some(cap) => MODAL_CHUNK_BYTES.min(cap),
         None => MODAL_CHUNK_BYTES,
     };
@@ -266,6 +266,10 @@ fn mime_pair_from_attributes(
 ///
 /// Drops chunks whose `event_id` doesn't match the currently-open
 /// modal (stale delivery after modal close or event change).
+///
+/// Uses `TracerCeilingConfig::default()` (no ceiling). For runtime
+/// use where a per-context config is available, prefer
+/// `apply_modal_chunk_with_ceiling`.
 pub fn apply_modal_chunk(
     state: &mut TracerState,
     event_id: i64,
@@ -283,7 +287,7 @@ pub fn apply_modal_chunk(
         bytes,
         eof,
         requested_len,
-        None,
+        &crate::config::TracerCeilingConfig::default(),
     );
 }
 
@@ -296,7 +300,7 @@ pub fn apply_modal_chunk_with_ceiling(
     bytes: Vec<u8>,
     eof: bool,
     _requested_len: usize,
-    ceiling: Option<usize>,
+    cfg: &crate::config::TracerCeilingConfig,
 ) {
     let Some(modal) = state.content_modal.as_mut() else {
         return;
@@ -314,14 +318,25 @@ pub fn apply_modal_chunk_with_ceiling(
     buf.loaded.extend_from_slice(&bytes);
     buf.in_flight = false;
     buf.last_error = None;
-    buf.decoded = crate::client::tracer::classify_content(buf.loaded.clone());
-    if eof {
-        buf.fully_loaded = true;
+    // Resolve the per-side ceiling on the first chunk (idempotent).
+    apply_first_chunk_and_resolve_ceiling(buf, &bytes, cfg);
+    // Enforce the now-resolved ceiling: truncate if we've exceeded it.
+    let cap = match buf.effective_ceiling {
+        Some(resolved) => resolved,
+        None => provisional_ceiling(cfg),
+    };
+    if let Some(c) = cap {
+        if buf.loaded.len() > c {
+            buf.loaded.truncate(c);
+            buf.ceiling_hit = true;
+            buf.fully_loaded = true;
+        } else if buf.loaded.len() == c {
+            buf.ceiling_hit = true;
+            buf.fully_loaded = true;
+        }
     }
-    if let Some(cap) = ceiling
-        && buf.loaded.len() >= cap
-    {
-        buf.ceiling_hit = true;
+    buf.decoded = crate::client::tracer::classify_content(buf.loaded.clone());
+    if eof && !buf.fully_loaded {
         buf.fully_loaded = true;
     }
     modal.diff_cache = None;
@@ -357,7 +372,7 @@ const STREAM_LOOKAHEAD_LINES: usize = 100;
 pub fn content_modal_scroll_to(
     state: &mut TracerState,
     new_offset: usize,
-    ceiling: Option<usize>,
+    cfg: &crate::config::TracerCeilingConfig,
 ) -> Vec<ModalFetchRequest> {
     let Some(modal) = state.content_modal.as_mut() else {
         return Vec::new();
@@ -379,6 +394,9 @@ pub fn content_modal_scroll_to(
     if buf.fully_loaded || buf.in_flight {
         return Vec::new();
     }
+    if !should_fire_next_chunk(buf, cfg) {
+        return Vec::new();
+    }
 
     let line_count = decoded_line_count(&buf.decoded);
     let viewport_bottom = modal.scroll_offset.saturating_add(modal.last_viewport_rows);
@@ -388,8 +406,13 @@ pub fn content_modal_scroll_to(
         return Vec::new();
     }
 
-    let remaining = match ceiling {
-        Some(cap) => cap.saturating_sub(buf.loaded.len()),
+    // Compute how many bytes we can still fetch under the resolved (or provisional) ceiling.
+    let cap = match buf.effective_ceiling {
+        Some(resolved) => resolved,
+        None => provisional_ceiling(cfg),
+    };
+    let remaining = match cap {
+        Some(c) => c.saturating_sub(buf.loaded.len()),
         None => MODAL_CHUNK_BYTES,
     };
     if remaining == 0 {
@@ -447,7 +470,7 @@ pub fn content_modal_line_count(state: &TracerState) -> usize {
 pub fn content_modal_scroll_by(
     state: &mut TracerState,
     delta: isize,
-    ceiling: Option<usize>,
+    cfg: &crate::config::TracerCeilingConfig,
 ) -> Vec<ModalFetchRequest> {
     let line_count = content_modal_line_count(state);
     let current = state
@@ -462,7 +485,7 @@ pub fn content_modal_scroll_by(
     } else {
         current.saturating_sub((-delta) as usize)
     };
-    content_modal_scroll_to(state, new_offset, ceiling)
+    content_modal_scroll_to(state, new_offset, cfg)
 }
 
 /// Shift the horizontal-scroll offset by `delta` columns (positive =
@@ -497,7 +520,7 @@ pub fn content_modal_scroll_horizontal_home(state: &mut TracerState) {
 /// to avoid jitter. Returns any auto-stream requests the new position implies.
 pub fn content_modal_scroll_to_match(
     state: &mut TracerState,
-    ceiling: Option<usize>,
+    cfg: &crate::config::TracerCeilingConfig,
 ) -> Vec<ModalFetchRequest> {
     let Some(modal) = state.content_modal.as_ref() else {
         return Vec::new();
@@ -515,7 +538,7 @@ pub fn content_modal_scroll_to_match(
     let offset = modal.scroll_offset;
     let rows = modal.last_viewport_rows.max(1);
     if line < offset || line >= offset + rows {
-        content_modal_scroll_to(state, line, ceiling)
+        content_modal_scroll_to(state, line, cfg)
     } else {
         Vec::new()
     }
@@ -974,7 +997,7 @@ pub fn close_content_modal(state: &mut TracerState) {
 pub fn switch_content_modal_tab(
     state: &mut TracerState,
     new_tab: ContentModalTab,
-    ceiling: Option<usize>,
+    cfg: &crate::config::TracerCeilingConfig,
 ) -> Vec<ModalFetchRequest> {
     let Some(modal) = state.content_modal.as_mut() else {
         return Vec::new();
@@ -992,7 +1015,7 @@ pub fn switch_content_modal_tab(
     }
 
     let event_id = modal.event_id;
-    let initial_len = match ceiling {
+    let initial_len = match provisional_ceiling(cfg) {
         Some(cap) => MODAL_CHUNK_BYTES.min(cap),
         None => MODAL_CHUNK_BYTES,
     };
@@ -1247,6 +1270,25 @@ pub fn provisional_ceiling(cfg: &crate::config::TracerCeilingConfig) -> Option<u
     }
 }
 
+/// Returns `true` iff there is still budget for fetching another chunk
+/// on this side, given the per-side resolved ceiling (or the provisional
+/// `max(text, tabular)` ceiling if not yet resolved).
+///
+/// `effective_ceiling = Some(None)` means "decided: unbounded" and
+/// `effective_ceiling = None` means "not decided yet". Both cases use
+/// the appropriate path via the `match` before falling back to
+/// `provisional_ceiling` — `Option::flatten` would conflate the two.
+pub fn should_fire_next_chunk(side: &SideBuffer, cfg: &crate::config::TracerCeilingConfig) -> bool {
+    let cap = match side.effective_ceiling {
+        Some(resolved) => resolved,       // decided (Some=cap, None=unbounded)
+        None => provisional_ceiling(cfg), // not decided yet → provisional max
+    };
+    match cap {
+        None => true,                     // unbounded
+        Some(c) => side.loaded.len() < c, // room remains
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1343,6 +1385,7 @@ mod tests {
     #[test]
     fn apply_modal_chunk_hits_ceiling() {
         use crate::client::ContentSide;
+        use crate::config::TracerCeilingConfig;
 
         let mut modal = stub_modal(1, ContentModalTab::Input);
         modal.input.in_flight = true;
@@ -1351,7 +1394,12 @@ mod tests {
             ..TracerState::default()
         };
 
-        // Ceiling = 10, chunk = 20 bytes → ceiling_hit
+        // Ceiling = 10 bytes (text & tabular both set to 10), chunk = 20 bytes → ceiling_hit
+        let cfg = TracerCeilingConfig {
+            text: Some(10),
+            tabular: Some(10),
+            diff: Some(512 * 1024),
+        };
         apply_modal_chunk_with_ceiling(
             &mut state,
             1,
@@ -1360,7 +1408,7 @@ mod tests {
             vec![0u8; 20],
             false,
             20,
-            Some(10),
+            &cfg,
         );
 
         let buf = &state.content_modal.as_ref().unwrap().input;
@@ -1371,6 +1419,7 @@ mod tests {
     #[test]
     fn apply_modal_chunk_unbounded_ceiling_keeps_streaming() {
         use crate::client::ContentSide;
+        use crate::config::TracerCeilingConfig;
 
         let mut modal = stub_modal(1, ContentModalTab::Input);
         modal.input.in_flight = true;
@@ -1379,6 +1428,12 @@ mod tests {
             ..TracerState::default()
         };
 
+        // Unbounded config (text = None, tabular = None)
+        let cfg = TracerCeilingConfig {
+            text: None,
+            tabular: None,
+            diff: Some(512 * 1024),
+        };
         apply_modal_chunk_with_ceiling(
             &mut state,
             1,
@@ -1387,7 +1442,7 @@ mod tests {
             vec![0u8; 20],
             false,
             20,
-            None,
+            &cfg,
         );
 
         let buf = &state.content_modal.as_ref().unwrap().input;
@@ -1457,12 +1512,8 @@ mod tests {
         let mut state = TracerState::default();
         let detail = stub_event_detail();
 
-        let fired = open_content_modal(
-            &mut state,
-            &detail,
-            ContentModalTab::Input,
-            Some(4 * 1024 * 1024),
-        );
+        let cfg = crate::config::TracerCeilingConfig::default();
+        let fired = open_content_modal(&mut state, &detail, ContentModalTab::Input, &cfg);
         let modal = state.content_modal.as_ref().expect("modal open");
         assert_eq!(modal.event_id, 42);
         assert_eq!(modal.active_tab, ContentModalTab::Input);
@@ -1483,10 +1534,16 @@ mod tests {
     #[test]
     fn content_modal_open_with_tiny_ceiling_clamps_first_chunk() {
         use crate::client::ContentSide;
+        use crate::config::TracerCeilingConfig;
 
         let detail = stub_event_detail();
         let mut state = TracerState::default();
-        let fired = open_content_modal(&mut state, &detail, ContentModalTab::Input, Some(100_000));
+        let cfg = TracerCeilingConfig {
+            text: Some(100_000),
+            tabular: Some(100_000),
+            diff: Some(512 * 1024),
+        };
+        let fired = open_content_modal(&mut state, &detail, ContentModalTab::Input, &cfg);
         assert_eq!(fired.len(), 1);
         assert_eq!(fired[0].side, ContentSide::Input);
         assert_eq!(fired[0].len, 100_000);
@@ -1514,7 +1571,8 @@ mod tests {
         let mut state = state;
 
         // Viewport bottom = 965 + 30 = 995 → distance to tail (1000) = 5 < 100.
-        let fired = content_modal_scroll_to(&mut state, 965, Some(4 * 1024 * 1024));
+        let cfg = crate::config::TracerCeilingConfig::default();
+        let fired = content_modal_scroll_to(&mut state, 965, &cfg);
         assert_eq!(fired.len(), 1);
         assert_eq!(fired[0].side, ContentSide::Input);
         assert_eq!(fired[0].offset, len);
@@ -1537,7 +1595,8 @@ mod tests {
             content_modal: Some(modal),
             ..TracerState::default()
         };
-        let fired = content_modal_scroll_to(&mut state, 965, Some(4 * 1024 * 1024));
+        let cfg = crate::config::TracerCeilingConfig::default();
+        let fired = content_modal_scroll_to(&mut state, 965, &cfg);
         assert!(fired.is_empty());
     }
 
@@ -1558,13 +1617,15 @@ mod tests {
             content_modal: Some(modal),
             ..TracerState::default()
         };
-        let fired = content_modal_scroll_to(&mut state, 965, Some(4 * 1024 * 1024));
+        let cfg = crate::config::TracerCeilingConfig::default();
+        let fired = content_modal_scroll_to(&mut state, 965, &cfg);
         assert!(fired.is_empty());
     }
 
     #[test]
     fn content_modal_scroll_respects_ceiling() {
         use crate::client::tracer::ContentRender;
+        use crate::config::TracerCeilingConfig;
 
         let text = "a\n".repeat(1000);
         let loaded_bytes = text.as_bytes().to_vec();
@@ -1575,13 +1636,17 @@ mod tests {
             text,
             pretty_printed: false,
         };
+        // Pre-resolve the effective ceiling so the scroll reducer sees it.
+        let cap = loaded_len + 48_576;
+        modal.input.effective_ceiling = Some(Some(cap));
         modal.last_viewport_rows = 30;
         let mut state = TracerState {
             content_modal: Some(modal),
             ..TracerState::default()
         };
-        // Ceiling = loaded_len + 48576 bytes remaining, chunk = min(512K, 48576)
-        let fired = content_modal_scroll_to(&mut state, 965, Some(loaded_len + 48_576));
+        // ceiling resolved to loaded_len + 48576; remaining = 48576, chunk = min(512K, 48576)
+        let cfg = TracerCeilingConfig::default();
+        let fired = content_modal_scroll_to(&mut state, 965, &cfg);
         assert_eq!(fired.len(), 1);
         assert_eq!(fired[0].len, 48_576);
     }
@@ -1753,8 +1818,8 @@ mod tests {
             content_modal: Some(stub_modal(1, ContentModalTab::Input)),
             ..TracerState::default()
         };
-        let fired =
-            switch_content_modal_tab(&mut state, ContentModalTab::Output, Some(4 * 1024 * 1024));
+        let cfg = crate::config::TracerCeilingConfig::default();
+        let fired = switch_content_modal_tab(&mut state, ContentModalTab::Output, &cfg);
         let modal = state.content_modal.as_ref().unwrap();
         assert_eq!(modal.active_tab, ContentModalTab::Output);
         assert_eq!(modal.scroll_offset, 0);
@@ -1771,8 +1836,8 @@ mod tests {
             content_modal: Some(modal),
             ..TracerState::default()
         };
-        let fired =
-            switch_content_modal_tab(&mut state, ContentModalTab::Output, Some(4 * 1024 * 1024));
+        let cfg = crate::config::TracerCeilingConfig::default();
+        let fired = switch_content_modal_tab(&mut state, ContentModalTab::Output, &cfg);
         assert!(fired.is_empty());
     }
 
@@ -1907,7 +1972,8 @@ mod tests {
         };
 
         // Scroll to line 165: viewport bottom = 195, distance to tail (200) = 5 < 100.
-        let fired = content_modal_scroll_by(&mut state, 165, Some(4 * 1024 * 1024));
+        let cfg = crate::config::TracerCeilingConfig::default();
+        let fired = content_modal_scroll_by(&mut state, 165, &cfg);
         assert_eq!(
             fired.len(),
             1,
@@ -1935,7 +2001,8 @@ mod tests {
             content_modal: Some(modal),
             ..TracerState::default()
         };
-        let fired = content_modal_scroll_by(&mut state, -10, Some(4 * 1024 * 1024));
+        let cfg = crate::config::TracerCeilingConfig::default();
+        let fired = content_modal_scroll_by(&mut state, -10, &cfg);
         assert!(fired.is_empty(), "no fetch when fully loaded");
         assert_eq!(
             state.content_modal.as_ref().unwrap().scroll_offset,
@@ -1960,8 +2027,9 @@ mod tests {
             content_modal: Some(modal),
             ..TracerState::default()
         };
+        let cfg = crate::config::TracerCeilingConfig::default();
         let line_count = content_modal_line_count(&state);
-        let fired = content_modal_scroll_to(&mut state, line_count.saturating_sub(1), None);
+        let fired = content_modal_scroll_to(&mut state, line_count.saturating_sub(1), &cfg);
         assert!(fired.is_empty(), "fully loaded: no fetch on Last");
         assert_eq!(
             state.content_modal.as_ref().unwrap().scroll_offset,
@@ -1986,7 +2054,8 @@ mod tests {
             content_modal: Some(modal),
             ..TracerState::default()
         };
-        let fired = content_modal_scroll_by(&mut state, 20, Some(4 * 1024 * 1024));
+        let cfg = crate::config::TracerCeilingConfig::default();
+        let fired = content_modal_scroll_by(&mut state, 20, &cfg);
         assert!(fired.is_empty(), "fully loaded: no fetch");
         assert_eq!(
             state.content_modal.as_ref().unwrap().scroll_offset,
@@ -2117,7 +2186,8 @@ mod tests {
             ..TracerState::default()
         };
 
-        let fired = content_modal_scroll_to_match(&mut state, None);
+        let cfg = crate::config::TracerCeilingConfig::default();
+        let fired = content_modal_scroll_to_match(&mut state, &cfg);
         // fully_loaded — no fetch fires; scroll offset updated.
         assert!(fired.is_empty(), "no fetch for fully loaded content");
         assert_eq!(
@@ -2427,8 +2497,9 @@ mod tests {
             content_modal: Some(stub_modal(1, ContentModalTab::Input)),
             ..TracerState::default()
         };
+        let cfg = crate::config::TracerCeilingConfig::default();
         content_modal_scroll_horizontal_by(&mut state, 25);
-        switch_content_modal_tab(&mut state, ContentModalTab::Output, None);
+        switch_content_modal_tab(&mut state, ContentModalTab::Output, &cfg);
         assert_eq!(
             state
                 .content_modal
@@ -2526,5 +2597,25 @@ mod tests {
             diff: Some(16 * 1024 * 1024),
         };
         assert_eq!(provisional_ceiling(&cfg2), None);
+    }
+
+    #[test]
+    fn should_fire_next_chunk_uses_resolved_ceiling_when_decided() {
+        use crate::config::TracerCeilingConfig;
+        let cfg = TracerCeilingConfig::default();
+        let mut side = SideBuffer {
+            loaded: vec![0u8; 100],
+            ..SideBuffer::default()
+        };
+        // Not yet resolved → falls back to provisional (max(text, tabular)) = 64 MiB.
+        assert!(should_fire_next_chunk(&side, &cfg));
+
+        // Mark as resolved with a tiny cap.
+        side.effective_ceiling = Some(Some(50));
+        assert!(!should_fire_next_chunk(&side, &cfg)); // 100 >= 50, no room
+
+        // Resolved as unbounded.
+        side.effective_ceiling = Some(None);
+        assert!(should_fire_next_chunk(&side, &cfg));
     }
 }

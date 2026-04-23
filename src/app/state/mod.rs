@@ -883,7 +883,7 @@ fn update_inner(state: &mut AppState, event: AppEvent, config: &Config) -> Updat
         AppEvent::Data(ViewPayload::Tracer(payload)) => {
             // Intercept modal-chunk variants before the general apply_payload
             // dispatch so the reducers run with full AppState context (needed
-            // for `tracer_config.ceiling.text` and the lazy diff
+            // for `tracer_config.ceiling` and the lazy diff
             // cache recompute).
             match payload {
                 crate::event::TracerPayload::ModalChunk {
@@ -894,7 +894,7 @@ fn update_inner(state: &mut AppState, event: AppEvent, config: &Config) -> Updat
                     eof,
                     requested_len,
                 } => {
-                    let ceiling = state.tracer_config.ceiling.text;
+                    let cfg = state.tracer_config.ceiling.clone();
                     crate::view::tracer::state::apply_modal_chunk_with_ceiling(
                         &mut state.tracer,
                         event_id,
@@ -903,7 +903,7 @@ fn update_inner(state: &mut AppState, event: AppEvent, config: &Config) -> Updat
                         bytes,
                         eof,
                         requested_len,
-                        ceiling,
+                        &cfg,
                     );
                     // Recompute diffability and (lazily) populate the
                     // diff cache after every chunk — independent of the
