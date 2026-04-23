@@ -310,14 +310,16 @@ the keymap shadows outer-tab keys.
 Streaming: `provenance_content_range(event_id, side, offset, len)`
 fetches 512 KiB chunks. A reducer auto-fires the next chunk when the
 viewport bottom comes within 100 lines of the decoded tail. Per-side
-ceiling defaults to 4 MiB (`[tracer] modal_streaming_ceiling`);
-`"0"` → unbounded.
+Per-side ceilings are configured via the `[tracer.ceiling]` nested
+table (keys: `text`, `tabular`, `diff`; defaults `4 MiB` / `64 MiB`
+/ `16 MiB`; `"0"` → unbounded). The legacy `modal_streaming_ceiling`
+flat key is honored for one release with a deprecation warn.
 
-Diff mode is bounded at 512 KiB per side (fixed, not configurable)
+Diff mode is bounded by `[tracer.ceiling] diff` (default `16 MiB`)
 and uses `similar::TextDiff::from_lines` with 3-line context. Diff
 eligibility requires both sides available, MIME pair matching the
 allowlist (or UTF-8 fallback when neither side declares a MIME),
-declared size ≤ 512 KiB per side, and non-identical bytes.
+declared size ≤ the diff ceiling per side, and non-identical bytes.
 
 `DiffRender::change_stops` is the navigation index for Ctrl+↓ /
 Ctrl+↑ ("next / previous change"). It is a flat list of line
@@ -334,8 +336,42 @@ appends `· N changes` from `change_stops.len()`.
 Search primitives (`MatchSpan`, `SearchState`, `compute_matches`) are
 shared with the Bulletins detail modal via `src/widget/search.rs`.
 
-Parquet / tabular viewers are **out of scope**; tracked as a follow-up
-spec.
+### Tracer tabular content (Parquet & Avro)
+
+`ContentRender::Tabular { format, schema_summary, body, decoded_bytes, truncated }`
+is produced when `classify_content` sees `PAR1` or `Obj\x01` magic in
+the first four bytes. Decoders live in `src/client/tracer.rs`
+(`decode_parquet` via `ParquetRecordBatchReaderBuilder` +
+`arrow::json::LineDelimitedWriter`; `decode_avro` via `apache_avro::Reader` +
+`from_value::<serde_json::Value>`). Decoder errors are caught inside
+`classify_content`, logged at `warn!`, and surfaced as `Hex` —
+classifier signature stays infallible.
+
+**Per-side ceiling:** `[tracer.ceiling]` table has three keys —
+`text`, `tabular`, `diff`. The reducer starts each side with a
+provisional ceiling of `max(text, tabular)`; after the first chunk
+arrives, `apply_first_chunk_and_resolve_ceiling` sniffs magic and
+records the resolved ceiling on `SideBuffer.effective_ceiling`.
+Subsequent reducer ticks use that resolved value.
+
+**Parquet truncation:** Parquet's footer lives at EOF, so a
+ceiling-hit fetch cannot decode at all and falls back to `Hex` with
+a chip identifying the cause (`parquet truncated at N MiB — raise
+[tracer.ceiling] tabular or use "s" to save`). Avro is streamable
+and degrades gracefully via `truncated = true`.
+
+**Diff:** Tabular sides diff iff their `format` tags match. Diff
+input is `Tabular::body`; schema lines do not contribute hunks.
+The `diff` ceiling caps the per-side input fed into
+`similar::TextDiff::from_lines`.
+
+**Fixture:** the integration test fixture's `diff-pipeline` includes
+two new sink chains (`ConvertRecord-parquet` → `LogAttribute-parquet`
+and `ConvertRecord-avro` → `LogAttribute-avro`) that produce
+parquet/avro provenance content for live-cluster decode coverage.
+The two new controller services are `diff-parquet-writer`
+(`ParquetRecordSetWriter`) and `diff-avro-writer`
+(`AvroRecordSetWriter`).
 
 ### Poll intervals
 
@@ -495,6 +531,15 @@ One command does it all:
 ./integration-tests/run.sh
 ```
 
+`run.sh` invokes `scripts/download-nars.sh` before bringing up the
+stack to fetch `nifi-parquet-nar` (and its transitive
+`nifi-hadoop-libraries-nar` dependency) from Maven Central into a
+gitignored cache. The NARs are mounted per-version into each NiFi
+service's `/opt/nifi/nifi-current/nar_extensions/` autoload
+directory. The `apache/nifi` base images don't bundle the
+standalone Parquet writer — only the Iceberg-specific variant —
+so this mount is required for `diff-parquet-writer` to enable.
+
 **Live-dev workflow** — the fixture stays up, point the TUI at it, and
 iterate without re-seeding:
 
@@ -512,7 +557,7 @@ cargo run -- --config integration-tests/nifilens-config.toml \
 ```
 
 `--skip-if-seeded` makes re-runs of the seeder a no-op when the fixture
-marker PG (`nifilens-fixture-v2`) is already present, so iterating on
+marker PG (`nifilens-fixture-v3`) is already present, so iterating on
 `nifi-lens` itself doesn't reset the fixture state.
 
 The fixture is six process groups (`healthy-pipeline` with nested
@@ -521,7 +566,7 @@ The fixture is six process groups (`healthy-pipeline` with nested
 top-level controller services (`fixture-json-reader` ENABLED,
 `fixture-json-writer` ENABLED, `fixture-csv-reader` DISABLED,
 `fixture-broken-writer` INVALID/DISABLED), all under a top-level
-marker PG named `nifilens-fixture-v2`.
+marker PG named `nifilens-fixture-v3`.
 
 `bulky-pipeline` produces ~1.5 MiB random-text flowfiles at a low rate,
 providing content for Tracer streaming / truncation testing.
