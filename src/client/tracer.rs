@@ -788,6 +788,84 @@ fn format_avro_type(schema: &apache_avro::Schema) -> String {
     }
 }
 
+/// Decode a Parquet file into [`ContentRender::Tabular`] by streaming
+/// `RecordBatch`es through `arrow::json::LineDelimitedWriter`.
+///
+/// Returns `Err` on truncated containers, unsupported codecs, or any
+/// downstream Arrow/Parquet error. Callers (notably `classify_content`)
+/// catch the error and render `Hex` instead.
+pub fn decode_parquet(
+    bytes: &[u8],
+) -> Result<ContentRender, Box<dyn std::error::Error + Send + Sync>> {
+    use bytes::Bytes;
+    use parquet::arrow::arrow_reader::ParquetRecordBatchReaderBuilder;
+
+    let bytes = Bytes::copy_from_slice(bytes);
+    let builder = ParquetRecordBatchReaderBuilder::try_new(bytes)?;
+    let arrow_schema = builder.schema().clone();
+    let schema_summary = format_arrow_schema(&arrow_schema);
+
+    let reader = builder.with_batch_size(1024).build()?;
+
+    // Serialise each batch to a temporary buffer, check limits, then accumulate.
+    // This two-phase (per-batch temp buffer → accumulator) approach avoids a
+    // borrow-checker conflict: `LineDelimitedWriter` holds `&mut` to its output
+    // for its entire lifetime, so we cannot simultaneously read the accumulated
+    // length through the same reference.
+    let mut body_bytes: Vec<u8> = Vec::with_capacity(64 * 1024);
+    let mut decoded_records = 0usize;
+    let mut truncated = false;
+
+    for batch_result in reader {
+        let batch = batch_result?;
+        // Pre-check both limits BEFORE serialising this batch. The byte limit
+        // is "soft" — see `decode_avro` for the same pattern.
+        if decoded_records + batch.num_rows() > TABULAR_RECORD_LIMIT
+            || body_bytes.len() >= TABULAR_BODY_LIMIT
+        {
+            truncated = true;
+            break;
+        }
+        let mut chunk: Vec<u8> = Vec::new();
+        {
+            let mut writer = arrow::json::LineDelimitedWriter::new(&mut chunk);
+            writer.write(&batch)?;
+            writer.finish()?;
+        }
+        body_bytes.extend_from_slice(&chunk);
+        decoded_records += batch.num_rows();
+    }
+
+    let mut body = String::from_utf8(body_bytes)?;
+    if body.ends_with('\n') {
+        body.pop();
+    }
+    let decoded_bytes = body.len();
+
+    Ok(ContentRender::Tabular {
+        format: TabularFormat::Parquet,
+        schema_summary,
+        body,
+        decoded_bytes,
+        truncated,
+    })
+}
+
+/// Render an Arrow schema as one line per top-level field, using each
+/// field's `DataType` `Display` output (e.g. `id : Int64`, `name : Utf8`,
+/// `tags : List<Utf8>`). Nullable fields carry a trailing `?`.
+fn format_arrow_schema(schema: &arrow::datatypes::Schema) -> String {
+    schema
+        .fields()
+        .iter()
+        .map(|f| {
+            let nullable = if f.is_nullable() { "?" } else { "" };
+            format!("{} : {}{}", f.name(), f.data_type(), nullable)
+        })
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
 /// Converts lineage graph nodes into a chronological list of event summaries.
 ///
 /// Filters to nodes whose `type` field equals `"EVENT"`, sorts ascending by
@@ -1319,5 +1397,72 @@ mod tests {
         } else {
             panic!("expected Tabular");
         }
+    }
+
+    fn build_parquet_fixture(records: usize) -> Vec<u8> {
+        use std::sync::Arc;
+
+        use arrow::array::{ArrayRef, BooleanArray, Int64Array, StringArray};
+        use arrow::datatypes::{DataType, Field, Schema};
+        use arrow::record_batch::RecordBatch;
+        use parquet::arrow::ArrowWriter;
+
+        let schema = Arc::new(Schema::new(vec![
+            Field::new("id", DataType::Int64, false),
+            Field::new("name", DataType::Utf8, false),
+            Field::new("active", DataType::Boolean, false),
+        ]));
+        let ids: Int64Array = (0..records as i64).collect();
+        let names: StringArray = (0..records).map(|i| Some(format!("user-{i}"))).collect();
+        let active: BooleanArray = (0..records).map(|i| Some(i % 2 == 0)).collect();
+        let batch = RecordBatch::try_new(
+            schema.clone(),
+            vec![
+                Arc::new(ids) as ArrayRef,
+                Arc::new(names) as ArrayRef,
+                Arc::new(active) as ArrayRef,
+            ],
+        )
+        .unwrap();
+
+        let mut buf = Vec::new();
+        let mut writer = ArrowWriter::try_new(&mut buf, schema, None).unwrap();
+        writer.write(&batch).unwrap();
+        writer.close().unwrap();
+        buf
+    }
+
+    #[test]
+    fn decode_parquet_happy_path_yields_tabular() {
+        let bytes = build_parquet_fixture(5);
+        let render = decode_parquet(&bytes).expect("decode_parquet");
+        match render {
+            ContentRender::Tabular {
+                format,
+                schema_summary,
+                body,
+                decoded_bytes,
+                truncated,
+            } => {
+                assert_eq!(format, TabularFormat::Parquet);
+                assert!(schema_summary.contains("id"));
+                assert!(schema_summary.contains("name"));
+                assert!(schema_summary.contains("active"));
+                assert_eq!(body.lines().count(), 5);
+                assert!(body.contains(r#""id":0"#));
+                assert!(body.contains(r#""name":"user-3""#));
+                assert_eq!(decoded_bytes, body.len());
+                assert!(!truncated);
+            }
+            other => panic!("expected Tabular, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn decode_parquet_corrupt_returns_err() {
+        let mut bytes = b"PAR1".to_vec();
+        bytes.extend_from_slice(&[0u8; 64]); // header magic but no footer
+        let result = decode_parquet(&bytes);
+        assert!(result.is_err());
     }
 }
