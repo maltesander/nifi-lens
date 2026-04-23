@@ -27,9 +27,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   GC table). Standalone NiFi servers degrade cleanly to a reduced
   layout.
 - `[polling.cluster] cluster_nodes` config key (default `5s`).
+- **Tracer**: content viewer decodes Apache Parquet (`PAR1` magic) and
+  Apache Avro Object Container Files (`Obj\x01` magic) into a schema
+  header + JSON-Lines body. The Diff tab supports Parquet↔Parquet and
+  Avro↔Avro comparisons; Parquet↔Avro shows a Mime mismatch.
 
 ### Changed
 
+- **Config**: `[tracer] modal_streaming_ceiling` is replaced by the
+  nested `[tracer.ceiling]` table with `text`, `tabular`, and `diff`
+  keys (defaults `4 MiB` / `64 MiB` / `16 MiB`; `"0"` = unbounded).
+  The legacy key is honored for one release with a deprecation
+  warning, then removed. Diff size cap is now configurable via
+  `[tracer.ceiling] diff` (was a fixed 512 KiB).
 - **Tracer**: inline content preview cap lowered from 1 MiB to 8 KiB.
   Use `i` to open the new modal for full streamed content.
 - **Bulletins detail modal**: `Enter` is now a no-op. Previously it
@@ -37,6 +47,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   navigation when committing a `/`-search with Enter and then pressing
   Enter a second time. To jump to the source, close the modal and use
   `g` on the Bulletins tab.
+- **Fixture**: `diff-pipeline` adds `ConvertRecord-parquet` and
+  `ConvertRecord-avro` sink chains plus the supporting
+  `diff-parquet-writer` / `diff-avro-writer` controller services for
+  live-cluster Tabular decode coverage. The fixture marker is
+  bumped to `nifilens-fixture-v3`.
+- **Build**: `integration-tests/scripts/download-nars.sh` fetches
+  `nifi-parquet-nar` (and its transitive `nifi-hadoop-libraries-nar`
+  dependency) from Maven Central into a gitignored cache; the NARs
+  are mounted per-version into each NiFi container. Required because
+  `apache/nifi` base images don't bundle the standalone Parquet
+  writer.
 
 ### Fixed
 
