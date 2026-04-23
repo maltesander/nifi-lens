@@ -26,11 +26,13 @@
 //! ```
 //!
 //! Controller services created inside this PG (scoped locally, not at root):
-//!   - diff-json-reader       (JsonTreeReader)      ENABLED
-//!   - diff-json-writer       (JsonRecordSetWriter) ENABLED
-//!   - diff-csv-reader        (CSVReader)           ENABLED
-//!   - diff-csv-writer        (CSVRecordSetWriter)  ENABLED (for ConvertRecord)
-//!   - diff-csv-writer-out    (CSVRecordSetWriter)  ENABLED (for UpdateRecord-csv)
+//!   - diff-json-reader       (JsonTreeReader)           ENABLED
+//!   - diff-json-writer       (JsonRecordSetWriter)      ENABLED
+//!   - diff-csv-reader        (CSVReader)                ENABLED
+//!   - diff-csv-writer        (CSVRecordSetWriter)       ENABLED (for ConvertRecord)
+//!   - diff-csv-writer-out    (CSVRecordSetWriter)       ENABLED (for UpdateRecord-csv)
+//!   - diff-avro-writer       (AvroRecordSetWriter)      ENABLED (for Task 21 avro chain)
+//!   - diff-parquet-writer    (ParquetRecordSetWriter)   ENABLED (for Task 21 parquet chain)
 //!
 //! Integration tests use the three record-processor events as diff-
 //! testable content-modification pairs:
@@ -68,6 +70,9 @@ struct DiffServices {
     // Used by Task 21 (ConvertRecord-avro chain).
     #[allow(dead_code)]
     avro_writer_id: String,
+    // Used by Task 21 (ConvertRecord-parquet chain).
+    #[allow(dead_code)]
+    parquet_writer_id: String,
 }
 
 pub async fn seed(
@@ -282,6 +287,13 @@ async fn create_controller_services(client: &DynamicClient, pg_id: &str) -> Resu
         "org.apache.nifi.avro.AvroRecordSetWriter",
     )
     .await?;
+    let parquet_writer_id = create_and_enable_cs(
+        client,
+        pg_id,
+        "diff-parquet-writer",
+        "org.apache.nifi.parquet.ParquetRecordSetWriter",
+    )
+    .await?;
 
     Ok(DiffServices {
         json_reader_id,
@@ -290,6 +302,7 @@ async fn create_controller_services(client: &DynamicClient, pg_id: &str) -> Resu
         csv_writer_id,
         csv_writer_out_id,
         avro_writer_id,
+        parquet_writer_id,
     })
 }
 
