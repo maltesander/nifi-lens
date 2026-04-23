@@ -338,6 +338,12 @@ fn default_ceiling_diff() -> Option<usize> {
 /// `ceiling.text` if the user has not also set `[ceiling] text`
 /// explicitly. Emits a `tracing::warn!` whenever the legacy key is
 /// seen so users notice the deprecation.
+///
+/// **Edge case:** explicit-set detection compares `ceiling.text`
+/// against the default value. A user who writes `text = "4MiB"`
+/// (matching the default) AND sets the legacy key will have the
+/// legacy value silently win. This is acceptable for a one-release
+/// deprecation window — the warn still fires either way.
 fn apply_legacy_tracer_keys(mut cfg: TracerConfig) -> TracerConfig {
     if let Some(legacy) = cfg.modal_streaming_ceiling.take() {
         let explicit_text_set = cfg.ceiling.text != default_ceiling_text();
