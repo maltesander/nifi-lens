@@ -1026,16 +1026,18 @@ pub fn resolve_and_cache_diff(
 }
 
 /// Pick the text to feed into the line-based diff for a side. Prefers
-/// the already-classified `ContentRender::Text` (which JSON has been
-/// pretty-printed into by `classify_content`) over the raw bytes —
-/// otherwise compact JSON would produce a single-line diff that's
-/// effectively unreadable in the modal. Non-text content falls back
-/// to lossy UTF-8 of the loaded bytes; in practice diff is gated to
-/// text-typed sides upstream so the fallback rarely fires.
+/// the already-classified `ContentRender` variant over the raw bytes —
+/// `Text` carries pretty-printed JSON (single-line diff would be
+/// unreadable), and `Tabular` carries JSON-Lines rows (one record per
+/// line, ideal for line-based diffing). `Hex` and `Empty` are never
+/// reached in practice because diff eligibility is gated upstream on
+/// text-typed or tabular-typed MIME pairs.
 fn side_diff_text(buf: &SideBuffer) -> String {
     match &buf.decoded {
         crate::client::tracer::ContentRender::Text { text, .. } => text.clone(),
-        _ => String::from_utf8_lossy(&buf.loaded).into_owned(),
+        crate::client::tracer::ContentRender::Tabular { body, .. } => body.clone(),
+        crate::client::tracer::ContentRender::Hex { first_4k } => first_4k.clone(),
+        crate::client::tracer::ContentRender::Empty => String::new(),
     }
 }
 
@@ -2920,5 +2922,47 @@ mod tests {
             result,
             Diffable::NotAvailable(NotDiffableReason::SizeExceedsDiffCap)
         ));
+    }
+
+    #[test]
+    fn modal_diff_tabular_parquet_yields_changed_lines() {
+        use crate::client::tracer::{ContentRender, TabularFormat};
+        use crate::config::TracerCeilingConfig;
+        let mut input = SideBuffer {
+            fully_loaded: true,
+            ..SideBuffer::default()
+        };
+        let mut output = SideBuffer {
+            fully_loaded: true,
+            ..SideBuffer::default()
+        };
+        input.decoded = ContentRender::Tabular {
+            format: TabularFormat::Parquet,
+            schema_summary: "id : Int64".into(),
+            body: "{\"id\":0}\n{\"id\":1}\n{\"id\":2}".into(),
+            decoded_bytes: 24,
+            truncated: false,
+        };
+        output.decoded = ContentRender::Tabular {
+            format: TabularFormat::Parquet,
+            schema_summary: "id : Int64".into(),
+            body: "{\"id\":0}\n{\"id\":2}\n{\"id\":3}".into(),
+            decoded_bytes: 24,
+            truncated: false,
+        };
+        let cfg = TracerCeilingConfig::default();
+        let input_text = side_diff_text(&input);
+        let output_text = side_diff_text(&output);
+        let render = compute_diff_cache(&input_text, &output_text, &cfg);
+        // Three lines diffed; expect at least one Insert and one Delete.
+        let tags: Vec<_> = render.lines.iter().map(|l| l.tag).collect();
+        assert!(
+            tags.contains(&similar::ChangeTag::Insert),
+            "expected at least one Insert tag"
+        );
+        assert!(
+            tags.contains(&similar::ChangeTag::Delete),
+            "expected at least one Delete tag"
+        );
     }
 }
