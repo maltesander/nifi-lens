@@ -910,7 +910,7 @@ fn update_inner(state: &mut AppState, event: AppEvent, config: &Config) -> Updat
                     // currently active tab, since the user may switch to
                     // Diff after both sides have already loaded.
                     if let Some(modal) = state.tracer.content_modal.as_mut() {
-                        crate::view::tracer::state::resolve_and_cache_diff(modal);
+                        crate::view::tracer::state::resolve_and_cache_diff(modal, &cfg);
                     }
                     state.last_refresh = Instant::now();
                     UpdateResult {

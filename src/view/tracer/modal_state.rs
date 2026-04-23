@@ -143,10 +143,6 @@ pub struct ContentModalState {
 /// Byte size of a single streaming fetch chunk.
 pub const MODAL_CHUNK_BYTES: usize = 512 * 1024;
 
-/// Maximum bytes loaded per side in Diff mode. Fixed; unlike the
-/// single-side ceiling this is not configurable.
-pub const DIFF_SIZE_CAP_BYTES: u64 = 512 * 1024;
-
 /// One pending fetch request — the reducer returns these instead of
 /// spawning directly so `AppState` code can route through the
 /// `tokio::spawn_local` wiring.
@@ -383,7 +379,7 @@ pub fn content_modal_scroll_to(
     let side = match modal.active_tab {
         ContentModalTab::Input => crate::client::ContentSide::Input,
         ContentModalTab::Output => crate::client::ContentSide::Output,
-        // Diff is capped at 512 KiB per side (fixed via DIFF_SIZE_CAP_BYTES);
+        // Diff is capped per `[tracer.ceiling] diff` (default 16 MiB);
         // both sides are loaded eagerly on modal open when Diff is the
         // landing tab. No auto-stream here — ever.
         ContentModalTab::Diff => return Vec::new(),
@@ -581,6 +577,7 @@ pub fn resolve_diffable(
     header: &ContentModalHeader,
     input: &SideBuffer,
     output: &SideBuffer,
+    cfg: &crate::config::TracerCeilingConfig,
 ) -> Diffable {
     use crate::client::tracer::ContentRender;
 
@@ -619,7 +616,11 @@ pub fn resolve_diffable(
 
     let isize = header.input_size.unwrap_or(input.loaded.len() as u64);
     let osize = header.output_size.unwrap_or(output.loaded.len() as u64);
-    if isize > DIFF_SIZE_CAP_BYTES || osize > DIFF_SIZE_CAP_BYTES {
+    let exceeds = match cfg.diff {
+        Some(cap) => isize > cap as u64 || osize > cap as u64,
+        None => false,
+    };
+    if exceeds {
         return Diffable::NotAvailable(NotDiffableReason::SizeExceedsDiffCap);
     }
 
@@ -643,7 +644,18 @@ const DIFF_CONTEXT_LINES: usize = 3;
 /// "all deletes followed by all inserts" when many or every line of a
 /// CSV / table-like body has changed. When `N != M`, leftover lines
 /// from the longer side are appended after the paired block.
-pub fn compute_diff_cache(input: &str, output: &str) -> DiffRender {
+pub fn compute_diff_cache(
+    input: &str,
+    output: &str,
+    cfg: &crate::config::TracerCeilingConfig,
+) -> DiffRender {
+    // Defensive: honour the configured cap even if resolve_diffable was
+    // bypassed or stale. Return an empty render for oversized input.
+    if let Some(cap) = cfg.diff
+        && (input.len() > cap || output.len() > cap)
+    {
+        return DiffRender::default();
+    }
     let diff = similar::TextDiff::from_lines(input, output);
     // Pre-split both bodies so we can index by line number for the
     // interleave path. `split_inclusive('\n')` keeps the trailing
@@ -968,12 +980,15 @@ fn make_diff_line(
 /// Input/Output and switch to Diff *after* both chunks have already
 /// arrived, by which point no further chunks fire and a tab-gated
 /// compute would never trigger.
-pub fn resolve_and_cache_diff(modal: &mut ContentModalState) {
-    modal.diffable = resolve_diffable(&modal.header, &modal.input, &modal.output);
+pub fn resolve_and_cache_diff(
+    modal: &mut ContentModalState,
+    cfg: &crate::config::TracerCeilingConfig,
+) {
+    modal.diffable = resolve_diffable(&modal.header, &modal.input, &modal.output, cfg);
     if modal.diffable == Diffable::Ok && modal.diff_cache.is_none() {
         let input_text = side_diff_text(&modal.input);
         let output_text = side_diff_text(&modal.output);
-        modal.diff_cache = Some(compute_diff_cache(&input_text, &output_text));
+        modal.diff_cache = Some(compute_diff_cache(&input_text, &output_text, cfg));
     }
 }
 
@@ -1687,18 +1702,28 @@ mod tests {
 
     // ── resolve_diffable tests ────────────────────────────────────────────────
 
+    fn default_ceiling() -> crate::config::TracerCeilingConfig {
+        crate::config::TracerCeilingConfig::default()
+    }
+
     #[test]
     fn diffable_ok_when_mime_equal_and_allowlisted() {
         let header = header_with_mime("application/json", "application/json", 1024, 1024);
         let (input, output) = (text_buffer("a"), text_buffer("b"));
-        assert_eq!(resolve_diffable(&header, &input, &output), Diffable::Ok);
+        assert_eq!(
+            resolve_diffable(&header, &input, &output, &default_ceiling()),
+            Diffable::Ok
+        );
     }
 
     #[test]
     fn diffable_wildcard_text_star() {
         let header = header_with_mime("text/html", "text/html", 1024, 1024);
         let (input, output) = (text_buffer("a"), text_buffer("b"));
-        assert_eq!(resolve_diffable(&header, &input, &output), Diffable::Ok);
+        assert_eq!(
+            resolve_diffable(&header, &input, &output, &default_ceiling()),
+            Diffable::Ok
+        );
     }
 
     #[test]
@@ -1710,7 +1735,10 @@ mod tests {
             1024,
         );
         let (input, output) = (text_buffer("a"), text_buffer("b"));
-        assert_eq!(resolve_diffable(&header, &input, &output), Diffable::Ok);
+        assert_eq!(
+            resolve_diffable(&header, &input, &output, &default_ceiling()),
+            Diffable::Ok
+        );
     }
 
     #[test]
@@ -1718,7 +1746,7 @@ mod tests {
         let header = header_with_mime("application/json", "text/csv", 1024, 1024);
         let (input, output) = (text_buffer("a"), text_buffer("b"));
         assert_eq!(
-            resolve_diffable(&header, &input, &output),
+            resolve_diffable(&header, &input, &output, &default_ceiling()),
             Diffable::NotAvailable(NotDiffableReason::MimeMismatch)
         );
     }
@@ -1729,15 +1757,25 @@ mod tests {
         header.input_mime = None;
         header.output_mime = None;
         let (input, output) = (text_buffer("a"), text_buffer("b"));
-        assert_eq!(resolve_diffable(&header, &input, &output), Diffable::Ok);
+        assert_eq!(
+            resolve_diffable(&header, &input, &output, &default_ceiling()),
+            Diffable::Ok
+        );
     }
 
     #[test]
     fn diffable_size_exceeds_cap() {
+        // 600_000 bytes exceeds the default 16 MiB cap only if the cap is set
+        // small; use an explicit 512 KiB cap to match the original hardcoded
+        // constant.
         let header = header_with_mime("application/json", "application/json", 600_000, 1024);
         let (input, output) = (text_buffer("a"), text_buffer("b"));
+        let cfg = crate::config::TracerCeilingConfig {
+            diff: Some(512 * 1024),
+            ..crate::config::TracerCeilingConfig::default()
+        };
         assert_eq!(
-            resolve_diffable(&header, &input, &output),
+            resolve_diffable(&header, &input, &output, &cfg),
             Diffable::NotAvailable(NotDiffableReason::SizeExceedsDiffCap)
         );
     }
@@ -1747,7 +1785,7 @@ mod tests {
         let header = header_with_mime("application/json", "application/json", 10, 10);
         let (input, output) = (text_buffer("same"), text_buffer("same"));
         assert_eq!(
-            resolve_diffable(&header, &input, &output),
+            resolve_diffable(&header, &input, &output, &default_ceiling()),
             Diffable::NotAvailable(NotDiffableReason::NoDifferences)
         );
     }
@@ -1758,7 +1796,7 @@ mod tests {
         header.input_available = false;
         let (input, output) = (SideBuffer::default(), text_buffer("x"));
         assert_eq!(
-            resolve_diffable(&header, &input, &output),
+            resolve_diffable(&header, &input, &output, &default_ceiling()),
             Diffable::NotAvailable(NotDiffableReason::InputUnavailable)
         );
     }
@@ -1778,7 +1816,7 @@ mod tests {
             effective_ceiling: None,
         };
         assert_eq!(
-            resolve_diffable(&header, &empty, &empty),
+            resolve_diffable(&header, &empty, &empty, &default_ceiling()),
             Diffable::NotAvailable(NotDiffableReason::NoDifferences)
         );
     }
@@ -1787,7 +1825,7 @@ mod tests {
     fn compute_diff_cache_produces_lines_and_hunks() {
         let input = "line a\nline b\nline c\n";
         let output = "line a\nline B\nline c\n";
-        let render = compute_diff_cache(input, output);
+        let render = compute_diff_cache(input, output, &default_ceiling());
         let inserts = render
             .lines
             .iter()
@@ -1897,7 +1935,7 @@ mod tests {
             input.push_str(&format!("{i},42,OK\n"));
             output.push_str(&format!("{i},42,ok\n"));
         }
-        let render = compute_diff_cache(&input, &output);
+        let render = compute_diff_cache(&input, &output, &default_ceiling());
         assert_eq!(render.hunks.len(), 1, "grouped_ops collapses to 1 hunk");
         assert_eq!(
             render.change_stops.len(),
@@ -2207,7 +2245,7 @@ mod tests {
         modal.output = text_buffer("line a\nline B\nline c\n");
         // Active tab is Input — cache must still populate (this is the
         // bug the helper fixes).
-        resolve_and_cache_diff(&mut modal);
+        resolve_and_cache_diff(&mut modal, &default_ceiling());
         assert_eq!(modal.diffable, Diffable::Ok);
         assert!(modal.diff_cache.is_some());
         let cache = modal.diff_cache.as_ref().unwrap();
@@ -2220,10 +2258,10 @@ mod tests {
         let mut modal = stub_modal(1, ContentModalTab::Input);
         modal.input = text_buffer("alpha\nbeta\n");
         modal.output = text_buffer("alpha\nBETA\n");
-        resolve_and_cache_diff(&mut modal);
+        resolve_and_cache_diff(&mut modal, &default_ceiling());
         let first_ptr = modal.diff_cache.as_ref().unwrap() as *const DiffRender;
         // Second call must not reallocate — same Box address.
-        resolve_and_cache_diff(&mut modal);
+        resolve_and_cache_diff(&mut modal, &default_ceiling());
         let second_ptr = modal.diff_cache.as_ref().unwrap() as *const DiffRender;
         assert_eq!(first_ptr, second_ptr, "cached diff must not be recomputed");
     }
@@ -2235,7 +2273,7 @@ mod tests {
         // returns Pending → cache stays None.
         modal.input = text_buffer("anything");
         modal.output.in_flight = true;
-        resolve_and_cache_diff(&mut modal);
+        resolve_and_cache_diff(&mut modal, &default_ceiling());
         assert_eq!(modal.diffable, Diffable::Pending);
         assert!(modal.diff_cache.is_none());
     }
@@ -2246,7 +2284,7 @@ mod tests {
         // "every line is a delete" case that the interleave fix targets.
         let input = "a,1,OK\nb,2,WARN\nc,3,OK\n";
         let output = "a,1,ok\nb,2,warn\nc,3,ok\n";
-        let render = compute_diff_cache(input, output);
+        let render = compute_diff_cache(input, output, &default_ceiling());
 
         // Expected order: -a OK, +a ok, -b WARN, +b warn, -c OK, +c ok
         let tags: Vec<similar::ChangeTag> = render.lines.iter().map(|l| l.tag).collect();
@@ -2276,7 +2314,7 @@ mod tests {
         // the third trails as a pure insert.
         let input = "alpha\nbeta\n";
         let output = "ALPHA\nBETA\nGAMMA\n";
-        let render = compute_diff_cache(input, output);
+        let render = compute_diff_cache(input, output, &default_ceiling());
 
         let tags: Vec<similar::ChangeTag> = render.lines.iter().map(|l| l.tag).collect();
         assert_eq!(
@@ -2335,7 +2373,7 @@ mod tests {
         // Two CSV-shaped rows, every one changed — classic Replace op.
         let input = "a,1,OK\nb,2,WARN\n";
         let output = "a,1,ok\nb,2,warn\n";
-        let render = compute_diff_cache(input, output);
+        let render = compute_diff_cache(input, output, &default_ceiling());
 
         // Every Delete/Insert row must carry inline_diff segments.
         for line in &render.lines {
@@ -2391,7 +2429,7 @@ mod tests {
             effective_ceiling: None,
         };
 
-        resolve_and_cache_diff(&mut modal);
+        resolve_and_cache_diff(&mut modal, &default_ceiling());
         let cache = modal
             .diff_cache
             .as_ref()
@@ -2428,7 +2466,7 @@ mod tests {
         let mut modal = stub_modal(1, ContentModalTab::Input);
         modal.input = text_buffer("identical content");
         modal.output = text_buffer("identical content");
-        resolve_and_cache_diff(&mut modal);
+        resolve_and_cache_diff(&mut modal, &default_ceiling());
         assert_eq!(
             modal.diffable,
             Diffable::NotAvailable(NotDiffableReason::NoDifferences)
@@ -2618,5 +2656,48 @@ mod tests {
         // Resolved as unbounded.
         side.effective_ceiling = Some(None);
         assert!(should_fire_next_chunk(&side, &cfg));
+    }
+
+    #[test]
+    fn diffable_size_exceeds_diff_cap_uses_config_value() {
+        use crate::client::tracer::ContentRender;
+        use crate::config::TracerCeilingConfig;
+        let header = ContentModalHeader {
+            event_type: "FORK".into(),
+            event_timestamp_iso: "".into(),
+            component_name: "".into(),
+            pg_path: "".into(),
+            input_size: Some(2_000_000),
+            output_size: Some(2_000_000),
+            input_mime: Some("application/json".into()),
+            output_mime: Some("application/json".into()),
+            input_available: true,
+            output_available: true,
+        };
+        let mut input = SideBuffer::default();
+        let mut output = SideBuffer::default();
+        input.loaded = vec![b'a'; 2_000_000];
+        output.loaded = vec![b'b'; 2_000_000];
+        input.fully_loaded = true;
+        output.fully_loaded = true;
+        input.decoded = ContentRender::Text {
+            text: "a".repeat(2_000_000),
+            pretty_printed: false,
+        };
+        output.decoded = ContentRender::Text {
+            text: "b".repeat(2_000_000),
+            pretty_printed: false,
+        };
+
+        let cfg = TracerCeilingConfig {
+            text: Some(4 * 1024 * 1024),
+            tabular: Some(64 * 1024 * 1024),
+            diff: Some(1_000_000), // 1 MB — both sides exceed this
+        };
+        let result = resolve_diffable(&header, &input, &output, &cfg);
+        assert!(matches!(
+            result,
+            Diffable::NotAvailable(NotDiffableReason::SizeExceedsDiffCap)
+        ));
     }
 }
