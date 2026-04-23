@@ -7,10 +7,10 @@ use nifi_rust_client::dynamic::DynamicClient;
 
 use crate::error::{Result, SeederError};
 
-/// Name of the marker PG. Bumping this (`v1` → `v2`) invalidates stale
+/// Name of the marker PG. Bumping this (`v2` → `v3`) invalidates stale
 /// fixtures: the next nuke-and-repave pass will delete the old marker
 /// along with everything else.
-pub const FIXTURE_MARKER_NAME: &str = "nifilens-fixture-v2";
+pub const FIXTURE_MARKER_NAME: &str = "nifilens-fixture-v3";
 
 /// Returns `Some(pg_id)` if the marker PG exists as a direct child of
 /// root, `None` otherwise.

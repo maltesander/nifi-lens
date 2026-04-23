@@ -65,6 +65,9 @@ struct DiffServices {
     csv_reader_id: String,
     csv_writer_id: String,
     csv_writer_out_id: String,
+    // Used by Task 21 (ConvertRecord-avro chain).
+    #[allow(dead_code)]
+    avro_writer_id: String,
 }
 
 pub async fn seed(
@@ -272,6 +275,13 @@ async fn create_controller_services(client: &DynamicClient, pg_id: &str) -> Resu
         "org.apache.nifi.csv.CSVRecordSetWriter",
     )
     .await?;
+    let avro_writer_id = create_and_enable_cs(
+        client,
+        pg_id,
+        "diff-avro-writer",
+        "org.apache.nifi.avro.AvroRecordSetWriter",
+    )
+    .await?;
 
     Ok(DiffServices {
         json_reader_id,
@@ -279,6 +289,7 @@ async fn create_controller_services(client: &DynamicClient, pg_id: &str) -> Resu
         csv_reader_id,
         csv_writer_id,
         csv_writer_out_id,
+        avro_writer_id,
     })
 }
 
