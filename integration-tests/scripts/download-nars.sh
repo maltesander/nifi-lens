@@ -20,7 +20,17 @@ ARTIFACTS=(
 for v in "${VERSIONS[@]}"; do
     for artifact in "${ARTIFACTS[@]}"; do
         target="$NARS_DIR/${artifact}-${v}.nar"
-        if [[ -f "$target" ]]; then
+        # Docker bind-mounts auto-create missing host paths as directories.
+        # If `docker compose up` ran before download-nars.sh, the NAR paths
+        # are root-owned empty directories — remove them so we can fetch.
+        if [[ -d "$target" ]]; then
+            echo "! ${target} is an empty directory (Docker artifact); removing"
+            if ! rmdir "$target" 2>/dev/null; then
+                # Owned by docker daemon (root); use a one-shot container to nuke.
+                docker run --rm -v "$NARS_DIR":/nars busybox rm -rf "/nars/$(basename "$target")"
+            fi
+        fi
+        if [[ -f "$target" && -s "$target" ]]; then
             echo "✓ ${artifact}-${v}.nar already cached"
             continue
         fi
