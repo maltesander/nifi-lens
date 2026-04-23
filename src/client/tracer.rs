@@ -679,6 +679,107 @@ pub fn detect_tabular_format(bytes: &[u8]) -> Option<TabularFormat> {
     }
 }
 
+/// Maximum decoded JSON-Lines body bytes per side. Internal OOM guard;
+/// the user-facing knob is `[tracer.ceiling] tabular` which caps the
+/// fetched bytes that reach the decoder.
+const TABULAR_BODY_LIMIT: usize = 128 * 1024 * 1024;
+
+/// Maximum number of records decoded per side. Internal safety cap.
+const TABULAR_RECORD_LIMIT: usize = 50_000;
+
+/// Decode an Avro Object Container File into `ContentRender::Tabular`.
+///
+/// Errors only on malformed containers, unsupported schemas, or
+/// decoder failures — callers (notably `classify_content`) are
+/// expected to catch the error and render `Hex` instead.
+pub fn decode_avro(
+    bytes: &[u8],
+) -> Result<ContentRender, Box<dyn std::error::Error + Send + Sync>> {
+    use std::fmt::Write as _;
+
+    let reader = apache_avro::Reader::new(bytes)?;
+    let schema_summary = format_avro_schema(reader.writer_schema());
+
+    let mut body = String::new();
+    let mut truncated = false;
+
+    for (idx, value) in reader.enumerate() {
+        if idx >= TABULAR_RECORD_LIMIT || body.len() >= TABULAR_BODY_LIMIT {
+            truncated = true;
+            break;
+        }
+        let value = value?;
+        let json: serde_json::Value = apache_avro::from_value(&value)?;
+        let line = serde_json::to_string(&json)?;
+        writeln!(&mut body, "{line}").expect("writeln to String is infallible");
+    }
+
+    if body.ends_with('\n') {
+        body.pop();
+    }
+    let decoded_bytes = body.len();
+
+    Ok(ContentRender::Tabular {
+        format: TabularFormat::Avro,
+        schema_summary,
+        body,
+        decoded_bytes,
+        truncated,
+    })
+}
+
+/// Render an Avro schema as one line per top-level field. Non-record
+/// top-level schemas render as a single `(value) : <type>` line.
+fn format_avro_schema(schema: &apache_avro::Schema) -> String {
+    use apache_avro::Schema;
+    match schema {
+        Schema::Record(rec) => rec
+            .fields
+            .iter()
+            .map(|f| format!("{} : {}", f.name, format_avro_type(&f.schema)))
+            .collect::<Vec<_>>()
+            .join("\n"),
+        other => format!("(value) : {}", format_avro_type(other)),
+    }
+}
+
+fn format_avro_type(schema: &apache_avro::Schema) -> String {
+    use apache_avro::Schema;
+    match schema {
+        Schema::Null => "null".into(),
+        Schema::Boolean => "boolean".into(),
+        Schema::Int => "int".into(),
+        Schema::Long => "long".into(),
+        Schema::Float => "float".into(),
+        Schema::Double => "double".into(),
+        Schema::Bytes => "bytes".into(),
+        Schema::String => "string".into(),
+        Schema::Uuid => "uuid".into(),
+        Schema::Date => "date".into(),
+        Schema::TimeMillis => "time-millis".into(),
+        Schema::TimeMicros => "time-micros".into(),
+        Schema::TimestampMillis => "timestamp-millis".into(),
+        Schema::TimestampMicros => "timestamp-micros".into(),
+        Schema::TimestampNanos => "timestamp-nanos".into(),
+        Schema::LocalTimestampMillis => "local-timestamp-millis".into(),
+        Schema::LocalTimestampMicros => "local-timestamp-micros".into(),
+        Schema::LocalTimestampNanos => "local-timestamp-nanos".into(),
+        Schema::Duration => "duration".into(),
+        Schema::Decimal(_) => "decimal".into(),
+        Schema::BigDecimal => "big-decimal".into(),
+        Schema::Array(inner) => format!("array<{}>", format_avro_type(&inner.items)),
+        Schema::Map(inner) => format!("map<{}>", format_avro_type(&inner.types)),
+        Schema::Union(u) => {
+            let parts: Vec<String> = u.variants().iter().map(format_avro_type).collect();
+            format!("union<{}>", parts.join("|"))
+        }
+        Schema::Record(r) => format!("record<{}>", r.name.name),
+        Schema::Enum(e) => format!("enum<{}>", e.name.name),
+        Schema::Fixed(f) => format!("fixed<{}>", f.name.name),
+        Schema::Ref { name } => format!("ref<{}>", name.name),
+    }
+}
+
 /// Converts lineage graph nodes into a chronological list of event summaries.
 ///
 /// Filters to nodes whose `type` field equals `"EVENT"`, sorts ascending by
@@ -1137,5 +1238,74 @@ mod tests {
         assert_eq!(detect_tabular_format(b""), None);
         assert_eq!(detect_tabular_format(b"PAR"), None);
         assert_eq!(detect_tabular_format(b"Obj"), None);
+    }
+
+    fn build_avro_fixture(records: usize) -> Vec<u8> {
+        use apache_avro::{Schema, Writer, types::Record};
+        let schema_json = r#"
+        {"type":"record","name":"User","fields":[
+            {"name":"id","type":"long"},
+            {"name":"name","type":"string"},
+            {"name":"active","type":"boolean"}
+        ]}"#;
+        let schema = Schema::parse_str(schema_json).unwrap();
+        let mut writer = Writer::new(&schema, Vec::new());
+        for i in 0..records {
+            let mut rec = Record::new(&schema).unwrap();
+            rec.put("id", i as i64);
+            rec.put("name", format!("user-{i}"));
+            rec.put("active", i % 2 == 0);
+            writer.append(rec).unwrap();
+        }
+        writer.into_inner().unwrap()
+    }
+
+    #[test]
+    fn decode_avro_happy_path_yields_tabular() {
+        let bytes = build_avro_fixture(3);
+        let render = decode_avro(&bytes).expect("decode_avro");
+        match render {
+            ContentRender::Tabular {
+                format,
+                schema_summary,
+                body,
+                decoded_bytes,
+                truncated,
+            } => {
+                assert_eq!(format, TabularFormat::Avro);
+                assert!(schema_summary.contains("id"));
+                assert!(schema_summary.contains("name"));
+                assert!(schema_summary.contains("active"));
+                assert_eq!(body.lines().count(), 3);
+                assert!(body.contains(r#""id":0"#));
+                assert!(body.contains(r#""name":"user-2""#));
+                assert_eq!(decoded_bytes, body.len());
+                assert!(!truncated);
+            }
+            other => panic!("expected Tabular, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn decode_avro_corrupt_returns_err() {
+        let mut bytes = b"Obj\x01".to_vec();
+        bytes.extend_from_slice(&[0xff; 32]); // not a valid avro header
+        let result = decode_avro(&bytes);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn decode_avro_respects_record_limit() {
+        let bytes = build_avro_fixture(10);
+        let render = decode_avro(&bytes).unwrap();
+        if let ContentRender::Tabular {
+            body, truncated, ..
+        } = render
+        {
+            assert_eq!(body.lines().count(), 10);
+            assert!(!truncated);
+        } else {
+            panic!("expected Tabular");
+        }
     }
 }
