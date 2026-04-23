@@ -616,10 +616,39 @@ impl NifiClient {
 
 /// Classifies raw bytes into a [`ContentRender`] variant.
 ///
-/// - Empty slice → [`ContentRender::Empty`]
-/// - Valid UTF-8 text → [`ContentRender::Text`] with JSON pretty-printing if parseable
-/// - Non-UTF-8 bytes → [`ContentRender::Hex`] with the first 4 KiB hex-dumped
+/// Two-stage pipeline:
+///
+/// 1. Magic-byte sniff via [`detect_tabular_format`]: `PAR1` →
+///    [`decode_parquet`], `Obj\x01` → [`decode_avro`]. Decoder
+///    errors fall back to `Hex` with a `tracing::warn!` log.
+/// 2. Otherwise: empty → `Empty`; valid UTF-8 → `Text` (JSON
+///    pretty-print when parseable); else → `Hex` of the first 4 KiB.
 pub fn classify_content(bytes: Vec<u8>) -> ContentRender {
+    if let Some(format) = detect_tabular_format(&bytes) {
+        let result = match format {
+            TabularFormat::Parquet => decode_parquet(&bytes),
+            TabularFormat::Avro => decode_avro(&bytes),
+        };
+        match result {
+            Ok(render) => return render,
+            Err(err) => {
+                tracing::warn!(
+                    format = format.label(),
+                    error = %err,
+                    "tabular decoder failed, falling back to hex"
+                );
+                return ContentRender::Hex {
+                    first_4k: hex_dump(&bytes[..bytes.len().min(4096)]),
+                };
+            }
+        }
+    }
+    classify_text_or_hex(bytes)
+}
+
+/// Today's classifier body, extracted so [`classify_content`] can call
+/// it after the magic-byte sniff fails.
+fn classify_text_or_hex(bytes: Vec<u8>) -> ContentRender {
     if bytes.is_empty() {
         return ContentRender::Empty;
     }
@@ -1464,5 +1493,64 @@ mod tests {
         bytes.extend_from_slice(&[0u8; 64]); // header magic but no footer
         let result = decode_parquet(&bytes);
         assert!(result.is_err());
+    }
+
+    #[test]
+    fn classify_parquet_bytes_produce_tabular() {
+        let bytes = build_parquet_fixture(2);
+        match classify_content(bytes) {
+            ContentRender::Tabular {
+                format: TabularFormat::Parquet,
+                ..
+            } => {}
+            other => panic!("expected Tabular::Parquet, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn classify_avro_bytes_produce_tabular() {
+        let bytes = build_avro_fixture(2);
+        match classify_content(bytes) {
+            ContentRender::Tabular {
+                format: TabularFormat::Avro,
+                ..
+            } => {}
+            other => panic!("expected Tabular::Avro, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn classify_parquet_corrupt_falls_back_to_hex() {
+        let mut bytes = b"PAR1".to_vec();
+        bytes.extend_from_slice(&[0u8; 64]);
+        match classify_content(bytes) {
+            ContentRender::Hex { .. } => {}
+            other => panic!("expected Hex fallback, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn classify_avro_corrupt_falls_back_to_hex() {
+        let mut bytes = b"Obj\x01".to_vec();
+        bytes.extend_from_slice(&[0xff; 32]);
+        match classify_content(bytes) {
+            ContentRender::Hex { .. } => {}
+            other => panic!("expected Hex fallback, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn classify_text_unaffected_by_tabular_routing() {
+        // Existing behavior must be preserved.
+        match classify_content(b"hello world".to_vec()) {
+            ContentRender::Text {
+                text,
+                pretty_printed,
+            } => {
+                assert_eq!(text, "hello world");
+                assert!(!pretty_printed);
+            }
+            other => panic!("expected Text, got {other:?}"),
+        }
     }
 }
