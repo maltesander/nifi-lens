@@ -104,6 +104,37 @@ nifilens
 Press `?` inside the tool for a context-aware help modal. A hint line at
 the bottom shows relevant keybindings for the current view.
 
+## Required NiFi permissions
+
+`nifi-lens` is read-only. It issues only `GET`, idempotent `POST` for
+provenance searches, and `DELETE` for cleaning up its own provenance
+and lineage queries. The user it authenticates as needs the following
+NiFi 2.x policies — nothing more:
+
+**Global policies:**
+
+| Policy | Why |
+|---|---|
+| `view the UI` | Baseline for any API access. |
+| `access the controller` | `/flow/status` (version-sync + component counts) and `/controller/cluster` (cluster membership + heartbeats). |
+| `view system diagnostics` | `/system-diagnostics` (heap, GC, repository fill, per-node metrics). |
+| `query provenance` | All Events and Tracer operations — provenance search, lineage, event detail. |
+
+**Component-level policies** — grant these on the **root Process Group**;
+they cascade to every descendant:
+
+| Policy | Why |
+|---|---|
+| `view the component` | Flow browser, status polling, bulletins, processor / controller-service / connection / port detail. |
+| `view the data` | *Optional.* Only needed when the Tracer content viewer modal is used (`/provenance-events/{id}/content/{input\|output}`). Strict monitoring-only users can omit this — the modal renders a `403` banner instead of the body. |
+
+**Not required:**
+
+- Any `modify …` policies — `nifi-lens` never writes.
+- `access restricted components` — no restricted components are executed.
+- `access users / user groups / policies / counters`.
+- `retrieve site-to-site details`.
+
 ## Core Components
 
 Five top-level tabs, each targeting a specific operational question.
