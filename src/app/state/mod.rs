@@ -185,7 +185,12 @@ pub struct AppState {
 }
 
 impl AppState {
-    pub fn new(context_name: String, detected_version: Version, config: &Config) -> Self {
+    pub fn new(
+        context_name: String,
+        detected_version: Version,
+        config: &Config,
+        base_url: String,
+    ) -> Self {
         Self {
             current_tab: ViewId::Overview,
             context_name,
@@ -209,6 +214,7 @@ impl AppState {
             cluster: crate::cluster::ClusterStore::new(
                 config.polling.cluster.clone(),
                 config.bulletins.ring_size,
+                base_url,
             ),
             error_detail: None,
             should_quit: false,
@@ -1903,6 +1909,7 @@ fn handle_intent_outcome(
         Ok(IntentOutcome::ContextSwitched {
             new_context_name,
             new_version,
+            new_base_url,
         }) => {
             state.context_name = new_context_name;
             state.detected_version = new_version;
@@ -1929,8 +1936,11 @@ fn handle_intent_outcome(
             // The app loop will respawn them against the new client in
             // the `pending_worker_restart` branch.
             state.cluster.shutdown();
-            state.cluster =
-                crate::cluster::ClusterStore::new(state.polling.cluster.clone(), ring_cap);
+            state.cluster = crate::cluster::ClusterStore::new(
+                state.polling.cluster.clone(),
+                ring_cap,
+                new_base_url,
+            );
 
             UpdateResult {
                 redraw: true,
@@ -2103,7 +2113,12 @@ mod tests {
 
     pub(super) fn fresh_state() -> AppState {
         let c = tiny_config();
-        AppState::new("dev".into(), Version::new(2, 9, 0), &c)
+        AppState::new(
+            "dev".into(),
+            Version::new(2, 9, 0),
+            &c,
+            "https://nifi.test:8443".into(),
+        )
     }
 
     pub(super) fn tiny_config() -> Config {
@@ -2355,6 +2370,7 @@ mod tests {
         let outcome = Ok(IntentOutcome::ContextSwitched {
             new_context_name: "other-ctx".into(),
             new_version: Version::new(2, 7, 2),
+            new_base_url: "https://other.nifi:8443".into(),
         });
         update(&mut s, AppEvent::IntentOutcome(outcome), &c);
         assert_eq!(s.detected_version, Version::new(2, 7, 2));
@@ -2381,6 +2397,7 @@ mod tests {
         let outcome = Ok(IntentOutcome::ContextSwitched {
             new_context_name: "other-ctx".into(),
             new_version: Version::new(2, 7, 2),
+            new_base_url: "https://other.nifi:8443".into(),
         });
         update(&mut s, AppEvent::IntentOutcome(outcome), &c);
 
@@ -2420,6 +2437,7 @@ mod tests {
         let outcome = Ok(IntentOutcome::ContextSwitched {
             new_context_name: "other-ctx".into(),
             new_version: Version::new(2, 7, 2),
+            new_base_url: "https://other.nifi:8443".into(),
         });
         update(&mut s, AppEvent::IntentOutcome(outcome), &c);
 

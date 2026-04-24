@@ -323,12 +323,14 @@ impl IntentDispatcher {
         };
 
         let new_context_name = resolved.name.clone();
+        let new_base_url = resolved.url.clone();
         let new_client = NifiClient::connect(&resolved).await?;
         let new_version = new_client.detected_version().clone();
         *self.client.write().await = new_client;
         Ok(IntentOutcome::ContextSwitched {
             new_context_name,
             new_version,
+            new_base_url,
         })
     }
 }

@@ -364,7 +364,11 @@ mod tests {
         // between handle-less views (Overview → Events, Events → Tracer,
         // Tracer → Bulletins, …) must still fire the outgoing view's
         // unsubscribe path.
-        let mut store = ClusterStore::new(ClusterPollingConfig::default(), 100);
+        let mut store = ClusterStore::new(
+            ClusterPollingConfig::default(),
+            100,
+            "https://nifi.test:8443".into(),
+        );
         let mut browser = BrowserState::default();
         let mut registry = WorkerRegistry::new();
 
@@ -430,7 +434,11 @@ mod tests {
     fn ensure_same_view_is_noop() {
         // Calling ensure with the already-active view must not
         // double-count subscribers nor touch the registry.
-        let mut store = ClusterStore::new(ClusterPollingConfig::default(), 100);
+        let mut store = ClusterStore::new(
+            ClusterPollingConfig::default(),
+            100,
+            "https://nifi.test:8443".into(),
+        );
         let mut browser = BrowserState::default();
         let mut registry = WorkerRegistry::new();
 
@@ -452,7 +460,11 @@ mod tests {
         // keeps context-switch semantics correct: the caller rebuilds
         // the cluster store, and the next `ensure` subscribes to the
         // fresh store without tripping the "same view, no-op" branch.
-        let mut store = ClusterStore::new(ClusterPollingConfig::default(), 100);
+        let mut store = ClusterStore::new(
+            ClusterPollingConfig::default(),
+            100,
+            "https://nifi.test:8443".into(),
+        );
         let mut browser = BrowserState::default();
         let mut registry = WorkerRegistry::new();
 
@@ -466,7 +478,11 @@ mod tests {
         // A fresh store (as produced by `spawn_fetchers` after a
         // context switch) starts with zero subscribers; the next
         // `ensure` repopulates them.
-        let mut fresh_store = ClusterStore::new(ClusterPollingConfig::default(), 100);
+        let mut fresh_store = ClusterStore::new(
+            ClusterPollingConfig::default(),
+            100,
+            "https://nifi.test:8443".into(),
+        );
         ensure_subscriptions_only(
             &mut registry,
             ViewId::Overview,

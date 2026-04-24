@@ -33,6 +33,7 @@ pub async fn run(
 ) -> Result<(), NifiLensError> {
     let detected_version = client.detected_version().clone();
     let context_name = client.context_name().to_string();
+    let base_url = client.base_url().to_string();
     let client = Arc::new(RwLock::new(client));
     let config = Arc::new(config);
 
@@ -45,7 +46,7 @@ pub async fn run(
     install_panic_hook(stderr_toggle.clone());
     let mut terminal = build_terminal()?;
 
-    let mut state = AppState::new(context_name, detected_version, &config);
+    let mut state = AppState::new(context_name, detected_version, &config, base_url);
     // Spawn per-endpoint cluster fetchers once at startup. A context
     // switch tears the store down and respawns inside the main loop's
     // `pending_worker_restart` branch.

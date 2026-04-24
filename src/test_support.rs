@@ -48,7 +48,12 @@ pub(crate) fn tiny_config() -> Config {
 /// Construct a fresh `AppState` for widget- and integration-level tests.
 pub(crate) fn fresh_state() -> AppState {
     let c = tiny_config();
-    AppState::new("dev".into(), Version::new(2, 9, 0), &c)
+    AppState::new(
+        "dev".into(),
+        Version::new(2, 9, 0),
+        &c,
+        "https://nifi.test:8443".into(),
+    )
 }
 
 /// Construct a minimal `RootPgStatusSnapshot` for Browser reducer tests

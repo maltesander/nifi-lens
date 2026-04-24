@@ -108,6 +108,17 @@ pub struct ClusterStore {
     /// connections-by-PG fetcher on each (re)spawn — including context
     /// switches where the channel would otherwise be unreachable.
     pg_ids_rx: watch::Receiver<Vec<String>>,
+    /// Latest node-address fan-out list published from the UI task after
+    /// every `ClusterUpdate::ClusterNodes` is applied. Consumed by the
+    /// tls-certs fetcher to know which nodes to probe.
+    node_addresses_tx: watch::Sender<Vec<String>>,
+    /// Receiver half retained so `spawn_fetchers` can clone one into the
+    /// tls-certs fetcher on each (re)spawn — including context switches.
+    node_addresses_rx: watch::Receiver<Vec<String>>,
+    /// Base URL of the active NiFi context (e.g. `"https://nifi.host:8443"`).
+    /// Stored here so `spawn_fetchers` can hand it to the tls-certs fetcher
+    /// without needing the full `NifiClient`.
+    base_url: String,
 }
 
 impl std::fmt::Debug for ClusterStore {
@@ -128,8 +139,13 @@ impl ClusterStore {
     /// is sourced from `config.bulletins.ring_size` by callers. Passing
     /// `0` is technically valid (zero-capacity ring) but makes the ring
     /// useless — the config loader enforces a 100..=100_000 bound.
-    pub fn new(config: ClusterPollingConfig, bulletins_capacity: usize) -> Self {
+    ///
+    /// `base_url` is the base URL of the active NiFi context (e.g.
+    /// `"https://nifi.host:8443"`), stored for later use by
+    /// `spawn_fetchers` when wiring the tls-certs fetcher.
+    pub fn new(config: ClusterPollingConfig, bulletins_capacity: usize, base_url: String) -> Self {
         let (pg_ids_tx, pg_ids_rx) = watch::channel(Vec::<String>::new());
+        let (node_addresses_tx, node_addresses_rx) = watch::channel(Vec::<String>::new());
         Self {
             snapshot: ClusterSnapshot::with_bulletins_capacity(bulletins_capacity),
             subscribers: SubscriberRegistry::new(),
@@ -138,6 +154,39 @@ impl ClusterStore {
             handles: Vec::new(),
             pg_ids_tx,
             pg_ids_rx,
+            node_addresses_tx,
+            node_addresses_rx,
+            base_url,
+        }
+    }
+
+    /// Returns the base URL of the active NiFi context stored on this store.
+    pub fn base_url(&self) -> &str {
+        &self.base_url
+    }
+
+    /// Subscribe to the watch channel that publishes node addresses
+    /// (host:port) extracted from `ClusterNodesSnapshot.rows`. The
+    /// tls-certs fetcher uses this to know which nodes to probe.
+    pub fn node_addresses_receiver(&self) -> watch::Receiver<Vec<String>> {
+        self.node_addresses_rx.clone()
+    }
+
+    /// Publish the latest `ClusterNodesSnapshot.rows[].address` list on
+    /// the watch channel. Called from the main loop after every
+    /// `ClusterUpdate::ClusterNodes` apply. No-op before the first
+    /// successful fetch.
+    pub fn publish_node_addresses(&self) {
+        let addrs: Vec<String> = self
+            .snapshot
+            .cluster_nodes
+            .latest()
+            .map(|snap| snap.rows.iter().map(|r| r.address.clone()).collect())
+            .unwrap_or_default();
+        if self.node_addresses_tx.send(addrs).is_err() {
+            tracing::trace!(
+                "publish_node_addresses: no receivers (fetchers not yet spawned or torn down)"
+            );
         }
     }
 
@@ -386,7 +435,11 @@ mod tests {
 
     #[test]
     fn apply_update_routes_to_correct_field() {
-        let mut store = ClusterStore::new(ClusterPollingConfig::default(), 5000);
+        let mut store = ClusterStore::new(
+            ClusterPollingConfig::default(),
+            5000,
+            "https://nifi.test:8443".into(),
+        );
         let err = NifiLensError::WritesNotImplemented;
         let ep = store.apply_update(ClusterUpdate::About(Err(err), meta()));
         assert_eq!(ep, ClusterEndpoint::About);
@@ -399,7 +452,11 @@ mod tests {
 
     #[test]
     fn controller_status_update_is_applied() {
-        let mut store = ClusterStore::new(ClusterPollingConfig::default(), 5000);
+        let mut store = ClusterStore::new(
+            ClusterPollingConfig::default(),
+            5000,
+            "https://nifi.test:8443".into(),
+        );
         let fake_status = ControllerStatusSnapshot {
             running: 1,
             stopped: 0,
@@ -427,7 +484,11 @@ mod tests {
     #[test]
     fn controller_services_update_is_applied() {
         use crate::client::ControllerServiceCounts;
-        let mut store = ClusterStore::new(ClusterPollingConfig::default(), 5000);
+        let mut store = ClusterStore::new(
+            ClusterPollingConfig::default(),
+            5000,
+            "https://nifi.test:8443".into(),
+        );
         let fake_cs = ControllerServicesSnapshot {
             counts: ControllerServiceCounts {
                 enabled: 4,
@@ -451,7 +512,11 @@ mod tests {
 
     #[test]
     fn root_pg_status_update_is_applied() {
-        let mut store = ClusterStore::new(ClusterPollingConfig::default(), 5000);
+        let mut store = ClusterStore::new(
+            ClusterPollingConfig::default(),
+            5000,
+            "https://nifi.test:8443".into(),
+        );
         let fake_pg = RootPgStatusSnapshot {
             flow_files_queued: 42,
             bytes_queued: 1024,
@@ -483,7 +548,11 @@ mod tests {
     #[test]
     fn system_diagnostics_update_is_applied() {
         use crate::client::health::{SystemDiagAggregate, SystemDiagSnapshot};
-        let mut store = ClusterStore::new(ClusterPollingConfig::default(), 5000);
+        let mut store = ClusterStore::new(
+            ClusterPollingConfig::default(),
+            5000,
+            "https://nifi.test:8443".into(),
+        );
         let fake = SystemDiagSnapshot {
             aggregate: SystemDiagAggregate {
                 content_repos: Vec::new(),
@@ -503,7 +572,11 @@ mod tests {
 
     #[test]
     fn about_update_is_applied() {
-        let mut store = ClusterStore::new(ClusterPollingConfig::default(), 5000);
+        let mut store = ClusterStore::new(
+            ClusterPollingConfig::default(),
+            5000,
+            "https://nifi.test:8443".into(),
+        );
         let fake = crate::client::AboutSnapshot {
             version: "2.9.0".into(),
             title: "NiFi".into(),
@@ -521,7 +594,11 @@ mod tests {
         let local = tokio::task::LocalSet::new();
         local
             .run_until(async {
-                let mut store = ClusterStore::new(ClusterPollingConfig::default(), 5000);
+                let mut store = ClusterStore::new(
+                    ClusterPollingConfig::default(),
+                    5000,
+                    "https://nifi.test:8443".into(),
+                );
                 let notify = store.notify_for(ClusterEndpoint::RootPgStatus);
                 let flag = std::rc::Rc::new(std::cell::Cell::new(false));
                 let flag_clone = flag.clone();
@@ -551,7 +628,11 @@ mod tests {
         let local = tokio::task::LocalSet::new();
         local
             .run_until(async {
-                let store = ClusterStore::new(ClusterPollingConfig::default(), 5000);
+                let store = ClusterStore::new(
+                    ClusterPollingConfig::default(),
+                    5000,
+                    "https://nifi.test:8443".into(),
+                );
                 let notify = store.notify_for(ClusterEndpoint::ControllerStatus);
                 let flag = std::rc::Rc::new(std::cell::Cell::new(false));
                 let flag_clone = flag.clone();
@@ -578,7 +659,11 @@ mod tests {
         let local = tokio::task::LocalSet::new();
         local
             .run_until(async {
-                let mut store = ClusterStore::new(ClusterPollingConfig::default(), 5000);
+                let mut store = ClusterStore::new(
+                    ClusterPollingConfig::default(),
+                    5000,
+                    "https://nifi.test:8443".into(),
+                );
                 // Pretend we spawned something.
                 store.handles.push(tokio::task::spawn_local(async {}));
                 store.shutdown();
@@ -594,7 +679,11 @@ mod tests {
         use crate::client::{ConnectionEndpointIds, ConnectionEndpoints};
         use std::collections::HashMap;
 
-        let mut store = ClusterStore::new(ClusterPollingConfig::default(), 5000);
+        let mut store = ClusterStore::new(
+            ClusterPollingConfig::default(),
+            5000,
+            "https://nifi.test:8443".into(),
+        );
         let mut by_connection = HashMap::new();
         by_connection.insert(
             "conn-1".to_string(),
@@ -630,7 +719,11 @@ mod tests {
 
     #[test]
     fn publish_pg_ids_mirrors_snapshot_into_watch_channel() {
-        let mut store = ClusterStore::new(ClusterPollingConfig::default(), 5000);
+        let mut store = ClusterStore::new(
+            ClusterPollingConfig::default(),
+            5000,
+            "https://nifi.test:8443".into(),
+        );
         // Before any RootPgStatus update the watch channel is empty.
         assert!(store.pg_ids_rx.borrow().is_empty());
 
@@ -674,7 +767,11 @@ mod tests {
 
     #[test]
     fn bulletins_delta_ok_merges_into_ring() {
-        let mut store = ClusterStore::new(ClusterPollingConfig::default(), 10);
+        let mut store = ClusterStore::new(
+            ClusterPollingConfig::default(),
+            10,
+            "https://nifi.test:8443".into(),
+        );
         // First batch: 3 bulletins.
         let batch1 = vec![fake_bulletin(1), fake_bulletin(2), fake_bulletin(3)];
         let ep = store.apply_update(ClusterUpdate::BulletinsDelta {
@@ -699,7 +796,11 @@ mod tests {
 
     #[test]
     fn bulletins_ring_drops_oldest_at_capacity() {
-        let mut store = ClusterStore::new(ClusterPollingConfig::default(), 3);
+        let mut store = ClusterStore::new(
+            ClusterPollingConfig::default(),
+            3,
+            "https://nifi.test:8443".into(),
+        );
         let batch = vec![
             fake_bulletin(1),
             fake_bulletin(2),
@@ -726,7 +827,11 @@ mod tests {
             fetched_at: std::time::Instant::now(),
             fetched_wall: time::OffsetDateTime::now_utc(),
         };
-        let mut store = ClusterStore::new(ClusterPollingConfig::default(), 5000);
+        let mut store = ClusterStore::new(
+            ClusterPollingConfig::default(),
+            5000,
+            "https://nifi.test:8443".into(),
+        );
         let meta = FetchMeta {
             fetched_at: std::time::Instant::now(),
             fetch_duration: Duration::from_millis(1),
@@ -755,7 +860,11 @@ mod tests {
 
     #[test]
     fn bulletins_delta_err_preserves_ring_sets_last_error() {
-        let mut store = ClusterStore::new(ClusterPollingConfig::default(), 10);
+        let mut store = ClusterStore::new(
+            ClusterPollingConfig::default(),
+            10,
+            "https://nifi.test:8443".into(),
+        );
         // Seed with a successful batch first.
         store.apply_update(ClusterUpdate::BulletinsDelta {
             result: Ok(vec![fake_bulletin(1), fake_bulletin(2)]),
@@ -781,5 +890,37 @@ mod tests {
         });
         assert!(store.snapshot.bulletins.last_error.is_none());
         assert_eq!(store.snapshot.bulletins.last_id, Some(3));
+    }
+
+    #[test]
+    fn publish_node_addresses_sends_latest() {
+        use crate::client::health::{ClusterNodeRow, ClusterNodeStatus, ClusterNodesSnapshot};
+        let mut store = ClusterStore::new(
+            ClusterPollingConfig::default(),
+            5000,
+            "https://nifi.test:8443".into(),
+        );
+        let snap = ClusterNodesSnapshot {
+            rows: vec![ClusterNodeRow {
+                node_id: "id1".into(),
+                address: "node1.nifi:8443".into(),
+                status: ClusterNodeStatus::Connected,
+                is_primary: false,
+                is_coordinator: false,
+                heartbeat_iso: None,
+                node_start_iso: None,
+                active_thread_count: 0,
+                flow_files_queued: 0,
+                bytes_queued: 0,
+                events: vec![],
+            }],
+            fetched_at: Instant::now(),
+            fetched_wall: time::OffsetDateTime::now_utc(),
+        };
+        store.apply_update(ClusterUpdate::ClusterNodes(Ok(snap), meta()));
+        store.publish_node_addresses();
+        let mut rx = store.node_addresses_receiver();
+        let addrs = rx.borrow_and_update().clone();
+        assert_eq!(addrs, vec!["node1.nifi:8443".to_string()]);
     }
 }

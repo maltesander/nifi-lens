@@ -52,6 +52,7 @@ pub enum IntentOutcome {
     ContextSwitched {
         new_context_name: String,
         new_version: semver::Version,
+        new_base_url: String,
     },
     ViewRefreshed {
         view: crate::app::state::ViewId,
