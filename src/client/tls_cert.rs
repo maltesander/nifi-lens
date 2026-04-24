@@ -43,11 +43,84 @@ pub enum TlsProbeError {
     ParseCert(String),
 }
 
+/// Parse one DER-encoded certificate into a `CertEntry`. The caller
+/// asserts whether this entry is the leaf (chain[0]) or an
+/// intermediate (chain[1..]).
+#[allow(dead_code)] // used by Task 4: probe_tls
+pub(crate) fn parse_cert_der(
+    der: &rustls::pki_types::CertificateDer<'_>,
+    is_leaf: bool,
+) -> Result<CertEntry, TlsProbeError> {
+    let (_, parsed) = x509_parser::parse_x509_certificate(der.as_ref())
+        .map_err(|e| TlsProbeError::ParseCert(e.to_string()))?;
+
+    // `validity().not_after` is an `ASN1Time`; `to_datetime()` returns
+    // the `time::OffsetDateTime` we need directly.
+    let not_after = parsed.validity().not_after.to_datetime();
+
+    // Pull a single CN attribute. SAN-only certs omit CN entirely —
+    // tolerate that gracefully.
+    let subject_cn = parsed
+        .subject()
+        .iter_common_name()
+        .next()
+        .and_then(|attr| attr.as_str().ok())
+        .map(|s| s.to_string());
+
+    Ok(CertEntry {
+        subject_cn,
+        not_after,
+        is_leaf,
+    })
+}
+
 impl NodeCertChain {
     /// Minimum `not_after` across every entry in the chain — the date
     /// that actually drives severity. Empty chain returns `None`.
     pub fn earliest_not_after(&self) -> Option<OffsetDateTime> {
         self.entries.iter().map(|e| e.not_after).min()
+    }
+}
+
+#[cfg(test)]
+mod parser_tests {
+    use super::*;
+    use rcgen::{CertificateParams, KeyPair};
+    use rustls::pki_types::CertificateDer;
+    use time::macros::datetime;
+
+    fn make_leaf_der(cn: &str, not_before: OffsetDateTime, not_after: OffsetDateTime) -> Vec<u8> {
+        let mut params = CertificateParams::new(vec![cn.to_string()]).unwrap();
+        params
+            .distinguished_name
+            .push(rcgen::DnType::CommonName, cn);
+        params.not_before = not_before;
+        params.not_after = not_after;
+        let kp = KeyPair::generate().unwrap();
+        let cert = params.self_signed(&kp).unwrap();
+        cert.der().to_vec()
+    }
+
+    #[test]
+    fn parse_cert_der_extracts_cn_and_not_after() {
+        let nb = datetime!(2026-01-01 00:00 UTC);
+        let na = datetime!(2027-01-01 00:00 UTC);
+        let der = make_leaf_der("node1.nifi.local", nb, na);
+        let cert_der = CertificateDer::from(der.as_slice());
+
+        let entry = parse_cert_der(&cert_der, true).unwrap();
+
+        assert_eq!(entry.subject_cn.as_deref(), Some("node1.nifi.local"));
+        assert_eq!(entry.not_after, na);
+        assert!(entry.is_leaf);
+    }
+
+    #[test]
+    fn parse_cert_der_malformed_bytes_returns_parse_error() {
+        let garbage = [0xFFu8; 16];
+        let cert_der = CertificateDer::from(garbage.as_slice());
+        let err = parse_cert_der(&cert_der, false).unwrap_err();
+        assert!(matches!(err, TlsProbeError::ParseCert(_)));
     }
 }
 
