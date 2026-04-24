@@ -216,6 +216,16 @@ the detail modal.
 All seven steps are mechanical. `dispatch_handler!` means
 cross-cutting key-handling dispatch is a single touch, not five.
 
+Where applicable, new views should:
+
+- Use `src/layout.rs` helpers for fixed-header / body / footer splits.
+- Use `src/widget/filter_bar.rs` for filter-chip rows.
+- Compose `src/widget/scroll.rs` state for modal scroll fields.
+- Use `crate::client::status::*` typed enums rather than stringly-typed
+  processor / controller-service state matching.
+
+See the "Visual language" section for the full shared-helper catalogue.
+
 ### Logging
 
 `tracing` + `tracing-subscriber` + `tracing-appender` write to
@@ -458,6 +468,37 @@ an accent color; unfocused panels use plain borders and
 Severity rendering (labels, colors, icons) is consolidated in
 `widget::severity` and `widget::run_icon`; call these helpers rather
 than reintroducing inline `Color::*`/`Modifier::*` constructors.
+
+Shared helpers for modal, filter-bar, layout, and typed-state code:
+
+- `src/widget/scroll.rs` — `VerticalScrollState` /
+  `BidirectionalScrollState` primitives composed by the Bulletins
+  detail modal and the Tracer content viewer modal. Covers scroll-by /
+  page-up-down / jump-top-bottom / horizontal scroll math; callers
+  hold content dimensions and drive the widget.
+- `src/widget/filter_bar.rs` — `FilterChip` + `build_chip_line` for
+  horizontal chip rows (Events + Bulletins top rows). Tab-specific
+  second rows stay in their render modules.
+- `src/widget/search.rs` — `SearchState` + `compute_matches`, shared
+  by both full-screen detail modals.
+- `src/layout.rs` — `split_header_body_footer` / `split_two_rows` /
+  `split_two_cols` helpers for the common fixed-plus-flex split
+  shapes.
+- `src/bytes.rs` — `KIB` / `MIB` / `GIB` unit constants plus
+  `FIXTURE_HEAP_*` test-fixture baselines. Prefer these over raw
+  `N * 1024 * 1024` literals.
+- `src/client/status.rs` — `ProcessorStatus` +
+  `ControllerServiceState` typed enums. Use `from_wire(&str)` for
+  case-insensitive parsing and the `style()` / `badge_style()` /
+  `referencing_style()` / `icon()` methods for display rather than
+  matching on raw strings.
+- `src/timestamp.rs` — `format_age(Option<Duration>)` for
+  `SystemTime`-derived ages and `format_age_secs(u64)` for
+  already-computed second counts (e.g. NiFi heartbeat ages).
+- `src/test_support.rs` — `fresh_state` / `tiny_config` plus
+  `default_fetch_duration()` and `test_backend(height)` (with the
+  `TEST_BACKEND_WIDTH` / `_SHORT` / `_MEDIUM` / `_TALL` constants).
+  Prefer these in fixture-heavy test code.
 
 Folders in the Browser tree are a **reducer-only** construct. The
 client walker emits a flat list of CS / queue / port / processor
