@@ -1,6 +1,5 @@
 ---
 source: src/view/overview/render/mod.rs
-assertion_line: 1103
 expression: render_to_string(&state)
 ---
 "┌ Components ──────────────────────────────────────────────────────────────────────────────────────┐"
@@ -9,9 +8,9 @@ expression: render_to_string(&state)
 "│  Controller services   12    ENABLED   12  DISABLED   0  INVALID    0                            │"
 "└──────────────────────────────────────────────────────────────────────────────────────────────────┘"
 "┌ Nodes (2 connected) ─────────────────────────────────────────────────────────────────────────────┐"
-"│  node1:8080                                        heap ██░░░  50% gc   50ms       load 0.38  1.5│"
-"│  node2:8080                                        heap ██░░░  50% gc   50ms       load 0.38  1.5│"
-"│  repositories                                      cont ███░░  60% ff  █░░░░  30%  prov ░░░░  20%│"
+"│  node1:8080                          heap ██░░░  50% gc   50ms       load 0.38  1.5              │"
+"│  node2:8080                          heap ██░░░  50% gc   50ms       load 0.38  1.5              │"
+"│  repositories                        cont ███░░  60% ff  █░░░░  30%  prov ░░░░  20%              │"
 "└──────────────────────────────────────────────────────────────────────────────────────────────────┘"
 "┌ Bulletins / min ───────────────────────────────┐┌ Noisy components ──────────────────────────────┐"
 "│15m  no bulletins                               ││cnt  source                             worst   │"

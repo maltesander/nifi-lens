@@ -26,7 +26,7 @@ pub use node_detail::render_node_detail_modal;
 
 use ratatui::Frame;
 use ratatui::layout::{Constraint, Direction, Layout, Rect};
-use ratatui::style::Style;
+use ratatui::style::{Modifier, Style};
 use ratatui::symbols;
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Bar, BarChart, BarGroup, Cell, Paragraph, Row, Table};
@@ -242,8 +242,23 @@ fn slot_gap() -> Vec<Span<'static>> {
 }
 
 fn render_nodes_zone(frame: &mut Frame, area: Rect, state: &OverviewState) {
+    render_nodes_zone_at(
+        frame,
+        area,
+        state,
+        state.focus == OverviewFocus::Nodes,
+        time::OffsetDateTime::now_utc(),
+    );
+}
+
+pub(crate) fn render_nodes_zone_at(
+    frame: &mut Frame,
+    area: Rect,
+    state: &OverviewState,
+    focused: bool,
+    now: time::OffsetDateTime,
+) {
     let total = state.nodes.nodes.len();
-    let focused = state.focus == OverviewFocus::Nodes;
 
     if total == 0 {
         frame.render_widget(
@@ -283,7 +298,7 @@ fn render_nodes_zone(frame: &mut Frame, area: Rect, state: &OverviewState) {
             } else {
                 Style::default()
             };
-            node_to_row(node, any_cluster, is_dead).style(row_style)
+            node_to_row(node, any_cluster, is_dead, now).style(row_style)
         })
         .collect();
 
@@ -295,6 +310,8 @@ fn render_nodes_zone(frame: &mut Frame, area: Rect, state: &OverviewState) {
         footer_cells.push(Cell::from(""));
     }
     footer_cells.extend(repos_footer_cells(repos));
+    // Trailing empty cell to match the cert-chip column added to node rows.
+    footer_cells.push(Cell::from(""));
     rows.push(Row::new(footer_cells));
 
     let widths: Vec<Constraint> = if any_cluster {
@@ -304,6 +321,7 @@ fn render_nodes_zone(frame: &mut Frame, area: Rect, state: &OverviewState) {
             Constraint::Length(15), // heap
             Constraint::Length(15), // gc
             Constraint::Length(14), // load
+            Constraint::Length(13), // cert chip
         ]
     } else {
         vec![
@@ -311,6 +329,7 @@ fn render_nodes_zone(frame: &mut Frame, area: Rect, state: &OverviewState) {
             Constraint::Length(15),
             Constraint::Length(15),
             Constraint::Length(14),
+            Constraint::Length(13), // cert chip
         ]
     };
     frame.render_widget(Table::new(rows, widths), area);
@@ -419,6 +438,43 @@ fn load_cell_for(node: &crate::client::health::NodeHealthRow) -> Cell<'static> {
     ]))
 }
 
+/// Return a cert-expiry chip cell for the trailing column of a node row.
+///
+/// Rules:
+/// - `None` or probe-failed → empty cell (silent).
+/// - `earliest_not_after - now >= 30d` → empty cell (healthy, no noise).
+/// - `14d <= delta < 30d` → `cert Nd` in yellow.
+/// - `delta < 7d` → `cert Nd` in red/bold.
+/// - Expired (`delta < 0`) → `cert expired` in red/bold.
+fn cert_chip_cell_for(
+    node: &crate::client::health::NodeHealthRow,
+    now: time::OffsetDateTime,
+) -> Cell<'static> {
+    let Some(Ok(chain)) = node.tls_cert.as_ref() else {
+        return Cell::from("");
+    };
+    let Some(earliest) = chain.earliest_not_after() else {
+        return Cell::from("");
+    };
+    let delta = earliest - now;
+    if delta.is_negative() {
+        return Cell::from(Span::styled(
+            "cert expired",
+            theme::error().add_modifier(Modifier::BOLD),
+        ));
+    }
+    let days = delta.whole_days();
+    if days >= 30 {
+        return Cell::from("");
+    }
+    let style = if days < 7 {
+        theme::error().add_modifier(Modifier::BOLD)
+    } else {
+        theme::warning()
+    };
+    Cell::from(Span::styled(format!("cert {days}d"), style))
+}
+
 /// Convert a `NodeHealthRow` into a ratatui `Row`.
 ///
 /// When `include_badge` is `true` a leading 6-column badge cell is
@@ -429,6 +485,7 @@ fn node_to_row(
     node: &crate::client::health::NodeHealthRow,
     include_badge: bool,
     is_dead: bool,
+    now: time::OffsetDateTime,
 ) -> Row<'static> {
     // Badge cell (only when rendering cluster info).
     let badge_cell = include_badge.then(|| match &node.cluster {
@@ -468,7 +525,13 @@ fn node_to_row(
         (heap_cell_for(node), gc_cell_for(node), load_cell_for(node))
     };
 
-    let mut cells = Vec::with_capacity(5);
+    let cert_cell = if is_dead {
+        Cell::from("")
+    } else {
+        cert_chip_cell_for(node, now)
+    };
+
+    let mut cells = Vec::with_capacity(6);
     if let Some(b) = badge_cell {
         cells.push(b);
     }
@@ -476,6 +539,7 @@ fn node_to_row(
     cells.push(heap_cell);
     cells.push(gc_cell);
     cells.push(load_cell);
+    cells.push(cert_cell);
     Row::new(cells)
 }
 
@@ -1721,5 +1785,97 @@ mod tests {
             "overview_standalone_no_badges",
             render_to_string(&state.overview)
         );
+    }
+
+    // ── T24 cert-chip column tests ────────────────────────────────────────────
+
+    /// Fixed "now" shared with node_detail tests: 2026-04-24T00:00Z.
+    fn fixed_now() -> time::OffsetDateTime {
+        time::macros::datetime!(2026-04-24 00:00 UTC)
+    }
+
+    /// Build a minimal `NodeHealthRow` with the given address and `tls_cert`.
+    fn row_with_tls(
+        address: &str,
+        tls_cert: Option<
+            Result<crate::client::tls_cert::NodeCertChain, crate::client::tls_cert::TlsProbeError>,
+        >,
+    ) -> crate::client::health::NodeHealthRow {
+        use crate::client::health::Severity;
+        crate::client::health::NodeHealthRow {
+            node_address: address.into(),
+            heap_used_bytes: 512 * 1024 * 1024,
+            heap_max_bytes: 1024 * 1024 * 1024,
+            heap_percent: 50,
+            heap_severity: Severity::Green,
+            gc_collection_count: 5,
+            gc_delta: None,
+            gc_millis: 20,
+            load_average: Some(0.5),
+            available_processors: Some(4),
+            uptime: "1h".into(),
+            total_threads: 20,
+            gc: vec![],
+            content_repos: vec![],
+            flowfile_repo: None,
+            provenance_repos: vec![],
+            cluster: None,
+            tls_cert,
+        }
+    }
+
+    /// Build a `NodeCertChain` whose earliest `not_after` is `fixed_now() + days`.
+    fn chain_expiring_in(days: i64) -> crate::client::tls_cert::NodeCertChain {
+        use crate::client::tls_cert::{CertEntry, NodeCertChain};
+        NodeCertChain {
+            entries: vec![CertEntry {
+                subject_cn: Some("n".into()),
+                not_after: fixed_now() + time::Duration::days(days),
+                is_leaf: true,
+            }],
+        }
+    }
+
+    /// Build a minimal `OverviewState` containing exactly the supplied node rows.
+    fn state_with_node_rows(
+        rows: Vec<crate::client::health::NodeHealthRow>,
+    ) -> crate::view::overview::state::OverviewState {
+        use crate::view::overview::state::{OverviewState, RepositoriesSummary};
+        let mut state = OverviewState::new();
+        state.nodes.nodes = rows;
+        state.repositories_summary = RepositoriesSummary {
+            content_percent: 42,
+            flowfile_percent: 18,
+            provenance_percent: 7,
+        };
+        state
+    }
+
+    #[test]
+    fn snapshot_nodes_list_cert_chips_mixed() {
+        use crate::client::tls_cert::TlsProbeError;
+        let rows = vec![
+            // n1: no TLS data → empty chip
+            row_with_tls("n1:8443", None),
+            // n2: expires in 400 days → silent (>= 30d threshold)
+            row_with_tls("n3:8443", Some(Ok(chain_expiring_in(400)))),
+            // n3: expires in 14 days → yellow "cert 14d"
+            row_with_tls("n3:8443", Some(Ok(chain_expiring_in(14)))),
+            // n4: expires in 3 days → red/bold "cert 3d"
+            row_with_tls("n4:8443", Some(Ok(chain_expiring_in(3)))),
+            // n5: expired 2 days ago → red/bold "cert expired"
+            row_with_tls("n5:8443", Some(Ok(chain_expiring_in(-2)))),
+            // n6: probe failed → empty chip (silent)
+            row_with_tls(
+                "n6:8443",
+                Some(Err(TlsProbeError::Connect("refused".into()))),
+            ),
+        ];
+        let state = state_with_node_rows(rows);
+        let backend = ratatui::backend::TestBackend::new(110, 12);
+        let mut term = Terminal::new(backend).unwrap();
+        term.draw(|f| super::render_nodes_zone_at(f, f.area(), &state, false, fixed_now()))
+            .unwrap();
+        insta::assert_snapshot!("nodes_list_cert_chips_mixed", format!("{}", term.backend()));
     }
 }
