@@ -559,6 +559,23 @@ simply render without the `→` marker on their endpoints. The extra
 fetches are cheap (one per PG, parallelized with
 `futures::future::join_all`).
 
+### Fuzzy Find
+
+The `Shift+F` modal searches a shared `FlowIndex` built from the
+Browser arena (processors, PGs, controller services, connections,
+ports — folders excluded). The haystack per entry is
+`"{name} {kind_label} {group_path}"` lowercased; nucleo scores and
+the top 50 are shown.
+
+A leading colon-prefixed token narrows the corpus to a single
+`NodeKind` before fuzzy scoring: `:proc`, `:pg`, `:cs`, `:conn`,
+`:in`, `:out`. Parsing happens inside
+`FuzzyFindState::rebuild_matches`; an unknown `:token` (or any
+non-leading occurrence) is treated as plain query text. A read-only
+chip row above the query line reflects the parsed filter. There is no
+chip-toggle keybinding — the query string is the single source of
+truth.
+
 ## Dependency on `nifi-rust-client`
 
 `nifi-lens` depends on `nifi-rust-client` with the `dynamic` feature,

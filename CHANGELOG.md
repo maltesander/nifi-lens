@@ -9,6 +9,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Fuzzy Find kind filter**: type `:proc`, `:pg`, `:cs`, `:conn`,
+  `:in`, or `:out` at the start of the query to narrow the corpus to
+  a single component kind. A chip row above the query shows the
+  active filter. Clear by backspacing through the prefix.
+
 - **Distribution**: prebuilt binaries for Linux (x86_64 / aarch64,
   gnu + musl), macOS (x86_64 / aarch64), and Windows (x86_64) are now
   attached to each GitHub Release, along with shell and PowerShell

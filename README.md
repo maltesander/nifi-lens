@@ -56,7 +56,9 @@
 - **Bulletin tail** — live cluster-wide log with severity filters, source deduplication, per-source mute, and a full-screen detail modal with scroll + substring search.
 - **Flow browser** — component tree with per-node detail.
   - **Cross-navigation** — detail rows whose value is a known component render a trailing `→` and jump to it on Enter. Covered surfaces: connection endpoints (FROM/TO), processor / CS property values that are component UUIDs, processor `Connections` section, process-group `Controller services` section. Controller Service and Port Identity panels resolve the parent group UUID to the PG name.
-  - **Fuzzy search** across all known components.
+  - **Fuzzy search** across all known components. Narrow the corpus by
+    kind with a leading prefix: `:proc kafka`, `:pg ingest`, `:cs aws`,
+    `:conn q1`, `:in`, `:out`.
 - **Provenance events** — filterable cluster-wide event search cross-linked from Bulletins and Browser.
 - **Flowfile tracer** — paste a UUID to trace its full lineage with attribute diffs, an inline content preview, and…
 - **Content viewer modal** — full-screen content viewer (Input / Output / Diff tabs) that streams large flowfile bodies in 512 KiB chunks up to a configurable ceiling, renders a colored unified diff when both sides share a MIME type, and supports in-body substring search with match highlighting.
@@ -225,6 +227,11 @@ reference; you don't need to memorise them.
 | `g`                 | Cross-tab goto menu                              |
 | `?`                 | Open context-aware help                          |
 | `q` / `Ctrl+C`      | Quit                                             |
+
+Inside the Fuzzy Find modal, a leading token narrows by kind:
+`:proc`, `:pg`, `:cs`, `:conn`, `:in`, `:out`. Clear the filter by
+backspacing through the prefix. The chip row above the query line
+reflects the active filter.
 
 ### Bulletins
 
