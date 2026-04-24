@@ -111,6 +111,17 @@ impl ControllerServiceState {
             _ => theme::warning(),
         }
     }
+
+    /// Style used for the CS state cell in the Referencing table on
+    /// CS detail panes. Mirrors the legacy mapping: enabled → success,
+    /// disabled → disabled, anything else → warning.
+    pub fn referencing_style(self) -> Style {
+        match self {
+            Self::Enabled => theme::success(),
+            Self::Disabled => theme::disabled(),
+            _ => theme::warning(),
+        }
+    }
 }
 
 #[cfg(test)]
@@ -265,6 +276,35 @@ mod tests {
         );
         assert_eq!(
             ControllerServiceState::Unknown.badge_style(),
+            crate::theme::warning()
+        );
+    }
+
+    #[test]
+    fn controller_service_state_referencing_styles() {
+        assert_eq!(
+            ControllerServiceState::Enabled.referencing_style(),
+            crate::theme::success()
+        );
+        assert_eq!(
+            ControllerServiceState::Disabled.referencing_style(),
+            crate::theme::disabled()
+        );
+        // Everything else falls through to warning.
+        assert_eq!(
+            ControllerServiceState::Enabling.referencing_style(),
+            crate::theme::warning()
+        );
+        assert_eq!(
+            ControllerServiceState::Disabling.referencing_style(),
+            crate::theme::warning()
+        );
+        assert_eq!(
+            ControllerServiceState::Invalid.referencing_style(),
+            crate::theme::warning()
+        );
+        assert_eq!(
+            ControllerServiceState::Unknown.referencing_style(),
             crate::theme::warning()
         );
     }

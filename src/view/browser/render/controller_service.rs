@@ -321,11 +321,8 @@ fn render_referencing_components_panel(
                 Cell::from(format!("{glyph} {state}")).style(style)
             }
             ReferencingKind::ControllerService => {
-                let style = match state {
-                    "ENABLED" => theme::success(),
-                    "DISABLED" => theme::disabled(),
-                    _ => theme::warning(),
-                };
+                let style = crate::client::status::ControllerServiceState::from_wire(state)
+                    .referencing_style();
                 Cell::from(state.to_string()).style(style)
             }
             _ => Cell::from(state.to_string()).style(theme::muted()),
