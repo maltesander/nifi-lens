@@ -102,10 +102,9 @@ pub(crate) fn tiny_controller_services(
     }
 }
 
-/// Filler `fetch_duration` for test fixtures that construct a
-/// synthetic `ClusterUpdate` without actually measuring a fetch.
-/// Short enough that adaptive-cadence logic treats the fetch as
-/// "fast" and applies no backoff.
+/// Filler value for the `fetch_duration` field on synthetic
+/// `ClusterUpdate`s built in tests. Tests never read this value
+/// back — it's there only because the struct requires it.
 pub(crate) fn default_fetch_duration() -> Duration {
     Duration::from_millis(5)
 }
@@ -114,9 +113,9 @@ pub(crate) fn default_fetch_duration() -> Duration {
 /// Named for readability; use them when spinning up a backend for
 /// Bulletins / Browser / Events / Tracer screens.
 pub(crate) const TEST_BACKEND_WIDTH: u16 = 100;
-pub(crate) const TEST_BACKEND_TALL: u16 = 28;
-pub(crate) const TEST_BACKEND_MEDIUM: u16 = 24;
 pub(crate) const TEST_BACKEND_SHORT: u16 = 20;
+pub(crate) const TEST_BACKEND_MEDIUM: u16 = 24;
+pub(crate) const TEST_BACKEND_TALL: u16 = 28;
 
 /// Shorthand for `TestBackend::new` at the standard width.
 pub(crate) fn test_backend(height: u16) -> TestBackend {
