@@ -43,9 +43,10 @@ use crate::widget::panel::Panel;
 
 pub fn render(frame: &mut Frame, area: Rect, state: &OverviewState) {
     // Vertical panels. Nodes panel height adapts to the number of nodes
-    // (1 row per node + 1 repos row), capped to keep the
-    // bulletin/queue panels readable. +2 for the top/bottom border.
-    let nodes_height = nodes_zone_height(state);
+    // (1 row per node + 1 repos row) and the available terminal height,
+    // capped at ~1/3 of the area so the bulletin/queue panels always keep
+    // their share. +2 for the top/bottom border.
+    let nodes_height = nodes_zone_height(state, area.height);
     let zones = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
@@ -116,13 +117,16 @@ pub fn render(frame: &mut Frame, area: Rect, state: &OverviewState) {
 
 /// Compute how many rows the nodes panel needs. One row per visible node +
 /// one row for the repositories aggregate + 2 rows for the panel border.
-/// Capped so the panel never starves the lower panels.
-fn nodes_zone_height(state: &OverviewState) -> u16 {
-    let visible_nodes = state.nodes.nodes.len().min(8) as u16;
-    // N node rows + 1 repositories row + 2 border rows. Min 4 (loading
-    // state needs 1 loading msg + 1 buffer + 2 border).
-    let needed = visible_nodes.max(1) + 1 + 2;
-    needed.clamp(4, 14)
+/// Grows with terminal height but capped at ~1/3 of the available area so
+/// the bulletin/queue panels always keep their share; `render_nodes_zone`
+/// scrolls when the node count exceeds what fits.
+fn nodes_zone_height(state: &OverviewState, area_height: u16) -> u16 {
+    // N node rows + 1 repositories row + 2 border rows. `max(1)` keeps a
+    // slot for the loading message when the snapshot is empty.
+    let visible_nodes = (state.nodes.nodes.len() as u16).max(1);
+    let desired = visible_nodes + 1 + 2;
+    let cap = (area_height / 3).max(4);
+    desired.min(cap).max(4)
 }
 
 /// Three-row Components table — process groups, processors, controller
