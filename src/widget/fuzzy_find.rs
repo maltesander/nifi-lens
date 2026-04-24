@@ -18,7 +18,14 @@ use crate::view::browser::state::{FlowIndex, FlowIndexEntry};
 
 #[derive(Debug)]
 pub struct FuzzyFindState {
+    /// Raw user input — the only field external callers mutate.
     pub query: String,
+    /// Kind filter parsed from the leading token of `query`. Derived
+    /// state, refreshed in `rebuild_matches`.
+    pub kind_filter: Option<NodeKind>,
+    /// Fuzzy needle with the kind prefix stripped. Derived state,
+    /// refreshed in `rebuild_matches`.
+    pub effective_query: String,
     pub matches: Vec<MatchedEntry>,
     pub selected: usize,
 }
@@ -47,7 +54,6 @@ fn kind_priority(kind: NodeKind) -> u8 {
 
 /// Fixed alias table mapping colon-prefixed tokens to `NodeKind`.
 /// Keep lowercase — `parse_prefix` compares case-insensitively.
-#[allow(dead_code)]
 const KIND_ALIASES: &[(&str, NodeKind)] = &[
     (":proc", NodeKind::Processor),
     (":pg", NodeKind::ProcessGroup),
@@ -69,15 +75,19 @@ const KIND_ALIASES: &[(&str, NodeKind)] = &[
 /// - `:proc` alone → kind set, empty needle.
 /// - Trailing whitespace in the returned needle is preserved (the user
 ///   may be mid-typing the next word).
-#[allow(dead_code)]
 pub(crate) fn parse_prefix(query: &str) -> (Option<NodeKind>, String) {
     let trimmed = query.trim_start();
+    // Split off the first whitespace-delimited token without allocating
+    // a Vec<&str>.
     let (head, tail) = match trimmed.find(char::is_whitespace) {
         Some(ws) => (&trimmed[..ws], &trimmed[ws..]),
         None => (trimmed, ""),
     };
     for (alias, kind) in KIND_ALIASES {
         if head.eq_ignore_ascii_case(alias) {
+            // Drop a single separator whitespace; preserve any trailing
+            // characters (further whitespace + the user's in-progress
+            // needle).
             let rest = tail
                 .strip_prefix(|c: char| c.is_whitespace())
                 .unwrap_or(tail);
@@ -97,20 +107,32 @@ impl FuzzyFindState {
     pub fn new() -> Self {
         Self {
             query: String::new(),
+            kind_filter: None,
+            effective_query: String::new(),
             matches: Vec::new(),
             selected: 0,
         }
     }
 
     /// Rebuild `matches` against `index`. Top 50 by score descending.
-    /// An empty query matches everything in the corpus.
+    /// An empty effective query matches everything in the (optionally
+    /// kind-filtered) corpus.
     pub fn rebuild_matches(&mut self, index: &FlowIndex) {
+        let (kind_filter, effective_query) = parse_prefix(&self.query);
+        self.kind_filter = kind_filter;
+        self.effective_query = effective_query;
+
         let mut matcher = Matcher::new(Config::DEFAULT.match_paths());
         let mut query_buf = Vec::new();
-        let lowered = self.query.to_lowercase();
+        let lowered = self.effective_query.to_lowercase();
         let pattern = Utf32Str::new(&lowered, &mut query_buf);
         let mut results: Vec<MatchedEntry> = Vec::new();
         for (i, entry) in index.entries.iter().enumerate() {
+            if let Some(wanted) = self.kind_filter
+                && entry.kind != wanted
+            {
+                continue;
+            }
             let mut haystack_buf = Vec::new();
             let hay = Utf32Str::new(&entry.haystack, &mut haystack_buf);
             let mut indices: Vec<u32> = Vec::new();
@@ -743,5 +765,54 @@ mod tests {
     #[test]
     fn parse_prefix_empty_query() {
         assert_eq!(parse_prefix(""), (None, String::new()));
+    }
+
+    #[test]
+    fn rebuild_matches_filters_by_parsed_kind() {
+        let mut s = FuzzyFindState::new();
+        s.query = ":cs".into();
+        s.rebuild_matches(&sample_index());
+        assert_eq!(s.matches.len(), 1);
+        assert_eq!(s.kind_filter, Some(NodeKind::ControllerService));
+    }
+
+    #[test]
+    fn rebuild_matches_applies_filter_and_then_fuzzy_needle() {
+        let mut s = FuzzyFindState::new();
+        s.query = ":proc kafka".into();
+        let idx = sample_index();
+        s.rebuild_matches(&idx);
+        assert_eq!(s.kind_filter, Some(NodeKind::Processor));
+        assert_eq!(s.effective_query, "kafka");
+        assert_eq!(s.matches.len(), 1);
+        let top = s.selected_entry(&idx).unwrap();
+        assert_eq!(top.id, "p1");
+    }
+
+    #[test]
+    fn rebuild_matches_empty_needle_with_filter_returns_all_of_that_kind() {
+        let mut s = FuzzyFindState::new();
+        s.query = ":proc".into();
+        s.rebuild_matches(&sample_index());
+        assert_eq!(s.matches.len(), 2);
+    }
+
+    #[test]
+    fn rebuild_matches_no_prefix_preserves_original_behavior() {
+        let mut s = FuzzyFindState::new();
+        s.query = "kafka".into();
+        s.rebuild_matches(&sample_index());
+        assert_eq!(s.kind_filter, None);
+        assert_eq!(s.effective_query, "kafka");
+        assert!(s.matches.len() >= 2);
+    }
+
+    #[test]
+    fn rebuild_matches_unknown_prefix_falls_through_to_fuzzy() {
+        let mut s = FuzzyFindState::new();
+        s.query = ":nope".into();
+        s.rebuild_matches(&sample_index());
+        assert_eq!(s.kind_filter, None);
+        assert_eq!(s.effective_query, ":nope");
     }
 }
