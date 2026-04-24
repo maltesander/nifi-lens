@@ -666,26 +666,26 @@ pub(crate) fn spawn_tls_certs(
             }
 
             let addresses = addresses_rx.borrow().clone();
+            let fallback = fallback_host_port(&base_url);
+            if fallback.is_none() && !http_logged {
+                tracing::info!("tls_certs: non-HTTPS base_url ({base_url}); skipping probe");
+                http_logged = true;
+            }
             let targets = if addresses.is_empty() {
-                match fallback_target(&base_url) {
-                    Some(t) => vec![t],
-                    None => {
-                        if !http_logged {
-                            tracing::info!(
-                                "tls_certs: non-HTTPS base_url ({base_url}); skipping probe"
-                            );
-                            http_logged = true;
-                        }
-                        Vec::new()
-                    }
-                }
+                // Pre-first-address cycle: probe `base_url` under a
+                // self-describing key so the modal shows something
+                // while we wait for ClusterNodes / SystemDiagnostics.
+                fallback
+                    .as_ref()
+                    .map(|(h, p)| vec![format!("{h}:{p}")])
+                    .unwrap_or_default()
             } else {
                 addresses
             };
 
-            tracing::debug!(?targets, "tls_certs: probing");
+            tracing::debug!(?targets, ?fallback, "tls_certs: probing");
             let t0 = Instant::now();
-            let snap = probe_all(&targets, PROBE_TIMEOUT).await;
+            let snap = probe_all(&targets, fallback, PROBE_TIMEOUT).await;
             let duration = t0.elapsed();
             let meta = FetchMeta {
                 fetched_at: t0,
@@ -709,16 +709,19 @@ pub(crate) fn spawn_tls_certs(
     })
 }
 
-/// Parse the context `base_url`. Returns `Some("host:port")` when the
-/// URL is `https`; `None` for anything else (plain http, bad URL).
-fn fallback_target(base_url: &str) -> Option<String> {
+/// Parse the context `base_url` into a `(host, port)` pair. Returns
+/// `None` for non-HTTPS URLs or unparseable input. Used as the TLS
+/// probe's fallback target when a node address isn't a valid
+/// `host:port` (e.g. the sysdiag aggregate-fallback placeholder on
+/// standalone NiFi) or before any address has been published.
+fn fallback_host_port(base_url: &str) -> Option<(String, u16)> {
     let parsed = url::Url::parse(base_url).ok()?;
     if parsed.scheme() != "https" {
         return None;
     }
-    let host = parsed.host_str()?;
+    let host = parsed.host_str()?.to_string();
     let port = parsed.port_or_known_default()?;
-    Some(format!("{host}:{port}"))
+    Some((host, port))
 }
 
 #[cfg(test)]

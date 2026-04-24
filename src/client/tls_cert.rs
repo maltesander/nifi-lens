@@ -205,19 +205,32 @@ impl NodeCertChain {
 
 /// Probe every target concurrently. Each entry is `Ok` or an
 /// individual `TlsProbeError` — the fetcher never aborts the whole
-/// snapshot on a single node's failure. Takes `host:port` strings;
-/// each is split on the rightmost `:` (v4-safe; IPv6 callers should
-/// wrap the host in brackets).
-pub async fn probe_all(targets: &[String], timeout: Duration) -> TlsCertsSnapshot {
+/// snapshot on a single node's failure.
+///
+/// Targets are typically `host:port` strings (split on the rightmost
+/// `:`; IPv6 callers should wrap the host in brackets). When a target
+/// doesn't parse — standalone NiFi's sysdiag aggregate-fallback row
+/// has the placeholder address `"Cluster (aggregate)"`, for example —
+/// `fallback` supplies the actual `(host, port)` to dial. The snapshot
+/// is still keyed by the original target so the reducer's join on
+/// `NodeHealthRow.node_address` continues to match.
+pub async fn probe_all(
+    targets: &[String],
+    fallback: Option<(String, u16)>,
+    timeout: Duration,
+) -> TlsCertsSnapshot {
     let fetched_at = Instant::now();
     let fetched_wall = OffsetDateTime::now_utc();
 
     let futures = targets.iter().map(|t| {
         let target = t.clone();
+        let fallback = fallback.clone();
         async move {
-            let result = match split_host_port(&target) {
+            let result = match split_host_port(&target).or(fallback) {
                 Some((host, port)) => probe_tls(&host, port, timeout).await,
-                None => Err(TlsProbeError::Connect(format!("bad target {target}"))),
+                None => Err(TlsProbeError::Connect(format!(
+                    "bad target {target} and no fallback host:port available"
+                ))),
             };
             (target, result)
         }
@@ -397,7 +410,7 @@ mod probe_tests {
             format!("127.0.0.1:{port_ok}"),
             format!("127.0.0.1:{port_bad}"),
         ];
-        let snap = probe_all(&targets, Duration::from_millis(500)).await;
+        let snap = probe_all(&targets, None, Duration::from_millis(500)).await;
 
         assert_eq!(snap.certs.len(), 2);
         assert!(snap.certs[&targets[0]].is_ok());
@@ -405,6 +418,26 @@ mod probe_tests {
             snap.certs[&targets[1]],
             Err(TlsProbeError::Connect(_))
         ));
+    }
+
+    #[tokio::test]
+    async fn probe_all_falls_back_to_explicit_host_port_for_unparseable_target() {
+        let (port, _) = start_test_server().await;
+        let targets = vec!["Cluster (aggregate)".to_string()];
+        let snap = probe_all(
+            &targets,
+            Some(("127.0.0.1".to_string(), port)),
+            Duration::from_millis(500),
+        )
+        .await;
+
+        assert_eq!(snap.certs.len(), 1);
+        // Snapshot keyed by the original (unparseable) target so the
+        // reducer's join on NodeHealthRow.node_address still matches.
+        let chain = snap.certs["Cluster (aggregate)"]
+            .as_ref()
+            .expect("fallback probe should have succeeded");
+        assert_eq!(chain.entries[0].subject_cn.as_deref(), Some("localhost"));
     }
 }
 
