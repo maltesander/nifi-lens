@@ -7,6 +7,7 @@ use std::collections::{HashMap, VecDeque};
 use std::time::{Duration, Instant};
 
 use crate::client::health::{ClusterNodesSnapshot, SystemDiagSnapshot};
+use crate::client::tls_cert::TlsCertsSnapshot;
 use crate::client::{
     AboutSnapshot, BulletinSnapshot, ConnectionEndpoints, ControllerServicesSnapshot,
     ControllerStatusSnapshot, RootPgStatusSnapshot,
@@ -144,6 +145,7 @@ pub struct ClusterSnapshot {
     pub root_pg_status: EndpointState<RootPgStatusSnapshot>,
     pub controller_services: EndpointState<ControllerServicesSnapshot>,
     pub cluster_nodes: EndpointState<ClusterNodesSnapshot>,
+    pub tls_certs: EndpointState<TlsCertsSnapshot>,
     pub system_diagnostics: EndpointState<SystemDiagSnapshot>,
     pub connections_by_pg: HashMap<String, EndpointState<ConnectionEndpoints>>,
     pub bulletins: BulletinRing,
@@ -196,8 +198,7 @@ impl ClusterSnapshot {
                 .max(),
             ClusterEndpoint::Bulletins => self.bulletins.meta.map(|m| m.next_interval),
             ClusterEndpoint::ClusterNodes => meta_of(&self.cluster_nodes).map(|m| m.next_interval),
-            // filled in by Task 8 when tls_certs field is added to ClusterSnapshot
-            ClusterEndpoint::TlsCerts => None,
+            ClusterEndpoint::TlsCerts => meta_of(&self.tls_certs).map(|m| m.next_interval),
         }
     }
 }
@@ -312,6 +313,30 @@ mod tests {
         assert_eq!(
             snap.next_interval_for(ClusterEndpoint::ClusterNodes),
             Some(Duration::from_secs(5)),
+        );
+    }
+
+    #[test]
+    fn next_interval_for_tls_certs() {
+        use crate::client::tls_cert::TlsCertsSnapshot;
+        use std::collections::HashMap;
+        let mut snap = ClusterSnapshot::default();
+        let meta = FetchMeta {
+            fetched_at: Instant::now(),
+            fetch_duration: Duration::from_millis(30),
+            next_interval: Duration::from_secs(3600),
+        };
+        snap.tls_certs.apply(
+            Ok(TlsCertsSnapshot {
+                certs: HashMap::new(),
+                fetched_at: Instant::now(),
+                fetched_wall: time::OffsetDateTime::now_utc(),
+            }),
+            meta,
+        );
+        assert_eq!(
+            snap.next_interval_for(ClusterEndpoint::TlsCerts),
+            Some(Duration::from_secs(3600)),
         );
     }
 
