@@ -104,9 +104,17 @@ processors (per-state counts), and controller services (per-state
 counts). Below it: a bulletin-rate sparkline, queue backpressure,
 repository fill, per-node health strips, and the noisiest components.
 
-- Per-node TLS certificate expiry — visible chip on the Nodes list,
-  full chain breakdown in the node detail modal. One handshake per
-  node per hour by default (`[polling.cluster] tls_certs`).
+- Per-node TLS certificate expiry — each Nodes-list row carries a
+  trailing chip showing the earliest `not_after` in the chain
+  (`Nd` under a year, `Ny Mmo` beyond). Severity thresholds:
+  expired or `<7d` renders red/bold, `7–30d` yellow, `≥30d` muted
+  grey. The chip only goes quiet when there is no data (not-yet-
+  probed or probe failed). Opening a node expands to the full chain
+  breakdown in the detail modal. Standalone NiFi servers (no
+  `/controller/cluster` endpoint) fall back to probing the context
+  URL's host+port; HTTP-only contexts skip probing with a one-time
+  info log. Cadence is one handshake per node per hour by default
+  (`[polling.cluster] tls_certs`).
 
 **Bulletins** — Live cluster-wide bulletin tail with severity,
 component-type, and free-text filters. Deduplication collapses
