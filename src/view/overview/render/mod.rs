@@ -1569,7 +1569,7 @@ mod tests {
             },
             meta: FetchMeta {
                 fetched_at: Instant::now(),
-                fetch_duration: std::time::Duration::from_millis(5),
+                fetch_duration: crate::test_support::default_fetch_duration(),
                 next_interval: std::time::Duration::from_secs(10),
             },
         };
@@ -1596,7 +1596,7 @@ mod tests {
             data: root_pg,
             meta: FetchMeta {
                 fetched_at: Instant::now(),
-                fetch_duration: std::time::Duration::from_millis(5),
+                fetch_duration: crate::test_support::default_fetch_duration(),
                 next_interval: std::time::Duration::from_secs(10),
             },
         };
@@ -1669,7 +1669,7 @@ mod tests {
             data: diag,
             meta: FetchMeta {
                 fetched_at: Instant::now(),
-                fetch_duration: std::time::Duration::from_millis(5),
+                fetch_duration: crate::test_support::default_fetch_duration(),
                 next_interval: std::time::Duration::from_secs(10),
             },
         };

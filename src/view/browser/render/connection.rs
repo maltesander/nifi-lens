@@ -221,10 +221,10 @@ fn fill_style(percent: u32) -> ratatui::style::Style {
 mod snapshots {
     use super::*;
     use crate::client::{NodeKind, NodeStatusSummary};
+    use crate::test_support::{TEST_BACKEND_SHORT, test_backend};
     use crate::view::browser::state::{MAX_DETAIL_SECTIONS, TreeNode};
     use insta::assert_snapshot;
     use ratatui::Terminal;
-    use ratatui::backend::TestBackend;
 
     // UUID-shaped IDs so resolve_id passes the is_uuid_shape pre-filter.
     const SRC_UUID: &str = "aaaaaaaa-0000-0000-0000-000000000001";
@@ -284,7 +284,7 @@ mod snapshots {
     #[test]
     fn connection_detail_renders() {
         let (d, state) = seeded();
-        let mut terminal = Terminal::new(TestBackend::new(100, 20)).unwrap();
+        let mut terminal = Terminal::new(test_backend(TEST_BACKEND_SHORT)).unwrap();
         terminal
             .draw(|f| render(f, f.area(), &d, &state, &DetailFocus::Tree))
             .unwrap();
@@ -307,7 +307,7 @@ mod snapshots {
             rows: [0; MAX_DETAIL_SECTIONS],
             x_offsets: [0; MAX_DETAIL_SECTIONS],
         };
-        let mut terminal = Terminal::new(TestBackend::new(100, 20)).unwrap();
+        let mut terminal = Terminal::new(test_backend(TEST_BACKEND_SHORT)).unwrap();
         terminal
             .draw(|f| render(f, f.area(), &d, &state, &focus))
             .unwrap();
@@ -321,7 +321,7 @@ mod snapshots {
     fn connection_detail_endpoints_hides_arrow_when_opposite_not_in_arena() {
         let (d, mut state) = seeded();
         state.nodes.clear(); // nothing resolves → no markers
-        let mut terminal = Terminal::new(TestBackend::new(100, 20)).unwrap();
+        let mut terminal = Terminal::new(test_backend(TEST_BACKEND_SHORT)).unwrap();
         terminal
             .draw(|f| render(f, f.area(), &d, &state, &DetailFocus::Tree))
             .unwrap();

@@ -2729,7 +2729,7 @@ mod tests {
             data: build_test_sysdiag_with_two_nodes(),
             meta: FetchMeta {
                 fetched_at: Instant::now(),
-                fetch_duration: Duration::from_millis(5),
+                fetch_duration: crate::test_support::default_fetch_duration(),
                 next_interval: Duration::from_secs(30),
             },
         };

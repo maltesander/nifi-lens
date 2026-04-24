@@ -453,13 +453,13 @@ fn render_detail_pane(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::test_support::{TEST_BACKEND_MEDIUM, test_backend};
     use insta::assert_snapshot;
     use ratatui::Terminal;
-    use ratatui::backend::TestBackend;
 
     fn render_to_string(state: &EventsState) -> String {
         let cfg = crate::timestamp::TimestampConfig::default();
-        let backend = TestBackend::new(100, 24);
+        let backend = test_backend(TEST_BACKEND_MEDIUM);
         let mut terminal = Terminal::new(backend).unwrap();
         terminal.draw(|f| render(f, f.area(), state, &cfg)).unwrap();
         format!("{}", terminal.backend())

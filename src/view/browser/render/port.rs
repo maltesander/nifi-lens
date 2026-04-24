@@ -184,9 +184,9 @@ fn render_recent_bulletins(
 #[cfg(test)]
 mod snapshots {
     use super::*;
+    use crate::test_support::{TEST_BACKEND_SHORT, test_backend};
     use insta::assert_snapshot;
     use ratatui::Terminal;
-    use ratatui::backend::TestBackend;
 
     #[test]
     fn port_detail_output_port_renders_without_comments() {
@@ -201,7 +201,7 @@ mod snapshots {
         };
         let state = BrowserState::new();
         let bulletins: VecDeque<BulletinSnapshot> = VecDeque::new();
-        let mut term = Terminal::new(TestBackend::new(100, 20)).unwrap();
+        let mut term = Terminal::new(test_backend(TEST_BACKEND_SHORT)).unwrap();
         term.draw(|f| render(f, f.area(), &d, &state, &bulletins, &DetailFocus::Tree))
             .unwrap();
         assert_snapshot!(
@@ -223,7 +223,7 @@ mod snapshots {
         };
         let state = BrowserState::new();
         let bulletins: VecDeque<BulletinSnapshot> = VecDeque::new();
-        let mut term = Terminal::new(TestBackend::new(100, 20)).unwrap();
+        let mut term = Terminal::new(test_backend(TEST_BACKEND_SHORT)).unwrap();
         term.draw(|f| render(f, f.area(), &d, &state, &bulletins, &DetailFocus::Tree))
             .unwrap();
         assert_snapshot!(
@@ -263,7 +263,7 @@ mod snapshots {
             },
         });
         let bulletins: VecDeque<BulletinSnapshot> = VecDeque::new();
-        let mut term = Terminal::new(TestBackend::new(100, 20)).unwrap();
+        let mut term = Terminal::new(test_backend(TEST_BACKEND_SHORT)).unwrap();
         term.draw(|f| render(f, f.area(), &d, &state, &bulletins, &DetailFocus::Tree))
             .unwrap();
         let out = format!("{}", term.backend());

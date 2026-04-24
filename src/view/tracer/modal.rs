@@ -809,6 +809,7 @@ fn render_footer_hint(frame: &mut Frame, area: Rect, modal: &ContentModalState) 
 mod tests {
     use super::*;
     use crate::client::tracer::ContentRender;
+    use crate::test_support::{TEST_BACKEND_MEDIUM, TEST_BACKEND_SHORT, test_backend};
     use crate::view::tracer::state::{
         ContentModalHeader, ContentModalState, ContentModalTab, DiffLine, DiffRender, Diffable,
         HunkAnchor, NotDiffableReason, SideBuffer,
@@ -918,7 +919,7 @@ mod tests {
         modal.input.loaded = vec![b'x'; 4 * 1024 * 1024];
         modal.input.ceiling_hit = true;
         modal.input.fully_loaded = true;
-        let backend = TestBackend::new(100, 20);
+        let backend = test_backend(TEST_BACKEND_SHORT);
         let mut terminal = Terminal::new(backend).unwrap();
         terminal
             .draw(|f| {
@@ -968,7 +969,7 @@ mod tests {
             }],
             change_stops: vec![0, 1],
         });
-        let backend = TestBackend::new(100, 20);
+        let backend = test_backend(TEST_BACKEND_SHORT);
         let mut terminal = Terminal::new(backend).unwrap();
         terminal
             .draw(|f| {
@@ -990,7 +991,7 @@ mod tests {
     fn modal_diff_no_differences() {
         let mut modal = stub_modal(ContentModalTab::Output);
         modal.diffable = Diffable::NotAvailable(NotDiffableReason::NoDifferences);
-        let backend = TestBackend::new(100, 20);
+        let backend = test_backend(TEST_BACKEND_SHORT);
         let mut terminal = Terminal::new(backend).unwrap();
         terminal
             .draw(|f| {
@@ -1009,7 +1010,7 @@ mod tests {
     fn modal_diff_size_exceeds_cap() {
         let mut modal = stub_modal(ContentModalTab::Input);
         modal.diffable = Diffable::NotAvailable(NotDiffableReason::SizeExceedsDiffCap);
-        let backend = TestBackend::new(100, 20);
+        let backend = test_backend(TEST_BACKEND_SHORT);
         let mut terminal = Terminal::new(backend).unwrap();
         terminal
             .draw(|f| {
@@ -1069,7 +1070,7 @@ mod tests {
             }],
             current: Some(0),
         });
-        let backend = TestBackend::new(100, 20);
+        let backend = test_backend(TEST_BACKEND_SHORT);
         let mut terminal = Terminal::new(backend).unwrap();
         terminal
             .draw(|f| {
@@ -1268,7 +1269,7 @@ mod tests {
             tabular: Some(64 * 1024 * 1024),
             diff: Some(16 * 1024 * 1024),
         };
-        let backend = TestBackend::new(100, 24);
+        let backend = test_backend(TEST_BACKEND_MEDIUM);
         let mut terminal = Terminal::new(backend).unwrap();
         terminal
             .draw(|f| render(f, f.area(), &mut modal, &cfg))

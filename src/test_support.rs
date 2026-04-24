@@ -5,6 +5,9 @@
 //! construct a minimal `AppState` without duplicating the config
 //! boilerplate.
 
+use std::time::Duration;
+
+use ratatui::backend::TestBackend;
 use semver::Version;
 
 use crate::app::state::AppState;
@@ -97,4 +100,25 @@ pub(crate) fn tiny_controller_services(
         counts: Default::default(),
         members,
     }
+}
+
+/// Filler `fetch_duration` for test fixtures that construct a
+/// synthetic `ClusterUpdate` without actually measuring a fetch.
+/// Short enough that adaptive-cadence logic treats the fetch as
+/// "fast" and applies no backoff.
+pub(crate) fn default_fetch_duration() -> Duration {
+    Duration::from_millis(5)
+}
+
+/// Common `TestBackend` dimensions used across view snapshot tests.
+/// Named for readability; use them when spinning up a backend for
+/// Bulletins / Browser / Events / Tracer screens.
+pub(crate) const TEST_BACKEND_WIDTH: u16 = 100;
+pub(crate) const TEST_BACKEND_TALL: u16 = 28;
+pub(crate) const TEST_BACKEND_MEDIUM: u16 = 24;
+pub(crate) const TEST_BACKEND_SHORT: u16 = 20;
+
+/// Shorthand for `TestBackend::new` at the standard width.
+pub(crate) fn test_backend(height: u16) -> TestBackend {
+    TestBackend::new(TEST_BACKEND_WIDTH, height)
 }

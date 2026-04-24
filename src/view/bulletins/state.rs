@@ -1079,7 +1079,7 @@ mod tests {
             .merge(vec![b(1, "INFO"), b(2, "WARN"), b(3, "ERROR")]);
         state.cluster.snapshot.bulletins.meta = Some(FetchMeta {
             fetched_at: Instant::now(),
-            fetch_duration: Duration::from_millis(5),
+            fetch_duration: crate::test_support::default_fetch_duration(),
             next_interval: Duration::from_secs(5),
         });
         crate::view::bulletins::state::redraw_bulletins(&mut state);
@@ -1103,7 +1103,7 @@ mod tests {
             .merge(vec![b(1, "INFO"), b(2, "INFO")]);
         state.cluster.snapshot.bulletins.meta = Some(FetchMeta {
             fetched_at: Instant::now(),
-            fetch_duration: Duration::from_millis(5),
+            fetch_duration: crate::test_support::default_fetch_duration(),
             next_interval: Duration::from_secs(5),
         });
         crate::view::bulletins::state::redraw_bulletins(&mut state);
@@ -1152,7 +1152,7 @@ mod tests {
             .merge(vec![build(1), build(2), build(3)]);
         state.cluster.snapshot.bulletins.meta = Some(FetchMeta {
             fetched_at: Instant::now(),
-            fetch_duration: Duration::from_millis(5),
+            fetch_duration: crate::test_support::default_fetch_duration(),
             next_interval: Duration::from_secs(5),
         });
         crate::view::bulletins::state::redraw_bulletins(&mut state);

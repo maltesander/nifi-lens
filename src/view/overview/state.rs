@@ -503,7 +503,7 @@ mod tests {
             data: controller,
             meta: FetchMeta {
                 fetched_at: Instant::now(),
-                fetch_duration: Duration::from_millis(5),
+                fetch_duration: crate::test_support::default_fetch_duration(),
                 next_interval: Duration::from_secs(10),
             },
         };
@@ -523,7 +523,7 @@ mod tests {
             data: diag,
             meta: FetchMeta {
                 fetched_at: Instant::now(),
-                fetch_duration: Duration::from_millis(5),
+                fetch_duration: crate::test_support::default_fetch_duration(),
                 next_interval: Duration::from_secs(10),
             },
         };
@@ -539,7 +539,7 @@ mod tests {
             data: root_pg,
             meta: FetchMeta {
                 fetched_at: Instant::now(),
-                fetch_duration: Duration::from_millis(5),
+                fetch_duration: crate::test_support::default_fetch_duration(),
                 next_interval: Duration::from_secs(10),
             },
         };
@@ -563,7 +563,7 @@ mod tests {
             },
             meta: FetchMeta {
                 fetched_at: Instant::now(),
-                fetch_duration: Duration::from_millis(5),
+                fetch_duration: crate::test_support::default_fetch_duration(),
                 next_interval: Duration::from_secs(10),
             },
         };
@@ -583,7 +583,7 @@ mod tests {
         state.cluster.snapshot.bulletins.merge(bulletins);
         state.cluster.snapshot.bulletins.meta = Some(FetchMeta {
             fetched_at: Instant::now(),
-            fetch_duration: Duration::from_millis(5),
+            fetch_duration: crate::test_support::default_fetch_duration(),
             next_interval: Duration::from_secs(10),
         });
     }

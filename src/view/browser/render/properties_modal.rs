@@ -158,10 +158,10 @@ mod tests {
     use super::*;
     use crate::client::ProcessorDetail;
     use crate::client::{NodeKind, NodeStatusSummary};
+    use crate::test_support::{TEST_BACKEND_SHORT, test_backend};
     use crate::view::browser::state::{BrowserState, NodeDetail, PropertiesModalState, TreeNode};
     use insta::assert_snapshot;
     use ratatui::Terminal;
-    use ratatui::backend::TestBackend;
 
     fn seeded_state_with_modal() -> (BrowserState, PropertiesModalState) {
         let mut s = BrowserState::new();
@@ -241,7 +241,7 @@ mod tests {
     #[test]
     fn properties_modal_renders_table_with_arrow_and_detail_strip() {
         let (state, modal) = seeded_state_with_modal();
-        let mut terminal = Terminal::new(TestBackend::new(100, 20)).unwrap();
+        let mut terminal = Terminal::new(test_backend(TEST_BACKEND_SHORT)).unwrap();
         terminal
             .draw(|f| render_properties_modal(f, f.area(), &modal, &state))
             .unwrap();

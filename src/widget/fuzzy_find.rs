@@ -416,14 +416,14 @@ mod tests {
 
     #[test]
     fn fuzzy_table_renders_header_row_and_columns() {
+        use crate::test_support::{TEST_BACKEND_SHORT, test_backend};
         use ratatui::Terminal;
-        use ratatui::backend::TestBackend;
 
         let idx = sample_index();
         let mut fuzz = FuzzyFindState::new();
         fuzz.rebuild_matches(&idx);
 
-        let backend = TestBackend::new(100, 20);
+        let backend = test_backend(TEST_BACKEND_SHORT);
         let mut term = Terminal::new(backend).unwrap();
         term.draw(|f| render(f, f.area(), &fuzz, &Some(idx.clone())))
             .unwrap();
@@ -477,11 +477,11 @@ mod tests {
 
     #[test]
     fn fuzzy_table_renders_no_index_message_when_flow_index_is_none() {
+        use crate::test_support::{TEST_BACKEND_SHORT, test_backend};
         use ratatui::Terminal;
-        use ratatui::backend::TestBackend;
 
         let fuzz = FuzzyFindState::new();
-        let backend = TestBackend::new(100, 20);
+        let backend = test_backend(TEST_BACKEND_SHORT);
         let mut term = Terminal::new(backend).unwrap();
         term.draw(|f| render(f, f.area(), &fuzz, &None)).unwrap();
         let out = format!("{}", term.backend());
@@ -523,8 +523,8 @@ mod tests {
 
     #[test]
     fn fuzzy_table_highlights_matched_name_chars_in_rendered_buffer() {
+        use crate::test_support::{TEST_BACKEND_SHORT, test_backend};
         use ratatui::Terminal;
-        use ratatui::backend::TestBackend;
         use ratatui::style::Modifier;
 
         let idx = sample_index();
@@ -532,7 +532,7 @@ mod tests {
         fuzz.query = "put".into();
         fuzz.rebuild_matches(&idx);
 
-        let backend = TestBackend::new(100, 20);
+        let backend = test_backend(TEST_BACKEND_SHORT);
         let mut term = Terminal::new(backend).unwrap();
         term.draw(|f| render(f, f.area(), &fuzz, &Some(idx.clone())))
             .unwrap();
@@ -550,8 +550,8 @@ mod tests {
 
     #[test]
     fn fuzzy_table_renders_no_matches_when_query_excludes_everything() {
+        use crate::test_support::{TEST_BACKEND_SHORT, test_backend};
         use ratatui::Terminal;
-        use ratatui::backend::TestBackend;
 
         let idx = sample_index();
         let mut fuzz = FuzzyFindState::new();
@@ -559,7 +559,7 @@ mod tests {
         fuzz.rebuild_matches(&idx);
         assert!(fuzz.matches.is_empty(), "precondition: query excludes all");
 
-        let backend = TestBackend::new(100, 20);
+        let backend = test_backend(TEST_BACKEND_SHORT);
         let mut term = Terminal::new(backend).unwrap();
         term.draw(|f| render(f, f.area(), &fuzz, &Some(idx)))
             .unwrap();

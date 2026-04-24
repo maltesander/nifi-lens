@@ -369,10 +369,10 @@ fn char_skip(s: &str, n: usize) -> String {
 #[cfg(test)]
 mod snapshots {
     use super::*;
+    use crate::test_support::{TEST_BACKEND_MEDIUM, TEST_BACKEND_TALL, test_backend};
     use crate::view::browser::state::MAX_DETAIL_SECTIONS;
     use insta::assert_snapshot;
     use ratatui::Terminal;
-    use ratatui::backend::TestBackend;
 
     fn seeded_pg_detail() -> ProcessGroupDetail {
         ProcessGroupDetail {
@@ -409,7 +409,7 @@ mod snapshots {
         let d = seeded_pg_detail();
         let state = BrowserState::new();
         let bulletins: VecDeque<BulletinSnapshot> = VecDeque::new();
-        let mut terminal = Terminal::new(TestBackend::new(100, 24)).unwrap();
+        let mut terminal = Terminal::new(test_backend(TEST_BACKEND_MEDIUM)).unwrap();
         terminal
             .draw(|f| render(f, f.area(), &d, &state, &bulletins, &DetailFocus::Tree))
             .unwrap();
@@ -426,7 +426,7 @@ mod snapshots {
             rows: [1, 0, 0, 0, 0],
             x_offsets: [0; MAX_DETAIL_SECTIONS],
         };
-        let mut terminal = Terminal::new(TestBackend::new(100, 28)).unwrap();
+        let mut terminal = Terminal::new(test_backend(TEST_BACKEND_TALL)).unwrap();
         terminal
             .draw(|f| render(f, f.area(), &d, &state, &bulletins, &focus))
             .unwrap();
@@ -446,7 +446,7 @@ mod snapshots {
             rows: [0, 0, 0, 0, 0],
             x_offsets: [0; MAX_DETAIL_SECTIONS],
         };
-        let mut terminal = Terminal::new(TestBackend::new(100, 28)).unwrap();
+        let mut terminal = Terminal::new(test_backend(TEST_BACKEND_TALL)).unwrap();
         terminal
             .draw(|f| render(f, f.area(), &d, &state, &bulletins, &focus))
             .unwrap();
@@ -516,7 +516,7 @@ mod snapshots {
             },
         });
         let bulletins: VecDeque<BulletinSnapshot> = VecDeque::new();
-        let mut terminal = Terminal::new(TestBackend::new(100, 24)).unwrap();
+        let mut terminal = Terminal::new(test_backend(TEST_BACKEND_MEDIUM)).unwrap();
         terminal
             .draw(|f| render(f, f.area(), &d, &state, &bulletins, &DetailFocus::Tree))
             .unwrap();
@@ -556,7 +556,7 @@ mod snapshots {
             rows: [0, 0, 0, 0, 0],
             x_offsets: [0; MAX_DETAIL_SECTIONS],
         };
-        let mut terminal = Terminal::new(TestBackend::new(100, 28)).unwrap();
+        let mut terminal = Terminal::new(test_backend(TEST_BACKEND_TALL)).unwrap();
         terminal
             .draw(|f| render(f, f.area(), &d, &state, &bulletins, &focus))
             .unwrap();

@@ -282,7 +282,7 @@ mod tests {
         let mut snap = ClusterSnapshot::default();
         let meta = FetchMeta {
             fetched_at: Instant::now(),
-            fetch_duration: Duration::from_millis(5),
+            fetch_duration: crate::test_support::default_fetch_duration(),
             next_interval: Duration::from_secs(15),
         };
         snap.controller_status
@@ -299,7 +299,7 @@ mod tests {
         let mut snap = ClusterSnapshot::default();
         let meta = FetchMeta {
             fetched_at: Instant::now(),
-            fetch_duration: Duration::from_millis(5),
+            fetch_duration: crate::test_support::default_fetch_duration(),
             next_interval: Duration::from_secs(5),
         };
         snap.cluster_nodes.apply(
@@ -345,12 +345,12 @@ mod tests {
         let mut snap = ClusterSnapshot::default();
         let meta_a = FetchMeta {
             fetched_at: Instant::now(),
-            fetch_duration: Duration::from_millis(5),
+            fetch_duration: crate::test_support::default_fetch_duration(),
             next_interval: Duration::from_secs(10),
         };
         let meta_b = FetchMeta {
             fetched_at: Instant::now(),
-            fetch_duration: Duration::from_millis(5),
+            fetch_duration: crate::test_support::default_fetch_duration(),
             next_interval: Duration::from_secs(30),
         };
         snap.connections_by_pg
