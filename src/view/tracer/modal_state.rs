@@ -6,6 +6,7 @@
 //! unchanged.
 
 use super::state::TracerState;
+use crate::widget::scroll::BidirectionalScrollState;
 
 // ── Content viewer modal ──────────────────────────────────────────────────────
 
@@ -135,7 +136,7 @@ pub struct ContentModalState {
     /// renderer to shift wide rows sideways). `last_viewport_rows` and
     /// `last_viewport_body_cols` are written by the renderer each frame;
     /// reducers use them to size page-sized scrolls.
-    pub scroll: crate::widget::scroll::BidirectionalScrollState,
+    pub scroll: BidirectionalScrollState,
     pub search: Option<crate::widget::search::SearchState>,
 }
 
@@ -203,7 +204,7 @@ pub fn open_content_modal(
         input: SideBuffer::default(),
         output: SideBuffer::default(),
         diff_cache: None,
-        scroll: crate::widget::scroll::BidirectionalScrollState::default(),
+        scroll: BidirectionalScrollState::default(),
         search: None,
     };
 
@@ -1451,7 +1452,7 @@ mod tests {
             input: SideBuffer::default(),
             output: SideBuffer::default(),
             diff_cache: None,
-            scroll: crate::widget::scroll::BidirectionalScrollState::default(),
+            scroll: BidirectionalScrollState::default(),
             search: None,
         }
     }

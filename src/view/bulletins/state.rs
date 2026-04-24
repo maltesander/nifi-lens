@@ -10,6 +10,7 @@ use std::time::{Duration, SystemTime};
 use crate::app::navigation::ListNavigation;
 use crate::app::state::AppState;
 use crate::client::BulletinSnapshot;
+use crate::widget::scroll::VerticalScrollState;
 pub use crate::widget::search::{MatchSpan, SearchState, compute_matches};
 
 /// Strip NiFi's `ComponentName[id=<uuid>] ` boilerplate prefix from a
@@ -310,7 +311,7 @@ pub struct DetailModalState {
     /// scrolls behave like line scrolls until the first render —
     /// harmless because the modal renders before the user can press
     /// a key.
-    pub scroll: crate::widget::scroll::VerticalScrollState,
+    pub scroll: VerticalScrollState,
     pub search: Option<SearchState>,
 }
 
@@ -723,7 +724,7 @@ impl BulletinsState {
         self.detail_modal = Some(DetailModalState {
             group_key,
             details,
-            scroll: crate::widget::scroll::VerticalScrollState::default(),
+            scroll: VerticalScrollState::default(),
             search: None,
         });
         true
@@ -747,23 +748,17 @@ impl BulletinsState {
     }
 
     pub fn modal_page_down(&mut self) {
-        let Some(modal) = self.detail_modal.as_mut() else {
-            return;
-        };
-        // Preserve the page=max(last_viewport_rows,1) semantics: if
-        // the renderer hasn't run yet we still advance by at least one
-        // line. Route through the widget's offset field directly; the
-        // renderer clamps upward each frame.
-        let page = modal.scroll.last_viewport_rows.max(1);
-        modal.scroll.offset = modal.scroll.offset.saturating_add(page);
+        if let Some(modal) = self.detail_modal.as_mut() {
+            // `usize::MAX` as content_rows disables the widget's upper
+            // clamp; the renderer performs the real wrap-aware clamp.
+            modal.scroll.page_down(usize::MAX);
+        }
     }
 
     pub fn modal_page_up(&mut self) {
-        let Some(modal) = self.detail_modal.as_mut() else {
-            return;
-        };
-        let page = modal.scroll.last_viewport_rows.max(1);
-        modal.scroll.offset = modal.scroll.offset.saturating_sub(page);
+        if let Some(modal) = self.detail_modal.as_mut() {
+            modal.scroll.page_up();
+        }
     }
 
     pub fn modal_jump_top(&mut self) {
@@ -772,12 +767,13 @@ impl BulletinsState {
         }
     }
 
-    /// Sets offset to `usize::MAX`; the renderer clamps against the
-    /// real maximum on the next frame. State-level reducer has no
-    /// access to viewport-derived maxima.
+    /// Passes `usize::MAX` as content_rows so the offset lands beyond
+    /// any real maximum; the renderer clamps against the true
+    /// wrap-aware maximum on the next frame. State-level reducer has
+    /// no access to viewport-derived maxima.
     pub fn modal_jump_bottom(&mut self) {
         if let Some(modal) = self.detail_modal.as_mut() {
-            modal.scroll.offset = usize::MAX;
+            modal.scroll.jump_bottom(usize::MAX);
         }
     }
 

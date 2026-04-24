@@ -190,6 +190,61 @@ mod tests {
     }
 
     #[test]
+    fn vertical_page_down_with_content_smaller_than_viewport() {
+        let mut v = VerticalScrollState {
+            offset: 0,
+            last_viewport_rows: 10,
+        };
+        v.page_down(5); // content fits; no scroll possible
+        assert_eq!(v.offset, 0);
+    }
+
+    #[test]
+    fn vertical_page_up_and_down_noop_with_zero_viewport() {
+        let mut v = VerticalScrollState {
+            offset: 5,
+            last_viewport_rows: 0,
+        };
+        v.page_up();
+        assert_eq!(v.offset, 5, "page_up with viewport=0 must not move");
+        v.page_down(100);
+        assert_eq!(v.offset, 5, "page_down with viewport=0 must not move");
+    }
+
+    #[test]
+    fn vertical_jump_bottom_with_content_smaller_than_viewport() {
+        let mut v = VerticalScrollState {
+            offset: 0,
+            last_viewport_rows: 10,
+        };
+        v.jump_bottom(5); // content fits; jump_bottom should pin at 0
+        assert_eq!(v.offset, 0);
+    }
+
+    #[test]
+    fn bidirectional_page_right_with_content_smaller_than_viewport() {
+        let mut b = BidirectionalScrollState {
+            last_viewport_body_cols: 20,
+            ..Default::default()
+        };
+        b.page_right(10); // content fits
+        assert_eq!(b.horizontal_offset, 0);
+    }
+
+    #[test]
+    fn vertical_jump_bottom_with_usize_max_sentinel_preserves_render_clamp_pattern() {
+        // Bulletins passes usize::MAX as content_rows so the render pass
+        // is the single source of truth for the real clamp. The widget
+        // must not panic on this sentinel.
+        let mut v = VerticalScrollState {
+            offset: 0,
+            last_viewport_rows: 30,
+        };
+        v.jump_bottom(usize::MAX);
+        assert_eq!(v.offset, usize::MAX - 30);
+    }
+
+    #[test]
     fn bidirectional_reset_clears_both_axes() {
         let mut b = BidirectionalScrollState {
             vertical: VerticalScrollState {
