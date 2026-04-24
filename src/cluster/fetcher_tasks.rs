@@ -648,8 +648,6 @@ use crate::client::tls_cert::probe_all;
 /// Always emits `Ok(TlsCertsSnapshot)` — per-node failures are
 /// per-entry inside the snapshot. Non-HTTPS base URLs skip probing
 /// entirely (empty snapshot) with a one-time `info` log.
-// Task 13 wires this into spawn_fetchers; suppress dead-code until then.
-#[allow(dead_code)]
 pub(crate) fn spawn_tls_certs(
     tx: mpsc::Sender<AppEvent>,
     addresses_rx: watch::Receiver<Vec<String>>,

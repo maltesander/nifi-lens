@@ -18,7 +18,7 @@ use crate::cluster::config::ClusterPollingConfig;
 use crate::cluster::fetcher_tasks::{
     FetchTaskConfig, spawn_about, spawn_bulletins, spawn_cluster_nodes, spawn_connections_by_pg,
     spawn_controller_services, spawn_controller_status, spawn_root_pg_status,
-    spawn_system_diagnostics,
+    spawn_system_diagnostics, spawn_tls_certs,
 };
 use crate::cluster::snapshot::{ClusterSnapshot, FetchMeta};
 use crate::cluster::subscriber::SubscriberRegistry;
@@ -327,6 +327,21 @@ impl ClusterStore {
             client.clone(),
             tx.clone(),
             cluster_nodes_cfg,
+        ));
+
+        let tls_cfg = FetchTaskConfig {
+            base_interval: self.config.tls_certs,
+            max_interval: self.config.max_interval,
+            jitter_percent: self.config.jitter_percent,
+            force: self.notifies.get(ClusterEndpoint::TlsCerts),
+            gated: true,
+            subscriber_counter: self.subscribers.counter(ClusterEndpoint::TlsCerts),
+        };
+        self.handles.push(spawn_tls_certs(
+            tx.clone(),
+            self.node_addresses_rx.clone(),
+            self.base_url.clone(),
+            tls_cfg,
         ));
     }
 
