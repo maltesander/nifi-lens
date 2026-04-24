@@ -98,6 +98,7 @@ pub struct NifiClient {
     inner: DynamicClient,
     context_name: String,
     detected_version: Version,
+    base_url: String,
 }
 
 impl std::fmt::Debug for NifiClient {
@@ -138,6 +139,7 @@ impl NifiClient {
             inner,
             context_name: context_name.into(),
             detected_version,
+            base_url: "https://test:8443".to_string(),
         }
     }
 
@@ -205,6 +207,7 @@ impl NifiClient {
             inner,
             context_name: ctx.name.clone(),
             detected_version,
+            base_url: ctx.url.clone(),
         })
     }
 
@@ -214,6 +217,10 @@ impl NifiClient {
 
     pub fn detected_version(&self) -> &Version {
         &self.detected_version
+    }
+
+    pub fn base_url(&self) -> &str {
+        &self.base_url
     }
 
     /// Convenience wrapper around `flow().get_about_info()` that maps
