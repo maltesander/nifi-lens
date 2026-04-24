@@ -93,8 +93,8 @@ pub async fn probe_tls(
     let addr = format!("{host}:{port}");
     let tcp = tokio::time::timeout(timeout, tokio::net::TcpStream::connect(&addr))
         .await
-        .map_err(|_| TlsProbeError::Connect(format!("connect timeout after {timeout:?}")))?
-        .map_err(|e| TlsProbeError::Connect(e.to_string()))?;
+        .map_err(|_| TlsProbeError::Connect(format!("{addr}: connect timeout after {timeout:?}")))?
+        .map_err(|e| TlsProbeError::Connect(format!("{addr}: {e}")))?;
 
     let captured: Arc<Mutex<Option<Vec<Vec<u8>>>>> = Arc::new(Mutex::new(None));
     let verifier = Arc::new(CaptureVerifier {
@@ -108,7 +108,7 @@ pub async fn probe_tls(
 
     let connector = tokio_rustls::TlsConnector::from(Arc::new(config));
     let server_name = ServerName::try_from(host.to_string())
-        .map_err(|e| TlsProbeError::Handshake(format!("invalid server name: {e}")))?;
+        .map_err(|e| TlsProbeError::Handshake(format!("{addr}: invalid server name: {e}")))?;
 
     // Drive the handshake under the same timeout budget. Whether this
     // returns Ok or Err is secondary — the verifier callback has
@@ -117,13 +117,13 @@ pub async fn probe_tls(
 
     let captured = captured
         .lock()
-        .map_err(|e| TlsProbeError::Handshake(format!("verifier mutex poisoned: {e}")))?
+        .map_err(|e| TlsProbeError::Handshake(format!("{addr}: verifier mutex poisoned: {e}")))?
         .take();
 
     let Some(raw) = captured else {
-        return Err(TlsProbeError::Handshake(
-            "server sent no certificate chain".into(),
-        ));
+        return Err(TlsProbeError::Handshake(format!(
+            "{addr}: server sent no certificate chain"
+        )));
     };
     if raw.is_empty() {
         return Err(TlsProbeError::NoCerts);

@@ -683,6 +683,7 @@ pub(crate) fn spawn_tls_certs(
                 addresses
             };
 
+            tracing::debug!(?targets, "tls_certs: probing");
             let t0 = Instant::now();
             let snap = probe_all(&targets, PROBE_TIMEOUT).await;
             let duration = t0.elapsed();
