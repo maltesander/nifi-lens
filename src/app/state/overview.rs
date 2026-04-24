@@ -132,8 +132,8 @@ mod tests {
         s.overview.nodes.nodes = (0..count)
             .map(|i| NodeHealthRow {
                 node_address: format!("node{}:8080", i),
-                heap_used_bytes: crate::bytes::HEAP_512_MIB,
-                heap_max_bytes: crate::bytes::HEAP_1_GIB,
+                heap_used_bytes: crate::bytes::FIXTURE_HEAP_USED,
+                heap_max_bytes: crate::bytes::FIXTURE_HEAP_MAX,
                 heap_percent: 50,
                 heap_severity: crate::client::health::Severity::Green,
                 gc_collection_count: 10,

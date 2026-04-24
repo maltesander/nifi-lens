@@ -815,8 +815,8 @@ mod tests {
             },
             nodes: vec![NodeDiagnostics {
                 address: "node1:8080".into(),
-                heap_used_bytes: crate::bytes::HEAP_512_MIB,
-                heap_max_bytes: crate::bytes::HEAP_1_GIB,
+                heap_used_bytes: crate::bytes::FIXTURE_HEAP_USED,
+                heap_max_bytes: crate::bytes::FIXTURE_HEAP_MAX,
                 gc: vec![
                     GcSnapshot {
                         name: "G1 Young".into(),

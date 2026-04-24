@@ -495,8 +495,8 @@ mod tests {
         assert_eq!(format_bytes(1024), "1.0 KB");
         assert_eq!(format_bytes(1536), "1.5 KB");
         assert_eq!(format_bytes(1024 * 1024), "1.0 MB");
-        assert_eq!(format_bytes(crate::bytes::HEAP_512_MIB), "512 MB");
-        assert_eq!(format_bytes(crate::bytes::HEAP_1_GIB), "1.0 GB");
+        assert_eq!(format_bytes(crate::bytes::FIXTURE_HEAP_USED), "512 MB");
+        assert_eq!(format_bytes(crate::bytes::FIXTURE_HEAP_MAX), "1.0 GB");
         assert_eq!(format_bytes(190 * crate::bytes::GIB), "190 GB");
         assert_eq!(format_bytes(3 * 1024_u64.pow(4)), "3.0 TB");
 
@@ -504,8 +504,8 @@ mod tests {
         assert_eq!(format_bytes(1023), "1023 B");
         assert_eq!(format_bytes(1024 * 1024 - 1), "1024.0 KB");
         assert_eq!(format_bytes(1024 * 1024), "1.0 MB");
-        assert_eq!(format_bytes(crate::bytes::HEAP_1_GIB - 1), "1024 MB");
-        assert_eq!(format_bytes(crate::bytes::HEAP_1_GIB), "1.0 GB");
+        assert_eq!(format_bytes(crate::bytes::FIXTURE_HEAP_MAX - 1), "1024 MB");
+        assert_eq!(format_bytes(crate::bytes::FIXTURE_HEAP_MAX), "1.0 GB");
         assert_eq!(format_bytes(1024_u64.pow(4) - 1), "1024 GB");
         assert_eq!(format_bytes(1024_u64.pow(4)), "1.0 TB");
 

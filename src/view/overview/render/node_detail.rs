@@ -553,7 +553,7 @@ mod tests {
         let row = NodeHealthRow {
             node_address: "node2.nifi:8443".into(),
             heap_used_bytes: 620 * crate::bytes::MIB,
-            heap_max_bytes: crate::bytes::HEAP_1_GIB,
+            heap_max_bytes: crate::bytes::FIXTURE_HEAP_MAX,
             heap_percent: 60,
             heap_severity: HSev::Yellow,
             gc_collection_count: 12,
@@ -664,8 +664,8 @@ mod tests {
         let mut term = Terminal::new(backend).unwrap();
         let row = NodeHealthRow {
             node_address: "nifi:8443".into(),
-            heap_used_bytes: crate::bytes::HEAP_512_MIB,
-            heap_max_bytes: crate::bytes::HEAP_1_GIB,
+            heap_used_bytes: crate::bytes::FIXTURE_HEAP_USED,
+            heap_max_bytes: crate::bytes::FIXTURE_HEAP_MAX,
             heap_percent: 52,
             heap_severity: HSev::Green,
             gc_collection_count: 12,
@@ -726,7 +726,7 @@ mod tests {
         let row = NodeHealthRow {
             node_address: "node3.nifi:8443".into(),
             heap_used_bytes: 0,
-            heap_max_bytes: crate::bytes::HEAP_1_GIB,
+            heap_max_bytes: crate::bytes::FIXTURE_HEAP_MAX,
             heap_percent: 0,
             heap_severity: HSev::Green,
             gc_collection_count: 0,
