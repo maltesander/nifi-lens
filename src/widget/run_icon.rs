@@ -5,28 +5,17 @@
 
 use ratatui::style::Style;
 
-use crate::theme;
-
 /// Maps NiFi's `run_status` string to a (glyph, style) pair for a
 /// Processor row. Unknown values fall back to the default ● glyph
 /// unstyled.
 pub fn processor_run_icon(run_status: &str) -> (char, Style) {
-    // NiFi's DTO emits uppercase enum values; be tolerant of mixed
-    // case in case a future schema change or a test fixture uses
-    // title-case.
-    match run_status.to_ascii_uppercase().as_str() {
-        "RUNNING" => ('\u{25CF}', theme::success()),
-        "STOPPED" => ('\u{25CC}', theme::warning()),
-        "INVALID" => ('\u{26A0}', theme::error()),
-        "DISABLED" => ('\u{2300}', theme::disabled()),
-        "VALIDATING" => ('\u{25D0}', theme::info()),
-        _ => ('\u{25CF}', Style::default()),
-    }
+    crate::client::status::ProcessorStatus::from_wire(run_status).icon()
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::theme;
 
     #[test]
     fn processor_icon_running_is_green_filled_circle() {

@@ -485,9 +485,9 @@ impl BrowserState {
                 continue;
             };
             if let NodeStatusSummary::Processor { run_status } = &node.status_summary {
-                match run_status.to_ascii_uppercase().as_str() {
-                    "INVALID" => return PgHealth::Red,
-                    "STOPPED" => saw_stopped = true,
+                match crate::client::status::ProcessorStatus::from_wire(run_status) {
+                    crate::client::status::ProcessorStatus::Invalid => return PgHealth::Red,
+                    crate::client::status::ProcessorStatus::Stopped => saw_stopped = true,
                     _ => {}
                 }
             }

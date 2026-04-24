@@ -97,14 +97,7 @@ fn build_header_title(d: &ProcessorDetail) -> Line<'_> {
 }
 
 fn run_state_style(run_status: &str) -> Style {
-    match run_status.to_ascii_uppercase().as_str() {
-        "RUNNING" => theme::success(),
-        "STOPPED" => theme::warning(),
-        "INVALID" => theme::error(),
-        "DISABLED" => theme::disabled(),
-        "VALIDATING" => theme::info(),
-        _ => Style::default(),
-    }
+    crate::client::status::ProcessorStatus::from_wire(run_status).style()
 }
 
 fn render_identity_panel(frame: &mut Frame, area: Rect, d: &ProcessorDetail) {
