@@ -54,13 +54,13 @@ pub fn render(
     render_stream_status(frame, rows[6], modal, cfg);
     render_search_strip(frame, rows[7], modal);
     render_footer_hint(frame, rows[8], modal);
-    modal.last_viewport_rows = rows[4].height as usize;
+    modal.scroll.vertical.last_viewport_rows = rows[4].height as usize;
     // Body cols = area width minus the fixed gutter. The renderer
     // already computed the gutter size above; approximate here as the
     // total width minus a small default when the renderer hasn't run
     // through text yet. The first frame is always generous since the
     // live modal starts with at least one chunk requested.
-    modal.last_viewport_body_cols = rows[4].width as usize;
+    modal.scroll.last_viewport_body_cols = rows[4].width as usize;
 }
 
 fn render_header(frame: &mut Frame, area: Rect, modal: &ContentModalState) {
@@ -130,13 +130,13 @@ fn render_body(frame: &mut Frame, area: Rect, modal: &ContentModalState) {
     let lines: Vec<Line<'static>> = match modal.active_tab {
         ContentModalTab::Input => text_body_lines(
             &modal.input.decoded,
-            modal.scroll_offset,
+            modal.scroll.vertical.offset,
             area.height as usize,
             modal.search.as_ref(),
         ),
         ContentModalTab::Output => text_body_lines(
             &modal.output.decoded,
-            modal.scroll_offset,
+            modal.scroll.vertical.offset,
             area.height as usize,
             modal.search.as_ref(),
         ),
@@ -168,7 +168,7 @@ fn render_body(frame: &mut Frame, area: Rect, modal: &ContentModalState) {
 
     frame.render_widget(Paragraph::new(gutter_lines), cols[0]);
     frame.render_widget(
-        Paragraph::new(body_lines).scroll((0, modal.horizontal_scroll_offset as u16)),
+        Paragraph::new(body_lines).scroll((0, modal.scroll.horizontal_offset as u16)),
         cols[1],
     );
 }
@@ -393,7 +393,7 @@ fn diff_body_lines(
         .lines
         .iter()
         .enumerate()
-        .skip(modal.scroll_offset)
+        .skip(modal.scroll.vertical.offset)
         .take(height)
     {
         if idx == next_hunk_line {
@@ -867,10 +867,7 @@ mod tests {
                 in_flight_decode: false,
             },
             diff_cache: None,
-            scroll_offset: 0,
-            horizontal_scroll_offset: 0,
-            last_viewport_rows: 0,
-            last_viewport_body_cols: 0,
+            scroll: crate::widget::scroll::BidirectionalScrollState::default(),
             search: None,
         }
     }

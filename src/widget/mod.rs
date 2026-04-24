@@ -10,6 +10,7 @@ pub mod node_badge;
 pub mod panel;
 pub mod run_icon;
 pub mod save_modal;
+pub mod scroll;
 pub mod search;
 pub mod severity;
 pub mod status_bar;

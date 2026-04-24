@@ -845,7 +845,7 @@ mod tests {
         update(&mut s, key(KeyCode::Char('i'), KeyModifiers::NONE), &c);
         // Down arrow must now move the modal's scroll_offset, not the list selection.
         update(&mut s, key(KeyCode::Down, KeyModifiers::NONE), &c);
-        assert_eq!(s.bulletins.detail_modal.as_ref().unwrap().scroll_offset, 1);
+        assert_eq!(s.bulletins.detail_modal.as_ref().unwrap().scroll.offset, 1);
         assert_eq!(s.bulletins.selected, 0);
     }
 

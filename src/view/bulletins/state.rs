@@ -302,16 +302,15 @@ pub struct DetailModalState {
     /// changes the underlying data, the snapshot keeps the modal
     /// coherent until the user closes it.
     pub details: GroupDetails,
-    /// Vertical scroll offset in wrapped-line units. Saturates on
-    /// render if the renderer's clamped max is smaller.
-    pub scroll_offset: usize,
-    /// Last viewport row count (wrap-aware body area, header/footer
-    /// excluded). Written by the renderer each frame; reducers read it
-    /// to compute page-size scrolls. Initial value `0` means page
-    /// scrolls behave like line scrolls until the first render — this
-    /// is harmless because the modal renders before the user can press
+    /// Vertical scroll state (offset + last viewport rows). Scroll
+    /// offset is in wrapped-line units and saturates on render if
+    /// the renderer's clamped max is smaller. `last_viewport_rows`
+    /// is written by the renderer each frame; reducers read it to
+    /// compute page-size scrolls. Initial value `0` means page
+    /// scrolls behave like line scrolls until the first render —
+    /// harmless because the modal renders before the user can press
     /// a key.
-    pub last_viewport_rows: usize,
+    pub scroll: crate::widget::scroll::VerticalScrollState,
     pub search: Option<SearchState>,
 }
 
@@ -724,8 +723,7 @@ impl BulletinsState {
         self.detail_modal = Some(DetailModalState {
             group_key,
             details,
-            scroll_offset: 0,
-            last_viewport_rows: 0,
+            scroll: crate::widget::scroll::VerticalScrollState::default(),
             search: None,
         });
         true
@@ -743,32 +741,34 @@ impl BulletinsState {
         let Some(modal) = self.detail_modal.as_mut() else {
             return;
         };
-        if delta >= 0 {
-            modal.scroll_offset = modal.scroll_offset.saturating_add(delta as usize);
-        } else {
-            modal.scroll_offset = modal.scroll_offset.saturating_sub((-delta) as usize);
-        }
+        // `usize::MAX` as content_rows effectively disables upward
+        // clamping — the renderer performs the real wrap-aware clamp.
+        modal.scroll.scroll_by(delta, usize::MAX);
     }
 
     pub fn modal_page_down(&mut self) {
         let Some(modal) = self.detail_modal.as_mut() else {
             return;
         };
-        let page = modal.last_viewport_rows.max(1);
-        modal.scroll_offset = modal.scroll_offset.saturating_add(page);
+        // Preserve the page=max(last_viewport_rows,1) semantics: if
+        // the renderer hasn't run yet we still advance by at least one
+        // line. Route through the widget's offset field directly; the
+        // renderer clamps upward each frame.
+        let page = modal.scroll.last_viewport_rows.max(1);
+        modal.scroll.offset = modal.scroll.offset.saturating_add(page);
     }
 
     pub fn modal_page_up(&mut self) {
         let Some(modal) = self.detail_modal.as_mut() else {
             return;
         };
-        let page = modal.last_viewport_rows.max(1);
-        modal.scroll_offset = modal.scroll_offset.saturating_sub(page);
+        let page = modal.scroll.last_viewport_rows.max(1);
+        modal.scroll.offset = modal.scroll.offset.saturating_sub(page);
     }
 
     pub fn modal_jump_top(&mut self) {
         if let Some(modal) = self.detail_modal.as_mut() {
-            modal.scroll_offset = 0;
+            modal.scroll.jump_top();
         }
     }
 
@@ -777,7 +777,7 @@ impl BulletinsState {
     /// access to viewport-derived maxima.
     pub fn modal_jump_bottom(&mut self) {
         if let Some(modal) = self.detail_modal.as_mut() {
-            modal.scroll_offset = usize::MAX;
+            modal.scroll.offset = usize::MAX;
         }
     }
 
@@ -2315,7 +2315,7 @@ mod tests {
         let modal = state.detail_modal.as_ref().expect("modal open");
         assert_eq!(modal.group_key.source_id, "src-1");
         assert_eq!(modal.details.raw_message, "PutDb[id=abc] boom");
-        assert_eq!(modal.scroll_offset, 0);
+        assert_eq!(modal.scroll.offset, 0);
         assert!(modal.search.is_none());
     }
 
@@ -2366,9 +2366,9 @@ mod tests {
         state.selected = 0;
         state.open_detail_modal();
         state.modal_scroll_by(1);
-        assert_eq!(state.detail_modal.as_ref().unwrap().scroll_offset, 1);
+        assert_eq!(state.detail_modal.as_ref().unwrap().scroll.offset, 1);
         state.modal_scroll_by(3);
-        assert_eq!(state.detail_modal.as_ref().unwrap().scroll_offset, 4);
+        assert_eq!(state.detail_modal.as_ref().unwrap().scroll.offset, 4);
     }
 
     #[test]
@@ -2388,7 +2388,7 @@ mod tests {
         state.selected = 0;
         state.open_detail_modal();
         state.modal_scroll_by(-5);
-        assert_eq!(state.detail_modal.as_ref().unwrap().scroll_offset, 0);
+        assert_eq!(state.detail_modal.as_ref().unwrap().scroll.offset, 0);
     }
 
     #[test]
@@ -2408,11 +2408,16 @@ mod tests {
         state.selected = 0;
         state.open_detail_modal();
         // Simulate a render having measured viewport_rows = 10.
-        state.detail_modal.as_mut().unwrap().last_viewport_rows = 10;
+        state
+            .detail_modal
+            .as_mut()
+            .unwrap()
+            .scroll
+            .last_viewport_rows = 10;
         state.modal_page_down();
-        assert_eq!(state.detail_modal.as_ref().unwrap().scroll_offset, 10);
+        assert_eq!(state.detail_modal.as_ref().unwrap().scroll.offset, 10);
         state.modal_page_up();
-        assert_eq!(state.detail_modal.as_ref().unwrap().scroll_offset, 0);
+        assert_eq!(state.detail_modal.as_ref().unwrap().scroll.offset, 0);
     }
 
     #[test]
@@ -2431,15 +2436,15 @@ mod tests {
         });
         state.selected = 0;
         state.open_detail_modal();
-        state.detail_modal.as_mut().unwrap().scroll_offset = 5;
+        state.detail_modal.as_mut().unwrap().scroll.offset = 5;
         state.modal_jump_top();
-        assert_eq!(state.detail_modal.as_ref().unwrap().scroll_offset, 0);
+        assert_eq!(state.detail_modal.as_ref().unwrap().scroll.offset, 0);
 
         // `modal_jump_bottom` sets offset to usize::MAX; renderer clamps
         // against real max. State-level test only verifies the sentinel.
         state.modal_jump_bottom();
         assert_eq!(
-            state.detail_modal.as_ref().unwrap().scroll_offset,
+            state.detail_modal.as_ref().unwrap().scroll.offset,
             usize::MAX
         );
     }

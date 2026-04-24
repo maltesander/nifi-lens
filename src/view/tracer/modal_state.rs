@@ -129,18 +129,13 @@ pub struct ContentModalState {
     pub input: SideBuffer,
     pub output: SideBuffer,
     pub diff_cache: Option<DiffRender>,
-    pub scroll_offset: usize,
-    /// Horizontal scroll offset in display columns into the body text
-    /// (right of the fixed line-number gutter). Advanced by `←` / `→`;
-    /// used by the renderer to shift wide rows sideways.
-    pub horizontal_scroll_offset: usize,
-    /// Last viewport row count (body area, excluding header/tab-strip/
-    /// footer/hint). Written by the renderer each frame.
-    pub last_viewport_rows: usize,
-    /// Last viewport body-column count (body area minus the gutter).
-    /// Written by the renderer each frame; reducers use it to size
-    /// horizontal page-size scrolls.
-    pub last_viewport_body_cols: usize,
+    /// Combined vertical + horizontal scroll state. `scroll.vertical.offset`
+    /// is the scroll row (in lines); `scroll.horizontal_offset` is the
+    /// column shift right of the fixed line-number gutter (used by the
+    /// renderer to shift wide rows sideways). `last_viewport_rows` and
+    /// `last_viewport_body_cols` are written by the renderer each frame;
+    /// reducers use them to size page-sized scrolls.
+    pub scroll: crate::widget::scroll::BidirectionalScrollState,
     pub search: Option<crate::widget::search::SearchState>,
 }
 
@@ -208,10 +203,7 @@ pub fn open_content_modal(
         input: SideBuffer::default(),
         output: SideBuffer::default(),
         diff_cache: None,
-        scroll_offset: 0,
-        horizontal_scroll_offset: 0,
-        last_viewport_rows: 0,
-        last_viewport_body_cols: 0,
+        scroll: crate::widget::scroll::BidirectionalScrollState::default(),
         search: None,
     };
 
@@ -454,7 +446,7 @@ pub fn content_modal_scroll_to(
     let Some(modal) = state.content_modal.as_mut() else {
         return Vec::new();
     };
-    modal.scroll_offset = new_offset;
+    modal.scroll.vertical.offset = new_offset;
 
     let side = match modal.active_tab {
         ContentModalTab::Input => crate::client::ContentSide::Input,
@@ -481,7 +473,11 @@ pub fn content_modal_scroll_to(
     };
 
     let line_count = decoded_line_count(&buf.decoded);
-    let viewport_bottom = modal.scroll_offset.saturating_add(modal.last_viewport_rows);
+    let viewport_bottom = modal
+        .scroll
+        .vertical
+        .offset
+        .saturating_add(modal.scroll.vertical.last_viewport_rows);
     let distance_to_tail = line_count.saturating_sub(viewport_bottom);
 
     if distance_to_tail > STREAM_LOOKAHEAD_LINES {
@@ -555,7 +551,7 @@ pub fn content_modal_scroll_by(
     let current = state
         .content_modal
         .as_ref()
-        .map(|m| m.scroll_offset)
+        .map(|m| m.scroll.vertical.offset)
         .unwrap_or(0);
     let new_offset = if delta >= 0 {
         current
@@ -574,13 +570,15 @@ pub fn content_modal_scroll_horizontal_by(state: &mut TracerState, delta: isize)
     let Some(modal) = state.content_modal.as_mut() else {
         return;
     };
-    modal.horizontal_scroll_offset = if delta >= 0 {
+    modal.scroll.horizontal_offset = if delta >= 0 {
         modal
-            .horizontal_scroll_offset
+            .scroll
+            .horizontal_offset
             .saturating_add(delta as usize)
     } else {
         modal
-            .horizontal_scroll_offset
+            .scroll
+            .horizontal_offset
             .saturating_sub((-delta) as usize)
     };
 }
@@ -589,7 +587,7 @@ pub fn content_modal_scroll_horizontal_by(state: &mut TracerState, delta: isize)
 /// `Home` and on tab switch.
 pub fn content_modal_scroll_horizontal_home(state: &mut TracerState) {
     if let Some(modal) = state.content_modal.as_mut() {
-        modal.horizontal_scroll_offset = 0;
+        modal.scroll.horizontal_offset = 0;
     }
 }
 
@@ -614,8 +612,8 @@ pub fn content_modal_scroll_to_match(
         return Vec::new();
     };
     let line = span.line_idx;
-    let offset = modal.scroll_offset;
-    let rows = modal.last_viewport_rows.max(1);
+    let offset = modal.scroll.vertical.offset;
+    let rows = modal.scroll.vertical.last_viewport_rows.max(1);
     if line < offset || line >= offset + rows {
         content_modal_scroll_to(state, line, cfg)
     } else {
@@ -1140,8 +1138,7 @@ pub fn switch_content_modal_tab(
     }
 
     modal.active_tab = new_tab;
-    modal.scroll_offset = 0;
-    modal.horizontal_scroll_offset = 0;
+    modal.scroll.reset();
     modal.search = None;
     if !matches!(new_tab, ContentModalTab::Diff) {
         modal.last_nondiff_tab = new_tab;
@@ -1192,9 +1189,9 @@ pub fn hunk_next(state: &mut TracerState) {
     let Some(cache) = modal.diff_cache.as_ref() else {
         return;
     };
-    let current = modal.scroll_offset as u32;
+    let current = modal.scroll.vertical.offset as u32;
     if let Some(&next) = cache.change_stops.iter().find(|&&i| i > current) {
-        modal.scroll_offset = next as usize;
+        modal.scroll.vertical.offset = next as usize;
     }
 }
 
@@ -1205,9 +1202,9 @@ pub fn hunk_prev(state: &mut TracerState) {
     let Some(cache) = modal.diff_cache.as_ref() else {
         return;
     };
-    let current = modal.scroll_offset as u32;
+    let current = modal.scroll.vertical.offset as u32;
     if let Some(&prev) = cache.change_stops.iter().rev().find(|&&i| i < current) {
-        modal.scroll_offset = prev as usize;
+        modal.scroll.vertical.offset = prev as usize;
     }
 }
 
@@ -1454,10 +1451,7 @@ mod tests {
             input: SideBuffer::default(),
             output: SideBuffer::default(),
             diff_cache: None,
-            scroll_offset: 0,
-            horizontal_scroll_offset: 0,
-            last_viewport_rows: 0,
-            last_viewport_body_cols: 0,
+            scroll: crate::widget::scroll::BidirectionalScrollState::default(),
             search: None,
         }
     }
@@ -1700,7 +1694,7 @@ mod tests {
             text,
             pretty_printed: false,
         };
-        modal.last_viewport_rows = 30;
+        modal.scroll.vertical.last_viewport_rows = 30;
         let state = TracerState {
             content_modal: Some(modal),
             ..TracerState::default()
@@ -1727,7 +1721,7 @@ mod tests {
             pretty_printed: false,
         };
         modal.input.fully_loaded = true;
-        modal.last_viewport_rows = 30;
+        modal.scroll.vertical.last_viewport_rows = 30;
         let mut state = TracerState {
             content_modal: Some(modal),
             ..TracerState::default()
@@ -1749,7 +1743,7 @@ mod tests {
             pretty_printed: false,
         };
         modal.input.in_flight = true;
-        modal.last_viewport_rows = 30;
+        modal.scroll.vertical.last_viewport_rows = 30;
         let mut state = TracerState {
             content_modal: Some(modal),
             ..TracerState::default()
@@ -1776,7 +1770,7 @@ mod tests {
         // Pre-resolve the effective ceiling so the scroll reducer sees it.
         let cap = loaded_len + 48_576;
         modal.input.effective_ceiling = Some(Some(cap));
-        modal.last_viewport_rows = 30;
+        modal.scroll.vertical.last_viewport_rows = 30;
         let mut state = TracerState {
             content_modal: Some(modal),
             ..TracerState::default()
@@ -1984,7 +1978,7 @@ mod tests {
         let fired = switch_content_modal_tab(&mut state, ContentModalTab::Output, &cfg);
         let modal = state.content_modal.as_ref().unwrap();
         assert_eq!(modal.active_tab, ContentModalTab::Output);
-        assert_eq!(modal.scroll_offset, 0);
+        assert_eq!(modal.scroll.vertical.offset, 0);
         assert_eq!(fired.len(), 1);
         assert_eq!(fired[0].side, crate::client::ContentSide::Output);
     }
@@ -2011,17 +2005,26 @@ mod tests {
             hunks: Vec::new(),
             change_stops: vec![10, 50],
         });
-        modal.scroll_offset = 5;
+        modal.scroll.vertical.offset = 5;
         let mut state = TracerState {
             content_modal: Some(modal),
             ..TracerState::default()
         };
         hunk_next(&mut state);
-        assert_eq!(state.content_modal.as_ref().unwrap().scroll_offset, 10);
+        assert_eq!(
+            state.content_modal.as_ref().unwrap().scroll.vertical.offset,
+            10
+        );
         hunk_next(&mut state);
-        assert_eq!(state.content_modal.as_ref().unwrap().scroll_offset, 50);
+        assert_eq!(
+            state.content_modal.as_ref().unwrap().scroll.vertical.offset,
+            50
+        );
         hunk_next(&mut state);
-        assert_eq!(state.content_modal.as_ref().unwrap().scroll_offset, 50);
+        assert_eq!(
+            state.content_modal.as_ref().unwrap().scroll.vertical.offset,
+            50
+        );
     }
 
     #[test]
@@ -2032,17 +2035,26 @@ mod tests {
             hunks: Vec::new(),
             change_stops: vec![10, 50],
         });
-        modal.scroll_offset = 75;
+        modal.scroll.vertical.offset = 75;
         let mut state = TracerState {
             content_modal: Some(modal),
             ..TracerState::default()
         };
         hunk_prev(&mut state);
-        assert_eq!(state.content_modal.as_ref().unwrap().scroll_offset, 50);
+        assert_eq!(
+            state.content_modal.as_ref().unwrap().scroll.vertical.offset,
+            50
+        );
         hunk_prev(&mut state);
-        assert_eq!(state.content_modal.as_ref().unwrap().scroll_offset, 10);
+        assert_eq!(
+            state.content_modal.as_ref().unwrap().scroll.vertical.offset,
+            10
+        );
         hunk_prev(&mut state);
-        assert_eq!(state.content_modal.as_ref().unwrap().scroll_offset, 10);
+        assert_eq!(
+            state.content_modal.as_ref().unwrap().scroll.vertical.offset,
+            10
+        );
     }
 
     /// Root cause for the CSV-diff bug: a body where every line changed
@@ -2127,7 +2139,7 @@ mod tests {
             text,
             pretty_printed: false,
         };
-        modal.last_viewport_rows = 30;
+        modal.scroll.vertical.last_viewport_rows = 30;
         let mut state = TracerState {
             content_modal: Some(modal),
             ..TracerState::default()
@@ -2157,8 +2169,8 @@ mod tests {
             text,
             pretty_printed: false,
         };
-        modal.scroll_offset = 0;
-        modal.last_viewport_rows = 20;
+        modal.scroll.vertical.offset = 0;
+        modal.scroll.vertical.last_viewport_rows = 20;
         let mut state = TracerState {
             content_modal: Some(modal),
             ..TracerState::default()
@@ -2167,7 +2179,7 @@ mod tests {
         let fired = content_modal_scroll_by(&mut state, -10, &cfg);
         assert!(fired.is_empty(), "no fetch when fully loaded");
         assert_eq!(
-            state.content_modal.as_ref().unwrap().scroll_offset,
+            state.content_modal.as_ref().unwrap().scroll.vertical.offset,
             0,
             "scroll must not go below 0"
         );
@@ -2184,7 +2196,7 @@ mod tests {
             text,
             pretty_printed: false,
         };
-        modal.last_viewport_rows = 10;
+        modal.scroll.vertical.last_viewport_rows = 10;
         let mut state = TracerState {
             content_modal: Some(modal),
             ..TracerState::default()
@@ -2194,7 +2206,7 @@ mod tests {
         let fired = content_modal_scroll_to(&mut state, line_count.saturating_sub(1), &cfg);
         assert!(fired.is_empty(), "fully loaded: no fetch on Last");
         assert_eq!(
-            state.content_modal.as_ref().unwrap().scroll_offset,
+            state.content_modal.as_ref().unwrap().scroll.vertical.offset,
             line_count.saturating_sub(1)
         );
     }
@@ -2210,8 +2222,8 @@ mod tests {
             text,
             pretty_printed: false,
         };
-        modal.scroll_offset = 10;
-        modal.last_viewport_rows = 20;
+        modal.scroll.vertical.offset = 10;
+        modal.scroll.vertical.last_viewport_rows = 20;
         let mut state = TracerState {
             content_modal: Some(modal),
             ..TracerState::default()
@@ -2220,7 +2232,7 @@ mod tests {
         let fired = content_modal_scroll_by(&mut state, 20, &cfg);
         assert!(fired.is_empty(), "fully loaded: no fetch");
         assert_eq!(
-            state.content_modal.as_ref().unwrap().scroll_offset,
+            state.content_modal.as_ref().unwrap().scroll.vertical.offset,
             30,
             "page-down by viewport rows"
         );
@@ -2330,8 +2342,8 @@ mod tests {
             pretty_printed: false,
         };
         // Match at line 50; viewport at 0..10. Scroll must jump to line 50.
-        modal.scroll_offset = 0;
-        modal.last_viewport_rows = 10;
+        modal.scroll.vertical.offset = 0;
+        modal.scroll.vertical.last_viewport_rows = 10;
         modal.search = Some(SearchState {
             query: "a".to_owned(),
             input_active: false,
@@ -2353,7 +2365,7 @@ mod tests {
         // fully_loaded — no fetch fires; scroll offset updated.
         assert!(fired.is_empty(), "no fetch for fully loaded content");
         assert_eq!(
-            state.content_modal.as_ref().unwrap().scroll_offset,
+            state.content_modal.as_ref().unwrap().scroll.vertical.offset,
             50,
             "scroll must jump to match line"
         );
@@ -2613,7 +2625,8 @@ mod tests {
                 .content_modal
                 .as_ref()
                 .unwrap()
-                .horizontal_scroll_offset,
+                .scroll
+                .horizontal_offset,
             5
         );
         content_modal_scroll_horizontal_by(&mut state, -3);
@@ -2622,7 +2635,8 @@ mod tests {
                 .content_modal
                 .as_ref()
                 .unwrap()
-                .horizontal_scroll_offset,
+                .scroll
+                .horizontal_offset,
             2
         );
         // Saturates at 0 on the left — scrolling further left is a no-op.
@@ -2632,7 +2646,8 @@ mod tests {
                 .content_modal
                 .as_ref()
                 .unwrap()
-                .horizontal_scroll_offset,
+                .scroll
+                .horizontal_offset,
             0
         );
     }
@@ -2650,7 +2665,8 @@ mod tests {
                 .content_modal
                 .as_ref()
                 .unwrap()
-                .horizontal_scroll_offset,
+                .scroll
+                .horizontal_offset,
             0
         );
     }
@@ -2669,7 +2685,8 @@ mod tests {
                 .content_modal
                 .as_ref()
                 .unwrap()
-                .horizontal_scroll_offset,
+                .scroll
+                .horizontal_offset,
             0,
             "switching tabs must reset horizontal scroll"
         );
@@ -3112,7 +3129,7 @@ mod tests {
             decoded_bytes: 200,
             truncated: false,
         };
-        modal.last_viewport_rows = 10;
+        modal.scroll.vertical.last_viewport_rows = 10;
         let mut state = TracerState {
             content_modal: Some(modal),
             ..TracerState::default()
@@ -3122,12 +3139,12 @@ mod tests {
         let cfg = crate::config::TracerCeilingConfig::default();
         let fired = content_modal_scroll_by(&mut state, 5, &cfg);
         assert!(fired.is_empty(), "fully_loaded: no fetch request expected");
-        let offset = state.content_modal.as_ref().unwrap().scroll_offset;
+        let offset = state.content_modal.as_ref().unwrap().scroll.vertical.offset;
         assert_eq!(offset, 5, "scroll_offset should advance to 5");
 
         // Scroll backward to zero.
         content_modal_scroll_by(&mut state, -10, &cfg);
-        let offset = state.content_modal.as_ref().unwrap().scroll_offset;
+        let offset = state.content_modal.as_ref().unwrap().scroll.vertical.offset;
         assert_eq!(offset, 0, "scroll_offset must clamp at 0");
     }
 

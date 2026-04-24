@@ -181,7 +181,7 @@ impl ViewKeyHandler for TracerHandler {
                         .tracer
                         .content_modal
                         .as_ref()
-                        .map(|m| m.last_viewport_rows.max(1))
+                        .map(|m| m.scroll.vertical.last_viewport_rows.max(1))
                         .unwrap_or(1) as isize;
                     ts::content_modal_scroll_by(&mut state.tracer, -rows, &cfg)
                 }
@@ -190,7 +190,7 @@ impl ViewKeyHandler for TracerHandler {
                         .tracer
                         .content_modal
                         .as_ref()
-                        .map(|m| m.last_viewport_rows.max(1))
+                        .map(|m| m.scroll.vertical.last_viewport_rows.max(1))
                         .unwrap_or(1) as isize;
                     ts::content_modal_scroll_by(&mut state.tracer, rows, &cfg)
                 }
@@ -2061,10 +2061,14 @@ mod tests {
             },
             output: SideBuffer::default(),
             diff_cache: None,
-            scroll_offset: 50,
-            horizontal_scroll_offset: 0,
-            last_viewport_rows: 20,
-            last_viewport_body_cols: 0,
+            scroll: crate::widget::scroll::BidirectionalScrollState {
+                vertical: crate::widget::scroll::VerticalScrollState {
+                    offset: 50,
+                    last_viewport_rows: 20,
+                },
+                horizontal_offset: 0,
+                last_viewport_body_cols: 0,
+            },
             search: None,
         };
         s.tracer.content_modal = Some(modal);
@@ -2079,7 +2083,13 @@ mod tests {
             .expect("Up must be consumed when modal is open");
         assert!(r.redraw);
         assert_eq!(
-            s.tracer.content_modal.as_ref().unwrap().scroll_offset,
+            s.tracer
+                .content_modal
+                .as_ref()
+                .unwrap()
+                .scroll
+                .vertical
+                .offset,
             49,
             "Up should decrement scroll offset by 1"
         );
@@ -2093,7 +2103,13 @@ mod tests {
             .expect("Down must be consumed when modal is open");
         assert!(r.redraw);
         assert_eq!(
-            s.tracer.content_modal.as_ref().unwrap().scroll_offset,
+            s.tracer
+                .content_modal
+                .as_ref()
+                .unwrap()
+                .scroll
+                .vertical
+                .offset,
             51,
             "Down should increment scroll offset by 1"
         );
@@ -2105,7 +2121,13 @@ mod tests {
         let mut s = state_with_open_modal();
         super::TracerHandler::handle_focus(&mut s, FocusAction::First);
         assert_eq!(
-            s.tracer.content_modal.as_ref().unwrap().scroll_offset,
+            s.tracer
+                .content_modal
+                .as_ref()
+                .unwrap()
+                .scroll
+                .vertical
+                .offset,
             0,
             "First/Home should jump to offset 0"
         );
@@ -2118,7 +2140,13 @@ mod tests {
         super::TracerHandler::handle_focus(&mut s, FocusAction::Last);
         // 100 lines fully loaded, last valid offset = 99
         assert_eq!(
-            s.tracer.content_modal.as_ref().unwrap().scroll_offset,
+            s.tracer
+                .content_modal
+                .as_ref()
+                .unwrap()
+                .scroll
+                .vertical
+                .offset,
             99,
             "Last/End should jump to last line"
         );
@@ -2131,7 +2159,13 @@ mod tests {
         // scroll_offset = 50, last_viewport_rows = 20 → new offset = 70
         super::TracerHandler::handle_focus(&mut s, FocusAction::PageDown);
         assert_eq!(
-            s.tracer.content_modal.as_ref().unwrap().scroll_offset,
+            s.tracer
+                .content_modal
+                .as_ref()
+                .unwrap()
+                .scroll
+                .vertical
+                .offset,
             70,
             "PageDown should advance by viewport rows"
         );
@@ -2181,10 +2215,14 @@ mod tests {
             },
             output: SideBuffer::default(),
             diff_cache: None,
-            scroll_offset: 0,
-            horizontal_scroll_offset: 0,
-            last_viewport_rows: 10,
-            last_viewport_body_cols: 0,
+            scroll: crate::widget::scroll::BidirectionalScrollState {
+                vertical: crate::widget::scroll::VerticalScrollState {
+                    offset: 0,
+                    last_viewport_rows: 10,
+                },
+                horizontal_offset: 0,
+                last_viewport_body_cols: 0,
+            },
             search: Some(SearchState {
                 input_active: true,
                 ..Default::default()
@@ -2319,10 +2357,14 @@ mod tests {
             },
             output: SideBuffer::default(),
             diff_cache: None,
-            scroll_offset: 0,
-            horizontal_scroll_offset: 0,
-            last_viewport_rows: 10,
-            last_viewport_body_cols: 0,
+            scroll: crate::widget::scroll::BidirectionalScrollState {
+                vertical: crate::widget::scroll::VerticalScrollState {
+                    offset: 0,
+                    last_viewport_rows: 10,
+                },
+                horizontal_offset: 0,
+                last_viewport_body_cols: 0,
+            },
             search: Some(SearchState {
                 query: "row".to_owned(),
                 input_active: false,
@@ -2355,6 +2397,9 @@ mod tests {
         let modal = s.tracer.content_modal.as_ref().unwrap();
         let search = modal.search.as_ref().unwrap();
         assert_eq!(search.current, Some(1), "SearchNext advances to match 1");
-        assert_eq!(modal.scroll_offset, 60, "scroll must jump to match line 60");
+        assert_eq!(
+            modal.scroll.vertical.offset, 60,
+            "scroll must jump to match line 60"
+        );
     }
 }

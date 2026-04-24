@@ -76,7 +76,7 @@ pub fn render(frame: &mut Frame, area: Rect, state: &mut BulletinsState) {
     render_body(frame, rows[1], modal);
     render_footer(frame, rows[2], modal);
 
-    modal.last_viewport_rows = rows[1].height as usize;
+    modal.scroll.last_viewport_rows = rows[1].height as usize;
 }
 
 fn render_header(frame: &mut Frame, area: Rect, modal: &DetailModalState) {
@@ -161,24 +161,24 @@ fn render_body(frame: &mut Frame, area: Rect, modal: &mut DetailModalState) {
     {
         let target = m.line_idx;
         let rows = area.height as usize;
-        if target < modal.scroll_offset {
-            modal.scroll_offset = target;
-        } else if rows > 0 && target >= modal.scroll_offset + rows {
-            modal.scroll_offset = target + 1 - rows;
+        if target < modal.scroll.offset {
+            modal.scroll.offset = target;
+        } else if rows > 0 && target >= modal.scroll.offset + rows {
+            modal.scroll.offset = target + 1 - rows;
         }
     }
 
-    // Clamp scroll_offset against estimated wrapped rows.
+    // Clamp scroll offset against estimated wrapped rows.
     let estimated_rows = estimate_wrapped_rows(&body, area.width as usize);
     let max_offset = estimated_rows.saturating_sub(area.height as usize);
-    if modal.scroll_offset > max_offset {
-        modal.scroll_offset = max_offset;
+    if modal.scroll.offset > max_offset {
+        modal.scroll.offset = max_offset;
     }
 
     frame.render_widget(
         Paragraph::new(styled)
             .wrap(Wrap { trim: false })
-            .scroll((modal.scroll_offset as u16, 0)),
+            .scroll((modal.scroll.offset as u16, 0)),
         area,
     );
 }
@@ -339,7 +339,7 @@ mod tests {
         state.selected = 0;
         state.auto_scroll = false;
         state.open_detail_modal();
-        state.detail_modal.as_mut().unwrap().scroll_offset = 5;
+        state.detail_modal.as_mut().unwrap().scroll.offset = 5;
 
         let backend = TestBackend::new(60, 15);
         let mut terminal = Terminal::new(backend).unwrap();
