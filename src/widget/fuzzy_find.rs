@@ -192,11 +192,12 @@ pub fn render(
     fuzz: &FuzzyFindState,
     flow_index: &Option<FlowIndex>,
 ) {
+    use crate::widget::filter_bar::{FilterChip, build_chip_line};
     use ratatui::layout::{Constraint, Direction, Layout};
     use ratatui::widgets::{Cell, Row, Table, TableState};
 
     let w = area.width.min(80);
-    let h = area.height.min(16);
+    let h = area.height.min(17);
     let x = area.x + (area.width - w) / 2;
     let y = area.y + (area.height - h) / 2;
     let rect = Rect {
@@ -207,30 +208,47 @@ pub fn render(
     };
 
     frame.render_widget(Clear, rect);
-    let block = crate::widget::panel::Panel::new(" Fuzzy Find — esc to close ").into_block();
+    let block = crate::widget::panel::Panel::new(
+        " Fuzzy Find — :proc :pg :cs :conn :in :out filter · esc close ",
+    )
+    .into_block();
     let inner = block.inner(rect);
     frame.render_widget(block, rect);
 
-    // Inner layout: query line, separator, table body.
+    // Inner layout: chip row, query line, separator, table body.
     let chunks = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
+            Constraint::Length(1),
             Constraint::Length(1),
             Constraint::Length(1),
             Constraint::Min(0),
         ])
         .split(inner);
 
+    // Chip row — read-only indicator of the parsed kind filter.
+    let chip_cells: Vec<FilterChip> = KIND_CHIPS
+        .iter()
+        .map(|(label, kind)| FilterChip {
+            text: label,
+            style: kind_chip_style(fuzz.kind_filter == Some(*kind)),
+        })
+        .collect();
+    frame.render_widget(
+        Paragraph::new(build_chip_line(&chip_cells, "  ")),
+        chunks[0],
+    );
+
     frame.render_widget(
         Paragraph::new(Line::from(format!("> {}_", fuzz.query))),
-        chunks[0],
+        chunks[1],
     );
     frame.render_widget(
         Paragraph::new(Line::from(Span::styled(
-            "─".repeat(chunks[1].width as usize),
+            "─".repeat(chunks[2].width as usize),
             theme::muted(),
         ))),
-        chunks[1],
+        chunks[2],
     );
 
     let Some(idx) = flow_index else {
@@ -238,18 +256,18 @@ pub fn render(
             "no index (visit Browser tab first)",
             theme::muted(),
         )));
-        frame.render_widget(body, chunks[2]);
+        frame.render_widget(body, chunks[3]);
         return;
     };
 
     if fuzz.matches.is_empty() {
-        let msg = if fuzz.query.is_empty() {
+        let msg = if fuzz.effective_query.is_empty() && fuzz.kind_filter.is_none() {
             "no entries"
         } else {
             "no matches"
         };
         let body = Paragraph::new(Line::from(Span::styled(msg, theme::muted())));
-        frame.render_widget(body, chunks[2]);
+        frame.render_widget(body, chunks[3]);
         return;
     }
 
@@ -289,7 +307,7 @@ pub fn render(
 
     let mut ts = TableState::default();
     ts.select(Some(fuzz.selected.min(row_count.saturating_sub(1))));
-    frame.render_stateful_widget(table, chunks[2], &mut ts);
+    frame.render_stateful_widget(table, chunks[3], &mut ts);
 }
 
 /// Emit a name-column `Span` list with matched characters highlighted
@@ -392,6 +410,27 @@ fn state_cell<'a>(
         StateBadge::Port => Cell::from(""),
     }
 }
+
+/// Style for a kind chip. Active chip = bold accent; inactive = muted.
+fn kind_chip_style(active: bool) -> ratatui::style::Style {
+    use ratatui::style::Modifier;
+    if active {
+        theme::accent().add_modifier(Modifier::BOLD)
+    } else {
+        theme::muted()
+    }
+}
+
+/// Ordered chip list for the kind filter row. Order stays stable so
+/// the visual layout does not shift as the filter changes.
+const KIND_CHIPS: &[(&str, NodeKind)] = &[
+    ("Proc", NodeKind::Processor),
+    ("PG", NodeKind::ProcessGroup),
+    ("CS", NodeKind::ControllerService),
+    ("Conn", NodeKind::Connection),
+    ("In", NodeKind::InputPort),
+    ("Out", NodeKind::OutputPort),
+];
 
 #[cfg(test)]
 mod tests {
@@ -814,5 +853,75 @@ mod tests {
         s.rebuild_matches(&sample_index());
         assert_eq!(s.kind_filter, None);
         assert_eq!(s.effective_query, ":nope");
+    }
+
+    #[test]
+    fn render_draws_all_six_kind_chip_labels() {
+        use crate::test_support::{TEST_BACKEND_SHORT, test_backend};
+        use ratatui::Terminal;
+
+        let idx = sample_index();
+        let mut fuzz = FuzzyFindState::new();
+        fuzz.rebuild_matches(&idx);
+
+        let backend = test_backend(TEST_BACKEND_SHORT);
+        let mut term = Terminal::new(backend).unwrap();
+        term.draw(|f| render(f, f.area(), &fuzz, &Some(idx.clone())))
+            .unwrap();
+        let out = format!("{}", term.backend());
+
+        for label in ["Proc", "PG", "CS", "Conn", "In", "Out"] {
+            assert!(
+                out.contains(label),
+                "expected chip label {label} in:\n{out}"
+            );
+        }
+    }
+
+    #[test]
+    fn render_active_kind_chip_uses_bold_style() {
+        use crate::test_support::{TEST_BACKEND_SHORT, test_backend};
+        use ratatui::Terminal;
+        use ratatui::style::Modifier;
+
+        let idx = sample_index();
+        let mut fuzz = FuzzyFindState::new();
+        fuzz.query = ":proc".into();
+        fuzz.rebuild_matches(&idx);
+
+        let backend = test_backend(TEST_BACKEND_SHORT);
+        let mut term = Terminal::new(backend).unwrap();
+        term.draw(|f| render(f, f.area(), &fuzz, &Some(idx.clone())))
+            .unwrap();
+        let buffer = term.backend().buffer();
+
+        let bold_p = buffer
+            .content()
+            .iter()
+            .any(|cell| cell.symbol() == "P" && cell.style().add_modifier.contains(Modifier::BOLD));
+        assert!(
+            bold_p,
+            "expected the active Proc chip to render with BOLD set"
+        );
+    }
+
+    #[test]
+    fn render_title_advertises_kind_aliases() {
+        use crate::test_support::{TEST_BACKEND_SHORT, test_backend};
+        use ratatui::Terminal;
+
+        let idx = sample_index();
+        let mut fuzz = FuzzyFindState::new();
+        fuzz.rebuild_matches(&idx);
+
+        let backend = test_backend(TEST_BACKEND_SHORT);
+        let mut term = Terminal::new(backend).unwrap();
+        term.draw(|f| render(f, f.area(), &fuzz, &Some(idx)))
+            .unwrap();
+        let out = format!("{}", term.backend());
+        assert!(
+            out.contains(":proc"),
+            "expected title to mention :proc alias — got:\n{out}"
+        );
     }
 }
