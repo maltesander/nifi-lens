@@ -270,9 +270,11 @@ Each node row is probed for its server certificate chain by the
 per node, permissive verifier, chain captured from the verifier
 callback. Results join into `NodeHealthRow.tls_cert`: per-entry
 `not_after` drives both the full-chain render in the node detail
-modal and a compact trailing chip on the Nodes list row (visible
-only when the earliest `not_after` is within 30 days, or has
-expired).
+modal and a compact trailing chip on the Nodes list row. The chip
+shows the earliest `not_after` as days (`Nd`) or years+months
+(`Ny Mmo` beyond 1y); it renders as muted grey when healthy and
+only goes quiet when there is no data (snapshot not yet loaded,
+or the probe failed).
 
 Cadence is controlled by `[polling.cluster] tls_certs` (default
 `1h`). Subscriber-gated: the fetcher parks when Overview is not
@@ -280,11 +282,16 @@ the active tab. Standalone NiFi (no `/controller/cluster`) probes
 `ctx.url`'s host+port; HTTP-only contexts skip probing entirely
 with a one-time `info` log.
 
+The fetcher's first cycle may run before `ClusterNodes` has
+published its address list; `publish_node_addresses` force-wakes
+the fetcher whenever that list actually changes so the second
+cycle runs immediately against the real cluster roster.
+
 Severity thresholds (hardcoded for v0.1):
 
-- `<7d` or expired → red / bold
+- expired or `<7d` → red / bold
 - `7..30d` → yellow
-- `>=30d` → muted (day count in modal; chip silent on the Nodes list)
+- `>=30d` → muted grey
 
 ### Bulletins ring buffer
 
