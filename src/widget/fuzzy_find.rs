@@ -45,6 +45,48 @@ fn kind_priority(kind: NodeKind) -> u8 {
     }
 }
 
+/// Fixed alias table mapping colon-prefixed tokens to `NodeKind`.
+/// Keep lowercase — `parse_prefix` compares case-insensitively.
+#[allow(dead_code)]
+const KIND_ALIASES: &[(&str, NodeKind)] = &[
+    (":proc", NodeKind::Processor),
+    (":pg", NodeKind::ProcessGroup),
+    (":cs", NodeKind::ControllerService),
+    (":conn", NodeKind::Connection),
+    (":in", NodeKind::InputPort),
+    (":out", NodeKind::OutputPort),
+];
+
+/// Parse a kind-filter prefix off the start of `query`. Returns the
+/// resolved kind (if any) and the remaining fuzzy needle.
+///
+/// Parsing rules:
+/// - Only the first whitespace-separated token is consulted.
+/// - Leading whitespace is tolerated and stripped.
+/// - Matching is case-insensitive.
+/// - An unknown `:token` (or any non-alias token) is treated as plain
+///   query text — no filter, no stripping.
+/// - `:proc` alone → kind set, empty needle.
+/// - Trailing whitespace in the returned needle is preserved (the user
+///   may be mid-typing the next word).
+#[allow(dead_code)]
+pub(crate) fn parse_prefix(query: &str) -> (Option<NodeKind>, String) {
+    let trimmed = query.trim_start();
+    let (head, tail) = match trimmed.find(char::is_whitespace) {
+        Some(ws) => (&trimmed[..ws], &trimmed[ws..]),
+        None => (trimmed, ""),
+    };
+    for (alias, kind) in KIND_ALIASES {
+        if head.eq_ignore_ascii_case(alias) {
+            let rest = tail
+                .strip_prefix(|c: char| c.is_whitespace())
+                .unwrap_or(tail);
+            return (Some(*kind), rest.to_string());
+        }
+    }
+    (None, query.to_string())
+}
+
 impl Default for FuzzyFindState {
     fn default() -> Self {
         Self::new()
@@ -631,5 +673,75 @@ mod tests {
             })
             .collect();
         assert_eq!(flattened, vec![("ca".into(), false), ("fé".into(), true),]);
+    }
+
+    #[test]
+    fn parse_prefix_strips_leading_proc_token() {
+        assert_eq!(
+            parse_prefix(":proc kafka"),
+            (Some(NodeKind::Processor), "kafka".to_string())
+        );
+    }
+
+    #[test]
+    fn parse_prefix_bare_alias_sets_kind_and_empty_query() {
+        assert_eq!(
+            parse_prefix(":proc"),
+            (Some(NodeKind::Processor), String::new())
+        );
+    }
+
+    #[test]
+    fn parse_prefix_tolerates_leading_whitespace() {
+        assert_eq!(
+            parse_prefix("   :cs aws"),
+            (Some(NodeKind::ControllerService), "aws".to_string())
+        );
+    }
+
+    #[test]
+    fn parse_prefix_non_leading_alias_is_plain_text() {
+        assert_eq!(
+            parse_prefix("kafka :proc"),
+            (None, "kafka :proc".to_string())
+        );
+    }
+
+    #[test]
+    fn parse_prefix_unknown_alias_is_plain_text() {
+        assert_eq!(parse_prefix(":nope foo"), (None, ":nope foo".to_string()));
+    }
+
+    #[test]
+    fn parse_prefix_case_insensitive_alias() {
+        assert_eq!(
+            parse_prefix(":PROC kafka"),
+            (Some(NodeKind::Processor), "kafka".to_string())
+        );
+        assert_eq!(
+            parse_prefix(":Proc kafka"),
+            (Some(NodeKind::Processor), "kafka".to_string())
+        );
+    }
+
+    #[test]
+    fn parse_prefix_all_aliases() {
+        assert_eq!(parse_prefix(":pg").0, Some(NodeKind::ProcessGroup));
+        assert_eq!(parse_prefix(":conn").0, Some(NodeKind::Connection));
+        assert_eq!(parse_prefix(":in").0, Some(NodeKind::InputPort));
+        assert_eq!(parse_prefix(":out").0, Some(NodeKind::OutputPort));
+    }
+
+    #[test]
+    fn parse_prefix_preserves_trailing_whitespace_in_query() {
+        assert_eq!(
+            parse_prefix(":proc kafka "),
+            (Some(NodeKind::Processor), "kafka ".to_string())
+        );
+    }
+
+    #[test]
+    fn parse_prefix_empty_query() {
+        assert_eq!(parse_prefix(""), (None, String::new()));
     }
 }
