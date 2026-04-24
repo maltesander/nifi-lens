@@ -214,6 +214,11 @@ pub fn synthesize_iso_from_time_only(raw: &str, now: OffsetDateTime) -> Option<S
     ))
 }
 
+// Age formatters: `format_age(Option<Duration>)` for nullable
+// SystemTime-derived ages (renders `—` for None); `format_age_secs(u64)`
+// when the caller already has a computed second count (e.g. heartbeat
+// ages). Both produce the compact `"5s"`/`"3m"`/`"2h"` format.
+
 /// Returns a compact, floor-rounded age string suitable for a fixed-width
 /// table column: `"Ns"` (0–59 s), `"Nm"` (1–59 min), `"Nh"` (≥ 1 h).
 /// Returns an em-dash for `None`.

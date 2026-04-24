@@ -33,6 +33,7 @@ use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Cell, Paragraph, Row, Table, TableState};
 
+use crate::client::status::ControllerServiceState;
 use crate::client::{ControllerServiceDetail, NodeKind};
 use crate::layout;
 use crate::theme;
@@ -105,7 +106,7 @@ fn build_header_title(d: &ControllerServiceDetail) -> Line<'_> {
 }
 
 fn state_style(state: &str) -> Style {
-    crate::client::status::ControllerServiceState::from_wire(state).badge_style()
+    ControllerServiceState::from_wire(state).badge_style()
 }
 
 fn render_identity_panel(
@@ -321,8 +322,7 @@ fn render_referencing_components_panel(
                 Cell::from(format!("{glyph} {state}")).style(style)
             }
             ReferencingKind::ControllerService => {
-                let style = crate::client::status::ControllerServiceState::from_wire(state)
-                    .referencing_style();
+                let style = ControllerServiceState::from_wire(state).referencing_style();
                 Cell::from(state.to_string()).style(style)
             }
             _ => Cell::from(state.to_string()).style(theme::muted()),

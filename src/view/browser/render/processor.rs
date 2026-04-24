@@ -38,6 +38,7 @@ use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Cell, Paragraph, Row, Table, TableState};
 
+use crate::client::status::ProcessorStatus;
 use crate::client::{BulletinSnapshot, NodeKind, ProcessorDetail};
 use crate::layout;
 use crate::theme;
@@ -97,7 +98,7 @@ fn build_header_title(d: &ProcessorDetail) -> Line<'_> {
 }
 
 fn run_state_style(run_status: &str) -> Style {
-    crate::client::status::ProcessorStatus::from_wire(run_status).style()
+    ProcessorStatus::from_wire(run_status).style()
 }
 
 fn render_identity_panel(frame: &mut Frame, area: Rect, d: &ProcessorDetail) {

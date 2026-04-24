@@ -12,6 +12,7 @@ use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Cell, Paragraph, Row, Table, TableState};
 
+use crate::client::status::ControllerServiceState;
 use crate::client::{BulletinSnapshot, ControllerServiceSummary, NodeKind, ProcessGroupDetail};
 use crate::theme;
 use crate::view::browser::state::{
@@ -173,7 +174,7 @@ fn render_controller_services_panel(
 }
 
 fn cs_state_style(state: &str) -> Style {
-    crate::client::status::ControllerServiceState::from_wire(state).referencing_style()
+    ControllerServiceState::from_wire(state).referencing_style()
 }
 
 fn render_child_groups_panel(

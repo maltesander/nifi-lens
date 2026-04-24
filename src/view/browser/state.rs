@@ -15,6 +15,7 @@ use crate::client::browser::{
     ConnectionDetail, ControllerServiceDetail, FolderKind, NodeKind, NodeStatusSummary,
     ProcessGroupDetail, ProcessorDetail, RawNode, RecursiveSnapshot,
 };
+use crate::client::status::{ControllerServiceState, ProcessorStatus};
 
 /// Rolled-up health color for a Process Group's tree marker glyph.
 /// Red beats Yellow beats Green: any descendant processor with
@@ -485,9 +486,9 @@ impl BrowserState {
                 continue;
             };
             if let NodeStatusSummary::Processor { run_status } = &node.status_summary {
-                match crate::client::status::ProcessorStatus::from_wire(run_status) {
-                    crate::client::status::ProcessorStatus::Invalid => return PgHealth::Red,
-                    crate::client::status::ProcessorStatus::Stopped => saw_stopped = true,
+                match ProcessorStatus::from_wire(run_status) {
+                    ProcessorStatus::Invalid => return PgHealth::Red,
+                    ProcessorStatus::Stopped => saw_stopped = true,
                     _ => {}
                 }
             }
@@ -1295,8 +1296,7 @@ pub fn build_flow_index(state: &BrowserState) -> FlowIndex {
                     StateBadge::Processor { glyph, style }
                 }
                 NodeStatusSummary::ControllerService { state } => {
-                    let style =
-                        crate::client::status::ControllerServiceState::from_wire(state).style();
+                    let style = ControllerServiceState::from_wire(state).style();
                     StateBadge::Cs {
                         label: state.clone(),
                         style,
