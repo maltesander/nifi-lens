@@ -32,9 +32,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   header + JSON-Lines body. The Diff tab supports Parquet↔Parquet and
   Avro↔Avro comparisons; Parquet↔Avro shows a Mime mismatch.
 - **Overview**: per-node TLS certificate expiry now surfaced on the
-  Nodes list (compact chip when close-to-expiry) and in the node
-  detail modal (full chain with per-entry `not_after`). New
-  `[polling.cluster] tls_certs` cadence knob (default `1h`).
+  Nodes list as a trailing chip (always shown: red/bold for
+  expired or `<7d`, yellow for `7–30d`, muted grey when healthy at
+  `≥30d`; quiet only when data is missing) and in the node detail
+  modal as a full chain with per-entry `not_after`. Standalone
+  NiFi falls back to probing the context URL's host+port; HTTP-
+  only contexts skip probing. New `[polling.cluster] tls_certs`
+  cadence knob (default `1h`).
 
 ### Changed
 
