@@ -38,7 +38,17 @@
 ## Features
 
 - **Cluster overview** — health dashboard with bulletin-rate sparkline, queue backpressure, per-node heap/GC, and noisiest components.
-  - **Per-node cluster membership** — primary / coordinator badges, heartbeat age, and a redesigned per-node detail modal with per-disk repository usage and a node-events timeline.
+  - **Per-node cluster membership** — each row carries a role/status
+    badge (`[P·]` primary, `[·C]` coordinator, `[PC]` both, `[··]`
+    connected worker, `[OFF]` offloaded, `[DIS]` disconnected,
+    `[CON]` connecting) and a heartbeat-age column.
+  - **Node detail modal** — four-quadrant layout: identity header
+    (badge + status + roles + heartbeat age + node id + join time),
+    Resources / Repositories top row (per-disk `used / total` in
+    power-of-1024 units), Events / GC bottom row. Standalone NiFi
+    servers hide the Events quadrant and let GC fill the bottom
+    row; the Nodes list also drops to a 4-column layout (no badge,
+    no heartbeat column).
 - **Bulletin tail** — live cluster-wide log with severity filters, source deduplication, per-source mute, and a full-screen detail modal with scroll + substring search.
 - **Flow browser** — component tree with per-node detail.
   - **Cross-navigation** — detail rows whose value is a known component render a trailing `→` and jump to it on Enter. Covered surfaces: connection endpoints (FROM/TO), processor / CS property values that are component UUIDs, processor `Connections` section, process-group `Controller services` section. Controller Service and Port Identity panels resolve the parent group UUID to the PG name.
