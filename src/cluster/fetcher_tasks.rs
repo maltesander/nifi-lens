@@ -636,3 +636,135 @@ fn map_res(
         }
     }
 }
+
+use crate::client::tls_cert::probe_all;
+
+/// Spawn the tls-certs fetch loop. Subscriber-gated when
+/// `cfg.gated`: parks when no view subscribes, wakes via `cfg.force`.
+/// Probes the addresses currently published on `addresses_rx`; falls
+/// back to the bound `base_url` when the cluster list is empty
+/// (standalone NiFi / pre-first-fetch).
+///
+/// Always emits `Ok(TlsCertsSnapshot)` — per-node failures are
+/// per-entry inside the snapshot. Non-HTTPS base URLs skip probing
+/// entirely (empty snapshot) with a one-time `info` log.
+// Task 13 wires this into spawn_fetchers; suppress dead-code until then.
+#[allow(dead_code)]
+pub(crate) fn spawn_tls_certs(
+    tx: mpsc::Sender<AppEvent>,
+    addresses_rx: watch::Receiver<Vec<String>>,
+    base_url: String,
+    cfg: FetchTaskConfig,
+) -> JoinHandle<()> {
+    const PROBE_TIMEOUT: Duration = Duration::from_secs(5);
+    tokio::task::spawn_local(async move {
+        let mut next_interval = cfg.base_interval;
+        let mut http_logged = false;
+
+        loop {
+            if cfg.gated && !subscribers_present(&cfg.subscriber_counter) {
+                cfg.force.notified().await;
+                continue;
+            }
+
+            let addresses = addresses_rx.borrow().clone();
+            let targets = if addresses.is_empty() {
+                match fallback_target(&base_url) {
+                    Some(t) => vec![t],
+                    None => {
+                        if !http_logged {
+                            tracing::info!(
+                                "tls_certs: non-HTTPS base_url ({base_url}); skipping probe"
+                            );
+                            http_logged = true;
+                        }
+                        Vec::new()
+                    }
+                }
+            } else {
+                addresses
+            };
+
+            let t0 = Instant::now();
+            let snap = probe_all(&targets, PROBE_TIMEOUT).await;
+            let duration = t0.elapsed();
+            let meta = FetchMeta {
+                fetched_at: t0,
+                fetch_duration: duration,
+                next_interval,
+            };
+            if tx
+                .send(AppEvent::ClusterUpdate(ClusterUpdate::TlsCerts(
+                    Ok(snap),
+                    meta,
+                )))
+                .await
+                .is_err()
+            {
+                tracing::debug!("tls_certs fetch: channel closed, exiting");
+                return;
+            }
+            next_interval = adaptive_interval(cfg.base_interval, duration, cfg.max_interval);
+            sleep_with_jitter(next_interval, cfg.jitter_percent, &cfg.force).await;
+        }
+    })
+}
+
+/// Parse the context `base_url`. Returns `Some("host:port")` when the
+/// URL is `https`; `None` for anything else (plain http, bad URL).
+fn fallback_target(base_url: &str) -> Option<String> {
+    let parsed = url::Url::parse(base_url).ok()?;
+    if parsed.scheme() != "https" {
+        return None;
+    }
+    let host = parsed.host_str()?;
+    let port = parsed.port_or_known_default()?;
+    Some(format!("{host}:{port}"))
+}
+
+#[cfg(test)]
+mod tls_certs_tests {
+    use super::*;
+    use std::sync::Arc;
+    use std::sync::atomic::AtomicUsize;
+    use std::time::Duration;
+    use tokio::sync::{Notify, mpsc, watch};
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn spawn_tls_certs_emits_empty_snapshot_on_non_https_base_url() {
+        let local = tokio::task::LocalSet::new();
+        local
+            .run_until(async {
+                let (tx, mut rx) = mpsc::channel::<AppEvent>(16);
+                let (_addr_tx, addr_rx) = watch::channel::<Vec<String>>(Vec::new());
+                let cfg = FetchTaskConfig {
+                    base_interval: Duration::from_millis(50),
+                    max_interval: Duration::from_secs(5),
+                    jitter_percent: 0,
+                    force: Arc::new(Notify::new()),
+                    gated: false,
+                    subscriber_counter: Arc::new(AtomicUsize::new(1)),
+                };
+                let handle =
+                    spawn_tls_certs(tx.clone(), addr_rx, "http://plain-nifi:8080".into(), cfg);
+
+                // First emission should land within the base interval.
+                let event = tokio::time::timeout(Duration::from_secs(1), rx.recv())
+                    .await
+                    .expect("fetcher emitted no event")
+                    .expect("channel closed");
+                handle.abort();
+
+                match event {
+                    AppEvent::ClusterUpdate(ClusterUpdate::TlsCerts(Ok(snap), _)) => {
+                        assert!(
+                            snap.certs.is_empty(),
+                            "non-HTTPS base_url should yield empty snapshot"
+                        );
+                    }
+                    _ => panic!("unexpected event variant"),
+                }
+            })
+            .await;
+    }
+}
