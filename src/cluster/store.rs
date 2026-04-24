@@ -172,22 +172,33 @@ impl ClusterStore {
         self.node_addresses_rx.clone()
     }
 
-    /// Publish the latest `ClusterNodesSnapshot.rows[].address` list on
-    /// the watch channel. Called from the main loop after every
-    /// `ClusterUpdate::ClusterNodes` apply. No-op before the first
-    /// successful fetch.
+    /// Publish the node-address list used by the `tls_certs` fetcher
+    /// on the watch channel. Called from the main loop after every
+    /// `ClusterUpdate::ClusterNodes` and `ClusterUpdate::SystemDiagnostics`
+    /// apply.
     ///
-    /// Force-wakes the `tls_certs` fetcher when the address list
+    /// Source precedence: `cluster_nodes` (definitive cluster roster)
+    /// when non-empty, else `system_diagnostics.nodes` (so standalone
+    /// NiFi — where `/controller/cluster` returns 409 — still probes
+    /// the address sysdiag reports, matching the join key used by
+    /// `update_nodes`).
+    ///
+    /// Force-wakes the `tls_certs` fetcher when the resulting list
     /// actually changed — otherwise a fetcher that ran its first cycle
-    /// against an empty watch (and fell back to `base_url`) would wait
-    /// a full cadence tick before re-probing the real node set.
+    /// against an empty watch would wait a full cadence tick before
+    /// re-probing.
     pub fn publish_node_addresses(&self) {
-        let addrs: Vec<String> = self
-            .snapshot
-            .cluster_nodes
-            .latest()
-            .map(|snap| snap.rows.iter().map(|r| r.address.clone()).collect())
-            .unwrap_or_default();
+        let addrs: Vec<String> = match self.snapshot.cluster_nodes.latest() {
+            Some(snap) if !snap.rows.is_empty() => {
+                snap.rows.iter().map(|r| r.address.clone()).collect()
+            }
+            _ => self
+                .snapshot
+                .system_diagnostics
+                .latest()
+                .map(|s| s.nodes.iter().map(|n| n.address.clone()).collect())
+                .unwrap_or_default(),
+        };
         let changed = self.node_addresses_tx.send_if_modified(|current| {
             if *current != addrs {
                 *current = addrs;
@@ -948,5 +959,37 @@ mod tests {
         let mut rx = store.node_addresses_receiver();
         let addrs = rx.borrow_and_update().clone();
         assert_eq!(addrs, vec!["node1.nifi:8443".to_string()]);
+    }
+
+    #[test]
+    fn publish_node_addresses_falls_back_to_sysdiag_when_cluster_nodes_empty() {
+        use crate::client::health::{NodeDiagnostics, SystemDiagAggregate, SystemDiagSnapshot};
+        let mut store = ClusterStore::new(
+            ClusterPollingConfig::default(),
+            5000,
+            "https://nifi.test:8443".into(),
+        );
+        let sysdiag = SystemDiagSnapshot {
+            aggregate: SystemDiagAggregate::default(),
+            nodes: vec![NodeDiagnostics {
+                address: "nifi-2-6-0:8443".into(),
+                heap_used_bytes: 0,
+                heap_max_bytes: 0,
+                gc: vec![],
+                load_average: None,
+                available_processors: None,
+                total_threads: 0,
+                uptime: String::new(),
+                content_repos: vec![],
+                flowfile_repo: None,
+                provenance_repos: vec![],
+            }],
+            fetched_at: Instant::now(),
+        };
+        store.apply_update(ClusterUpdate::SystemDiagnostics(Ok(sysdiag), meta()));
+        store.publish_node_addresses();
+        let mut rx = store.node_addresses_receiver();
+        let addrs = rx.borrow_and_update().clone();
+        assert_eq!(addrs, vec!["nifi-2-6-0:8443".to_string()]);
     }
 }

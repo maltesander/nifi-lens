@@ -88,7 +88,11 @@ pub async fn run(
                 if matches!(endpoint, crate::cluster::ClusterEndpoint::RootPgStatus) {
                     state.cluster.publish_pg_ids();
                 }
-                if matches!(endpoint, crate::cluster::ClusterEndpoint::ClusterNodes) {
+                if matches!(
+                    endpoint,
+                    crate::cluster::ClusterEndpoint::ClusterNodes
+                        | crate::cluster::ClusterEndpoint::SystemDiagnostics
+                ) {
                     state.cluster.publish_node_addresses();
                 }
                 if tx.send(AppEvent::ClusterChanged(endpoint)).await.is_err() {
