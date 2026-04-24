@@ -8,7 +8,7 @@
 pub mod browser;
 pub mod build;
 pub mod events;
-pub mod health;
+pub mod overview;
 pub mod status;
 pub mod tls_cert;
 pub mod tracer;
@@ -743,7 +743,7 @@ pub use browser::{
     ReferencingKind,
 };
 pub use events::{ProvenancePollResult, ProvenanceQuery, ProvenanceQueryHandle};
-pub use health::{
+pub use overview::{
     GcSnapshot, NodeDiagnostics, NodeHealthRow, RepoUsage, Severity as HealthSeverity,
     SystemDiagAggregate, SystemDiagSnapshot,
 };

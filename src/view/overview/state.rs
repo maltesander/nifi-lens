@@ -111,7 +111,7 @@ pub struct OverviewState {
     pub last_bulletin_id: Option<i64>,
 
     // New in Phase 3 — populated by the SystemDiag payload variant.
-    pub nodes: crate::client::health::NodesState,
+    pub nodes: crate::client::overview::NodesState,
     pub repositories_summary: RepositoriesSummary,
     pub last_pg_refresh: Option<std::time::Instant>,
     pub last_sysdiag_refresh: Option<std::time::Instant>,
@@ -197,7 +197,7 @@ pub(crate) fn redraw_sysdiag(state: &mut crate::app::state::AppState) {
 
     let cluster = state.cluster.snapshot.cluster_nodes.latest().cloned();
     let tls_certs = state.cluster.snapshot.tls_certs.latest().cloned();
-    crate::client::health::update_nodes(
+    crate::client::overview::update_nodes(
         &mut state.overview.nodes,
         diag,
         cluster.as_ref(),
@@ -437,7 +437,7 @@ pub(crate) fn redraw_components(state: &mut crate::app::state::AppState) {
 /// aggregate (already summed/averaged across nodes by NiFi).
 /// We use the average utilization across the repos within each repo type.
 fn build_repositories_summary(
-    diag: &crate::client::health::SystemDiagSnapshot,
+    diag: &crate::client::overview::SystemDiagSnapshot,
 ) -> RepositoriesSummary {
     let agg = &diag.aggregate;
 
@@ -456,7 +456,7 @@ fn build_repositories_summary(
     }
 }
 
-fn avg_repo_percent(repos: &[crate::client::health::RepoUsage]) -> u32 {
+fn avg_repo_percent(repos: &[crate::client::overview::RepoUsage]) -> u32 {
     if repos.is_empty() {
         return 0;
     }
@@ -515,7 +515,7 @@ mod tests {
     /// arrival path.
     fn seed_sysdiag(
         state: &mut crate::app::state::AppState,
-        diag: crate::client::health::SystemDiagSnapshot,
+        diag: crate::client::overview::SystemDiagSnapshot,
     ) {
         use crate::cluster::snapshot::{EndpointState, FetchMeta};
         use std::time::Instant;
@@ -996,8 +996,8 @@ mod tests {
     /// reducer tests reuse. Mirrors the old
     /// `apply_system_diagnostics_populates_nodes_and_repositories`
     /// fixture one-for-one so rendered values stay byte-identical.
-    fn two_node_sysdiag() -> crate::client::health::SystemDiagSnapshot {
-        use crate::client::health::{
+    fn two_node_sysdiag() -> crate::client::overview::SystemDiagSnapshot {
+        use crate::client::overview::{
             GcSnapshot, NodeDiagnostics, RepoUsage, SystemDiagAggregate, SystemDiagSnapshot,
         };
         use std::time::Instant;
@@ -1201,7 +1201,7 @@ mod tests {
 
     #[test]
     fn redraw_cluster_nodes_populates_membership_on_existing_rows() {
-        use crate::client::health::{ClusterNodeRow, ClusterNodeStatus, ClusterNodesSnapshot};
+        use crate::client::overview::{ClusterNodeRow, ClusterNodeStatus, ClusterNodesSnapshot};
         use crate::cluster::snapshot::FetchMeta;
 
         // First: seed sysdiag so we have a node1:8080 / node2:8080 rows.

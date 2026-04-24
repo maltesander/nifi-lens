@@ -38,10 +38,10 @@ fn seed_controller_status(state: &mut OverviewState, controller: ControllerStatu
 /// `repositories_summary` projections without threading an
 /// `&mut AppState`. Replaces the pre-Task-8
 /// `apply_payload(SystemDiag(..))` path in render tests.
-fn seed_sysdiag(state: &mut OverviewState, diag: &crate::client::health::SystemDiagSnapshot) {
+fn seed_sysdiag(state: &mut OverviewState, diag: &crate::client::overview::SystemDiagSnapshot) {
     use crate::view::overview::state::RepositoriesSummary;
-    crate::client::health::update_nodes(&mut state.nodes, diag, None, None);
-    let avg = |repos: &[crate::client::health::RepoUsage]| -> u32 {
+    crate::client::overview::update_nodes(&mut state.nodes, diag, None, None);
+    let avg = |repos: &[crate::client::overview::RepoUsage]| -> u32 {
         if repos.is_empty() {
             0
         } else {
@@ -356,7 +356,7 @@ fn snapshot_unhealthy_cluster() {
 
 #[test]
 fn snapshot_with_nodes_populated() {
-    use crate::client::health::{
+    use crate::client::overview::{
         GcSnapshot, NodeDiagnostics, RepoUsage, SystemDiagAggregate, SystemDiagSnapshot,
     };
     use std::time::Instant;
@@ -476,7 +476,7 @@ fn snapshot_with_nodes_populated() {
 
 #[test]
 fn nodes_panel_scrolls_to_selected() {
-    use crate::client::health::{
+    use crate::client::overview::{
         GcSnapshot, NodeDiagnostics, RepoUsage, SystemDiagAggregate, SystemDiagSnapshot,
     };
     use std::time::Instant;
@@ -725,7 +725,7 @@ fn queues_panel_scrolls_to_selected() {
 /// snapshot is NOT yet applied, so every `NodeHealthRow` has
 /// `cluster = None` — this is the `any_cluster = false` baseline.
 fn seed_state_with_two_nodes() -> crate::app::state::AppState {
-    use crate::client::health::{
+    use crate::client::overview::{
         GcSnapshot, NodeDiagnostics, RepoUsage, SystemDiagAggregate, SystemDiagSnapshot,
     };
     use crate::cluster::snapshot::{EndpointState, FetchMeta};
@@ -861,7 +861,7 @@ fn seed_state_with_two_nodes() -> crate::app::state::AppState {
 
 #[test]
 fn snapshot_overview_with_cluster_roles() {
-    use crate::client::health::{ClusterNodeRow, ClusterNodeStatus, ClusterNodesSnapshot};
+    use crate::client::overview::{ClusterNodeRow, ClusterNodeStatus, ClusterNodesSnapshot};
     use crate::cluster::snapshot::FetchMeta;
 
     // Seed two-node sysdiag, then apply cluster-nodes with primary +
@@ -916,7 +916,7 @@ fn snapshot_overview_with_cluster_roles() {
 
 #[test]
 fn snapshot_overview_with_dead_node() {
-    use crate::client::health::{ClusterNodeRow, ClusterNodeStatus, ClusterNodesSnapshot};
+    use crate::client::overview::{ClusterNodeRow, ClusterNodeStatus, ClusterNodesSnapshot};
     use crate::cluster::snapshot::FetchMeta;
 
     // node1 connected primary+coordinator; node2 disconnected.
@@ -991,9 +991,9 @@ fn row_with_tls(
     tls_cert: Option<
         Result<crate::client::tls_cert::NodeCertChain, crate::client::tls_cert::TlsProbeError>,
     >,
-) -> crate::client::health::NodeHealthRow {
-    use crate::client::health::Severity;
-    crate::client::health::NodeHealthRow {
+) -> crate::client::overview::NodeHealthRow {
+    use crate::client::overview::Severity;
+    crate::client::overview::NodeHealthRow {
         node_address: address.into(),
         heap_used_bytes: crate::bytes::FIXTURE_HEAP_USED,
         heap_max_bytes: crate::bytes::FIXTURE_HEAP_MAX,
@@ -1029,7 +1029,7 @@ fn chain_expiring_in(days: i64) -> crate::client::tls_cert::NodeCertChain {
 
 /// Build a minimal `OverviewState` containing exactly the supplied node rows.
 fn state_with_node_rows(
-    rows: Vec<crate::client::health::NodeHealthRow>,
+    rows: Vec<crate::client::overview::NodeHealthRow>,
 ) -> crate::view::overview::state::OverviewState {
     use crate::view::overview::state::{OverviewState, RepositoriesSummary};
     let mut state = OverviewState::new();

@@ -154,7 +154,7 @@ fn repos_footer_cells(repos: &super::super::state::RepositoriesSummary) -> Vec<C
 }
 
 /// Build the heap `Cell` for a live node row.
-fn heap_cell_for(node: &crate::client::health::NodeHealthRow) -> Cell<'static> {
+fn heap_cell_for(node: &crate::client::overview::NodeHealthRow) -> Cell<'static> {
     let heap_style = health_severity_style(node.heap_severity);
     let heap_bar = fill_bar(5, node.heap_percent);
     Cell::from(Line::from(vec![
@@ -166,7 +166,7 @@ fn heap_cell_for(node: &crate::client::health::NodeHealthRow) -> Cell<'static> {
 }
 
 /// Build the GC `Cell` for a live node row.
-fn gc_cell_for(node: &crate::client::health::NodeHealthRow) -> Cell<'static> {
+fn gc_cell_for(node: &crate::client::overview::NodeHealthRow) -> Cell<'static> {
     let gc_style = match node.gc_delta {
         Some(d) if d > 5 => theme::error(),
         Some(_) => theme::warning(),
@@ -183,7 +183,7 @@ fn gc_cell_for(node: &crate::client::health::NodeHealthRow) -> Cell<'static> {
 }
 
 /// Build the load-average `Cell` for a live node row.
-fn load_cell_for(node: &crate::client::health::NodeHealthRow) -> Cell<'static> {
+fn load_cell_for(node: &crate::client::overview::NodeHealthRow) -> Cell<'static> {
     let (load_str, load_style) = match (node.load_average, node.available_processors) {
         (Some(l), Some(cpus)) if cpus > 0 => {
             let ratio = l / cpus as f64;
@@ -222,7 +222,7 @@ fn load_cell_for(node: &crate::client::health::NodeHealthRow) -> Cell<'static> {
 /// - `7d <= delta < 30d` → `cert Nd` in yellow.
 /// - `delta >= 30d` → `cert Nd` / `cert Ny Mmo` in muted grey (healthy).
 fn cert_chip_cell_for(
-    node: &crate::client::health::NodeHealthRow,
+    node: &crate::client::overview::NodeHealthRow,
     now: time::OffsetDateTime,
 ) -> Cell<'static> {
     let Some(Ok(chain)) = node.tls_cert.as_ref() else {
@@ -267,7 +267,7 @@ fn cert_chip_cell_for(
 /// When `is_dead` is `true` the heap/gc/load cells are replaced with
 /// `───` placeholders.
 fn node_to_row(
-    node: &crate::client::health::NodeHealthRow,
+    node: &crate::client::overview::NodeHealthRow,
     include_badge: bool,
     is_dead: bool,
     now: time::OffsetDateTime,

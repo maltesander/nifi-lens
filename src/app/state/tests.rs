@@ -531,8 +531,8 @@ fn capital_k_with_shift_opens_context_switcher() {
     );
 }
 
-fn build_test_sysdiag_with_two_nodes() -> crate::client::health::SystemDiagSnapshot {
-    use crate::client::health::{
+fn build_test_sysdiag_with_two_nodes() -> crate::client::overview::SystemDiagSnapshot {
+    use crate::client::overview::{
         GcSnapshot, NodeDiagnostics, RepoUsage, SystemDiagAggregate, SystemDiagSnapshot,
     };
     use std::time::Instant;

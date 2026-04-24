@@ -124,7 +124,7 @@ mod tests {
     use super::super::tests::{fresh_state, tiny_config};
     use super::OverviewHandler;
     use crate::app::state::{Modal, ViewId};
-    use crate::client::health::NodeHealthRow;
+    use crate::client::overview::NodeHealthRow;
     use crate::input::FocusAction;
     use crate::view::overview::state::OverviewFocus;
 
@@ -135,7 +135,7 @@ mod tests {
                 heap_used_bytes: crate::bytes::FIXTURE_HEAP_USED,
                 heap_max_bytes: crate::bytes::FIXTURE_HEAP_MAX,
                 heap_percent: 50,
-                heap_severity: crate::client::health::Severity::Green,
+                heap_severity: crate::client::overview::Severity::Green,
                 gc_collection_count: 10,
                 gc_delta: None,
                 gc_millis: 50,

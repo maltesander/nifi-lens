@@ -521,7 +521,7 @@ pub(crate) fn spawn_cluster_nodes(
                         );
                         standalone_logged = true;
                     }
-                    Ok(crate::client::health::ClusterNodesSnapshot {
+                    Ok(crate::client::overview::ClusterNodesSnapshot {
                         rows: vec![],
                         fetched_at: t0,
                         fetched_wall: OffsetDateTime::now_utc(),

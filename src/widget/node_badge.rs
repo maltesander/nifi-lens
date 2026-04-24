@@ -7,7 +7,7 @@
 use ratatui::style::{Modifier, Style};
 use ratatui::text::Span;
 
-use crate::client::health::{ClusterMembership, ClusterNodeStatus};
+use crate::client::overview::{ClusterMembership, ClusterNodeStatus};
 use crate::theme;
 
 /// Render a role/status badge for the given membership. Span has a

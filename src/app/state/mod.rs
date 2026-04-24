@@ -363,7 +363,7 @@ pub enum Modal {
     Properties(crate::view::browser::state::PropertiesModalState),
     SaveEventContent(crate::widget::save_modal::SaveEventContentState),
     /// Per-node detail popup opened from the Overview Nodes panel.
-    NodeDetail(Box<crate::client::health::NodeHealthRow>),
+    NodeDetail(Box<crate::client::overview::NodeHealthRow>),
     /// Cross-tab goto menu — shown when `AppAction::Goto` resolves to multiple targets.
     /// Full render logic is added in Task 11; this variant is a stub so Task 10 compiles.
     GotoMenu(crate::widget::goto_menu::GotoMenuState),

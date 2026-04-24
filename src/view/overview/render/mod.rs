@@ -82,7 +82,7 @@ pub fn render(frame: &mut Frame, area: Rect, state: &OverviewState) {
             .filter(|r| {
                 r.cluster
                     .as_ref()
-                    .map(|c| c.status == crate::client::health::ClusterNodeStatus::Connected)
+                    .map(|c| c.status == crate::client::overview::ClusterNodeStatus::Connected)
                     .unwrap_or(true)
             })
             .count();
@@ -144,12 +144,12 @@ pub(super) fn fill_style(percent: u32) -> Style {
     }
 }
 
-/// Convert a `client::health::Severity` (Green/Yellow/Red) into a theme style.
+/// Convert a `client::overview::Severity` (Green/Yellow/Red) into a theme style.
 ///
 /// Shared helper: used by `nodes.rs` for heap cells and by
 /// `node_detail.rs` for the detail modal's resource gauges.
-pub(super) fn health_severity_style(s: crate::client::health::Severity) -> Style {
-    use crate::client::health::Severity as H;
+pub(super) fn health_severity_style(s: crate::client::overview::Severity) -> Style {
+    use crate::client::overview::Severity as H;
     match s {
         H::Green => theme::success(),
         H::Yellow => theme::warning(),

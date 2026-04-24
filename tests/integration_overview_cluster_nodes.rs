@@ -12,7 +12,7 @@
 //!   silently swallowed.
 
 use nifi_lens::client::NifiClient;
-use nifi_lens::client::health::ClusterNodeStatus;
+use nifi_lens::client::overview::ClusterNodeStatus;
 use nifi_lens::config::{ResolvedAuth, ResolvedContext, VersionStrategy};
 
 #[path = "common/mod.rs"]

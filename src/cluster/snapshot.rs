@@ -6,7 +6,7 @@
 use std::collections::{HashMap, VecDeque};
 use std::time::{Duration, Instant};
 
-use crate::client::health::{ClusterNodesSnapshot, SystemDiagSnapshot};
+use crate::client::overview::{ClusterNodesSnapshot, SystemDiagSnapshot};
 use crate::client::tls_cert::TlsCertsSnapshot;
 use crate::client::{
     AboutSnapshot, BulletinSnapshot, ConnectionEndpoints, ControllerServicesSnapshot,
@@ -295,7 +295,7 @@ mod tests {
 
     #[test]
     fn next_interval_for_cluster_nodes() {
-        use crate::client::health::ClusterNodesSnapshot;
+        use crate::client::overview::ClusterNodesSnapshot;
         let mut snap = ClusterSnapshot::default();
         let meta = FetchMeta {
             fetched_at: Instant::now(),

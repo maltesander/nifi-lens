@@ -8,7 +8,7 @@ use tokio::sync::{Notify, RwLock, mpsc, watch};
 use tokio::task::JoinHandle;
 
 use crate::app::state::ViewId;
-use crate::client::health::{ClusterNodesSnapshot, SystemDiagSnapshot};
+use crate::client::overview::{ClusterNodesSnapshot, SystemDiagSnapshot};
 use crate::client::{
     AboutSnapshot, BulletinSnapshot, ConnectionEndpoints, ControllerServicesSnapshot,
     ControllerStatusSnapshot, NifiClient, RootPgStatusSnapshot,
@@ -584,7 +584,7 @@ mod tests {
 
     #[test]
     fn system_diagnostics_update_is_applied() {
-        use crate::client::health::{SystemDiagAggregate, SystemDiagSnapshot};
+        use crate::client::overview::{SystemDiagAggregate, SystemDiagSnapshot};
         let mut store = ClusterStore::new(
             ClusterPollingConfig::default(),
             5000,
@@ -858,7 +858,7 @@ mod tests {
 
     #[test]
     fn cluster_nodes_update_is_applied() {
-        use crate::client::health::ClusterNodesSnapshot;
+        use crate::client::overview::ClusterNodesSnapshot;
         let fake = ClusterNodesSnapshot {
             rows: vec![],
             fetched_at: std::time::Instant::now(),
@@ -931,7 +931,7 @@ mod tests {
 
     #[test]
     fn publish_node_addresses_sends_latest() {
-        use crate::client::health::{ClusterNodeRow, ClusterNodeStatus, ClusterNodesSnapshot};
+        use crate::client::overview::{ClusterNodeRow, ClusterNodeStatus, ClusterNodesSnapshot};
         let mut store = ClusterStore::new(
             ClusterPollingConfig::default(),
             5000,
@@ -963,7 +963,7 @@ mod tests {
 
     #[test]
     fn publish_node_addresses_falls_back_to_sysdiag_when_cluster_nodes_empty() {
-        use crate::client::health::{NodeDiagnostics, SystemDiagAggregate, SystemDiagSnapshot};
+        use crate::client::overview::{NodeDiagnostics, SystemDiagAggregate, SystemDiagSnapshot};
         let mut store = ClusterStore::new(
             ClusterPollingConfig::default(),
             5000,

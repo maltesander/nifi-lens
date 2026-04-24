@@ -24,7 +24,7 @@ use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Borders, Cell, Clear, Paragraph, Row, Table};
 
 use super::health_severity_style;
-use crate::client::health::{ClusterNodeEvent, ClusterNodeStatus, NodeHealthRow, RepoUsage};
+use crate::client::overview::{ClusterNodeEvent, ClusterNodeStatus, NodeHealthRow, RepoUsage};
 use crate::theme;
 use crate::timestamp::{format_age, format_bytes};
 use crate::widget::gauge::fill_bar;
@@ -528,7 +528,7 @@ fn center_rect(pct_x: u16, height: u16, area: Rect) -> Rect {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::client::health::{
+    use crate::client::overview::{
         ClusterMembership, ClusterNodeEvent, ClusterNodeStatus, GcSnapshot, NodeHealthRow,
         RepoUsage, Severity as HSev,
     };
