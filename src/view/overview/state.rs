@@ -196,7 +196,13 @@ pub(crate) fn redraw_sysdiag(state: &mut crate::app::state::AppState) {
     };
 
     let cluster = state.cluster.snapshot.cluster_nodes.latest().cloned();
-    crate::client::health::update_nodes(&mut state.overview.nodes, diag, cluster.as_ref());
+    let tls_certs = state.cluster.snapshot.tls_certs.latest().cloned();
+    crate::client::health::update_nodes(
+        &mut state.overview.nodes,
+        diag,
+        cluster.as_ref(),
+        tls_certs.as_ref(),
+    );
     state.overview.repositories_summary = build_repositories_summary(diag);
     state.overview.last_sysdiag_refresh = Some(std::time::Instant::now());
     state.cluster_summary.total_nodes = Some(diag.nodes.len());

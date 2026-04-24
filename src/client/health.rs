@@ -8,6 +8,7 @@ use time::OffsetDateTime;
 use crate::app::navigation::ListNavigation;
 use crate::client::NifiClient;
 use crate::client::classify_or_fallback;
+use crate::client::tls_cert::{NodeCertChain, TlsCertsSnapshot, TlsProbeError};
 use crate::error::NifiLensError;
 
 // ---------------------------------------------------------------------------
@@ -287,6 +288,7 @@ pub struct NodeHealthRow {
     pub flowfile_repo: Option<RepoUsage>,
     pub provenance_repos: Vec<RepoUsage>,
     pub cluster: Option<ClusterMembership>,
+    pub tls_cert: Option<Result<NodeCertChain, TlsProbeError>>,
 }
 
 /// Stateful container for the node-health table.
@@ -334,6 +336,7 @@ pub fn update_nodes(
     state: &mut NodesState,
     diag: &SystemDiagSnapshot,
     cluster: Option<&ClusterNodesSnapshot>,
+    tls: Option<&TlsCertsSnapshot>,
 ) {
     // Capture previous GC totals keyed by node address.
     let old_gc: std::collections::HashMap<&str, u64> = state
@@ -345,6 +348,11 @@ pub fn update_nodes(
     // Pre-index cluster rows by address for O(1) join.
     let cluster_by_addr: std::collections::HashMap<&str, &ClusterNodeRow> = cluster
         .map(|c| c.rows.iter().map(|r| (r.address.as_str(), r)).collect())
+        .unwrap_or_default();
+
+    // Pre-index TLS cert results by address for O(1) join.
+    let tls_by_addr: std::collections::HashMap<&str, &Result<NodeCertChain, TlsProbeError>> = tls
+        .map(|t| t.certs.iter().map(|(k, v)| (k.as_str(), v)).collect())
         .unwrap_or_default();
 
     state.nodes = diag
@@ -360,6 +368,8 @@ pub fn update_nodes(
             } else {
                 0
             };
+
+            let tls_cert = tls_by_addr.get(n.address.as_str()).map(|r| (*r).clone());
 
             let cluster_membership = cluster_by_addr.get(n.address.as_str()).map(|cr| {
                 let heartbeat_age = compute_heartbeat_age(
@@ -398,6 +408,7 @@ pub fn update_nodes(
                 flowfile_repo: n.flowfile_repo.clone(),
                 provenance_repos: n.provenance_repos.clone(),
                 cluster: cluster_membership,
+                tls_cert,
             }
         })
         .collect();
@@ -706,7 +717,7 @@ mod tests {
             Vec::new(),
             vec![node_diag("node1:8080", 1_000, 8_000, 10)],
         );
-        update_nodes(&mut state, &snap1, None);
+        update_nodes(&mut state, &snap1, None, None);
         assert_eq!(state.nodes.len(), 1);
         assert!(state.nodes[0].gc_delta.is_none(), "first poll → no delta");
         assert_eq!(state.nodes[0].gc_collection_count, 10);
@@ -718,7 +729,7 @@ mod tests {
             Vec::new(),
             vec![node_diag("node1:8080", 1_000, 8_000, 15)],
         );
-        update_nodes(&mut state, &snap2, None);
+        update_nodes(&mut state, &snap2, None, None);
         assert_eq!(state.nodes[0].gc_delta, Some(5));
         assert_eq!(state.nodes[0].gc_collection_count, 15);
     }
@@ -740,7 +751,7 @@ mod tests {
                 node_diag("Bravo:8080", 1_000, 8_000, 0),
             ],
         );
-        update_nodes(&mut state, &snap, None);
+        update_nodes(&mut state, &snap, None, None);
 
         let addresses: Vec<&str> = state
             .nodes
@@ -761,7 +772,7 @@ mod tests {
             Vec::new(),
             vec![node_diag("node1:8080", 1_000, 8_000, 10)],
         );
-        update_nodes(&mut state, &snap1, None);
+        update_nodes(&mut state, &snap1, None, None);
 
         // Second poll: node1 + new node2
         let snap2 = diag_snap(
@@ -773,7 +784,7 @@ mod tests {
                 node_diag("node2:8080", 2_000, 8_000, 3),
             ],
         );
-        update_nodes(&mut state, &snap2, None);
+        update_nodes(&mut state, &snap2, None, None);
 
         let node1 = state
             .nodes
@@ -847,7 +858,7 @@ mod tests {
             fetched_at: Instant::now(),
         };
         let mut state = NodesState::default();
-        update_nodes(&mut state, &diag, None);
+        update_nodes(&mut state, &diag, None, None);
 
         let row = &state.nodes[0];
         assert_eq!(row.gc.len(), 2);
@@ -887,7 +898,7 @@ mod tests {
                 provenance_repos: Vec::new(),
             }],
         );
-        update_nodes(&mut state, &snap, None);
+        update_nodes(&mut state, &snap, None, None);
 
         assert_eq!(state.nodes.len(), 1);
         assert_eq!(state.nodes[0].node_address, "Cluster (aggregate)");
@@ -1065,6 +1076,7 @@ mod tests {
             flowfile_repo: None,
             provenance_repos: vec![],
             cluster: None,
+            tls_cert: None,
         };
         assert!(row.cluster.is_none());
     }
@@ -1082,7 +1094,7 @@ mod tests {
             Vec::new(),
             vec![node_diag("node1:8080", 1_000, 8_000, 10)],
         );
-        super::update_nodes(&mut state, &snap, None);
+        super::update_nodes(&mut state, &snap, None, None);
         assert_eq!(state.nodes.len(), 1);
         assert!(state.nodes[0].cluster.is_none());
     }
@@ -1114,7 +1126,7 @@ mod tests {
             fetched_at: std::time::Instant::now(),
             fetched_wall: time::OffsetDateTime::now_utc(),
         };
-        super::update_nodes(&mut state, &sysdiag, Some(&cluster));
+        super::update_nodes(&mut state, &sysdiag, Some(&cluster), None);
         let row = &state.nodes[0];
         let m = row.cluster.as_ref().expect("cluster joined");
         assert_eq!(m.node_id, "id-1");
@@ -1138,7 +1150,7 @@ mod tests {
             fetched_at: std::time::Instant::now(),
             fetched_wall: time::OffsetDateTime::now_utc(),
         };
-        super::update_nodes(&mut state, &sysdiag, Some(&cluster));
+        super::update_nodes(&mut state, &sysdiag, Some(&cluster), None);
         assert!(state.nodes[0].cluster.is_none());
     }
 
@@ -1173,7 +1185,7 @@ mod tests {
             fetched_at: std::time::Instant::now(),
             fetched_wall,
         };
-        super::update_nodes(&mut state, &sysdiag, Some(&cluster));
+        super::update_nodes(&mut state, &sysdiag, Some(&cluster), None);
         let m = state.nodes[0].cluster.as_ref().unwrap();
         assert_eq!(m.heartbeat_age, Some(std::time::Duration::from_secs(5)));
     }
@@ -1205,7 +1217,7 @@ mod tests {
             fetched_at: std::time::Instant::now(),
             fetched_wall: time::OffsetDateTime::now_utc(),
         };
-        super::update_nodes(&mut state, &sysdiag, Some(&cluster));
+        super::update_nodes(&mut state, &sysdiag, Some(&cluster), None);
         let m = state.nodes[0].cluster.as_ref().unwrap();
         assert!(m.heartbeat_age.is_none());
     }
@@ -1244,7 +1256,7 @@ mod tests {
             fetched_at: std::time::Instant::now(),
             fetched_wall,
         };
-        super::update_nodes(&mut state, &sysdiag, Some(&cluster));
+        super::update_nodes(&mut state, &sysdiag, Some(&cluster), None);
         assert!(
             state.nodes[0]
                 .cluster
@@ -1253,5 +1265,57 @@ mod tests {
                 .heartbeat_age
                 .is_none()
         );
+    }
+
+    // -----------------------------------------------------------------------
+    // update_nodes TLS-cert join tests
+    // -----------------------------------------------------------------------
+
+    fn tiny_sysdiag_with_one_node(address: &str) -> SystemDiagSnapshot {
+        diag_snap(
+            Vec::new(),
+            None,
+            Vec::new(),
+            vec![node_diag(address, 1_000, 8_000, 0)],
+        )
+    }
+
+    #[test]
+    fn update_nodes_joins_tls_certs_by_address() {
+        use crate::client::tls_cert::{CertEntry, NodeCertChain, TlsCertsSnapshot};
+        use std::collections::HashMap;
+        use time::macros::datetime;
+
+        let diag = tiny_sysdiag_with_one_node("n1:8443");
+        let mut tls = HashMap::new();
+        tls.insert(
+            "n1:8443".to_string(),
+            Ok(NodeCertChain {
+                entries: vec![CertEntry {
+                    subject_cn: Some("n1".into()),
+                    not_after: datetime!(2026-05-06 00:00 UTC),
+                    is_leaf: true,
+                }],
+            }),
+        );
+        let tls_snap = TlsCertsSnapshot {
+            certs: tls,
+            fetched_at: std::time::Instant::now(),
+            fetched_wall: time::OffsetDateTime::now_utc(),
+        };
+        let mut state = NodesState::default();
+        super::update_nodes(&mut state, &diag, None, Some(&tls_snap));
+        assert_eq!(state.nodes.len(), 1);
+        let cert = state.nodes[0].tls_cert.as_ref().unwrap().as_ref().unwrap();
+        assert_eq!(cert.entries.len(), 1);
+        assert_eq!(cert.entries[0].subject_cn.as_deref(), Some("n1"));
+    }
+
+    #[test]
+    fn update_nodes_without_tls_snapshot_leaves_field_none() {
+        let diag = tiny_sysdiag_with_one_node("n1:8443");
+        let mut state = NodesState::default();
+        super::update_nodes(&mut state, &diag, None, None);
+        assert!(state.nodes[0].tls_cert.is_none());
     }
 }

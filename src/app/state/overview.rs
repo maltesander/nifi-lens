@@ -148,6 +148,7 @@ mod tests {
                 flowfile_repo: None,
                 provenance_repos: vec![],
                 cluster: None,
+                tls_cert: None,
             })
             .collect();
     }

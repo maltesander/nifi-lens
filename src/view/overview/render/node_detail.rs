@@ -511,6 +511,7 @@ mod tests {
                     },
                 ],
             }),
+            tls_cert: None,
         };
         term.draw(|f| render_node_detail_modal(f, f.area(), &row))
             .unwrap();
@@ -568,6 +569,7 @@ mod tests {
                 utilization_percent: 20,
             }],
             cluster: None,
+            tls_cert: None,
         };
         term.draw(|f| render_node_detail_modal(f, f.area(), &row))
             .unwrap();
@@ -621,6 +623,7 @@ mod tests {
                     },
                 ],
             }),
+            tls_cert: None,
         };
         term.draw(|f| render_node_detail_modal(f, f.area(), &row))
             .unwrap();
