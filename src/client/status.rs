@@ -17,14 +17,20 @@ pub enum ProcessorStatus {
 
 impl ProcessorStatus {
     /// Parse a NiFi-wire status string (case-insensitive).
+    /// Unrecognized values map to `Unknown`.
     pub fn from_wire(s: &str) -> Self {
-        match s.to_ascii_uppercase().as_str() {
-            "RUNNING" => Self::Running,
-            "STOPPED" => Self::Stopped,
-            "INVALID" => Self::Invalid,
-            "DISABLED" => Self::Disabled,
-            "VALIDATING" => Self::Validating,
-            _ => Self::Unknown,
+        if s.eq_ignore_ascii_case("RUNNING") {
+            Self::Running
+        } else if s.eq_ignore_ascii_case("STOPPED") {
+            Self::Stopped
+        } else if s.eq_ignore_ascii_case("INVALID") {
+            Self::Invalid
+        } else if s.eq_ignore_ascii_case("DISABLED") {
+            Self::Disabled
+        } else if s.eq_ignore_ascii_case("VALIDATING") {
+            Self::Validating
+        } else {
+            Self::Unknown
         }
     }
 
@@ -105,5 +111,18 @@ mod tests {
         let (glyph, style) = ProcessorStatus::Unknown.icon();
         assert_eq!(glyph, '\u{25CF}');
         assert_eq!(style, Style::default());
+    }
+
+    #[test]
+    fn style_maps_match_theme() {
+        assert_eq!(ProcessorStatus::Running.style(), crate::theme::success());
+        assert_eq!(ProcessorStatus::Stopped.style(), crate::theme::warning());
+        assert_eq!(ProcessorStatus::Invalid.style(), crate::theme::error());
+        assert_eq!(ProcessorStatus::Disabled.style(), crate::theme::disabled());
+        assert_eq!(ProcessorStatus::Validating.style(), crate::theme::info());
+        assert_eq!(
+            ProcessorStatus::Unknown.style(),
+            ratatui::style::Style::default()
+        );
     }
 }
