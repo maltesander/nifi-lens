@@ -31,15 +31,31 @@ use crate::widget::gauge::fill_bar;
 use crate::widget::panel::Panel;
 
 pub fn render_node_detail_modal(frame: &mut Frame, area: Rect, row: &NodeHealthRow) {
-    // Popup: 90% width, min(22, area.height - 2) rows, clamped >= 10.
-    let height = 22u16.min(area.height.saturating_sub(2)).max(10);
+    render_node_detail_modal_at(frame, area, row, time::OffsetDateTime::now_utc());
+}
+
+pub(crate) fn render_node_detail_modal_at(
+    frame: &mut Frame,
+    area: Rect,
+    row: &NodeHealthRow,
+    now: time::OffsetDateTime,
+) {
+    // Popup: 90% width, min(26, area.height - 2) rows, clamped >= 10.
+    let height = 26u16.min(area.height.saturating_sub(2)).max(10);
     let popup = center_rect(90, height, area);
     frame.render_widget(Clear, popup);
     let outer = Panel::new(format!(" {} ", row.node_address)).into_block();
     let inner = outer.inner(popup);
     frame.render_widget(outer, popup);
 
-    // Vertical: header (2) / separator (1) / top row / separator (1) / bottom row.
+    // cert_rows: number of extra lines the cert sub-block occupies in the header.
+    let cert_rows = match row.tls_cert.as_ref() {
+        None => 1u16,
+        Some(Ok(chain)) => chain.entries.len() as u16,
+        Some(Err(_)) => 1u16,
+    };
+
+    // Vertical: header (2 + cert_rows) / separator (1) / top row / separator (1) / bottom row.
     // We always reserve the bottom row; when a node has no events AND
     // has no GC data the bottom renders an empty "GC" stub — that's
     // visually correct and avoids jumpy layout.
@@ -50,16 +66,16 @@ pub fn render_node_detail_modal(frame: &mut Frame, area: Rect, row: &NodeHealthR
         .unwrap_or(false);
     let show_bottom = !row.gc.is_empty() || has_events;
     let bottom_h = if show_bottom {
-        inner.height.saturating_sub(4) / 2
+        inner.height.saturating_sub(4 + cert_rows) / 2
     } else {
         0
     };
-    let top_h = inner.height.saturating_sub(4 + bottom_h);
+    let top_h = inner.height.saturating_sub(4 + cert_rows + bottom_h);
 
     let chunks = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
-            Constraint::Length(2),
+            Constraint::Length(2 + cert_rows),
             Constraint::Length(1),
             Constraint::Length(top_h),
             Constraint::Length(1),
@@ -67,7 +83,7 @@ pub fn render_node_detail_modal(frame: &mut Frame, area: Rect, row: &NodeHealthR
         ])
         .split(inner);
 
-    render_header(frame, chunks[0], row);
+    render_header(frame, chunks[0], row, now);
     render_separator(frame, chunks[1]);
     render_top_row(frame, chunks[2], row);
     if show_bottom {
@@ -85,7 +101,7 @@ fn render_separator(frame: &mut Frame, area: Rect) {
     );
 }
 
-fn render_header(frame: &mut Frame, area: Rect, row: &NodeHealthRow) {
+fn render_header(frame: &mut Frame, area: Rect, row: &NodeHealthRow, now: time::OffsetDateTime) {
     let line1 = match &row.cluster {
         Some(c) => {
             let badge = crate::widget::node_badge::node_badge(c);
@@ -127,7 +143,110 @@ fn render_header(frame: &mut Frame, area: Rect, row: &NodeHealthRow) {
         ]),
         None => Line::from(""),
     };
-    frame.render_widget(Paragraph::new(vec![line1, line2]), area);
+
+    let cert_rows = match row.tls_cert.as_ref() {
+        None => 1u16,
+        Some(Ok(chain)) => chain.entries.len() as u16,
+        Some(Err(_)) => 1u16,
+    };
+
+    let header_chunks = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([Constraint::Length(2), Constraint::Length(cert_rows)])
+        .split(area);
+    frame.render_widget(Paragraph::new(vec![line1, line2]), header_chunks[0]);
+    render_cert_block(frame, header_chunks[1], row, now);
+}
+
+fn render_cert_block(
+    frame: &mut Frame,
+    area: Rect,
+    row: &NodeHealthRow,
+    now: time::OffsetDateTime,
+) {
+    let mut lines: Vec<Line<'static>> = Vec::new();
+    match row.tls_cert.as_ref() {
+        None => {
+            lines.push(Line::from(vec![
+                Span::styled("  cert     ", theme::muted()),
+                Span::styled("\u{2014} fetching", theme::muted()),
+            ]));
+        }
+        Some(Err(err)) => {
+            lines.push(Line::from(vec![
+                Span::styled("  cert     ", theme::muted()),
+                Span::styled(
+                    format!("probe failed: {}", probe_error_msg(err)),
+                    theme::warning(),
+                ),
+            ]));
+        }
+        Some(Ok(chain)) => {
+            for (i, entry) in chain.entries.iter().enumerate() {
+                let label_cell = if i == 0 { "  cert     " } else { "           " };
+                let kind = if entry.is_leaf { "leaf" } else { "CA  " };
+                let (days_text, days_style) = days_until_style(entry.not_after, now);
+                let date_str = entry
+                    .not_after
+                    .format(&time::format_description::well_known::Iso8601::DATE)
+                    .unwrap_or_else(|_| "\u{2014}".into());
+                let cn = entry
+                    .subject_cn
+                    .clone()
+                    .unwrap_or_else(|| "\u{2014}".into());
+                lines.push(Line::from(vec![
+                    Span::styled(label_cell, theme::muted()),
+                    Span::raw(format!("{kind}  ")),
+                    Span::raw(format!("{date_str}  ")),
+                    Span::styled(days_text, days_style),
+                    Span::raw("          "),
+                    Span::styled(cn, theme::muted()),
+                ]));
+            }
+        }
+    }
+    frame.render_widget(Paragraph::new(lines), area);
+}
+
+fn probe_error_msg(err: &crate::client::tls_cert::TlsProbeError) -> String {
+    use crate::client::tls_cert::TlsProbeError;
+    match err {
+        TlsProbeError::Connect(s) => format!("connect: {s}"),
+        TlsProbeError::Handshake(s) => format!("handshake: {s}"),
+        TlsProbeError::NoCerts => "server sent no certs".into(),
+        TlsProbeError::ParseCert(s) => format!("parse: {s}"),
+    }
+}
+
+/// Format a days-until string and severity style.
+fn days_until_style(not_after: time::OffsetDateTime, now: time::OffsetDateTime) -> (String, Style) {
+    let delta = not_after - now;
+    if delta.is_negative() {
+        return (
+            "EXPIRED".into(),
+            theme::error().add_modifier(Modifier::BOLD),
+        );
+    }
+    let days = delta.whole_days();
+    let style = if days < 7 {
+        theme::error().add_modifier(Modifier::BOLD)
+    } else if days < 30 {
+        theme::warning()
+    } else {
+        theme::muted()
+    };
+    let text = if days >= 365 {
+        let years = days / 365;
+        let months = (days % 365) / 30;
+        if months > 0 {
+            format!("{years}y {months}mo")
+        } else {
+            format!("{years}y")
+        }
+    } else {
+        format!("{days}d")
+    };
+    (text, style)
 }
 
 fn status_word(status: ClusterNodeStatus) -> &'static str {
@@ -416,13 +535,21 @@ mod tests {
         ClusterMembership, ClusterNodeEvent, ClusterNodeStatus, GcSnapshot, NodeHealthRow,
         RepoUsage, Severity as HSev,
     };
+    use crate::client::tls_cert::{CertEntry, NodeCertChain, TlsProbeError};
     use ratatui::Terminal;
     use ratatui::backend::TestBackend;
+
+    fn fixed_now() -> time::OffsetDateTime {
+        time::macros::datetime!(2026-04-24 00:00 UTC)
+    }
 
     #[test]
     fn snapshot_node_detail_modal_clustered() {
         let backend = TestBackend::new(110, 28);
         let mut term = Terminal::new(backend).unwrap();
+        // 2-entry chain: leaf expires in ~2.5y, CA expires in 12d (yellow).
+        let leaf_not_after = time::macros::datetime!(2028-11-22 00:00 UTC);
+        let ca_not_after = time::macros::datetime!(2026-05-06 00:00 UTC);
         let row = NodeHealthRow {
             node_address: "node2.nifi:8443".into(),
             heap_used_bytes: 620 * 1024 * 1024,
@@ -511,9 +638,22 @@ mod tests {
                     },
                 ],
             }),
-            tls_cert: None,
+            tls_cert: Some(Ok(NodeCertChain {
+                entries: vec![
+                    CertEntry {
+                        subject_cn: Some("node2.nifi".into()),
+                        not_after: leaf_not_after,
+                        is_leaf: true,
+                    },
+                    CertEntry {
+                        subject_cn: Some("NiFi CA".into()),
+                        not_after: ca_not_after,
+                        is_leaf: false,
+                    },
+                ],
+            })),
         };
-        term.draw(|f| render_node_detail_modal(f, f.area(), &row))
+        term.draw(|f| render_node_detail_modal_at(f, f.area(), &row, fixed_now()))
             .unwrap();
         insta::assert_snapshot!("node_detail_modal_clustered", format!("{}", term.backend()));
     }
@@ -569,9 +709,9 @@ mod tests {
                 utilization_percent: 20,
             }],
             cluster: None,
-            tls_cert: None,
+            tls_cert: None, // exercises "— fetching" path
         };
-        term.draw(|f| render_node_detail_modal(f, f.area(), &row))
+        term.draw(|f| render_node_detail_modal_at(f, f.area(), &row, fixed_now()))
             .unwrap();
         insta::assert_snapshot!(
             "node_detail_modal_standalone",
@@ -623,9 +763,9 @@ mod tests {
                     },
                 ],
             }),
-            tls_cert: None,
+            tls_cert: Some(Err(TlsProbeError::Connect("refused".into()))), // exercises probe-failed path
         };
-        term.draw(|f| render_node_detail_modal(f, f.area(), &row))
+        term.draw(|f| render_node_detail_modal_at(f, f.area(), &row, fixed_now()))
             .unwrap();
         insta::assert_snapshot!(
             "node_detail_modal_disconnected",
