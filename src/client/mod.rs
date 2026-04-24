@@ -9,6 +9,7 @@ pub mod browser;
 pub mod build;
 pub mod events;
 pub mod health;
+pub mod tls_cert;
 pub mod tracer;
 
 use std::ops::{Deref, DerefMut};
@@ -738,6 +739,7 @@ pub use health::{
     GcSnapshot, NodeDiagnostics, NodeHealthRow, RepoUsage, Severity as HealthSeverity,
     SystemDiagAggregate, SystemDiagSnapshot,
 };
+pub use tls_cert::{CertEntry, NodeCertChain, TlsCertsSnapshot, TlsProbeError};
 pub use tracer::{
     AttributeTriple, ContentRangeSnapshot, ContentRender, ContentSide, ContentSnapshot,
     INLINE_PREVIEW_BYTES, LatestEventsSnapshot, LineagePoll, LineageSnapshot,
