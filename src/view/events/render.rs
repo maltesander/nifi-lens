@@ -31,6 +31,7 @@ use time;
 use crate::theme;
 use crate::timestamp::format_age_secs;
 use crate::view::events::state::{EventsQueryStatus, EventsState, FilterField};
+use crate::widget::filter_bar::{FilterChip, build_chip_line};
 use crate::widget::panel::Panel;
 
 const FILTER_BAR_ROWS: u16 = 2;
@@ -86,33 +87,23 @@ fn render_filter_bar(frame: &mut Frame, area: Rect, state: &EventsState) {
         .constraints([Constraint::Length(1), Constraint::Length(1)])
         .split(area);
 
-    // Row 0: filter chips.
-    let row0 = Line::from(vec![
-        Span::styled(
-            field_chip("D time", FilterField::Time, state),
-            theme::accent(),
-        ),
-        Span::raw("   "),
-        Span::styled(
-            field_chip("T type", FilterField::Types, state),
-            theme::accent(),
-        ),
-        Span::raw("   "),
-        Span::styled(
-            field_chip("S source", FilterField::Source, state),
-            theme::accent(),
-        ),
-        Span::raw("   "),
-        Span::styled(
-            field_chip("U uuid", FilterField::Uuid, state),
-            theme::accent(),
-        ),
-        Span::raw("   "),
-        Span::styled(
-            field_chip("A attr", FilterField::Attr, state),
-            theme::accent(),
-        ),
-    ]);
+    // Row 0: filter chips. Texts are computed first so &str lifetimes
+    // match build_chip_line's signature.
+    let chip_texts: [String; 5] = [
+        field_chip("D time", FilterField::Time, state),
+        field_chip("T type", FilterField::Types, state),
+        field_chip("S source", FilterField::Source, state),
+        field_chip("U uuid", FilterField::Uuid, state),
+        field_chip("A attr", FilterField::Attr, state),
+    ];
+    let chips: Vec<FilterChip> = chip_texts
+        .iter()
+        .map(|t| FilterChip {
+            text: t.as_str(),
+            style: theme::accent(),
+        })
+        .collect();
+    let row0 = build_chip_line(&chips, "   ");
     frame.render_widget(Paragraph::new(row0), chunks[0]);
 
     // Row 1: status + result count + hints.

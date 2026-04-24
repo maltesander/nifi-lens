@@ -28,6 +28,7 @@ use time;
 use crate::theme;
 use crate::timestamp::format_age_secs;
 use crate::view::bulletins::state::{BulletinsState, ComponentType, GroupedRow};
+use crate::widget::filter_bar::{FilterChip, build_chip_line};
 use crate::widget::panel::Panel;
 use crate::widget::severity::{format_severity_label, severity_style};
 
@@ -83,24 +84,41 @@ fn render_filter_bar(frame: &mut Frame, area: Rect, state: &BulletinsState) {
     let counts = state.severity_counts();
 
     // Row 0: chips-with-counts + type + text + mutes badge + +N new.
-    let mut row0: Vec<Span<'static>> = vec![
-        chip_with_count("E", counts.error, state.filters.show_error, theme::error()),
-        Span::raw(" "),
-        chip_with_count(
-            "W",
-            counts.warning,
-            state.filters.show_warning,
-            theme::warning(),
-        ),
-        Span::raw(" "),
-        chip_with_count("I", counts.info, state.filters.show_info, theme::info()),
-        Span::raw("   type: "),
-        Span::styled(
-            component_type_label(state.filters.component_type),
-            theme::accent(),
-        ),
-        Span::raw("   "),
+    // The E/W/I triplet is rendered via the shared filter_bar chip
+    // primitive; the trailing type / text / badge spans stay inline
+    // because they aren't uniform chips (prefixes, conditional
+    // presence).
+    let e_text = format!("[E {}]", counts.error);
+    let w_text = format!("[W {}]", counts.warning);
+    let i_text = format!("[I {}]", counts.info);
+    let sev_chips = [
+        FilterChip {
+            text: &e_text,
+            style: chip_style(state.filters.show_error, theme::error()),
+        },
+        FilterChip {
+            text: &w_text,
+            style: chip_style(state.filters.show_warning, theme::warning()),
+        },
+        FilterChip {
+            text: &i_text,
+            style: chip_style(state.filters.show_info, theme::info()),
+        },
     ];
+    let sev_line = build_chip_line(&sev_chips, " ");
+    // Extend row0 with the chip-line spans (materialized to 'static so
+    // they can coexist with the trailing owned-string spans below).
+    let mut row0: Vec<Span<'static>> = sev_line
+        .spans
+        .into_iter()
+        .map(|s| Span::styled(s.content.into_owned(), s.style))
+        .collect();
+    row0.push(Span::raw("   type: "));
+    row0.push(Span::styled(
+        component_type_label(state.filters.component_type),
+        theme::accent(),
+    ));
+    row0.push(Span::raw("   "));
     // Text-input display folded into the chip row.
     let text_display = if let Some(buf) = state.text_input.as_deref() {
         Span::styled(format!("text: {buf}_"), theme::accent())
@@ -147,12 +165,14 @@ fn render_filter_bar(frame: &mut Frame, area: Rect, state: &BulletinsState) {
     frame.render_widget(Paragraph::new(row1), chunks[1]);
 }
 
-fn chip_with_count(label: &'static str, count: usize, on: bool, on_style: Style) -> Span<'static> {
-    let text = format!("[{label} {count}]");
+/// Style for a severity chip given its active/inactive state.
+/// Active chips use the severity color with bold; inactive chips use
+/// muted grey.
+fn chip_style(on: bool, on_style: Style) -> Style {
     if on {
-        Span::styled(text, on_style.add_modifier(Modifier::BOLD))
+        on_style.add_modifier(Modifier::BOLD)
     } else {
-        Span::styled(text, theme::muted())
+        theme::muted()
     }
 }
 

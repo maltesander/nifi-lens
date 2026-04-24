@@ -1,6 +1,7 @@
 //! Shared widgets: status bar, help modal, context switcher.
 
 pub mod context_switcher;
+pub mod filter_bar;
 pub mod fuzzy_find;
 pub mod gauge;
 pub mod goto_menu;
