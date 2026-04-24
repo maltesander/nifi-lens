@@ -6,6 +6,7 @@
 //! `dynamic` feature so one binary works against every supported NiFi version.
 
 pub mod app;
+pub mod bytes;
 pub mod cli;
 pub mod client;
 pub mod cluster;

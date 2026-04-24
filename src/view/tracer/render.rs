@@ -1193,7 +1193,7 @@ mod tests {
             view.focus = LineageFocus::Content { scroll: 0 };
             let mut detail = make_lineage_detail(2);
             // Total output size is 512 MiB; only 1 MiB was fetched.
-            detail.output_size = Some(512 << 20);
+            detail.output_size = Some(512 * crate::bytes::MIB);
             view.event_detail = EventDetail::Loaded {
                 event: Box::new(detail),
                 content: ContentPane::Shown {

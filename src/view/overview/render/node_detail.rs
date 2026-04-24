@@ -552,8 +552,8 @@ mod tests {
         let ca_not_after = time::macros::datetime!(2026-05-06 00:00 UTC);
         let row = NodeHealthRow {
             node_address: "node2.nifi:8443".into(),
-            heap_used_bytes: 620 * 1024 * 1024,
-            heap_max_bytes: 1024 * 1024 * 1024,
+            heap_used_bytes: 620 * crate::bytes::MIB,
+            heap_max_bytes: crate::bytes::HEAP_1_GIB,
             heap_percent: 60,
             heap_severity: HSev::Yellow,
             gc_collection_count: 12,
@@ -614,7 +614,7 @@ mod tests {
                 node_start_iso: Some("04/22/2026 09:12:04 UTC".into()),
                 active_thread_count: 42,
                 flow_files_queued: 1234,
-                bytes_queued: 456 * 1024 * 1024,
+                bytes_queued: 456 * crate::bytes::MIB,
                 events: vec![
                     ClusterNodeEvent {
                         timestamp_iso: "04/22/2026 10:14:03 UTC".into(),
@@ -664,8 +664,8 @@ mod tests {
         let mut term = Terminal::new(backend).unwrap();
         let row = NodeHealthRow {
             node_address: "nifi:8443".into(),
-            heap_used_bytes: 512 * 1024 * 1024,
-            heap_max_bytes: 1024 * 1024 * 1024,
+            heap_used_bytes: crate::bytes::HEAP_512_MIB,
+            heap_max_bytes: crate::bytes::HEAP_1_GIB,
             heap_percent: 52,
             heap_severity: HSev::Green,
             gc_collection_count: 12,
@@ -726,7 +726,7 @@ mod tests {
         let row = NodeHealthRow {
             node_address: "node3.nifi:8443".into(),
             heap_used_bytes: 0,
-            heap_max_bytes: 1024 * 1024 * 1024,
+            heap_max_bytes: crate::bytes::HEAP_1_GIB,
             heap_percent: 0,
             heap_severity: HSev::Green,
             gc_collection_count: 0,

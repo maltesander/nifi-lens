@@ -1203,8 +1203,8 @@ mod tests {
         // reducer test in src/view/overview/state.rs.
         let node = |address: &str| NodeDiagnostics {
             address: address.into(),
-            heap_used_bytes: 512 * 1024 * 1024,
-            heap_max_bytes: 1024 * 1024 * 1024,
+            heap_used_bytes: crate::bytes::HEAP_512_MIB,
+            heap_max_bytes: crate::bytes::HEAP_1_GIB,
             gc: vec![GcSnapshot {
                 name: "G1 Young".into(),
                 collection_count: 10,
@@ -1304,8 +1304,8 @@ mod tests {
 
         let node = |i: usize| NodeDiagnostics {
             address: format!("node{}:8080", i),
-            heap_used_bytes: 256 * 1024 * 1024,
-            heap_max_bytes: 1024 * 1024 * 1024,
+            heap_used_bytes: 256 * crate::bytes::MIB,
+            heap_max_bytes: crate::bytes::HEAP_1_GIB,
             gc: vec![GcSnapshot {
                 name: "G1 Young".into(),
                 collection_count: 1,
@@ -1605,8 +1605,8 @@ mod tests {
         // Seed sysdiag with two nodes.
         let node = |address: &str| NodeDiagnostics {
             address: address.into(),
-            heap_used_bytes: 512 * 1024 * 1024,
-            heap_max_bytes: 1024 * 1024 * 1024,
+            heap_used_bytes: crate::bytes::HEAP_512_MIB,
+            heap_max_bytes: crate::bytes::HEAP_1_GIB,
             gc: vec![GcSnapshot {
                 name: "G1 Young".into(),
                 collection_count: 10,
@@ -1814,8 +1814,8 @@ mod tests {
         use crate::client::health::Severity;
         crate::client::health::NodeHealthRow {
             node_address: address.into(),
-            heap_used_bytes: 512 * 1024 * 1024,
-            heap_max_bytes: 1024 * 1024 * 1024,
+            heap_used_bytes: crate::bytes::HEAP_512_MIB,
+            heap_max_bytes: crate::bytes::HEAP_1_GIB,
             heap_percent: 50,
             heap_severity: Severity::Green,
             gc_collection_count: 5,

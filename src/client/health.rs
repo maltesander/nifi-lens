@@ -815,8 +815,8 @@ mod tests {
             },
             nodes: vec![NodeDiagnostics {
                 address: "node1:8080".into(),
-                heap_used_bytes: 512 * 1024 * 1024,
-                heap_max_bytes: 1024 * 1024 * 1024,
+                heap_used_bytes: crate::bytes::HEAP_512_MIB,
+                heap_max_bytes: crate::bytes::HEAP_1_GIB,
                 gc: vec![
                     GcSnapshot {
                         name: "G1 Young".into(),
@@ -937,7 +937,7 @@ mod tests {
         node.node_start_time = Some("04/22/2026 09:12:04 UTC".into());
         node.active_thread_count = Some(42);
         node.flow_files_queued = Some(1234);
-        node.bytes_queued = Some(456 * 1024 * 1024);
+        node.bytes_queued = Some((456 * crate::bytes::MIB) as i64);
         node.events = Some(vec![ev]);
 
         let mut dto = ClusterDto::default();
@@ -957,7 +957,7 @@ mod tests {
         );
         assert_eq!(row.active_thread_count, 42);
         assert_eq!(row.flow_files_queued, 1234);
-        assert_eq!(row.bytes_queued, 456 * 1024 * 1024);
+        assert_eq!(row.bytes_queued, 456 * crate::bytes::MIB);
         assert_eq!(row.events.len(), 1);
         assert_eq!(row.events[0].category.as_deref(), Some("CONNECTED"));
     }

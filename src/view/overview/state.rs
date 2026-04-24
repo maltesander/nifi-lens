@@ -1004,8 +1004,8 @@ mod tests {
 
         let node = |address: &str| NodeDiagnostics {
             address: address.into(),
-            heap_used_bytes: 512 * 1024 * 1024,
-            heap_max_bytes: 1024 * 1024 * 1024,
+            heap_used_bytes: crate::bytes::HEAP_512_MIB,
+            heap_max_bytes: crate::bytes::HEAP_1_GIB,
             gc: vec![GcSnapshot {
                 name: "G1 Young".into(),
                 collection_count: 10,

@@ -1955,7 +1955,7 @@ mod tests {
         s.current_tab = ViewId::Tracer;
 
         // 512 MiB output; content pane shows a truncated preview.
-        let total_output_bytes: u64 = 512 << 20;
+        let total_output_bytes: u64 = 512 * crate::bytes::MIB;
         let summary = ProvenanceEventSummary {
             event_id: 42,
             event_time_iso: "2026-01-01T00:00:00Z".to_string(),

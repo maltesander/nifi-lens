@@ -250,7 +250,7 @@ mod snapshots {
             load_balance_strategy: "DO_NOT_LOAD_BALANCE".into(),
             fill_percent: 55,
             flow_files_queued: 5_500,
-            bytes_queued: 52_428_800,
+            bytes_queued: 50 * crate::bytes::MIB,
             queued_display: "5,500 / 50 MB".into(),
         };
         // Arena must contain the source and destination so resolve_id
