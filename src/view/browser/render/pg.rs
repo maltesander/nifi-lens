@@ -173,11 +173,7 @@ fn render_controller_services_panel(
 }
 
 fn cs_state_style(state: &str) -> Style {
-    match state {
-        "ENABLED" => theme::success(),
-        "DISABLED" => theme::disabled(),
-        _ => theme::warning(),
-    }
+    crate::client::status::ControllerServiceState::from_wire(state).referencing_style()
 }
 
 fn render_child_groups_panel(
