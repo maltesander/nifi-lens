@@ -1,0 +1,63 @@
+name: Publish to crates.io
+
+# Binary artifacts and the GitHub Release itself are owned by cargo-dist
+# (`.github/workflows/release.yml`). This workflow handles only the crates.io
+# publication path: pre-publish quality gates, then `cargo publish`.
+
+on:
+  push:
+    tags:
+      - 'v[0-9]+.[0-9]+.[0-9]+'
+
+env:
+  CARGO_TERM_COLOR: always
+  RUST_BACKTRACE: 1
+
+jobs:
+  test:
+    name: Test before publish
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions-rust-lang/setup-rust-toolchain@v1
+        with:
+          components: clippy, rustfmt
+
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Verify tag matches Cargo.toml version
+        run: |
+          tag_version="${GITHUB_REF_NAME#v}"
+          cargo_version=$(cargo metadata --format-version 1 --no-deps \
+            | jq -r '.packages[] | select(.name == "nifi-lens") | .version')
+          if [ "$tag_version" != "$cargo_version" ]; then
+            echo "::error::Tag version ($tag_version) does not match Cargo.toml version ($cargo_version)"
+            exit 1
+          fi
+
+      - run: cargo fmt --all -- --check
+      - run: cargo clippy --all-targets --all-features -- -D warnings
+      - run: cargo test --all-features
+      - run: RUSTDOCFLAGS="-D warnings" cargo doc --all-features --no-deps
+
+      - name: Install cargo-deny
+        run: cargo install cargo-deny --locked
+      - run: cargo deny check
+
+      - name: Verify packaging
+        run: cargo package
+
+  publish:
+    name: Publish to crates.io
+    runs-on: ubuntu-latest
+    needs: test
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions-rust-lang/setup-rust-toolchain@v1
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Publish nifi-lens
+        run: cargo publish
+        env:
+          CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}

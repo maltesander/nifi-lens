@@ -78,17 +78,28 @@ pub fn load(args: &Args) -> Result<(Config, ResolvedContext), NifiLensError> {
     Ok((config, resolved))
 }
 
-/// Resolve the config file path. Precedence: explicit --config, then
-/// $XDG_CONFIG_HOME/nifilens/config.toml, then $HOME/.config/nifilens/config.toml.
+/// Resolve the config file path. Precedence: explicit `--config`, then the
+/// platform-appropriate config directory. Resolves to:
+///
+/// - Linux: `$XDG_CONFIG_HOME/nifilens/config.toml` (or `~/.config/nifilens/config.toml`)
+/// - macOS: `~/Library/Application Support/nifilens/config.toml`
+/// - Windows: `%APPDATA%\nifilens\config\config.toml`
 pub fn resolve_path(explicit: Option<PathBuf>) -> PathBuf {
+    resolve_path_from(explicit, platform_default_config_dir())
+}
+
+fn resolve_path_from(explicit: Option<PathBuf>, default_dir: Option<PathBuf>) -> PathBuf {
     if let Some(p) = explicit {
         return p;
     }
-    if let Ok(xdg) = std::env::var("XDG_CONFIG_HOME") {
-        return PathBuf::from(xdg).join("nifilens/config.toml");
-    }
-    let home = std::env::var("HOME").unwrap_or_default();
-    PathBuf::from(home).join(".config/nifilens/config.toml")
+    default_dir
+        .unwrap_or_else(|| PathBuf::from("."))
+        .join("config.toml")
+}
+
+fn platform_default_config_dir() -> Option<PathBuf> {
+    let dirs = directories::ProjectDirs::from("", "", "nifilens")?;
+    Some(dirs.config_dir().to_path_buf())
 }
 
 #[cfg(unix)]
@@ -242,6 +253,31 @@ mod tests {
             allow_writes: false,
             command: None,
         }
+    }
+
+    #[test]
+    fn resolve_path_prefers_explicit_override() {
+        let explicit = PathBuf::from("/etc/nifilens.toml");
+        let result = resolve_path_from(
+            Some(explicit.clone()),
+            Some(PathBuf::from("/ignored/default")),
+        );
+        assert_eq!(result, explicit);
+    }
+
+    #[test]
+    fn resolve_path_joins_default_dir_with_config_toml() {
+        let result = resolve_path_from(None, Some(PathBuf::from("/home/user/.config/nifilens")));
+        assert_eq!(
+            result,
+            PathBuf::from("/home/user/.config/nifilens/config.toml")
+        );
+    }
+
+    #[test]
+    fn resolve_path_falls_back_to_cwd_when_no_default() {
+        let result = resolve_path_from(None, None);
+        assert_eq!(result, PathBuf::from("./config.toml"));
     }
 
     #[test]

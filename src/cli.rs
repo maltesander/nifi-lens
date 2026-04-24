@@ -5,7 +5,8 @@ use std::path::PathBuf;
 #[derive(clap::Parser, Debug)]
 #[command(version, about, long_about = None)]
 pub struct Args {
-    /// Override the config file path (default: $XDG_CONFIG_HOME/nifilens/config.toml)
+    /// Override the config file path (default: the platform config dir, e.g.
+    /// ~/.config/nifilens/config.toml on Linux, %APPDATA%\nifilens\config\config.toml on Windows)
     #[arg(long, value_name = "PATH", global = true)]
     pub config: Option<PathBuf>,
 
@@ -47,7 +48,7 @@ pub enum Command {
 
 #[derive(clap::Subcommand, Debug)]
 pub enum ConfigAction {
-    /// Write a commented template to ~/.config/nifilens/config.toml (chmod 0600).
+    /// Write a commented template to the platform config dir (chmod 0600 on Unix).
     Init {
         /// Overwrite an existing config file.
         #[arg(long)]

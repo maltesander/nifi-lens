@@ -157,20 +157,25 @@ pub fn init(args: &Args) -> Result<(WorkerGuard, StderrToggle), NifiLensError> {
 }
 
 fn resolve_log_dir() -> Result<PathBuf, NifiLensError> {
-    resolve_log_dir_from(
-        std::env::var("XDG_STATE_HOME").ok().as_deref(),
-        std::env::var("HOME").ok().as_deref(),
-    )
+    resolve_log_dir_from(platform_default_log_dir())
 }
 
-fn resolve_log_dir_from(xdg: Option<&str>, home: Option<&str>) -> Result<PathBuf, NifiLensError> {
-    if let Some(xdg) = xdg {
-        return Ok(PathBuf::from(xdg).join("nifilens"));
-    }
-    let home = home.ok_or_else(|| NifiLensError::Io {
-        source: std::io::Error::other("HOME not set"),
-    })?;
-    Ok(PathBuf::from(home).join(".local/state/nifilens"))
+fn resolve_log_dir_from(default: Option<PathBuf>) -> Result<PathBuf, NifiLensError> {
+    default.ok_or_else(|| NifiLensError::Io {
+        source: std::io::Error::other("could not determine log directory for this platform"),
+    })
+}
+
+// Linux: $XDG_STATE_HOME/nifilens (or ~/.local/state/nifilens).
+// macOS: ~/Library/Caches/nifilens.
+// Windows: %LOCALAPPDATA%\nifilens\cache.
+fn platform_default_log_dir() -> Option<PathBuf> {
+    let dirs = directories::ProjectDirs::from("", "", "nifilens")?;
+    Some(
+        dirs.state_dir()
+            .unwrap_or_else(|| dirs.cache_dir())
+            .to_path_buf(),
+    )
 }
 
 #[cfg(test)]
@@ -178,20 +183,14 @@ mod tests {
     use super::*;
 
     #[test]
-    fn resolve_log_dir_prefers_xdg_state_home() {
-        let result = resolve_log_dir_from(Some("/var/state"), Some("/home/user")).unwrap();
+    fn resolve_log_dir_returns_provided_default() {
+        let result = resolve_log_dir_from(Some(PathBuf::from("/var/state/nifilens"))).unwrap();
         assert_eq!(result, PathBuf::from("/var/state/nifilens"));
     }
 
     #[test]
-    fn resolve_log_dir_falls_back_to_home() {
-        let result = resolve_log_dir_from(None, Some("/home/user")).unwrap();
-        assert_eq!(result, PathBuf::from("/home/user/.local/state/nifilens"));
-    }
-
-    #[test]
-    fn resolve_log_dir_errors_when_home_missing() {
-        let err = resolve_log_dir_from(None, None).unwrap_err();
+    fn resolve_log_dir_errors_when_default_missing() {
+        let err = resolve_log_dir_from(None).unwrap_err();
         assert!(matches!(err, NifiLensError::Io { .. }));
     }
 }

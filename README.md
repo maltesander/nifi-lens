@@ -65,6 +65,25 @@
 
 ## Install
 
+Prebuilt binaries and installers for Linux (x86_64 / aarch64, gnu + musl),
+macOS (x86_64 / aarch64), and Windows (x86_64) are attached to each
+[GitHub Release](https://github.com/maltesander/nifi-lens/releases/latest).
+
+One-line installers:
+
+```bash
+# Linux / macOS
+curl --proto '=https' --tlsv1.2 -LsSf \
+  https://github.com/maltesander/nifi-lens/releases/latest/download/nifi-lens-installer.sh | sh
+```
+
+```powershell
+# Windows
+powershell -c "irm https://github.com/maltesander/nifi-lens/releases/latest/download/nifi-lens-installer.ps1 | iex"
+```
+
+From crates.io (requires a Rust toolchain):
+
 ```bash
 cargo install nifi-lens
 ```
@@ -79,7 +98,9 @@ cargo install --path .
 
 ## Quick Start
 
-Create `~/.config/nifilens/config.toml`:
+Create the config file (paths below are Linux; see
+[Configuration](#configuration) for macOS and Windows, or run
+`nifilens config init` to write a template to the right place):
 
 ```toml
 current_context = "dev"
@@ -297,7 +318,13 @@ use `s` to save the partial bytes to disk.
 
 ## Configuration
 
-Config file lives at `~/.config/nifilens/config.toml` and is kubeconfig-style:
+The config file lives in the platform config directory:
+
+- Linux: `~/.config/nifilens/config.toml` (honors `$XDG_CONFIG_HOME`)
+- macOS: `~/Library/Application Support/nifilens/config.toml`
+- Windows: `%APPDATA%\nifilens\config\config.toml`
+
+Override with `--config <PATH>`. The file is kubeconfig-style:
 
 ```toml
 current_context = "dev"
