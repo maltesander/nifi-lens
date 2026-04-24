@@ -220,13 +220,21 @@ reference; you don't need to memorise them.
 | `s`                    | Save the full raw content to file (uncapped)     |
 | `Esc`                  | Close the modal                                  |
 
-#### Tabular content (Parquet & Avro)
+#### Structured content (JSON, CSV, Parquet, Avro)
 
-Apache Parquet (`PAR1`-magic) and Apache Avro Object Container Files
-(`Obj\x01`-magic) are decoded into a schema header followed by
-JSON-Lines, one record per line. The same `/` search and Diff tab
-work as on text content. Diff between two sides requires the same
-format on both sides — Parquet ↔ Avro shows `Mime mismatch`.
+The Diff tab renders a colored unified diff between Input and Output
+whenever both sides share a compatible format. Use `Ctrl+↓` /
+`Ctrl+↑` to jump between changes.
+
+- **Text formats** (JSON, CSV, plain text) diff directly against
+  the raw bytes.
+- **Binary formats** — Apache Parquet (`PAR1`-magic) and Apache Avro
+  Object Container Files (`Obj\x01`-magic) — are decoded into a
+  schema header followed by JSON-Lines (one record per line) before
+  rendering or diffing.
+
+Same-format diff only. JSON ↔ CSV or Parquet ↔ Avro renders
+`Mime mismatch` and greys out the Diff tab.
 
 **Parquet caveat:** Parquet's metadata footer lives at end-of-file,
 so the full file must fit under `[tracer.ceiling] tabular` to decode.
