@@ -37,6 +37,10 @@ pub enum ClusterUpdate {
     ControllerServices(Result<ControllerServicesSnapshot, NifiLensError>, FetchMeta),
     SystemDiagnostics(Result<SystemDiagSnapshot, NifiLensError>, FetchMeta),
     ClusterNodes(Result<ClusterNodesSnapshot, NifiLensError>, FetchMeta),
+    TlsCerts(
+        Result<crate::client::tls_cert::TlsCertsSnapshot, NifiLensError>,
+        FetchMeta,
+    ),
     Connections {
         pg_id: String,
         result: Result<ConnectionEndpoints, NifiLensError>,
@@ -57,6 +61,7 @@ impl ClusterUpdate {
             Self::ControllerServices(..) => ClusterEndpoint::ControllerServices,
             Self::SystemDiagnostics(..) => ClusterEndpoint::SystemDiagnostics,
             Self::ClusterNodes(..) => ClusterEndpoint::ClusterNodes,
+            Self::TlsCerts(..) => ClusterEndpoint::TlsCerts,
             Self::Connections { .. } => ClusterEndpoint::ConnectionsByPg,
             Self::BulletinsDelta { .. } => ClusterEndpoint::Bulletins,
         }
@@ -312,6 +317,7 @@ impl ClusterStore {
             ClusterUpdate::ClusterNodes(result, meta) => {
                 self.snapshot.cluster_nodes.apply(result, meta)
             }
+            ClusterUpdate::TlsCerts(result, meta) => self.snapshot.tls_certs.apply(result, meta),
             ClusterUpdate::Connections {
                 pg_id,
                 result,
@@ -732,6 +738,19 @@ mod tests {
             store.snapshot.cluster_nodes,
             crate::cluster::snapshot::EndpointState::Ready { .. }
         ));
+    }
+
+    #[test]
+    fn cluster_update_tls_certs_reports_endpoint() {
+        use crate::client::tls_cert::TlsCertsSnapshot;
+        use std::collections::HashMap;
+        let snap = TlsCertsSnapshot {
+            certs: HashMap::new(),
+            fetched_at: Instant::now(),
+            fetched_wall: time::OffsetDateTime::now_utc(),
+        };
+        let u = ClusterUpdate::TlsCerts(Ok(snap), meta());
+        assert_eq!(u.endpoint(), ClusterEndpoint::TlsCerts);
     }
 
     #[test]
