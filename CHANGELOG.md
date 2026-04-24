@@ -31,6 +31,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   Apache Avro Object Container Files (`Obj\x01` magic) into a schema
   header + JSON-Lines body. The Diff tab supports Parquet↔Parquet and
   Avro↔Avro comparisons; Parquet↔Avro shows a Mime mismatch.
+- **Overview**: per-node TLS certificate expiry now surfaced on the
+  Nodes list (compact chip when close-to-expiry) and in the node
+  detail modal (full chain with per-entry `not_after`). New
+  `[polling.cluster] tls_certs` cadence knob (default `1h`).
 
 ### Changed
 

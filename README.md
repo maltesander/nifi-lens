@@ -104,6 +104,10 @@ processors (per-state counts), and controller services (per-state
 counts). Below it: a bulletin-rate sparkline, queue backpressure,
 repository fill, per-node health strips, and the noisiest components.
 
+- Per-node TLS certificate expiry — visible chip on the Nodes list,
+  full chain breakdown in the node detail modal. One handshake per
+  node per hour by default (`[polling.cluster] tls_certs`).
+
 **Bulletins** — Live cluster-wide bulletin tail with severity,
 component-type, and free-text filters. Deduplication collapses
 repeating errors from the same component into a single `×N` row. A
@@ -273,6 +277,7 @@ bulletins           = "5s"
 cluster_nodes       = "5s"
 connections_by_pg   = "15s"
 about               = "5m"
+tls_certs           = "1h"
 max_interval        = "60s"
 jitter_percent      = 20
 

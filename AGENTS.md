@@ -263,6 +263,29 @@ age + node_id + joined timestamp), a Resources / Repositories top row
 bottom row. When the node is standalone the Events quadrant is hidden
 and GC fills the bottom row.
 
+### TLS certificate expiry
+
+Each node row is probed for its server certificate chain by the
+`ClusterEndpoint::TlsCerts` fetcher — one `tokio-rustls` handshake
+per node, permissive verifier, chain captured from the verifier
+callback. Results join into `NodeHealthRow.tls_cert`: per-entry
+`not_after` drives both the full-chain render in the node detail
+modal and a compact trailing chip on the Nodes list row (visible
+only when the earliest `not_after` is within 30 days, or has
+expired).
+
+Cadence is controlled by `[polling.cluster] tls_certs` (default
+`1h`). Subscriber-gated: the fetcher parks when Overview is not
+the active tab. Standalone NiFi (no `/controller/cluster`) probes
+`ctx.url`'s host+port; HTTP-only contexts skip probing entirely
+with a one-time `info` log.
+
+Severity thresholds (hardcoded for v0.1):
+
+- `<7d` or expired → red / bold
+- `7..30d` → yellow
+- `>=30d` → muted (day count in modal; chip silent on the Nodes list)
+
 ### Bulletins ring buffer
 
 The Bulletins tab holds a rolling in-memory window of recently-seen
