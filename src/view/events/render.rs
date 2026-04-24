@@ -29,6 +29,7 @@ use ratatui::widgets::Paragraph;
 use time;
 
 use crate::theme;
+use crate::timestamp::format_age_secs;
 use crate::view::events::state::{EventsQueryStatus, EventsState, FilterField};
 use crate::widget::panel::Panel;
 
@@ -45,7 +46,7 @@ pub fn render(
         EventsQueryStatus::Done { fetched_at, .. } => SystemTime::now()
             .duration_since(*fetched_at)
             .ok()
-            .map(|d| format!(" last {} ago ", format_age(d.as_secs())))
+            .map(|d| format!(" last {} ago ", format_age_secs(d.as_secs())))
             .unwrap_or_else(|| "  ".to_string()),
         _ => "  ".to_string(),
     };
@@ -80,16 +81,6 @@ pub fn render(
     let detail_inner = detail_block.inner(rows[2]);
     frame.render_widget(detail_block, rows[2]);
     render_detail_pane(frame, detail_inner, state, now, cfg);
-}
-
-fn format_age(secs: u64) -> String {
-    if secs < 60 {
-        format!("{secs}s")
-    } else if secs < 3600 {
-        format!("{}m", secs / 60)
-    } else {
-        format!("{}h", secs / 3600)
-    }
 }
 
 fn render_filter_bar(frame: &mut Frame, area: Rect, state: &EventsState) {

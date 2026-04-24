@@ -26,6 +26,7 @@ use ratatui::widgets::{Cell, Paragraph, Row, Table};
 use time;
 
 use crate::theme;
+use crate::timestamp::format_age_secs;
 use crate::view::bulletins::state::{BulletinsState, ComponentType, GroupedRow};
 use crate::widget::panel::Panel;
 use crate::widget::severity::{format_severity_label, severity_style};
@@ -43,7 +44,7 @@ pub fn render(
     let age_label = state
         .last_fetched_at
         .and_then(|fetched| SystemTime::now().duration_since(fetched).ok())
-        .map(|d| format!(" last {} ago ", format_age(d.as_secs())))
+        .map(|d| format!(" last {} ago ", format_age_secs(d.as_secs())))
         .unwrap_or_else(|| " connecting… ".to_string());
 
     let rows = Layout::default()
@@ -74,16 +75,6 @@ pub fn render(
     let detail_inner = detail_block.inner(rows[2]);
     frame.render_widget(detail_block, rows[2]);
     render_detail(frame, detail_inner, state, browser);
-}
-
-fn format_age(secs: u64) -> String {
-    if secs < 60 {
-        format!("{secs}s")
-    } else if secs < 3600 {
-        format!("{}m", secs / 60)
-    } else {
-        format!("{}h", secs / 3600)
-    }
 }
 
 fn render_filter_bar(frame: &mut Frame, area: Rect, state: &BulletinsState) {

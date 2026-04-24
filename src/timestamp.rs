@@ -221,7 +221,13 @@ pub fn format_age(d: Option<Duration>) -> String {
     let Some(d) = d else {
         return "\u{2014}".to_string();
     };
-    let secs = d.as_secs();
+    format_age_secs(d.as_secs())
+}
+
+/// Compact single-unit age formatter for view-layer code that
+/// already has a `u64` seconds value. Output matches the
+/// `Ns`/`Nm`/`Nh` pattern used on Bulletins and Events rows.
+pub fn format_age_secs(secs: u64) -> String {
     if secs < 60 {
         format!("{secs}s")
     } else if secs < 3600 {
@@ -470,6 +476,16 @@ mod tests {
     #[test]
     fn format_age_none() {
         assert_eq!(format_age(None), "\u{2014}"); // em-dash
+    }
+
+    #[test]
+    fn format_age_secs_matches_seconds_minutes_hours() {
+        assert_eq!(format_age_secs(0), "0s");
+        assert_eq!(format_age_secs(59), "59s");
+        assert_eq!(format_age_secs(60), "1m");
+        assert_eq!(format_age_secs(3599), "59m");
+        assert_eq!(format_age_secs(3600), "1h");
+        assert_eq!(format_age_secs(86_400), "24h");
     }
 
     #[test]
