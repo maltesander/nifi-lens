@@ -380,7 +380,7 @@ shared with the Bulletins detail modal via `src/widget/search.rs`.
 
 `ContentRender::Tabular { format, schema_summary, body, decoded_bytes, truncated }`
 is produced when `classify_content` sees `PAR1` or `Obj\x01` magic in
-the first four bytes. Decoders live in `src/client/tracer.rs`
+the first four bytes. Decoders live in `src/client/tracer/content.rs`
 (`decode_parquet` via `ParquetRecordBatchReaderBuilder` +
 `arrow::json::LineDelimitedWriter`; `decode_avro` via `apache_avro::Reader` +
 `from_value::<serde_json::Value>`). Decoder errors are caught inside
