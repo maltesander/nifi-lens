@@ -114,7 +114,7 @@ processors (per-state counts), and controller services (per-state
 counts). Below it: a bulletin-rate sparkline, queue backpressure,
 repository fill, per-node health strips, and the noisiest components.
 
-- Per-node TLS certificate expiry — each Nodes-list row carries a
+- Per-node TLS certificate expiry — each Nodes list row carries a
   trailing chip showing the earliest `not_after` in the chain
   (`Nd` under a year, `Ny Mmo` beyond). Severity thresholds:
   expired or `<7d` renders red/bold, `7–30d` yellow, `≥30d` muted
