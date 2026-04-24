@@ -38,14 +38,14 @@ pub fn render(
     //   identity:  5 rows  (2 borders + 3 content lines)
     //   cs:        Fill(1) — split with child groups
     //   kids:      Fill(1)
-    //   bulletins: 8 rows  (2 borders + 6 content rows)
+    //   bulletins: 5 rows  (2 borders + 1 header + 2 data rows)
     let rows = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
             Constraint::Length(5),
             Constraint::Fill(1),
             Constraint::Fill(1),
-            Constraint::Length(8),
+            Constraint::Length(5),
         ])
         .split(inner);
 
