@@ -203,6 +203,43 @@ impl NodeCertChain {
     }
 }
 
+/// Probe every target concurrently. Each entry is `Ok` or an
+/// individual `TlsProbeError` — the fetcher never aborts the whole
+/// snapshot on a single node's failure. Takes `host:port` strings;
+/// each is split on the rightmost `:` (v4-safe; IPv6 callers should
+/// wrap the host in brackets).
+pub async fn probe_all(targets: &[String], timeout: Duration) -> TlsCertsSnapshot {
+    let fetched_at = Instant::now();
+    let fetched_wall = OffsetDateTime::now_utc();
+
+    let futures = targets.iter().map(|t| {
+        let target = t.clone();
+        async move {
+            let result = match split_host_port(&target) {
+                Some((host, port)) => probe_tls(&host, port, timeout).await,
+                None => Err(TlsProbeError::Connect(format!("bad target {target}"))),
+            };
+            (target, result)
+        }
+    });
+
+    let results: Vec<(String, Result<NodeCertChain, TlsProbeError>)> =
+        futures::future::join_all(futures).await;
+    let certs = results.into_iter().collect();
+    TlsCertsSnapshot {
+        certs,
+        fetched_at,
+        fetched_wall,
+    }
+}
+
+fn split_host_port(target: &str) -> Option<(String, u16)> {
+    let idx = target.rfind(':')?;
+    let (host, port_str) = target.split_at(idx);
+    let port: u16 = port_str[1..].parse().ok()?;
+    Some((host.to_string(), port))
+}
+
 #[cfg(test)]
 mod parser_tests {
     use super::*;
@@ -346,6 +383,28 @@ mod probe_tests {
             .await
             .unwrap_err();
         assert!(matches!(err, TlsProbeError::Handshake(_)), "got {err:?}");
+    }
+
+    #[tokio::test]
+    async fn probe_all_fans_out_and_keys_by_target() {
+        let (port_ok, _) = start_test_server().await;
+        // An unbound port for the failure case.
+        let l = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let port_bad = l.local_addr().unwrap().port();
+        drop(l);
+
+        let targets = vec![
+            format!("127.0.0.1:{port_ok}"),
+            format!("127.0.0.1:{port_bad}"),
+        ];
+        let snap = probe_all(&targets, Duration::from_millis(500)).await;
+
+        assert_eq!(snap.certs.len(), 2);
+        assert!(snap.certs[&targets[0]].is_ok());
+        assert!(matches!(
+            snap.certs[&targets[1]],
+            Err(TlsProbeError::Connect(_))
+        ));
     }
 }
 
