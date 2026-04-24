@@ -441,11 +441,11 @@ fn load_cell_for(node: &crate::client::health::NodeHealthRow) -> Cell<'static> {
 /// Return a cert-expiry chip cell for the trailing column of a node row.
 ///
 /// Rules:
-/// - `None` or probe-failed → empty cell (silent).
-/// - `earliest_not_after - now >= 30d` → empty cell (healthy, no noise).
-/// - `14d <= delta < 30d` → `cert Nd` in yellow.
-/// - `delta < 7d` → `cert Nd` in red/bold.
+/// - `None` or probe-failed → empty cell (silent — no data to show).
 /// - Expired (`delta < 0`) → `cert expired` in red/bold.
+/// - `delta < 7d` → `cert Nd` in red/bold.
+/// - `7d <= delta < 30d` → `cert Nd` in yellow.
+/// - `delta >= 30d` → `cert Nd` / `cert Ny Mmo` in muted grey (healthy).
 fn cert_chip_cell_for(
     node: &crate::client::health::NodeHealthRow,
     now: time::OffsetDateTime,
@@ -464,15 +464,25 @@ fn cert_chip_cell_for(
         ));
     }
     let days = delta.whole_days();
-    if days >= 30 {
-        return Cell::from("");
-    }
     let style = if days < 7 {
         theme::error().add_modifier(Modifier::BOLD)
-    } else {
+    } else if days < 30 {
         theme::warning()
+    } else {
+        theme::muted()
     };
-    Cell::from(Span::styled(format!("cert {days}d"), style))
+    let text = if days >= 365 {
+        let years = days / 365;
+        let months = (days % 365) / 30;
+        if months > 0 {
+            format!("cert {years}y {months}mo")
+        } else {
+            format!("cert {years}y")
+        }
+    } else {
+        format!("cert {days}d")
+    };
+    Cell::from(Span::styled(text, style))
 }
 
 /// Convert a `NodeHealthRow` into a ratatui `Row`.

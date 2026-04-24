@@ -3,7 +3,7 @@ source: src/view/overview/render/mod.rs
 expression: "format!(\"{}\", term.backend())"
 ---
 "  n1:8443                                         heap ██░░░  50% gc   20ms       load 0.12  0.5              "
-"  n3:8443                                         heap ██░░░  50% gc   20ms       load 0.12  0.5              "
+"  n3:8443                                         heap ██░░░  50% gc   20ms       load 0.12  0.5 cert 1y 1mo  "
 "  n3:8443                                         heap ██░░░  50% gc   20ms       load 0.12  0.5 cert 14d     "
 "  n4:8443                                         heap ██░░░  50% gc   20ms       load 0.12  0.5 cert 3d      "
 "  n5:8443                                         heap ██░░░  50% gc   20ms       load 0.12  0.5 cert expired "
