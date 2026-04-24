@@ -105,11 +105,7 @@ fn build_header_title(d: &ControllerServiceDetail) -> Line<'_> {
 }
 
 fn state_style(state: &str) -> Style {
-    match state {
-        "ENABLED" => theme::success().add_modifier(Modifier::BOLD),
-        "DISABLED" => theme::muted(),
-        _ => theme::warning(),
-    }
+    crate::client::status::ControllerServiceState::from_wire(state).badge_style()
 }
 
 fn render_identity_panel(

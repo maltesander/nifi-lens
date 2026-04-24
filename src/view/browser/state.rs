@@ -1295,12 +1295,8 @@ pub fn build_flow_index(state: &BrowserState) -> FlowIndex {
                     StateBadge::Processor { glyph, style }
                 }
                 NodeStatusSummary::ControllerService { state } => {
-                    let style = match state.to_ascii_uppercase().as_str() {
-                        "ENABLED" => crate::theme::success(),
-                        "DISABLED" => crate::theme::disabled(),
-                        "ENABLING" | "DISABLING" => crate::theme::info(),
-                        _ => crate::theme::muted(),
-                    };
+                    let style =
+                        crate::client::status::ControllerServiceState::from_wire(state).style();
                     StateBadge::Cs {
                         label: state.clone(),
                         style,

@@ -3,7 +3,7 @@
 //! and display styling live in one place.
 
 use crate::theme;
-use ratatui::style::Style;
+use ratatui::style::{Modifier, Style};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ProcessorStatus {
@@ -55,6 +55,60 @@ impl ProcessorStatus {
             Self::Disabled => ('\u{2300}', theme::disabled()),
             Self::Validating => ('\u{25D0}', theme::info()),
             Self::Unknown => ('\u{25CF}', Style::default()),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ControllerServiceState {
+    Enabled,
+    Disabled,
+    Enabling,
+    Disabling,
+    Invalid,
+    Unknown,
+}
+
+impl ControllerServiceState {
+    /// Parse a NiFi-wire CS state string (case-insensitive).
+    /// Unrecognized values map to `Unknown`.
+    pub fn from_wire(s: &str) -> Self {
+        if s.eq_ignore_ascii_case("ENABLED") {
+            Self::Enabled
+        } else if s.eq_ignore_ascii_case("DISABLED") {
+            Self::Disabled
+        } else if s.eq_ignore_ascii_case("ENABLING") {
+            Self::Enabling
+        } else if s.eq_ignore_ascii_case("DISABLING") {
+            Self::Disabling
+        } else if s.eq_ignore_ascii_case("INVALID") {
+            Self::Invalid
+        } else {
+            Self::Unknown
+        }
+    }
+
+    /// Style used for CS state labels in the Browser tree + detail
+    /// panes (non-bold variant). Mirrors the legacy mapping: enabled
+    /// → success, disabled → disabled, enabling/disabling → info,
+    /// anything else → muted.
+    pub fn style(self) -> Style {
+        match self {
+            Self::Enabled => theme::success(),
+            Self::Disabled => theme::disabled(),
+            Self::Enabling | Self::Disabling => theme::info(),
+            _ => theme::muted(),
+        }
+    }
+
+    /// Bold-variant style used by the CS state badge in detail headers.
+    /// Mirrors the legacy mapping: enabled → success+BOLD, disabled →
+    /// muted, anything else → warning.
+    pub fn badge_style(self) -> Style {
+        match self {
+            Self::Enabled => theme::success().add_modifier(Modifier::BOLD),
+            Self::Disabled => theme::muted(),
+            _ => theme::warning(),
         }
     }
 }
@@ -123,6 +177,95 @@ mod tests {
         assert_eq!(
             ProcessorStatus::Unknown.style(),
             ratatui::style::Style::default()
+        );
+    }
+
+    #[test]
+    fn controller_service_state_from_wire() {
+        assert_eq!(
+            ControllerServiceState::from_wire("ENABLED"),
+            ControllerServiceState::Enabled
+        );
+        assert_eq!(
+            ControllerServiceState::from_wire("enabled"),
+            ControllerServiceState::Enabled
+        );
+        assert_eq!(
+            ControllerServiceState::from_wire("DISABLED"),
+            ControllerServiceState::Disabled
+        );
+        assert_eq!(
+            ControllerServiceState::from_wire("Enabling"),
+            ControllerServiceState::Enabling
+        );
+        assert_eq!(
+            ControllerServiceState::from_wire("DISABLING"),
+            ControllerServiceState::Disabling
+        );
+        assert_eq!(
+            ControllerServiceState::from_wire("INVALID"),
+            ControllerServiceState::Invalid
+        );
+        assert_eq!(
+            ControllerServiceState::from_wire(""),
+            ControllerServiceState::Unknown
+        );
+        assert_eq!(
+            ControllerServiceState::from_wire("GARBAGE"),
+            ControllerServiceState::Unknown
+        );
+    }
+
+    #[test]
+    fn controller_service_state_styles() {
+        assert_eq!(
+            ControllerServiceState::Enabled.style(),
+            crate::theme::success()
+        );
+        assert_eq!(
+            ControllerServiceState::Disabled.style(),
+            crate::theme::disabled()
+        );
+        assert_eq!(
+            ControllerServiceState::Enabling.style(),
+            crate::theme::info()
+        );
+        assert_eq!(
+            ControllerServiceState::Disabling.style(),
+            crate::theme::info()
+        );
+        assert_eq!(
+            ControllerServiceState::Invalid.style(),
+            crate::theme::muted()
+        );
+        assert_eq!(
+            ControllerServiceState::Unknown.style(),
+            crate::theme::muted()
+        );
+    }
+
+    #[test]
+    fn controller_service_state_badge_styles() {
+        assert_eq!(
+            ControllerServiceState::Enabled.badge_style(),
+            crate::theme::success().add_modifier(ratatui::style::Modifier::BOLD)
+        );
+        assert_eq!(
+            ControllerServiceState::Disabled.badge_style(),
+            crate::theme::muted()
+        );
+        // Any other variant falls through to warning.
+        assert_eq!(
+            ControllerServiceState::Invalid.badge_style(),
+            crate::theme::warning()
+        );
+        assert_eq!(
+            ControllerServiceState::Enabling.badge_style(),
+            crate::theme::warning()
+        );
+        assert_eq!(
+            ControllerServiceState::Unknown.badge_style(),
+            crate::theme::warning()
         );
     }
 }
