@@ -6,7 +6,7 @@
 //! Phase 4's Tracer worker plug into the same pattern. Task 7 retired
 //! the Bulletins worker — Bulletins now subscribes to the cluster-owned
 //! `BulletinRing` and has no per-view task. Task 8 retired the Overview
-//! worker the same way: Overview subscribes to seven cluster endpoints
+//! worker the same way: Overview subscribes to eight cluster endpoints
 //! and projects them into `OverviewState` via the `redraw_*` reducers.
 
 use std::sync::Arc;
@@ -151,6 +151,7 @@ impl WorkerRegistry {
                 cluster.unsubscribe(ClusterEndpoint::About, ViewId::Overview);
                 cluster.unsubscribe(ClusterEndpoint::Bulletins, ViewId::Overview);
                 cluster.unsubscribe(ClusterEndpoint::ClusterNodes, ViewId::Overview);
+                cluster.unsubscribe(ClusterEndpoint::TlsCerts, ViewId::Overview);
             }
             ViewId::Bulletins => {
                 cluster.unsubscribe(ClusterEndpoint::Bulletins, ViewId::Bulletins);
@@ -177,7 +178,7 @@ impl WorkerRegistry {
         match view {
             ViewId::Overview => {
                 // Overview has no per-view worker; it subscribes to
-                // seven cluster-wide endpoints and projects each into
+                // eight cluster-wide endpoints and projects each into
                 // `OverviewState` via the `redraw_*` reducers.
                 cluster.subscribe(ClusterEndpoint::RootPgStatus, ViewId::Overview);
                 cluster.subscribe(ClusterEndpoint::ControllerServices, ViewId::Overview);
@@ -190,6 +191,8 @@ impl WorkerRegistry {
                 // ClusterNodes feeds the per-node membership join in the
                 // Nodes panel (`NodeHealthRow.cluster`).
                 cluster.subscribe(ClusterEndpoint::ClusterNodes, ViewId::Overview);
+                // TlsCerts probes run per-node; joined into NodeHealthRow.tls_cert.
+                cluster.subscribe(ClusterEndpoint::TlsCerts, ViewId::Overview);
             }
             ViewId::Bulletins => {
                 // Bulletins mirrors the shared `BulletinRing` into its
@@ -342,6 +345,7 @@ mod tests {
                 ClusterEndpoint::About,
                 ClusterEndpoint::Bulletins,
                 ClusterEndpoint::ClusterNodes,
+                ClusterEndpoint::TlsCerts,
             ],
         )
     }
@@ -372,18 +376,18 @@ mod tests {
         let mut browser = BrowserState::default();
         let mut registry = WorkerRegistry::new();
 
-        // Enter Overview: all seven Overview endpoints are subscribed.
+        // Enter Overview: all eight Overview endpoints are subscribed.
         ensure_subscriptions_only(&mut registry, ViewId::Overview, &mut browser, &mut store);
         assert_eq!(
             overview_subscriber_total(&store),
-            7,
-            "Overview entry should add seven subscribers"
+            8,
+            "Overview entry should add eight subscribers"
         );
         assert_eq!(browser_subscriber_total(&store), 0);
         assert_eq!(registry.active, Some(ViewId::Overview));
 
         // Overview → Events (handle-less transition). Pre-fix, this
-        // was the broken path: Overview's seven subscribers leaked for
+        // was the broken path: Overview's eight subscribers leaked for
         // the rest of the session.
         ensure_subscriptions_only(&mut registry, ViewId::Events, &mut browser, &mut store);
         assert_eq!(
@@ -418,14 +422,14 @@ mod tests {
         assert_eq!(store.subscribers.count(ClusterEndpoint::Bulletins), 1);
 
         // Bulletins → Overview: second Overview entry must re-subscribe
-        // all seven endpoints. Bulletins's single subscriber is released
+        // all eight endpoints. Bulletins's single subscriber is released
         // before Overview re-adds its own Bulletins subscriber, so the
         // final Bulletins count is 1 (from Overview, not the original).
         ensure_subscriptions_only(&mut registry, ViewId::Overview, &mut browser, &mut store);
         assert_eq!(
             overview_subscriber_total(&store),
-            7,
-            "Second Overview entry should re-subscribe all seven endpoints"
+            8,
+            "Second Overview entry should re-subscribe all eight endpoints"
         );
         assert_eq!(store.subscribers.count(ClusterEndpoint::Bulletins), 1);
     }
@@ -443,12 +447,12 @@ mod tests {
         let mut registry = WorkerRegistry::new();
 
         ensure_subscriptions_only(&mut registry, ViewId::Overview, &mut browser, &mut store);
-        assert_eq!(overview_subscriber_total(&store), 7);
+        assert_eq!(overview_subscriber_total(&store), 8);
 
         ensure_subscriptions_only(&mut registry, ViewId::Overview, &mut browser, &mut store);
         assert_eq!(
             overview_subscriber_total(&store),
-            7,
+            8,
             "Re-entering the same view must not double-subscribe"
         );
     }
@@ -489,6 +493,6 @@ mod tests {
             &mut browser,
             &mut fresh_store,
         );
-        assert_eq!(overview_subscriber_total(&fresh_store), 7);
+        assert_eq!(overview_subscriber_total(&fresh_store), 8);
     }
 }

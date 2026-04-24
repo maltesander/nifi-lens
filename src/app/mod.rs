@@ -88,6 +88,9 @@ pub async fn run(
                 if matches!(endpoint, crate::cluster::ClusterEndpoint::RootPgStatus) {
                     state.cluster.publish_pg_ids();
                 }
+                if matches!(endpoint, crate::cluster::ClusterEndpoint::ClusterNodes) {
+                    state.cluster.publish_node_addresses();
+                }
                 if tx.send(AppEvent::ClusterChanged(endpoint)).await.is_err() {
                     tracing::debug!("channel closed during ClusterChanged fanout");
                 }
@@ -95,12 +98,13 @@ pub async fn run(
             }
             AppEvent::ClusterChanged(endpoint) => {
                 use crate::cluster::ClusterEndpoint;
-                // Overview cares about seven cluster endpoints (all read-
+                // Overview cares about eight cluster endpoints (all read-
                 // model fields plus Bulletins for the sparkline +
                 // noisy-components leaderboard). Task 8 added
                 // ControllerStatus, SystemDiagnostics, and About —
                 // previously Overview-worker-owned. Task 16/17 adds
                 // ClusterNodes for the per-node membership join.
+                // Task 15 adds TlsCerts for per-node cert expiry.
                 let affects_overview = matches!(
                     endpoint,
                     ClusterEndpoint::RootPgStatus
@@ -110,6 +114,7 @@ pub async fn run(
                         | ClusterEndpoint::About
                         | ClusterEndpoint::Bulletins
                         | ClusterEndpoint::ClusterNodes
+                        | ClusterEndpoint::TlsCerts
                 );
                 let affects_browser = matches!(
                     endpoint,
@@ -136,6 +141,9 @@ pub async fn run(
                             crate::view::overview::state::redraw_sysdiag(&mut state);
                         }
                         ClusterEndpoint::ClusterNodes => {
+                            crate::view::overview::state::redraw_cluster_nodes(&mut state);
+                        }
+                        ClusterEndpoint::TlsCerts => {
                             crate::view::overview::state::redraw_cluster_nodes(&mut state);
                         }
                         ClusterEndpoint::About => {
