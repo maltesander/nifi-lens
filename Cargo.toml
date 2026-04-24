@@ -7,7 +7,6 @@ description = "A keyboard-driven TUI lens into Apache NiFi 2.x. Browse flows, tr
 license = "Apache-2.0"
 repository = "https://github.com/maltesander/nifi-lens"
 homepage = "https://github.com/maltesander/nifi-lens"
-documentation = "https://docs.rs/nifi-lens"
 readme = "README.md"
 keywords = ["nifi", "tui", "observability", "ratatui", "terminal"]
 categories = ["command-line-utilities"]
