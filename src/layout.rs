@@ -33,6 +33,10 @@ pub fn detail_row_constraints() -> [Constraint; 2] {
 
 /// Vertical split with a fixed-height header and footer. The body
 /// (middle rect) takes the remaining rows.
+///
+/// The body uses `Constraint::Min(0)` as the sole flex slot; for
+/// layouts with multiple flex slots or weighted `Fill(n)` shares,
+/// inline the `Layout::default()` call instead.
 pub fn split_header_body_footer(area: Rect, header: u16, footer: u16) -> [Rect; 3] {
     let rows = Layout::default()
         .direction(Direction::Vertical)
@@ -106,5 +110,17 @@ mod split_helper_tests {
         assert_eq!(h.height, 0);
         assert_eq!(f.height, 0);
         assert_eq!(b.height, 30);
+    }
+
+    #[test]
+    fn split_header_body_footer_handles_overflow() {
+        // Header + footer exceed the total area height.
+        // Ratatui clamps gracefully; body gets 0 rows.
+        let area = Rect::new(0, 0, 80, 3);
+        let [h, b, f] = split_header_body_footer(area, 5, 5);
+        // Total height is preserved across the three rects.
+        assert_eq!(h.height + b.height + f.height, area.height);
+        // Body is zero-sized; headers are clamped to the available space.
+        assert_eq!(b.height, 0);
     }
 }
