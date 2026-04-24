@@ -1,7 +1,16 @@
 //! Ratatui renderer for the Overview tab.
 //!
-//! The node detail modal lives in `node_detail.rs` and is re-exported here
-//! so callers at `crate::view::overview::render::render_node_detail_modal`
+//! Top-level `render` orchestrator + the shared style helpers used by
+//! multiple sibling submodules. The four responsibility-focused panels
+//! live in their own files:
+//!
+//! - `components.rs` — Components table (PGs / processors / CSes).
+//! - `nodes.rs` — Nodes list + repositories aggregate row + cert chip.
+//! - `bulletins_noisy.rs` — bulletins sparkline + noisy components table.
+//! - `queues.rs` — unhealthy queues table.
+//!
+//! The node detail modal lives in `node_detail.rs` and is re-exported
+//! here so callers at `crate::view::overview::render::render_node_detail_modal`
 //! continue to work unchanged.
 //!
 //! Layout 3:
@@ -21,24 +30,26 @@
 //! └────────────────────────────────────────────────────────────────────────────┘
 //! ```
 
+mod bulletins_noisy;
+mod components;
 pub mod node_detail;
+mod nodes;
+mod queues;
+
 pub use node_detail::render_node_detail_modal;
+// Re-exported so `crate::view::overview::render::render_nodes_zone_at`
+// stays reachable at its original path after the split. Only test code
+// calls it today; `#[allow(unused_imports)]` keeps the build warning-
+// free until an external caller lands.
+#[allow(unused_imports)]
+pub(crate) use nodes::render_nodes_zone_at;
 
 use ratatui::Frame;
 use ratatui::layout::{Constraint, Direction, Layout, Rect};
-use ratatui::style::{Modifier, Style};
-use ratatui::symbols;
-use ratatui::text::{Line, Span};
-use ratatui::widgets::{Bar, BarChart, BarGroup, Cell, Paragraph, Row, Table};
+use ratatui::style::Style;
 
-use super::state::{
-    BulletinBucket, NoisyComponent, OverviewFocus, OverviewState, SPARKLINE_MINUTES, Severity,
-    UnhealthyQueue,
-};
-use crate::app::navigation::compute_scroll_window;
-use crate::client::{ControllerServiceCounts, ControllerStatusSnapshot, ProcessorStateCounts};
+use super::state::{OverviewFocus, OverviewState};
 use crate::theme;
-use crate::widget::gauge::fill_bar;
 use crate::widget::panel::Panel;
 
 pub fn render(frame: &mut Frame, area: Rect, state: &OverviewState) {
@@ -61,7 +72,7 @@ pub fn render(frame: &mut Frame, area: Rect, state: &OverviewState) {
     let components_block = Panel::new(" Components ").into_block();
     let components_inner = components_block.inner(zones[0]);
     frame.render_widget(components_block, zones[0]);
-    render_components_table(frame, components_inner, state);
+    components::render_components_table(frame, components_inner, state);
 
     // Nodes panel — title shows node count when populated.
     // When any row has cluster membership data (any_cluster = true) the
@@ -90,14 +101,14 @@ pub fn render(frame: &mut Frame, area: Rect, state: &OverviewState) {
         .into_block();
     let nodes_inner = nodes_block.inner(zones[1]);
     frame.render_widget(nodes_block, zones[1]);
-    render_nodes_zone(frame, nodes_inner, state);
+    nodes::render_nodes_zone(frame, nodes_inner, state);
 
     // Bulletins + Noisy horizontal split, each in its own panel
     let bn_chunks = Layout::default()
         .direction(Direction::Horizontal)
         .constraints([Constraint::Percentage(50), Constraint::Percentage(50)])
         .split(zones[2]);
-    render_bulletins_and_noisy(frame, bn_chunks[0], bn_chunks[1], state);
+    bulletins_noisy::render_bulletins_and_noisy(frame, bn_chunks[0], bn_chunks[1], state);
 
     // Unhealthy queues panel
     let queues_focused = state.focus == OverviewFocus::Queues;
@@ -106,7 +117,7 @@ pub fn render(frame: &mut Frame, area: Rect, state: &OverviewState) {
         .into_block();
     let queues_inner = queues_block.inner(zones[3]);
     frame.render_widget(queues_block, zones[3]);
-    render_unhealthy_queues(
+    queues::render_unhealthy_queues(
         frame,
         queues_inner,
         &state.unhealthy,
@@ -129,663 +140,8 @@ fn nodes_zone_height(state: &OverviewState, area_height: u16) -> u16 {
     desired.min(cap).max(4)
 }
 
-/// Three-row Components table — process groups, processors, controller
-/// services. Display-only; not focusable. Aligned columns: 2-pad +
-/// 20-label + 4-count + 4-gap + repeating 12-slot (8 label + 4 value).
-///
-/// All projections are sourced from `OverviewState` fields mirrored
-/// from `AppState.cluster.snapshot` by the `redraw_*` reducers. The
-/// renderer shows "loading…" until both `root_pg_status` and
-/// `controller_status` have landed in the cluster snapshot. The CS row
-/// degrades to "cs list unavailable" when `state.cs_counts` is `None`.
-fn render_components_table(frame: &mut Frame, area: Rect, state: &OverviewState) {
-    let (Some(controller), Some(root_pg)) = (state.controller.as_ref(), state.root_pg.as_ref())
-    else {
-        let line = Line::from(Span::styled("loading…", theme::muted()));
-        frame.render_widget(Paragraph::new(line), area);
-        return;
-    };
-    let lines = vec![
-        pg_row(controller, root_pg),
-        processors_row(&root_pg.processors),
-        controller_services_row(state.cs_counts.as_ref()),
-    ];
-    frame.render_widget(Paragraph::new(lines), area);
-}
-
-fn pg_row(
-    controller: &ControllerStatusSnapshot,
-    root_pg: &crate::client::RootPgStatusSnapshot,
-) -> Line<'static> {
-    let mut spans = label_and_count("Process groups", root_pg.process_group_count);
-    let stale = controller.stale;
-    let modified = controller.locally_modified;
-    let sync_err = controller.sync_failure;
-    if stale + modified + sync_err == 0 {
-        spans.extend(slot_text("all in sync", theme::muted()));
-    } else {
-        spans.extend(slot("STALE", stale, theme::warning()));
-        spans.extend(slot_gap());
-        spans.extend(slot("MODIFIED", modified, theme::warning()));
-        spans.extend(slot_gap());
-        spans.extend(slot("SYNC-ERR", sync_err, theme::error()));
-    }
-    spans.extend(slot_gap());
-    spans.extend(slot("INPUTS", root_pg.input_port_count, theme::muted()));
-    spans.extend(slot_gap());
-    spans.extend(slot("OUTPUTS", root_pg.output_port_count, theme::muted()));
-    Line::from(spans)
-}
-
-fn processors_row(p: &ProcessorStateCounts) -> Line<'static> {
-    let mut spans = label_and_count("Processors", p.total());
-    spans.extend(slot("RUNNING", p.running, theme::success()));
-    spans.extend(slot_gap());
-    spans.extend(slot("STOPPED", p.stopped, theme::warning()));
-    spans.extend(slot_gap());
-    spans.extend(slot("INVALID", p.invalid, theme::error()));
-    spans.extend(slot_gap());
-    spans.extend(slot("DISABLED", p.disabled, theme::muted()));
-    Line::from(spans)
-}
-
-fn controller_services_row(counts: Option<&ControllerServiceCounts>) -> Line<'static> {
-    match counts {
-        Some(c) => {
-            let mut spans = label_and_count("Controller services", c.total());
-            spans.extend(slot("ENABLED", c.enabled, theme::success()));
-            spans.extend(slot_gap());
-            spans.extend(slot("DISABLED", c.disabled, theme::muted()));
-            spans.extend(slot_gap());
-            spans.extend(slot("INVALID", c.invalid, theme::error()));
-            Line::from(spans)
-        }
-        None => Line::from(vec![
-            Span::raw("  "),
-            Span::raw(format!("{:<20}", "Controller services")),
-            Span::styled(format!("{:>4}", "?"), theme::muted()),
-            Span::raw("    "),
-            Span::styled("cs list unavailable", theme::error()),
-        ]),
-    }
-}
-
-/// Returns `[pad, label-padded-to-20, count-right-aligned-in-4, 4-space-gap]`
-/// — the fixed prefix every row shares.
-fn label_and_count(label: &str, count: u32) -> Vec<Span<'static>> {
-    vec![
-        Span::raw("  "),
-        Span::raw(format!("{:<20}", label)),
-        Span::styled(format!("{:>4}", count), theme::accent()),
-        Span::raw("    "),
-    ]
-}
-
-/// One status slot (12 chars total): label left-aligned in 8, value
-/// right-aligned in 4. Returns 2 spans (label, value) — caller adds the gap.
-fn slot(label: &'static str, value: u32, value_style: Style) -> Vec<Span<'static>> {
-    vec![
-        Span::styled(format!("{:<8}", label), theme::muted()),
-        Span::styled(format!("{:>4}", value), value_style),
-    ]
-}
-
-/// One status slot occupied by a single text chip (e.g. "all in sync"),
-/// padded to 12 chars total to stay aligned with the numeric slots.
-fn slot_text(text: &'static str, style: Style) -> Vec<Span<'static>> {
-    vec![Span::styled(format!("{:<12}", text), style)]
-}
-
-/// Two-space gap between consecutive slots.
-fn slot_gap() -> Vec<Span<'static>> {
-    vec![Span::raw("  ")]
-}
-
-fn render_nodes_zone(frame: &mut Frame, area: Rect, state: &OverviewState) {
-    render_nodes_zone_at(
-        frame,
-        area,
-        state,
-        state.focus == OverviewFocus::Nodes,
-        time::OffsetDateTime::now_utc(),
-    );
-}
-
-pub(crate) fn render_nodes_zone_at(
-    frame: &mut Frame,
-    area: Rect,
-    state: &OverviewState,
-    focused: bool,
-    now: time::OffsetDateTime,
-) {
-    let total = state.nodes.nodes.len();
-
-    if total == 0 {
-        frame.render_widget(
-            Paragraph::new(Span::styled(
-                "  loading system diagnostics…",
-                theme::muted(),
-            )),
-            area,
-        );
-        return;
-    }
-
-    let any_cluster = state.nodes.nodes.iter().any(|n| n.cluster.is_some());
-    let selected = state.nodes.selected;
-    // Reserve 1 row at the bottom for the repositories aggregate.
-    let visible_node_rows = area.height.saturating_sub(1) as usize;
-    let window = compute_scroll_window(selected, state.nodes.nodes.len(), visible_node_rows);
-
-    let mut rows: Vec<Row> = state
-        .nodes
-        .nodes
-        .iter()
-        .skip(window.offset)
-        .take(visible_node_rows)
-        .enumerate()
-        .map(|(idx, node)| {
-            let is_focused_sel = focused && idx == window.selected_local;
-            let is_dead = node
-                .cluster
-                .as_ref()
-                .map(|c| c.status.is_dead())
-                .unwrap_or(false);
-            let row_style = if is_focused_sel {
-                theme::cursor_row()
-            } else if is_dead {
-                theme::muted()
-            } else {
-                Style::default()
-            };
-            node_to_row(node, any_cluster, is_dead, now).style(row_style)
-        })
-        .collect();
-
-    // Cluster-aggregate repositories row. When badges are rendered,
-    // prepend an empty cell so the columns line up with node rows.
-    let repos = &state.repositories_summary;
-    let mut footer_cells = Vec::new();
-    if any_cluster {
-        footer_cells.push(Cell::from(""));
-    }
-    footer_cells.extend(repos_footer_cells(repos));
-    // Trailing empty cell to match the cert-chip column added to node rows.
-    footer_cells.push(Cell::from(""));
-    rows.push(Row::new(footer_cells));
-
-    let widths: Vec<Constraint> = if any_cluster {
-        vec![
-            Constraint::Length(6),  // badge
-            Constraint::Fill(1),    // address + heartbeat age
-            Constraint::Length(15), // heap
-            Constraint::Length(15), // gc
-            Constraint::Length(14), // load
-            Constraint::Length(13), // cert chip
-        ]
-    } else {
-        vec![
-            Constraint::Fill(1),
-            Constraint::Length(15),
-            Constraint::Length(15),
-            Constraint::Length(14),
-            Constraint::Length(13), // cert chip
-        ]
-    };
-    frame.render_widget(Table::new(rows, widths), area);
-}
-
-/// Build the four-cell repositories footer row.
-fn repos_footer_cells(repos: &super::state::RepositoriesSummary) -> Vec<Cell<'static>> {
-    vec![
-        Cell::from(Span::styled("  repositories", theme::muted())),
-        Cell::from(Line::from(vec![
-            Span::raw("cont "),
-            Span::styled(
-                fill_bar(5, repos.content_percent),
-                fill_style(repos.content_percent),
-            ),
-            Span::raw(" "),
-            Span::styled(
-                format!("{:>3}%", repos.content_percent),
-                fill_style(repos.content_percent),
-            ),
-        ])),
-        Cell::from(Line::from(vec![
-            Span::raw("ff  "),
-            Span::styled(
-                fill_bar(5, repos.flowfile_percent),
-                fill_style(repos.flowfile_percent),
-            ),
-            Span::raw(" "),
-            Span::styled(
-                format!("{:>3}%", repos.flowfile_percent),
-                fill_style(repos.flowfile_percent),
-            ),
-        ])),
-        Cell::from(Line::from(vec![
-            Span::raw("prov "),
-            Span::styled(
-                fill_bar(4, repos.provenance_percent),
-                fill_style(repos.provenance_percent),
-            ),
-            Span::raw(" "),
-            Span::styled(
-                format!("{:>3}%", repos.provenance_percent),
-                fill_style(repos.provenance_percent),
-            ),
-        ])),
-    ]
-}
-
-/// Build the heap `Cell` for a live node row.
-fn heap_cell_for(node: &crate::client::health::NodeHealthRow) -> Cell<'static> {
-    let heap_style = health_severity_style(node.heap_severity);
-    let heap_bar = fill_bar(5, node.heap_percent);
-    Cell::from(Line::from(vec![
-        Span::raw("heap "),
-        Span::styled(heap_bar, heap_style),
-        Span::raw(" "),
-        Span::styled(format!("{:>3}%", node.heap_percent), heap_style),
-    ]))
-}
-
-/// Build the GC `Cell` for a live node row.
-fn gc_cell_for(node: &crate::client::health::NodeHealthRow) -> Cell<'static> {
-    let gc_style = match node.gc_delta {
-        Some(d) if d > 5 => theme::error(),
-        Some(_) => theme::warning(),
-        None => Style::default(),
-    };
-    let gc_str = match node.gc_delta {
-        Some(d) => format!("{:>4}ms (+{})", node.gc_millis, d),
-        None => format!("{:>4}ms", node.gc_millis),
-    };
-    Cell::from(Line::from(vec![
-        Span::raw("gc "),
-        Span::styled(gc_str, gc_style),
-    ]))
-}
-
-/// Build the load-average `Cell` for a live node row.
-fn load_cell_for(node: &crate::client::health::NodeHealthRow) -> Cell<'static> {
-    let (load_str, load_style) = match (node.load_average, node.available_processors) {
-        (Some(l), Some(cpus)) if cpus > 0 => {
-            let ratio = l / cpus as f64;
-            let style = if ratio >= 2.0 {
-                theme::error()
-            } else if ratio >= 1.0 {
-                theme::warning()
-            } else {
-                theme::success()
-            };
-            (format!("{l:>4.1}"), style)
-        }
-        (Some(l), _) => (format!("{l:>4.1}"), Style::default()),
-        (None, _) => ("\u{2014}   ".to_string(), theme::muted()),
-    };
-    let load_bar = match (node.load_average, node.available_processors) {
-        (Some(l), Some(cpus)) if cpus > 0 => {
-            format!("{:.2}", (l / cpus as f64).min(9.99))
-        }
-        _ => "    ".to_string(),
-    };
-    Cell::from(Line::from(vec![
-        Span::raw("load "),
-        Span::styled(load_bar, load_style),
-        Span::raw(" "),
-        Span::styled(load_str, load_style),
-    ]))
-}
-
-/// Return a cert-expiry chip cell for the trailing column of a node row.
-///
-/// Rules:
-/// - `None` or probe-failed → empty cell (silent — no data to show).
-/// - Expired (`delta < 0`) → `cert expired` in red/bold.
-/// - `delta < 7d` → `cert Nd` in red/bold.
-/// - `7d <= delta < 30d` → `cert Nd` in yellow.
-/// - `delta >= 30d` → `cert Nd` / `cert Ny Mmo` in muted grey (healthy).
-fn cert_chip_cell_for(
-    node: &crate::client::health::NodeHealthRow,
-    now: time::OffsetDateTime,
-) -> Cell<'static> {
-    let Some(Ok(chain)) = node.tls_cert.as_ref() else {
-        return Cell::from("");
-    };
-    let Some(earliest) = chain.earliest_not_after() else {
-        return Cell::from("");
-    };
-    let delta = earliest - now;
-    if delta.is_negative() {
-        return Cell::from(Span::styled(
-            "cert expired",
-            theme::error().add_modifier(Modifier::BOLD),
-        ));
-    }
-    let days = delta.whole_days();
-    let style = if days < 7 {
-        theme::error().add_modifier(Modifier::BOLD)
-    } else if days < 30 {
-        theme::warning()
-    } else {
-        theme::muted()
-    };
-    let text = if days >= 365 {
-        let years = days / 365;
-        let months = (days % 365) / 30;
-        if months > 0 {
-            format!("cert {years}y {months}mo")
-        } else {
-            format!("cert {years}y")
-        }
-    } else {
-        format!("cert {days}d")
-    };
-    Cell::from(Span::styled(text, style))
-}
-
-/// Convert a `NodeHealthRow` into a ratatui `Row`.
-///
-/// When `include_badge` is `true` a leading 6-column badge cell is
-/// prepended and the address cell includes the heartbeat age span.
-/// When `is_dead` is `true` the heap/gc/load cells are replaced with
-/// `───` placeholders.
-fn node_to_row(
-    node: &crate::client::health::NodeHealthRow,
-    include_badge: bool,
-    is_dead: bool,
-    now: time::OffsetDateTime,
-) -> Row<'static> {
-    // Badge cell (only when rendering cluster info).
-    let badge_cell = include_badge.then(|| match &node.cluster {
-        Some(c) => Cell::from(crate::widget::node_badge::node_badge(c)),
-        None => Cell::from(""),
-    });
-
-    // Address + optional heartbeat age.
-    let hb_span = node
-        .cluster
-        .as_ref()
-        .map(|c| {
-            let age_text = crate::timestamp::format_age(c.heartbeat_age);
-            Span::styled(
-                format!("  {age_text}"),
-                heartbeat_age_style(c.heartbeat_age),
-            )
-        })
-        .unwrap_or_else(|| Span::raw(""));
-    let address_cell = Cell::from(Line::from(vec![
-        Span::styled(format!("  {}", node.node_address), theme::accent()),
-        hb_span,
-    ]));
-
-    // Heap / gc / load — collapse to ─── for dead rows.
-    let (heap_cell, gc_cell, load_cell) = if is_dead {
-        let dim = theme::muted();
-        (
-            Cell::from(Span::styled(
-                "heap \u{2500}\u{2500}\u{2500} \u{2500}\u{2500}\u{2500}",
-                dim,
-            )),
-            Cell::from(Span::styled("gc \u{2500}\u{2500}\u{2500}", dim)),
-            Cell::from(Span::styled("load \u{2500}\u{2500}\u{2500}", dim)),
-        )
-    } else {
-        (heap_cell_for(node), gc_cell_for(node), load_cell_for(node))
-    };
-
-    let cert_cell = if is_dead {
-        Cell::from("")
-    } else {
-        cert_chip_cell_for(node, now)
-    };
-
-    let mut cells = Vec::with_capacity(6);
-    if let Some(b) = badge_cell {
-        cells.push(b);
-    }
-    cells.push(address_cell);
-    cells.push(heap_cell);
-    cells.push(gc_cell);
-    cells.push(load_cell);
-    cells.push(cert_cell);
-    Row::new(cells)
-}
-
-/// Style for the heartbeat age text appended to the address cell.
-fn heartbeat_age_style(age: Option<std::time::Duration>) -> Style {
-    match age {
-        None => theme::muted(),
-        Some(d) if d.as_secs() < 30 => theme::muted(),
-        Some(d) if d.as_secs() < 120 => theme::warning(),
-        Some(_) => theme::error(),
-    }
-}
-
-fn render_bulletins_and_noisy(
-    frame: &mut Frame,
-    bulletins_area: Rect,
-    noisy_area: Rect,
-    state: &OverviewState,
-) {
-    let bulletins_block = Panel::new(" Bulletins / min ").into_block();
-    let bulletins_inner = bulletins_block.inner(bulletins_area);
-    frame.render_widget(bulletins_block, bulletins_area);
-    render_bulletin_sparkline(frame, bulletins_inner, &state.sparkline);
-
-    let noisy_focused = state.focus == OverviewFocus::Noisy;
-    let noisy_block = Panel::new(" Noisy components ")
-        .focused(noisy_focused)
-        .into_block();
-    let noisy_inner = noisy_block.inner(noisy_area);
-    frame.render_widget(noisy_block, noisy_area);
-    render_noisy_components(
-        frame,
-        noisy_inner,
-        &state.noisy,
-        noisy_focused,
-        state.noisy_selected,
-    );
-}
-
-fn render_bulletin_sparkline(frame: &mut Frame, area: Rect, buckets: &[BulletinBucket]) {
-    // Trim leading zero-count buckets so bars start from the left edge
-    // rather than appearing mid-chart while the window is still filling up.
-    let first_nonempty = buckets
-        .iter()
-        .position(|b| b.count > 0)
-        .unwrap_or(buckets.len());
-    let visible = &buckets[first_nonempty..];
-
-    // Layout: legend (1) | grouped bars (3) | time axis (1).
-    let chunks = Layout::default()
-        .direction(Direction::Vertical)
-        .constraints([
-            Constraint::Length(1),
-            Constraint::Length(3),
-            Constraint::Length(1),
-        ])
-        .split(area);
-
-    // ── Legend ────────────────────────────────────────────────────────────────
-    let legend = if visible.is_empty() {
-        Line::from(Span::styled(
-            format!("{}m  no bulletins", SPARKLINE_MINUTES),
-            theme::muted(),
-        ))
-    } else {
-        Line::from(vec![
-            Span::styled(format!("{}m  ", SPARKLINE_MINUTES), theme::muted()),
-            Span::styled("■ Err  ", severity_style(Severity::Error)),
-            Span::styled("■ Warn  ", severity_style(Severity::Warning)),
-            Span::styled("■ Info", severity_style(Severity::Info)),
-        ])
-    };
-    frame.render_widget(Paragraph::new(legend), chunks[0]);
-
-    if visible.is_empty() {
-        return;
-    }
-
-    // One BarGroup per visible minute with three bars (Error, Warning, Info).
-    // All bars share the same chart so they scale to a common maximum —
-    // this makes them grow as a unit rather than each track independently.
-    //
-    // bar_width: fill available space across visible groups, 3 bars each,
-    // with a 1-column gap between groups for readability.
-    const GROUP_GAP: u16 = 1;
-    let n = visible.len() as u16;
-    let bar_width = area
-        .width
-        .saturating_sub(n.saturating_sub(1) * GROUP_GAP)
-        .checked_div(n * 3)
-        .unwrap_or(1)
-        .max(1);
-
-    let groups: Vec<BarGroup> = visible
-        .iter()
-        .map(|b| {
-            BarGroup::default().bars(&[
-                Bar::default()
-                    .value(b.error_count as u64)
-                    .style(severity_style(Severity::Error))
-                    .text_value(""),
-                Bar::default()
-                    .value(b.warning_count as u64)
-                    .style(severity_style(Severity::Warning))
-                    .text_value(""),
-                Bar::default()
-                    .value(b.info_count as u64)
-                    .style(severity_style(Severity::Info))
-                    .text_value(""),
-            ])
-        })
-        .collect();
-
-    frame.render_widget(
-        BarChart::grouped(groups)
-            .bar_width(bar_width)
-            .bar_gap(0)
-            .group_gap(GROUP_GAP)
-            .bar_set(symbols::bar::NINE_LEVELS),
-        chunks[1],
-    );
-
-    // ── Time-axis grid ────────────────────────────────────────────────────────
-    let oldest_min = SPARKLINE_MINUTES - first_nonempty;
-    let left_label = format!("←{}m", oldest_min);
-    let right_label = "now→";
-    let fill = (area.width as usize).saturating_sub(left_label.len() + right_label.len());
-    let axis_line = Line::from(vec![
-        Span::styled(left_label, theme::muted()),
-        Span::raw(" ".repeat(fill)),
-        Span::styled(right_label, theme::muted()),
-    ]);
-    frame.render_widget(Paragraph::new(axis_line), chunks[2]);
-}
-
-fn render_noisy_components(
-    frame: &mut Frame,
-    area: Rect,
-    noisy: &[NoisyComponent],
-    focused: bool,
-    selected: usize,
-) {
-    let rows: Vec<Row> = if noisy.is_empty() {
-        vec![Row::new(vec![
-            Cell::from(""),
-            Cell::from(Span::styled("no bulletins yet", theme::muted())),
-            Cell::from(""),
-        ])]
-    } else {
-        let visible_rows = area.height.saturating_sub(1) as usize;
-        let window = compute_scroll_window(selected, noisy.len(), visible_rows);
-        noisy
-            .iter()
-            .skip(window.offset)
-            .take(visible_rows)
-            .enumerate()
-            .map(|(idx, n)| {
-                let sev_style = severity_style(n.max_severity);
-                let row_style = if focused && idx == window.selected_local {
-                    theme::cursor_row()
-                } else {
-                    Style::default()
-                };
-                Row::new(vec![
-                    Cell::from(format!("{:>3}", n.count)).style(theme::bold()),
-                    Cell::from(n.source_name.clone()),
-                    Cell::from(format!("{:?}", n.max_severity)).style(sev_style),
-                ])
-                .style(row_style)
-            })
-            .collect()
-    };
-    let table = Table::new(
-        rows,
-        [
-            Constraint::Length(4),
-            Constraint::Fill(1),
-            Constraint::Length(8),
-        ],
-    )
-    .header(Row::new(vec!["cnt", "source", "worst"]).style(theme::bold()));
-    frame.render_widget(table, area);
-}
-
-fn render_unhealthy_queues(
-    frame: &mut Frame,
-    area: Rect,
-    queues: &[UnhealthyQueue],
-    focused: bool,
-    selected: usize,
-) {
-    let rows: Vec<Row> = if queues.is_empty() {
-        vec![Row::new(vec![
-            Cell::from(""),
-            Cell::from(""),
-            Cell::from(Span::styled("no queues reported yet", theme::muted())),
-            Cell::from(""),
-        ])]
-    } else {
-        let visible_rows = area.height.saturating_sub(1) as usize;
-        let window = compute_scroll_window(selected, queues.len(), visible_rows);
-        queues
-            .iter()
-            .skip(window.offset)
-            .take(visible_rows)
-            .enumerate()
-            .map(|(idx, q)| {
-                let style = fill_style(q.fill_percent);
-                let row_style = if focused && idx == window.selected_local {
-                    theme::cursor_row()
-                } else {
-                    Style::default()
-                };
-                Row::new(vec![
-                    Cell::from(format!("{:>3}%", q.fill_percent)).style(style),
-                    Cell::from(q.name.clone()),
-                    Cell::from(format!("{} → {}", q.source_name, q.destination_name)),
-                    Cell::from(q.flow_files_queued.to_string()),
-                ])
-                .style(row_style)
-            })
-            .collect()
-    };
-    let table = Table::new(
-        rows,
-        [
-            Constraint::Length(5),
-            Constraint::Fill(2),
-            Constraint::Fill(3),
-            Constraint::Length(8),
-        ],
-    )
-    .header(Row::new(vec!["fill", "queue", "src → dst", "ffiles"]).style(theme::bold()));
-    frame.render_widget(table, area);
-}
-
+/// Shared fill-style helper. Used by both `nodes.rs` (repositories
+/// footer) and `queues.rs` (queue fill column).
 pub(super) fn fill_style(percent: u32) -> Style {
     match percent {
         0..=49 => theme::success(),
@@ -795,6 +151,9 @@ pub(super) fn fill_style(percent: u32) -> Style {
 }
 
 /// Convert a `client::health::Severity` (Green/Yellow/Red) into a theme style.
+///
+/// Shared helper: used by `nodes.rs` for heap cells and by
+/// `node_detail.rs` for the detail modal's resource gauges.
 pub(super) fn health_severity_style(s: crate::client::health::Severity) -> Style {
     use crate::client::health::Severity as H;
     match s {
@@ -804,18 +163,9 @@ pub(super) fn health_severity_style(s: crate::client::health::Severity) -> Style
     }
 }
 
-/// Convert a bulletin `Severity` (Error/Warning/Info/Unknown) into a theme style.
-fn severity_style(s: Severity) -> Style {
-    match s {
-        Severity::Error => theme::error(),
-        Severity::Warning => theme::warning(),
-        Severity::Info => theme::info(),
-        Severity::Unknown => theme::muted(),
-    }
-}
-
 #[cfg(test)]
 mod tests {
+    use super::super::state::{BulletinBucket, NoisyComponent, Severity};
     use crate::client::{
         BulletinSnapshot, ControllerStatusSnapshot, QueueSnapshot, RootPgStatusSnapshot,
     };
@@ -899,7 +249,7 @@ mod tests {
             let shift = minutes_elapsed.min(SPARKLINE_MINUTES);
             state.sparkline.rotate_left(shift);
             for i in (SPARKLINE_MINUTES - shift)..SPARKLINE_MINUTES {
-                state.sparkline[i] = super::BulletinBucket::default();
+                state.sparkline[i] = BulletinBucket::default();
             }
             epoch_secs + (minutes_elapsed as i64 * 60)
         } else {
@@ -921,18 +271,18 @@ mod tests {
             }
             let bucket = &mut state.sparkline[SPARKLINE_MINUTES - 1 - minute];
             bucket.count = bucket.count.saturating_add(1);
-            let sev = super::Severity::parse(&b.level);
+            let sev = Severity::parse(&b.level);
             match sev {
-                super::Severity::Error => {
+                Severity::Error => {
                     bucket.error_count = bucket.error_count.saturating_add(1);
                 }
-                super::Severity::Warning => {
+                Severity::Warning => {
                     bucket.warning_count = bucket.warning_count.saturating_add(1);
                 }
-                super::Severity::Info => {
+                Severity::Info => {
                     bucket.info_count = bucket.info_count.saturating_add(1);
                 }
-                super::Severity::Unknown => {}
+                Severity::Unknown => {}
             }
             if sev > bucket.max_severity {
                 bucket.max_severity = sev;
@@ -940,27 +290,26 @@ mod tests {
         }
 
         // Noisy components.
-        let mut by_source: HashMap<String, super::NoisyComponent> = HashMap::new();
+        let mut by_source: HashMap<String, NoisyComponent> = HashMap::new();
         for b in bulletins {
             if b.source_id.is_empty() {
                 continue;
             }
-            let entry =
-                by_source
-                    .entry(b.source_id.clone())
-                    .or_insert_with(|| super::NoisyComponent {
-                        source_id: b.source_id.clone(),
-                        source_name: b.source_name.clone(),
-                        group_id: b.group_id.clone(),
-                        ..super::NoisyComponent::default()
-                    });
+            let entry = by_source
+                .entry(b.source_id.clone())
+                .or_insert_with(|| NoisyComponent {
+                    source_id: b.source_id.clone(),
+                    source_name: b.source_name.clone(),
+                    group_id: b.group_id.clone(),
+                    ..NoisyComponent::default()
+                });
             entry.count = entry.count.saturating_add(1);
-            let sev = super::Severity::parse(&b.level);
+            let sev = Severity::parse(&b.level);
             if sev > entry.max_severity {
                 entry.max_severity = sev;
             }
         }
-        let mut noisy: Vec<super::NoisyComponent> = by_source.into_values().collect();
+        let mut noisy: Vec<NoisyComponent> = by_source.into_values().collect();
         noisy.sort_by(|a, b| {
             b.count
                 .cmp(&a.count)
