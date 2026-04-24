@@ -196,6 +196,8 @@ impl ClusterSnapshot {
                 .max(),
             ClusterEndpoint::Bulletins => self.bulletins.meta.map(|m| m.next_interval),
             ClusterEndpoint::ClusterNodes => meta_of(&self.cluster_nodes).map(|m| m.next_interval),
+            // filled in by Task 8 when tls_certs field is added to ClusterSnapshot
+            ClusterEndpoint::TlsCerts => None,
         }
     }
 }
