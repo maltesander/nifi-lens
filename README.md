@@ -15,6 +15,10 @@
 
 ![Overview tab](assets/screenshots/overview.png)
 
+**Node details** — Detailed per node information: "What is this node doing?"
+
+![Node detail tab](assets/screenshots/overview_node.png)
+
 **Bulletins** — Live cluster-wide bulletin tail: "What is the cluster complaining about?"
 
 ![Bulletins tab](assets/screenshots/bulletins.png)
@@ -31,7 +35,7 @@
 
 ![Tracer — attribute diff](assets/screenshots/tracer_attributes.png)
 
-**Tracer** — Content preview (Input / Output tabs): "Why did this flowfile fail?"
+**Tracer** — Content preview and diff for CSV, JSON, AVRO and PARQUET: "What changed in this flowfile?"
 
 ![Tracer — content preview](assets/screenshots/tracer_content.png)
 
