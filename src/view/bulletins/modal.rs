@@ -6,7 +6,7 @@
 //! modal-local shortcuts.
 
 use ratatui::Frame;
-use ratatui::layout::{Constraint, Direction, Layout, Rect};
+use ratatui::layout::Rect;
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, BorderType, Clear, Paragraph, Wrap};
 
@@ -63,14 +63,7 @@ pub fn render(frame: &mut Frame, area: Rect, state: &mut BulletinsState) {
         FOOTER_ROWS
     };
 
-    let rows = Layout::default()
-        .direction(Direction::Vertical)
-        .constraints([
-            Constraint::Length(HEADER_ROWS),
-            Constraint::Fill(1),
-            Constraint::Length(footer_rows),
-        ])
-        .split(inner);
+    let rows = crate::layout::split_header_body_footer(inner, HEADER_ROWS, footer_rows);
 
     render_header(frame, rows[0], modal);
     render_body(frame, rows[1], modal);

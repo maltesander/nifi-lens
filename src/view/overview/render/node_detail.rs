@@ -438,10 +438,7 @@ fn render_events(frame: &mut Frame, area: Rect, row: &NodeHealthRow) {
         return;
     };
     let header = Paragraph::new(Line::from(Span::styled("  Events", theme::bold())));
-    let h = Layout::default()
-        .direction(Direction::Vertical)
-        .constraints([Constraint::Length(1), Constraint::Fill(1)])
-        .split(area);
+    let h = crate::layout::split_two_rows(area, Constraint::Length(1));
     frame.render_widget(header, h[0]);
 
     let rows: Vec<Row> = cluster

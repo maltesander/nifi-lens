@@ -47,14 +47,11 @@ pub fn render(
         .map(|d| format!(" last {} ago ", format_age_secs(d.as_secs())))
         .unwrap_or_else(|| " connecting… ".to_string());
 
-    let rows = Layout::default()
-        .direction(Direction::Vertical)
-        .constraints([
-            Constraint::Length(FILTER_BAR_ROWS + 2), // +2 for panel border
-            Constraint::Fill(1),                     // bulletins list
-            Constraint::Length(DETAIL_PANE_ROWS + 2), // +2 for panel border
-        ])
-        .split(area);
+    let rows = crate::layout::split_header_body_footer(
+        area,
+        FILTER_BAR_ROWS + 2,  // +2 for panel border
+        DETAIL_PANE_ROWS + 2, // +2 for panel border
+    );
 
     // Filters panel
     let filters_block = Panel::new(" Filters ").into_block();

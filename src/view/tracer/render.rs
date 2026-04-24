@@ -697,14 +697,7 @@ fn render_latest_events(
     now: time::OffsetDateTime,
     cfg: &crate::timestamp::TimestampConfig,
 ) {
-    let rows = Layout::default()
-        .direction(Direction::Vertical)
-        .constraints([
-            Constraint::Length(1), // component label
-            Constraint::Fill(1),   // event list
-            Constraint::Length(1), // footer
-        ])
-        .split(area);
+    let rows = crate::layout::split_header_body_footer(area, 1, 1);
 
     // Component label header.
     let header = Paragraph::new(Line::from(vec![

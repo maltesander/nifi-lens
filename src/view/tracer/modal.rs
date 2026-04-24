@@ -161,10 +161,7 @@ fn render_body(frame: &mut Frame, area: Rect, modal: &ContentModalState) {
         body_lines.push(Line::from(body_spans));
     }
 
-    let cols = Layout::default()
-        .direction(Direction::Horizontal)
-        .constraints([Constraint::Length(gutter_width as u16), Constraint::Fill(1)])
-        .split(area);
+    let cols = crate::layout::split_two_cols(area, Constraint::Length(gutter_width as u16));
 
     frame.render_widget(Paragraph::new(gutter_lines), cols[0]);
     frame.render_widget(
