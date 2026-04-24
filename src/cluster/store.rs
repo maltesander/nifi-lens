@@ -176,6 +176,11 @@ impl ClusterStore {
     /// the watch channel. Called from the main loop after every
     /// `ClusterUpdate::ClusterNodes` apply. No-op before the first
     /// successful fetch.
+    ///
+    /// Force-wakes the `tls_certs` fetcher when the address list
+    /// actually changed — otherwise a fetcher that ran its first cycle
+    /// against an empty watch (and fell back to `base_url`) would wait
+    /// a full cadence tick before re-probing the real node set.
     pub fn publish_node_addresses(&self) {
         let addrs: Vec<String> = self
             .snapshot
@@ -183,10 +188,16 @@ impl ClusterStore {
             .latest()
             .map(|snap| snap.rows.iter().map(|r| r.address.clone()).collect())
             .unwrap_or_default();
-        if self.node_addresses_tx.send(addrs).is_err() {
-            tracing::trace!(
-                "publish_node_addresses: no receivers (fetchers not yet spawned or torn down)"
-            );
+        let changed = self.node_addresses_tx.send_if_modified(|current| {
+            if *current != addrs {
+                *current = addrs;
+                true
+            } else {
+                false
+            }
+        });
+        if changed {
+            self.force(ClusterEndpoint::TlsCerts);
         }
     }
 
