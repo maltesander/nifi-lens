@@ -16,14 +16,65 @@ use crate::client::NodeKind;
 use crate::theme;
 use crate::view::browser::state::{FlowIndex, FlowIndexEntry};
 
+/// Drift sub-filter used by `QueryFilter::Drift`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DriftFilter {
+    /// Any non-`UpToDate` version-control state.
+    Any,
+    /// `Stale` or `LocallyModifiedAndStale`.
+    Stale,
+    /// `LocallyModified` or `LocallyModifiedAndStale`.
+    Modified,
+    /// `SyncFailure`.
+    SyncErr,
+}
+
+/// Parsed leading-token filter from a fuzzy-find query string.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum QueryFilter {
+    /// No filter — all entries pass.
+    None,
+    /// Restrict corpus to a single `NodeKind`.
+    Kind(NodeKind),
+    /// Restrict corpus to PGs whose version-control state matches the drift sub-filter.
+    Drift(DriftFilter),
+}
+
+impl QueryFilter {
+    /// Returns `true` when `entry` passes through this filter.
+    pub fn matches(self, entry: &FlowIndexEntry) -> bool {
+        use nifi_rust_client::dynamic::types::VersionControlInformationDtoState as S;
+        match self {
+            Self::None => true,
+            Self::Kind(k) => entry.kind == k,
+            Self::Drift(f) => {
+                if entry.kind != NodeKind::ProcessGroup {
+                    return false;
+                }
+                let Some(state) = entry.version_state else {
+                    return false;
+                };
+                match f {
+                    DriftFilter::Any => state != S::UpToDate,
+                    DriftFilter::Stale => matches!(state, S::Stale | S::LocallyModifiedAndStale),
+                    DriftFilter::Modified => {
+                        matches!(state, S::LocallyModified | S::LocallyModifiedAndStale)
+                    }
+                    DriftFilter::SyncErr => state == S::SyncFailure,
+                }
+            }
+        }
+    }
+}
+
 #[derive(Debug)]
 pub struct FuzzyFindState {
     /// Raw user input — the only field external callers mutate.
     pub query: String,
-    /// Kind filter parsed from the leading token of `query`. Derived
+    /// Filter parsed from the leading token of `query`. Derived
     /// state, refreshed in `rebuild_matches`.
-    pub kind_filter: Option<NodeKind>,
-    /// Fuzzy needle with the kind prefix stripped. Derived state,
+    pub filter: QueryFilter,
+    /// Fuzzy needle with the kind/drift prefix stripped. Derived state,
     /// refreshed in `rebuild_matches`.
     pub effective_query: String,
     pub matches: Vec<MatchedEntry>,
@@ -63,8 +114,17 @@ const KIND_ALIASES: &[(&str, NodeKind)] = &[
     (":out", NodeKind::OutputPort),
 ];
 
-/// Parse a kind-filter prefix off the start of `query`. Returns the
-/// resolved kind (if any) and the remaining fuzzy needle.
+/// Fixed alias table mapping colon-prefixed tokens to `DriftFilter`.
+/// Keep lowercase — `parse_prefix` compares case-insensitively.
+const DRIFT_ALIASES: &[(&str, DriftFilter)] = &[
+    (":drift", DriftFilter::Any),
+    (":stale", DriftFilter::Stale),
+    (":modified", DriftFilter::Modified),
+    (":syncerr", DriftFilter::SyncErr),
+];
+
+/// Parse a filter prefix off the start of `query`. Returns the resolved
+/// `QueryFilter` (kind or drift, or `None`) and the remaining fuzzy needle.
 ///
 /// Parsing rules:
 /// - Only the first whitespace-separated token is consulted.
@@ -73,9 +133,10 @@ const KIND_ALIASES: &[(&str, NodeKind)] = &[
 /// - An unknown `:token` (or any non-alias token) is treated as plain
 ///   query text — no filter, no stripping.
 /// - `:proc` alone → kind set, empty needle.
+/// - `:drift` alone → drift filter set, empty needle.
 /// - Trailing whitespace in the returned needle is preserved (the user
 ///   may be mid-typing the next word).
-pub(crate) fn parse_prefix(query: &str) -> (Option<NodeKind>, String) {
+pub(crate) fn parse_prefix(query: &str) -> (QueryFilter, String) {
     let trimmed = query.trim_start();
     // Split off the first whitespace-delimited token without allocating
     // a Vec<&str>.
@@ -91,10 +152,18 @@ pub(crate) fn parse_prefix(query: &str) -> (Option<NodeKind>, String) {
             let rest = tail
                 .strip_prefix(|c: char| c.is_whitespace())
                 .unwrap_or(tail);
-            return (Some(*kind), rest.to_string());
+            return (QueryFilter::Kind(*kind), rest.to_string());
         }
     }
-    (None, query.to_string())
+    for (alias, drift) in DRIFT_ALIASES {
+        if head.eq_ignore_ascii_case(alias) {
+            let rest = tail
+                .strip_prefix(|c: char| c.is_whitespace())
+                .unwrap_or(tail);
+            return (QueryFilter::Drift(*drift), rest.to_string());
+        }
+    }
+    (QueryFilter::None, query.to_string())
 }
 
 impl Default for FuzzyFindState {
@@ -107,7 +176,7 @@ impl FuzzyFindState {
     pub fn new() -> Self {
         Self {
             query: String::new(),
-            kind_filter: None,
+            filter: QueryFilter::None,
             effective_query: String::new(),
             matches: Vec::new(),
             selected: 0,
@@ -118,8 +187,8 @@ impl FuzzyFindState {
     /// An empty effective query matches everything in the (optionally
     /// kind-filtered) corpus.
     pub fn rebuild_matches(&mut self, index: &FlowIndex) {
-        let (kind_filter, effective_query) = parse_prefix(&self.query);
-        self.kind_filter = kind_filter;
+        let (filter, effective_query) = parse_prefix(&self.query);
+        self.filter = filter;
         self.effective_query = effective_query;
 
         let mut matcher = Matcher::new(Config::DEFAULT.match_paths());
@@ -128,9 +197,7 @@ impl FuzzyFindState {
         let pattern = Utf32Str::new(&lowered, &mut query_buf);
         let mut results: Vec<MatchedEntry> = Vec::new();
         for (i, entry) in index.entries.iter().enumerate() {
-            if let Some(wanted) = self.kind_filter
-                && entry.kind != wanted
-            {
+            if !self.filter.matches(entry) {
                 continue;
             }
             let mut haystack_buf = Vec::new();
@@ -231,7 +298,7 @@ pub fn render(
         .iter()
         .map(|(label, kind)| FilterChip {
             text: label,
-            style: kind_chip_style(fuzz.kind_filter == Some(*kind)),
+            style: kind_chip_style(fuzz.filter == QueryFilter::Kind(*kind)),
         })
         .collect();
     frame.render_widget(
@@ -261,7 +328,7 @@ pub fn render(
     };
 
     if fuzz.matches.is_empty() {
-        let msg = if fuzz.effective_query.is_empty() && fuzz.kind_filter.is_none() {
+        let msg = if fuzz.effective_query.is_empty() && fuzz.filter == QueryFilter::None {
             "no entries"
         } else {
             "no matches"
@@ -745,7 +812,7 @@ mod tests {
     fn parse_prefix_strips_leading_proc_token() {
         assert_eq!(
             parse_prefix(":proc kafka"),
-            (Some(NodeKind::Processor), "kafka".to_string())
+            (QueryFilter::Kind(NodeKind::Processor), "kafka".to_string())
         );
     }
 
@@ -753,7 +820,7 @@ mod tests {
     fn parse_prefix_bare_alias_sets_kind_and_empty_query() {
         assert_eq!(
             parse_prefix(":proc"),
-            (Some(NodeKind::Processor), String::new())
+            (QueryFilter::Kind(NodeKind::Processor), String::new())
         );
     }
 
@@ -761,7 +828,10 @@ mod tests {
     fn parse_prefix_tolerates_leading_whitespace() {
         assert_eq!(
             parse_prefix("   :cs aws"),
-            (Some(NodeKind::ControllerService), "aws".to_string())
+            (
+                QueryFilter::Kind(NodeKind::ControllerService),
+                "aws".to_string()
+            )
         );
     }
 
@@ -769,46 +839,61 @@ mod tests {
     fn parse_prefix_non_leading_alias_is_plain_text() {
         assert_eq!(
             parse_prefix("kafka :proc"),
-            (None, "kafka :proc".to_string())
+            (QueryFilter::None, "kafka :proc".to_string())
         );
     }
 
     #[test]
     fn parse_prefix_unknown_alias_is_plain_text() {
-        assert_eq!(parse_prefix(":nope foo"), (None, ":nope foo".to_string()));
+        assert_eq!(
+            parse_prefix(":nope foo"),
+            (QueryFilter::None, ":nope foo".to_string())
+        );
     }
 
     #[test]
     fn parse_prefix_case_insensitive_alias() {
         assert_eq!(
             parse_prefix(":PROC kafka"),
-            (Some(NodeKind::Processor), "kafka".to_string())
+            (QueryFilter::Kind(NodeKind::Processor), "kafka".to_string())
         );
         assert_eq!(
             parse_prefix(":Proc kafka"),
-            (Some(NodeKind::Processor), "kafka".to_string())
+            (QueryFilter::Kind(NodeKind::Processor), "kafka".to_string())
         );
     }
 
     #[test]
     fn parse_prefix_all_aliases() {
-        assert_eq!(parse_prefix(":pg").0, Some(NodeKind::ProcessGroup));
-        assert_eq!(parse_prefix(":conn").0, Some(NodeKind::Connection));
-        assert_eq!(parse_prefix(":in").0, Some(NodeKind::InputPort));
-        assert_eq!(parse_prefix(":out").0, Some(NodeKind::OutputPort));
+        assert_eq!(
+            parse_prefix(":pg").0,
+            QueryFilter::Kind(NodeKind::ProcessGroup)
+        );
+        assert_eq!(
+            parse_prefix(":conn").0,
+            QueryFilter::Kind(NodeKind::Connection)
+        );
+        assert_eq!(
+            parse_prefix(":in").0,
+            QueryFilter::Kind(NodeKind::InputPort)
+        );
+        assert_eq!(
+            parse_prefix(":out").0,
+            QueryFilter::Kind(NodeKind::OutputPort)
+        );
     }
 
     #[test]
     fn parse_prefix_preserves_trailing_whitespace_in_query() {
         assert_eq!(
             parse_prefix(":proc kafka "),
-            (Some(NodeKind::Processor), "kafka ".to_string())
+            (QueryFilter::Kind(NodeKind::Processor), "kafka ".to_string())
         );
     }
 
     #[test]
     fn parse_prefix_empty_query() {
-        assert_eq!(parse_prefix(""), (None, String::new()));
+        assert_eq!(parse_prefix(""), (QueryFilter::None, String::new()));
     }
 
     #[test]
@@ -817,7 +902,7 @@ mod tests {
         s.query = ":cs".into();
         s.rebuild_matches(&sample_index());
         assert_eq!(s.matches.len(), 1);
-        assert_eq!(s.kind_filter, Some(NodeKind::ControllerService));
+        assert_eq!(s.filter, QueryFilter::Kind(NodeKind::ControllerService));
     }
 
     #[test]
@@ -826,7 +911,7 @@ mod tests {
         s.query = ":proc kafka".into();
         let idx = sample_index();
         s.rebuild_matches(&idx);
-        assert_eq!(s.kind_filter, Some(NodeKind::Processor));
+        assert_eq!(s.filter, QueryFilter::Kind(NodeKind::Processor));
         assert_eq!(s.effective_query, "kafka");
         assert_eq!(s.matches.len(), 1);
         let top = s.selected_entry(&idx).unwrap();
@@ -846,7 +931,7 @@ mod tests {
         let mut s = FuzzyFindState::new();
         s.query = "kafka".into();
         s.rebuild_matches(&sample_index());
-        assert_eq!(s.kind_filter, None);
+        assert_eq!(s.filter, QueryFilter::None);
         assert_eq!(s.effective_query, "kafka");
         assert!(s.matches.len() >= 2);
     }
@@ -856,7 +941,7 @@ mod tests {
         let mut s = FuzzyFindState::new();
         s.query = ":nope".into();
         s.rebuild_matches(&sample_index());
-        assert_eq!(s.kind_filter, None);
+        assert_eq!(s.filter, QueryFilter::None);
         assert_eq!(s.effective_query, ":nope");
     }
 
@@ -928,5 +1013,104 @@ mod tests {
             out.contains(":proc"),
             "expected title to mention :proc alias — got:\n{out}"
         );
+    }
+
+    // ── Drift alias tests ─────────────────────────────────────────────────
+
+    #[test]
+    fn parse_prefix_drift_alias() {
+        assert_eq!(
+            parse_prefix(":drift"),
+            (QueryFilter::Drift(DriftFilter::Any), String::new())
+        );
+        assert_eq!(
+            parse_prefix(":stale"),
+            (QueryFilter::Drift(DriftFilter::Stale), String::new())
+        );
+        assert_eq!(
+            parse_prefix(":modified ingest"),
+            (
+                QueryFilter::Drift(DriftFilter::Modified),
+                "ingest".to_string()
+            )
+        );
+        assert_eq!(
+            parse_prefix(":syncerr"),
+            (QueryFilter::Drift(DriftFilter::SyncErr), String::new())
+        );
+    }
+
+    #[test]
+    fn parse_prefix_kind_alias_returns_kind_filter() {
+        assert_eq!(
+            parse_prefix(":proc kafka"),
+            (QueryFilter::Kind(NodeKind::Processor), "kafka".to_string())
+        );
+    }
+
+    #[test]
+    fn parse_prefix_no_alias_returns_none_filter() {
+        assert_eq!(
+            parse_prefix("kafka"),
+            (QueryFilter::None, "kafka".to_string())
+        );
+    }
+
+    #[test]
+    fn query_filter_drift_matches_only_pg_with_state() {
+        use crate::view::browser::state::StateBadge;
+        use nifi_rust_client::dynamic::types::VersionControlInformationDtoState as S;
+
+        fn entry(kind: NodeKind, version_state: Option<S>) -> FlowIndexEntry {
+            FlowIndexEntry {
+                id: "x".into(),
+                group_id: String::new(),
+                kind,
+                name: "x".into(),
+                group_path: "(root)".into(),
+                state: StateBadge::Port,
+                haystack: String::new(),
+                version_state,
+            }
+        }
+        let stale_pg = entry(NodeKind::ProcessGroup, Some(S::Stale));
+        let stale_modified_pg = entry(NodeKind::ProcessGroup, Some(S::LocallyModifiedAndStale));
+        let modified_pg = entry(NodeKind::ProcessGroup, Some(S::LocallyModified));
+        let processor = entry(NodeKind::Processor, None);
+
+        assert!(QueryFilter::Drift(DriftFilter::Stale).matches(&stale_pg));
+        assert!(QueryFilter::Drift(DriftFilter::Stale).matches(&stale_modified_pg));
+        assert!(!QueryFilter::Drift(DriftFilter::Stale).matches(&modified_pg));
+        assert!(!QueryFilter::Drift(DriftFilter::Stale).matches(&processor));
+
+        assert!(QueryFilter::Drift(DriftFilter::Modified).matches(&modified_pg));
+        assert!(QueryFilter::Drift(DriftFilter::Modified).matches(&stale_modified_pg));
+        assert!(!QueryFilter::Drift(DriftFilter::Modified).matches(&stale_pg));
+
+        assert!(QueryFilter::Drift(DriftFilter::Any).matches(&stale_pg));
+        assert!(QueryFilter::Drift(DriftFilter::Any).matches(&modified_pg));
+        assert!(!QueryFilter::Drift(DriftFilter::Any).matches(&processor));
+    }
+
+    #[test]
+    fn query_filter_kind_matches_kind_only() {
+        use crate::view::browser::state::StateBadge;
+
+        fn entry(kind: NodeKind) -> FlowIndexEntry {
+            FlowIndexEntry {
+                id: "x".into(),
+                group_id: String::new(),
+                kind,
+                name: "x".into(),
+                group_path: "(root)".into(),
+                state: StateBadge::Port,
+                haystack: String::new(),
+                version_state: None,
+            }
+        }
+        assert!(QueryFilter::Kind(NodeKind::Processor).matches(&entry(NodeKind::Processor)));
+        assert!(!QueryFilter::Kind(NodeKind::Processor).matches(&entry(NodeKind::ProcessGroup)));
+        assert!(QueryFilter::None.matches(&entry(NodeKind::Processor)));
+        assert!(QueryFilter::None.matches(&entry(NodeKind::ProcessGroup)));
     }
 }
