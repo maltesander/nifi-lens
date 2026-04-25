@@ -276,7 +276,7 @@ pub fn render(
 
     frame.render_widget(Clear, rect);
     let block = crate::widget::panel::Panel::new(
-        " Fuzzy Find — :proc :pg :cs :conn :in :out filter · esc close ",
+        " Fuzzy Find — :proc :pg :cs :conn :in :out :drift :stale :modified :syncerr · esc close ",
     )
     .into_block();
     let inner = block.inner(rect);
@@ -293,14 +293,18 @@ pub fn render(
         ])
         .split(inner);
 
-    // Chip row — read-only indicator of the parsed kind filter.
-    let chip_cells: Vec<FilterChip> = KIND_CHIPS
+    // Chip row — read-only indicator of the parsed kind/drift filter.
+    let mut chip_cells: Vec<FilterChip> = KIND_CHIPS
         .iter()
         .map(|(label, kind)| FilterChip {
             text: label,
             style: kind_chip_style(fuzz.filter == QueryFilter::Kind(*kind)),
         })
         .collect();
+    chip_cells.extend(DRIFT_CHIPS.iter().map(|(label, drift)| FilterChip {
+        text: label,
+        style: kind_chip_style(fuzz.filter == QueryFilter::Drift(*drift)),
+    }));
     frame.render_widget(
         Paragraph::new(build_chip_line(&chip_cells, "  ")),
         chunks[0],
@@ -497,6 +501,15 @@ const KIND_CHIPS: &[(&str, NodeKind)] = &[
     ("Conn", NodeKind::Connection),
     ("In", NodeKind::InputPort),
     ("Out", NodeKind::OutputPort),
+];
+
+/// Ordered chip list for the drift filter row. Order stays stable so
+/// the visual layout does not shift as the filter changes.
+const DRIFT_CHIPS: &[(&str, DriftFilter)] = &[
+    ("Drift", DriftFilter::Any),
+    ("Stale", DriftFilter::Stale),
+    ("Modified", DriftFilter::Modified),
+    ("SyncErr", DriftFilter::SyncErr),
 ];
 
 #[cfg(test)]
@@ -946,7 +959,7 @@ mod tests {
     }
 
     #[test]
-    fn render_draws_all_six_kind_chip_labels() {
+    fn render_draws_all_chip_labels_including_drift() {
         use crate::test_support::{TEST_BACKEND_SHORT, test_backend};
         use ratatui::Terminal;
 
@@ -960,12 +973,111 @@ mod tests {
             .unwrap();
         let out = format!("{}", term.backend());
 
-        for label in ["Proc", "PG", "CS", "Conn", "In", "Out"] {
+        for label in [
+            "Proc", "PG", "CS", "Conn", "In", "Out", "Drift", "Stale", "Modified", "SyncErr",
+        ] {
             assert!(
                 out.contains(label),
                 "expected chip label {label} in:\n{out}"
             );
         }
+    }
+
+    #[test]
+    fn render_highlights_drift_chip_when_drift_filter_active() {
+        use crate::test_support::{TEST_BACKEND_SHORT, test_backend};
+        use ratatui::Terminal;
+        use ratatui::style::Modifier;
+
+        let idx = sample_index();
+        let mut fuzz = FuzzyFindState::new();
+        fuzz.query = ":drift".into();
+        fuzz.rebuild_matches(&idx);
+
+        let backend = test_backend(TEST_BACKEND_SHORT);
+        let mut term = Terminal::new(backend).unwrap();
+        term.draw(|f| render(f, f.area(), &fuzz, &Some(idx.clone())))
+            .unwrap();
+        let buffer = term.backend().buffer();
+
+        // The "D" of "Drift" should be bold (active chip).
+        let bold_d = buffer
+            .content()
+            .iter()
+            .any(|cell| cell.symbol() == "D" && cell.style().add_modifier.contains(Modifier::BOLD));
+        assert!(
+            bold_d,
+            "expected the active Drift chip to render with BOLD set"
+        );
+    }
+
+    #[test]
+    fn render_highlights_stale_chip_when_stale_filter_active() {
+        use crate::test_support::{TEST_BACKEND_SHORT, test_backend};
+        use ratatui::Terminal;
+        use ratatui::style::Modifier;
+
+        let idx = sample_index();
+        let mut fuzz = FuzzyFindState::new();
+        fuzz.query = ":stale".into();
+        fuzz.rebuild_matches(&idx);
+
+        let backend = test_backend(TEST_BACKEND_SHORT);
+        let mut term = Terminal::new(backend).unwrap();
+        term.draw(|f| render(f, f.area(), &fuzz, &Some(idx.clone())))
+            .unwrap();
+        let buffer = term.backend().buffer();
+
+        // The "S" of "Stale" should be bold (active chip).
+        // Note: "S" also appears in "SyncErr" and "CS" — we look for bold "S"
+        // followed by "t" to confirm it's "Stale".
+        let content = buffer.content();
+        let bold_stale = content.windows(2).any(|w| {
+            w[0].symbol() == "S"
+                && w[0].style().add_modifier.contains(Modifier::BOLD)
+                && w[1].symbol() == "t"
+        });
+        assert!(
+            bold_stale,
+            "expected the active Stale chip to render with BOLD set"
+        );
+    }
+
+    #[test]
+    fn render_highlights_kind_chip_unchanged_when_kind_filter_active() {
+        use crate::test_support::{TEST_BACKEND_SHORT, test_backend};
+        use ratatui::Terminal;
+        use ratatui::style::Modifier;
+
+        let idx = sample_index();
+        let mut fuzz = FuzzyFindState::new();
+        fuzz.query = ":proc".into();
+        fuzz.rebuild_matches(&idx);
+
+        let backend = test_backend(TEST_BACKEND_SHORT);
+        let mut term = Terminal::new(backend).unwrap();
+        term.draw(|f| render(f, f.area(), &fuzz, &Some(idx.clone())))
+            .unwrap();
+        let buffer = term.backend().buffer();
+
+        // "P" of "Proc" should be bold (kind filter active).
+        let bold_p = buffer
+            .content()
+            .iter()
+            .any(|cell| cell.symbol() == "P" && cell.style().add_modifier.contains(Modifier::BOLD));
+        assert!(
+            bold_p,
+            "expected the active Proc chip to render with BOLD set (kind filter regression)"
+        );
+        // Drift chip "D" of "Drift" should NOT be bold when kind filter is active.
+        let bold_d = buffer
+            .content()
+            .iter()
+            .any(|cell| cell.symbol() == "D" && cell.style().add_modifier.contains(Modifier::BOLD));
+        assert!(
+            !bold_d,
+            "Drift chip should be inactive (muted) when a kind filter is active"
+        );
     }
 
     #[test]
