@@ -27,6 +27,8 @@ pub struct ClusterPollingConfig {
     pub tls_certs: Duration,
     #[serde(default = "default_connections_by_pg", with = "humantime_serde")]
     pub connections_by_pg: Duration,
+    #[serde(default = "default_version_control", with = "humantime_serde")]
+    pub version_control: Duration,
     #[serde(default = "default_about", with = "humantime_serde")]
     pub about: Duration,
     #[serde(default = "default_max_interval", with = "humantime_serde")]
@@ -46,6 +48,7 @@ impl Default for ClusterPollingConfig {
             cluster_nodes: default_cluster_nodes(),
             tls_certs: default_tls_certs(),
             connections_by_pg: default_connections_by_pg(),
+            version_control: default_version_control(),
             about: default_about(),
             max_interval: default_max_interval(),
             jitter_percent: default_jitter_percent(),
@@ -76,6 +79,9 @@ fn default_tls_certs() -> Duration {
 }
 fn default_connections_by_pg() -> Duration {
     Duration::from_secs(15)
+}
+fn default_version_control() -> Duration {
+    Duration::from_secs(30)
 }
 fn default_about() -> Duration {
     Duration::from_secs(300)
@@ -142,5 +148,18 @@ mod tests {
     fn omitted_section_yields_defaults() {
         let c: ClusterPollingConfig = toml::from_str("").unwrap();
         assert_eq!(c, ClusterPollingConfig::default());
+    }
+
+    #[test]
+    fn version_control_default_is_30s() {
+        let c = ClusterPollingConfig::default();
+        assert_eq!(c.version_control, Duration::from_secs(30));
+    }
+
+    #[test]
+    fn parses_version_control_override() {
+        let toml = r#"version_control = "2m""#;
+        let c: ClusterPollingConfig = toml::from_str(toml).unwrap();
+        assert_eq!(c.version_control, Duration::from_secs(120));
     }
 }
