@@ -3,7 +3,7 @@
 //! even when the latest fetch failed, so views render with a staleness
 //! chip rather than blanking out.
 
-use std::collections::{HashMap, VecDeque};
+use std::collections::{BTreeMap, HashMap, VecDeque};
 use std::time::{Duration, Instant};
 
 use crate::client::overview::{ClusterNodesSnapshot, SystemDiagSnapshot};
@@ -14,6 +14,7 @@ use crate::client::{
 };
 use crate::cluster::ClusterEndpoint;
 use crate::error::NifiLensError;
+use nifi_rust_client::dynamic::types::VersionControlInformationDtoState;
 
 /// Metadata about a single fetch — timing, measured duration, and the
 /// adaptive-cadence result that informs the next tick. `next_interval`
@@ -136,6 +137,30 @@ impl BulletinRing {
     }
 }
 
+/// Per-PG identity for a versioned process group, sourced from
+/// `GET /versions/process-groups/{id}`. PGs not under version control are
+/// absent from the map.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct VersionControlSummary {
+    pub state: VersionControlInformationDtoState,
+    pub registry_name: Option<String>,
+    pub bucket_name: Option<String>,
+    pub branch: Option<String>,
+    pub flow_id: Option<String>,
+    pub flow_name: Option<String>,
+    pub version: Option<String>,
+    pub state_explanation: Option<String>,
+}
+
+/// Cluster-wide map of versioned-PG identities keyed by PG id.
+/// Stored as a single `EndpointState<VersionControlMap>` value: each
+/// fetch cycle either succeeds and replaces the whole map, or fails and
+/// preserves the previous map via `last_ok`.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct VersionControlMap {
+    pub by_pg_id: BTreeMap<String, VersionControlSummary>,
+}
+
 /// The cluster snapshot. Holds the raw client-level snapshot types
 /// (already normalized by `NifiClient`) — views project from these.
 #[derive(Debug, Default, Clone)]
@@ -149,6 +174,7 @@ pub struct ClusterSnapshot {
     pub system_diagnostics: EndpointState<SystemDiagSnapshot>,
     pub connections_by_pg: HashMap<String, EndpointState<ConnectionEndpoints>>,
     pub bulletins: BulletinRing,
+    pub version_control: EndpointState<VersionControlMap>,
 }
 
 impl ClusterSnapshot {
@@ -199,7 +225,9 @@ impl ClusterSnapshot {
             ClusterEndpoint::Bulletins => self.bulletins.meta.map(|m| m.next_interval),
             ClusterEndpoint::ClusterNodes => meta_of(&self.cluster_nodes).map(|m| m.next_interval),
             ClusterEndpoint::TlsCerts => meta_of(&self.tls_certs).map(|m| m.next_interval),
-            ClusterEndpoint::VersionControl => todo!("Task 3: add VersionControlMap to snapshot"),
+            ClusterEndpoint::VersionControl => {
+                meta_of(&self.version_control).map(|m| m.next_interval)
+            }
         }
     }
 }
@@ -365,6 +393,39 @@ mod tests {
         assert_eq!(
             snap.next_interval_for(ClusterEndpoint::ConnectionsByPg),
             Some(Duration::from_secs(30)),
+        );
+    }
+
+    #[test]
+    fn version_control_map_apply_ok_becomes_ready() {
+        use crate::cluster::snapshot::{VersionControlMap, VersionControlSummary};
+        use nifi_rust_client::dynamic::types::VersionControlInformationDtoState;
+        let mut state: EndpointState<VersionControlMap> = EndpointState::Loading;
+        let mut map = VersionControlMap::default();
+        map.by_pg_id.insert(
+            "pg-1".to_string(),
+            VersionControlSummary {
+                state: VersionControlInformationDtoState::Stale,
+                registry_name: Some("ops".into()),
+                bucket_name: Some("flows".into()),
+                branch: None,
+                flow_id: Some("flow-x".into()),
+                flow_name: Some("ingest".into()),
+                version: Some("3".into()),
+                state_explanation: None,
+            },
+        );
+        state.apply(Ok(map.clone()), fake_meta());
+        assert!(matches!(state, EndpointState::Ready { .. }));
+        assert_eq!(state.latest().unwrap().by_pg_id.len(), 1);
+    }
+
+    #[test]
+    fn next_interval_for_version_control_returns_none_on_loading() {
+        let snap = ClusterSnapshot::default();
+        assert!(
+            snap.next_interval_for(ClusterEndpoint::VersionControl)
+                .is_none()
         );
     }
 }
