@@ -20,7 +20,7 @@ use crate::cluster::fetcher_tasks::{
     spawn_controller_services, spawn_controller_status, spawn_root_pg_status,
     spawn_system_diagnostics, spawn_tls_certs,
 };
-use crate::cluster::snapshot::{ClusterSnapshot, FetchMeta};
+use crate::cluster::snapshot::{ClusterSnapshot, FetchMeta, VersionControlMap};
 use crate::cluster::subscriber::SubscriberRegistry;
 use crate::error::NifiLensError;
 use crate::event::AppEvent;
@@ -50,6 +50,7 @@ pub enum ClusterUpdate {
         result: Result<Vec<BulletinSnapshot>, NifiLensError>,
         meta: FetchMeta,
     },
+    VersionControl(Result<VersionControlMap, NifiLensError>, FetchMeta),
 }
 
 impl ClusterUpdate {
@@ -64,6 +65,7 @@ impl ClusterUpdate {
             Self::TlsCerts(..) => ClusterEndpoint::TlsCerts,
             Self::Connections { .. } => ClusterEndpoint::ConnectionsByPg,
             Self::BulletinsDelta { .. } => ClusterEndpoint::Bulletins,
+            Self::VersionControl(..) => ClusterEndpoint::VersionControl,
         }
     }
 }
@@ -426,6 +428,9 @@ impl ClusterStore {
                     self.snapshot.bulletins.meta = Some(meta);
                 }
             },
+            ClusterUpdate::VersionControl(result, meta) => {
+                self.snapshot.version_control.apply(result, meta)
+            }
         }
         endpoint
     }
@@ -991,5 +996,39 @@ mod tests {
         let mut rx = store.node_addresses_receiver();
         let addrs = rx.borrow_and_update().clone();
         assert_eq!(addrs, vec!["nifi-2-6-0:8443".to_string()]);
+    }
+
+    #[test]
+    fn version_control_update_is_applied() {
+        use crate::cluster::snapshot::{EndpointState, VersionControlMap, VersionControlSummary};
+        use nifi_rust_client::dynamic::types::VersionControlInformationDtoState;
+        let mut store = ClusterStore::new(
+            ClusterPollingConfig::default(),
+            5000,
+            "https://nifi.test:8443".into(),
+        );
+        let mut map = VersionControlMap::default();
+        map.by_pg_id.insert(
+            "pg-1".to_string(),
+            VersionControlSummary {
+                state: VersionControlInformationDtoState::LocallyModified,
+                registry_name: None,
+                bucket_name: None,
+                branch: None,
+                flow_id: None,
+                flow_name: None,
+                version: None,
+                state_explanation: None,
+            },
+        );
+        let ep = store.apply_update(ClusterUpdate::VersionControl(Ok(map.clone()), meta()));
+        assert_eq!(ep, ClusterEndpoint::VersionControl);
+        match &store.snapshot.version_control {
+            EndpointState::Ready { data, .. } => {
+                assert_eq!(data.by_pg_id.len(), 1);
+                assert!(data.by_pg_id.contains_key("pg-1"));
+            }
+            other => panic!("expected Ready, got {:?}", other),
+        }
     }
 }
