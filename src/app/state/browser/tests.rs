@@ -240,6 +240,7 @@ fn f_with_index_opens_fuzzy_find_modal() {
                 style: crate::theme::success(),
             },
             haystack: "p   processor   root".into(),
+            version_state: None,
         }],
     });
     update(&mut s, key(KeyCode::Char('F'), KeyModifiers::SHIFT), &c);
@@ -262,6 +263,7 @@ fn fuzzy_find_modal_enter_emits_open_in_browser_intent() {
                 style: crate::theme::success(),
             },
             haystack: "putkafka   processor   root".into(),
+            version_state: None,
         }],
     });
     update(&mut s, key(KeyCode::Char('F'), KeyModifiers::SHIFT), &c);
@@ -292,6 +294,7 @@ fn fuzzy_find_modal_esc_closes_without_goto() {
                 style: crate::theme::success(),
             },
             haystack: "x   processor   root".into(),
+            version_state: None,
         }],
     });
     update(&mut s, key(KeyCode::Char('F'), KeyModifiers::SHIFT), &c);

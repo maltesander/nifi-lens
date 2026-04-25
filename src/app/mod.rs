@@ -131,6 +131,8 @@ pub async fn run(
                         | ClusterEndpoint::ConnectionsByPg
                 );
                 let affects_bulletins = matches!(endpoint, ClusterEndpoint::Bulletins);
+                let affects_browser_version_control =
+                    matches!(endpoint, ClusterEndpoint::VersionControl);
 
                 if affects_overview {
                     match endpoint {
@@ -193,11 +195,16 @@ pub async fn run(
                 if affects_bulletins {
                     crate::view::bulletins::state::redraw_bulletins(&mut state);
                 }
+                if affects_browser_version_control {
+                    let snap_vc = state.cluster.snapshot.clone();
+                    crate::view::browser::state::redraw_version_control(&mut state, &snap_vc);
+                }
 
                 let active = state.current_tab;
                 let should_redraw = (affects_overview && active == ViewId::Overview)
                     || (affects_browser && active == ViewId::Browser)
-                    || (affects_bulletins && active == ViewId::Bulletins);
+                    || (affects_bulletins && active == ViewId::Bulletins)
+                    || (affects_browser_version_control && active == ViewId::Browser);
                 if should_redraw {
                     terminal
                         .draw(|f| ui::render(f, &mut state))

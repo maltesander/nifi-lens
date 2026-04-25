@@ -452,6 +452,7 @@ mod tests {
                         style: crate::theme::success(),
                     },
                     haystack: "putkafka   processor   root/publish".into(),
+                    version_state: None,
                 },
                 FlowIndexEntry {
                     id: "p2".into(),
@@ -464,6 +465,7 @@ mod tests {
                         style: crate::theme::success(),
                     },
                     haystack: "generateflowfile   processor   root".into(),
+                    version_state: None,
                 },
                 FlowIndexEntry {
                     id: "cs1".into(),
@@ -476,6 +478,7 @@ mod tests {
                         style: crate::theme::success(),
                     },
                     haystack: "kafka-brokers   cs   (controller)".into(),
+                    version_state: None,
                 },
             ],
         }
@@ -556,6 +559,7 @@ mod tests {
                     group_path: "(root)".into(),
                     state: StateBadge::Pg { invalid: 0 },
                     haystack: "auth".into(),
+                    version_state: None,
                 },
                 FlowIndexEntry {
                     id: "p1".into(),
@@ -568,6 +572,7 @@ mod tests {
                         style: crate::theme::success(),
                     },
                     haystack: "auth".into(),
+                    version_state: None,
                 },
             ],
         };

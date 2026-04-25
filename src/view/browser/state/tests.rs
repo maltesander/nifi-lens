@@ -1966,3 +1966,133 @@ fn version_control_for_returns_none_when_endpoint_loading() {
     let snap = ClusterSnapshot::default();
     assert!(BrowserState::version_control_for(&snap, "pg-1").is_none());
 }
+
+#[test]
+fn redraw_version_control_stamps_pg_entries_only() {
+    use crate::client::NodeKind;
+    use crate::cluster::snapshot::{
+        EndpointState, FetchMeta, VersionControlMap, VersionControlSummary,
+    };
+    use crate::view::browser::state::{TreeNode, build_flow_index};
+    use nifi_rust_client::dynamic::types::VersionControlInformationDtoState;
+
+    // Build an AppState and seed the browser arena with one PG and one
+    // Processor so the flow index has both kinds.
+    let mut s = crate::test_support::fresh_state();
+    s.browser.nodes.push(TreeNode {
+        parent: None,
+        children: vec![],
+        kind: NodeKind::ProcessGroup,
+        id: "pg-1".into(),
+        group_id: String::new(),
+        name: "ingest".into(),
+        status_summary: crate::client::NodeStatusSummary::ProcessGroup {
+            running: 0,
+            stopped: 0,
+            invalid: 0,
+            disabled: 0,
+        },
+    });
+    s.browser.nodes.push(TreeNode {
+        parent: Some(0),
+        children: vec![],
+        kind: NodeKind::Processor,
+        id: "proc-a".into(),
+        group_id: "pg-1".into(),
+        name: "EnrichRecord".into(),
+        status_summary: crate::client::NodeStatusSummary::Processor {
+            run_status: "Running".into(),
+        },
+    });
+    s.flow_index = Some(build_flow_index(&s.browser));
+
+    // Build a cluster snapshot where pg-1 is Stale.
+    let mut map = VersionControlMap::default();
+    map.by_pg_id.insert(
+        "pg-1".into(),
+        VersionControlSummary {
+            state: VersionControlInformationDtoState::Stale,
+            registry_name: None,
+            bucket_name: None,
+            branch: None,
+            flow_id: None,
+            flow_name: None,
+            version: None,
+            state_explanation: None,
+        },
+    );
+    let snap = crate::cluster::snapshot::ClusterSnapshot {
+        version_control: EndpointState::Ready {
+            data: map,
+            meta: FetchMeta {
+                fetched_at: std::time::Instant::now(),
+                fetch_duration: std::time::Duration::from_millis(0),
+                next_interval: std::time::Duration::from_secs(30),
+            },
+        },
+        ..crate::cluster::snapshot::ClusterSnapshot::default()
+    };
+
+    crate::view::browser::state::redraw_version_control(&mut s, &snap);
+
+    let idx = s.flow_index.as_ref().unwrap();
+    let pg_entry = idx
+        .entries
+        .iter()
+        .find(|e| e.kind == NodeKind::ProcessGroup)
+        .unwrap();
+    let proc_entry = idx
+        .entries
+        .iter()
+        .find(|e| e.kind == NodeKind::Processor)
+        .unwrap();
+    assert_eq!(
+        pg_entry.version_state,
+        Some(VersionControlInformationDtoState::Stale)
+    );
+    assert_eq!(proc_entry.version_state, None);
+}
+
+#[test]
+fn redraw_version_control_clears_when_endpoint_loading() {
+    use crate::client::NodeKind;
+    use crate::view::browser::state::{TreeNode, build_flow_index};
+
+    let mut s = crate::test_support::fresh_state();
+    s.browser.nodes.push(TreeNode {
+        parent: None,
+        children: vec![],
+        kind: NodeKind::ProcessGroup,
+        id: "pg-1".into(),
+        group_id: String::new(),
+        name: "ingest".into(),
+        status_summary: crate::client::NodeStatusSummary::ProcessGroup {
+            running: 0,
+            stopped: 0,
+            invalid: 0,
+            disabled: 0,
+        },
+    });
+    s.flow_index = Some(build_flow_index(&s.browser));
+
+    // Pre-stamp a value to prove redraw clears it on Loading.
+    let entries = &mut s.flow_index.as_mut().unwrap().entries;
+    entries[0].version_state =
+        Some(nifi_rust_client::dynamic::types::VersionControlInformationDtoState::Stale);
+
+    let snap = crate::cluster::snapshot::ClusterSnapshot::default();
+    crate::view::browser::state::redraw_version_control(&mut s, &snap);
+
+    let idx = s.flow_index.as_ref().unwrap();
+    let pg_entry = &idx.entries[0];
+    assert_eq!(pg_entry.version_state, None);
+}
+
+#[test]
+fn redraw_version_control_no_op_when_flow_index_absent() {
+    let mut s = crate::test_support::fresh_state();
+    // No flow_index set yet; function must not panic.
+    let snap = crate::cluster::snapshot::ClusterSnapshot::default();
+    crate::view::browser::state::redraw_version_control(&mut s, &snap);
+    assert!(s.flow_index.is_none());
+}

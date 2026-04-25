@@ -953,6 +953,30 @@ pub fn rebuild_arena_from_cluster(
     state.flow_index = Some(build_flow_index(&state.browser));
 }
 
+/// Re-stamp `FlowIndexEntry.version_state` for ProcessGroup entries from
+/// the cluster snapshot. O(|entries|) walk; no full FlowIndex rebuild.
+/// Called from the main loop on every `ClusterChanged(VersionControl)` event.
+///
+/// When the endpoint hasn't fetched successfully yet (or has just failed
+/// without `last_ok`), every entry's `version_state` is cleared to `None`
+/// — keeps the field honest after context switch.
+pub fn redraw_version_control(
+    state: &mut crate::app::state::AppState,
+    snapshot: &crate::cluster::snapshot::ClusterSnapshot,
+) {
+    let Some(idx) = state.flow_index.as_mut() else {
+        return;
+    };
+    let map = snapshot.version_control.latest();
+    for e in &mut idx.entries {
+        if matches!(e.kind, NodeKind::ProcessGroup) {
+            e.version_state = map.and_then(|m| m.by_pg_id.get(&e.id)).map(|s| s.state);
+        } else {
+            e.version_state = None;
+        }
+    }
+}
+
 /// Fold a full recursive tree snapshot into the state. Preserves
 /// expansion and selection across arena rebuilds by matching on
 /// `(id, kind)`. Drops detail entries for nodes that are gone.
@@ -1221,6 +1245,11 @@ pub struct FlowIndexEntry {
     /// haystack nucleo searches against. Highlight positions from the
     /// matcher index into this string.
     pub haystack: String,
+    /// Per-PG version-control state, re-stamped from the cluster
+    /// snapshot by `redraw_version_control`. Always `None` for non-PG
+    /// kinds; `None` for unversioned PGs and while the endpoint is
+    /// `Loading`.
+    pub version_state: Option<nifi_rust_client::dynamic::types::VersionControlInformationDtoState>,
 }
 
 #[derive(Debug)]
@@ -1336,6 +1365,7 @@ pub fn build_flow_index(state: &BrowserState) -> FlowIndex {
                 group_path,
                 state: state_badge,
                 haystack,
+                version_state: None,
             }
         })
         .collect();
