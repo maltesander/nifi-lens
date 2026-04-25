@@ -206,13 +206,66 @@ fn render_diff_body(frame: &mut Frame, area: Rect, modal: &VersionControlModalSt
     }
 }
 
-fn render_footer(frame: &mut Frame, area: Rect, _modal: &VersionControlModalState) {
-    // Task 20: minimal footer. Task 22 implements the full status + hint bar.
-    let line = Line::from(Span::styled(
-        "press esc to close · / search · e env · r refresh · c copy",
-        theme::muted(),
-    ));
-    frame.render_widget(Paragraph::new(line), area);
+fn render_footer(frame: &mut Frame, area: Rect, modal: &VersionControlModalState) {
+    let rows = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([Constraint::Length(1), Constraint::Length(1)])
+        .split(area);
+
+    render_footer_status(frame, rows[0], modal);
+    render_footer_hint(frame, rows[1], modal);
+}
+
+fn render_footer_status(frame: &mut Frame, area: Rect, modal: &VersionControlModalState) {
+    let env_label = if modal.show_environmental {
+        "env shown"
+    } else {
+        "env hidden"
+    };
+    let status = match &modal.differences {
+        VersionControlDifferenceLoad::Pending => "loading…".to_string(),
+        VersionControlDifferenceLoad::Failed(_) => "failed — press r to retry".to_string(),
+        VersionControlDifferenceLoad::Loaded(sections) => {
+            let mut diff_count = 0usize;
+            let mut comp_count = 0usize;
+            for s in sections {
+                let kept = s
+                    .differences
+                    .iter()
+                    .filter(|d| modal.show_environmental || !d.environmental)
+                    .count();
+                if kept > 0 {
+                    comp_count += 1;
+                    diff_count += kept;
+                }
+            }
+            format!(
+                "{} differences across {} components · {}",
+                diff_count, comp_count, env_label
+            )
+        }
+    };
+    frame.render_widget(
+        Paragraph::new(Line::from(Span::styled(status, theme::muted()))),
+        area,
+    );
+}
+
+fn render_footer_hint(frame: &mut Frame, area: Rect, _modal: &VersionControlModalState) {
+    use crate::input::Verb;
+    use crate::input::VersionControlModalVerb;
+
+    let parts: Vec<String> = VersionControlModalVerb::all()
+        .iter()
+        .copied()
+        .filter(|v| v.show_in_hint_bar() && !v.hint().is_empty())
+        .map(|v| format!("[{}] {}", v.chord().display(), v.hint()))
+        .collect();
+    let text = parts.join(" · ");
+    frame.render_widget(
+        Paragraph::new(Line::from(Span::styled(text, theme::muted()))),
+        area,
+    );
 }
 
 #[cfg(test)]
@@ -397,5 +450,60 @@ mod tests {
         );
         term.draw(|f| render(f, f.area(), &modal)).unwrap();
         assert_snapshot!("vc_modal_failed", format!("{}", term.backend()));
+    }
+
+    #[test]
+    fn footer_shows_diff_count_and_env_state() {
+        use crate::client::{ComponentDiffSection, RenderedDifference};
+        let mut term = Terminal::new(test_backend(28)).unwrap();
+        let modal = loaded_modal_with(
+            VersionControlInformationDtoState::LocallyModified,
+            false,
+            vec![ComponentDiffSection {
+                component_id: "abcdabcd".into(),
+                component_name: "X".into(),
+                component_type: "Processor".into(),
+                differences: vec![
+                    RenderedDifference {
+                        kind: "PROPERTY_CHANGED".into(),
+                        description: "a".into(),
+                        environmental: false,
+                    },
+                    RenderedDifference {
+                        kind: "PROPERTY_CHANGED".into(),
+                        description: "b".into(),
+                        environmental: false,
+                    },
+                    RenderedDifference {
+                        kind: "BUNDLE_CHANGED".into(),
+                        description: "c".into(),
+                        environmental: true,
+                    },
+                ],
+            }],
+        );
+        term.draw(|f| render(f, f.area(), &modal)).unwrap();
+        // Footer should read: "2 differences across 1 components · env hidden"
+        assert_snapshot!("vc_modal_footer_diff_count", format!("{}", term.backend()));
+    }
+
+    #[test]
+    fn footer_pending_shows_loading() {
+        let mut term = Terminal::new(test_backend(24)).unwrap();
+        let modal = modal_with_identity(VersionControlInformationDtoState::Stale);
+        // differences stays Pending
+        term.draw(|f| render(f, f.area(), &modal)).unwrap();
+        assert_snapshot!("vc_modal_footer_pending", format!("{}", term.backend()));
+    }
+
+    #[test]
+    fn footer_failed_shows_retry_hint() {
+        let mut term = Terminal::new(test_backend(24)).unwrap();
+        let mut modal = modal_with_identity(VersionControlInformationDtoState::SyncFailure);
+        modal.differences = crate::view::browser::state::VersionControlDifferenceLoad::Failed(
+            "registry unreachable".into(),
+        );
+        term.draw(|f| render(f, f.area(), &modal)).unwrap();
+        assert_snapshot!("vc_modal_footer_failed", format!("{}", term.backend()));
     }
 }
