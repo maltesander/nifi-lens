@@ -150,8 +150,13 @@ async fn create_versioned_pg_with_pipeline(
     Ok(pg_id)
 }
 
-/// Commit a PG to the NiFi Registry under `flow_name`. The first commit
-/// uses `version=0` and `action="COMMIT"`.
+/// Commit a PG to the NiFi Registry under `flow_name`.
+///
+/// The PG's revision is fetched fresh before commit — creating
+/// processors and connections inside the PG bumps its revision past 0,
+/// and NiFi 2.6.0 strictly enforces revision match (returns 400 "not
+/// the most up-to-date revision" otherwise). 2.9.0 is more lenient,
+/// but we always send the truthful value.
 async fn commit_to_registry(
     client: &DynamicClient,
     pg_id: &str,
@@ -159,6 +164,23 @@ async fn commit_to_registry(
     flow_name: &str,
     comments: &str,
 ) -> Result<()> {
+    // Fetch the PG's current revision — creating processors/connections
+    // inside the PG has bumped it past 0.
+    let pg_entity = client
+        .processgroups()
+        .get_process_group(pg_id)
+        .await
+        .map_err(|e| SeederError::Api {
+            message: format!("get PG {pg_id} for revision lookup before commit"),
+            source: Box::new(e),
+        })?;
+    let revision = pg_entity
+        .revision
+        .clone()
+        .ok_or_else(|| SeederError::Invariant {
+            message: format!("PG {pg_id} has no revision"),
+        })?;
+
     let mut versioned_flow = types::VersionedFlowDto::default();
     versioned_flow.action = Some("COMMIT".to_string());
     versioned_flow.registry_id = Some(registry_ids.client_id.clone());
@@ -166,10 +188,6 @@ async fn commit_to_registry(
     versioned_flow.flow_name = Some(flow_name.to_string());
     versioned_flow.description = Some("nifilens fixture: versioned PG".to_string());
     versioned_flow.comments = Some(comments.to_string());
-
-    let mut revision = types::RevisionDto::default();
-    revision.client_id = Some("nifilens-fixture-seeder".to_string());
-    revision.version = Some(0);
 
     let mut body = types::StartVersionControlRequestEntity::default();
     body.process_group_revision = Some(revision);
