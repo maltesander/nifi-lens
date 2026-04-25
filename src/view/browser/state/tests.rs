@@ -1920,3 +1920,49 @@ fn rebuild_arena_is_idempotent_for_same_inputs() {
         .count();
     assert_eq!(cs_count, 1, "exactly one CS member spliced");
 }
+
+#[test]
+fn version_control_for_returns_summary_when_present() {
+    use crate::cluster::snapshot::{
+        ClusterSnapshot, EndpointState, FetchMeta, VersionControlMap, VersionControlSummary,
+    };
+    use nifi_rust_client::dynamic::types::VersionControlInformationDtoState;
+
+    let mut snap = ClusterSnapshot::default();
+    let mut map = VersionControlMap::default();
+    map.by_pg_id.insert(
+        "pg-1".into(),
+        VersionControlSummary {
+            state: VersionControlInformationDtoState::LocallyModifiedAndStale,
+            registry_name: Some("ops".into()),
+            bucket_name: Some("flows".into()),
+            branch: None,
+            flow_id: Some("f-1".into()),
+            flow_name: Some("ingest".into()),
+            version: Some("3".into()),
+            state_explanation: None,
+        },
+    );
+    snap.version_control = EndpointState::Ready {
+        data: map,
+        meta: FetchMeta {
+            fetched_at: std::time::Instant::now(),
+            fetch_duration: std::time::Duration::from_millis(10),
+            next_interval: std::time::Duration::from_secs(30),
+        },
+    };
+    assert_eq!(
+        BrowserState::version_control_for(&snap, "pg-1")
+            .unwrap()
+            .state,
+        VersionControlInformationDtoState::LocallyModifiedAndStale
+    );
+    assert!(BrowserState::version_control_for(&snap, "pg-unknown").is_none());
+}
+
+#[test]
+fn version_control_for_returns_none_when_endpoint_loading() {
+    use crate::cluster::snapshot::ClusterSnapshot;
+    let snap = ClusterSnapshot::default();
+    assert!(BrowserState::version_control_for(&snap, "pg-1").is_none());
+}

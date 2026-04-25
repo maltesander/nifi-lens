@@ -41,6 +41,24 @@ pub(super) fn format_property_value(raw: &str, state: &BrowserState) -> Option<L
     ]))
 }
 
+/// Map a wire version-control state to the (label, style) shown as a
+/// trailing chip on Browser tree rows. Returns `None` for `UpToDate` —
+/// callers must skip rendering when this returns `None`.
+#[allow(dead_code)] // will be called by tree-row renderer in the next task
+pub(super) fn chip_for_state(
+    state: nifi_rust_client::dynamic::types::VersionControlInformationDtoState,
+) -> Option<(&'static str, ratatui::style::Style)> {
+    use nifi_rust_client::dynamic::types::VersionControlInformationDtoState as S;
+    match state {
+        S::UpToDate => None,
+        S::Stale => Some(("STALE", crate::theme::warning())),
+        S::LocallyModified => Some(("MODIFIED", crate::theme::warning())),
+        S::LocallyModifiedAndStale => Some(("STALE+MOD", crate::theme::warning())),
+        S::SyncFailure => Some(("SYNC-ERR", crate::theme::error())),
+        _ => None,
+    }
+}
+
 /// Entry point called from `app::ui`.
 pub fn render(
     frame: &mut Frame,
@@ -363,6 +381,28 @@ mod tests {
         assert!(text.contains("Root"));
         assert!(text.contains("Generate"));
         assert!(text.contains(" > "));
+    }
+}
+
+#[cfg(test)]
+mod chip_tests {
+    use super::chip_for_state;
+    use nifi_rust_client::dynamic::types::VersionControlInformationDtoState as S;
+
+    #[test]
+    fn up_to_date_renders_no_chip() {
+        assert!(chip_for_state(S::UpToDate).is_none());
+    }
+
+    #[test]
+    fn each_drift_state_has_a_chip() {
+        assert_eq!(chip_for_state(S::Stale).unwrap().0, "STALE");
+        assert_eq!(chip_for_state(S::LocallyModified).unwrap().0, "MODIFIED");
+        assert_eq!(
+            chip_for_state(S::LocallyModifiedAndStale).unwrap().0,
+            "STALE+MOD"
+        );
+        assert_eq!(chip_for_state(S::SyncFailure).unwrap().0, "SYNC-ERR");
     }
 }
 

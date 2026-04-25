@@ -260,6 +260,23 @@ impl BrowserState {
         })
     }
 
+    /// Look up the `VersionControlSummary` for a PG id from the cluster
+    /// snapshot. Returns `None` for unversioned PGs (absent from the map),
+    /// for non-PG ids, and while the endpoint is still `Loading`.
+    ///
+    /// Static method (no `&self`) because the cluster snapshot is a peer
+    /// of `BrowserState` on `AppState`, not a child. Call site:
+    /// `BrowserState::version_control_for(&state.cluster.snapshot, &pg_id)`.
+    pub fn version_control_for<'a>(
+        snapshot: &'a crate::cluster::snapshot::ClusterSnapshot,
+        pg_id: &str,
+    ) -> Option<&'a crate::cluster::snapshot::VersionControlSummary> {
+        snapshot
+            .version_control
+            .latest()
+            .and_then(|m| m.by_pg_id.get(pg_id))
+    }
+
     /// Called from every selection-changing entry point. Resets detail
     /// focus because the node under the cursor has (potentially) changed.
     fn reset_detail_focus(&mut self) {
