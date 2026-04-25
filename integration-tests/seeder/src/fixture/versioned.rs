@@ -2,12 +2,18 @@
 //!
 //! Creates two PGs and commits them to the NiFi Registry:
 //!  - `versioned-clean` — committed and untouched → `UP_TO_DATE`.
-//!  - `versioned-modified` — committed, then a single property mutated
-//!    after the fact → `LOCALLY_MODIFIED`.
+//!  - `versioned-modified` — committed, then a richer set of mutations
+//!    applied after the fact → `LOCALLY_MODIFIED`. The mutations are
+//!    chosen to surface multiple diff entry types in the
+//!    version-control modal: PROPERTY_CHANGED on two different
+//!    components, COMPONENT_ADDED for a new processor and a new
+//!    connection, and COMPONENT_REMOVED for the original gen→log
+//!    connection.
 //!
-//! Each PG has a tiny GenerateFlowFile → LogAttribute pipeline. The
-//! topology is intentionally minimal — we only need *something* in
-//! version control. The Tracer modal exercises the diff, not the data.
+//! Each PG has a tiny GenerateFlowFile → LogAttribute pipeline at
+//! commit time. The topology is intentionally minimal — we only need
+//! *something* in version control. The Tracer modal exercises the
+//! diff, not the data.
 
 use std::collections::HashMap;
 
@@ -19,9 +25,25 @@ use crate::fixture::custom_text_property_key;
 use crate::fixture::healthy::{create_connection_in_pg, create_processor};
 use crate::fixture::registry::RegistryIds;
 
-/// Seed the two versioned-flow PGs under `parent_pg_id`. Commits each to
-/// the NiFi Registry, then mutates one property on `versioned-modified`
-/// so it surfaces as `LOCALLY_MODIFIED`.
+/// Identifiers captured from the initial gen → log pipeline of a
+/// versioned PG so post-commit mutations can target each component
+/// directly without re-resolving by name.
+pub struct VersionedPgIds {
+    pub pg_id: String,
+    pub gen_id: String,
+    /// Not yet consumed by the post-commit mutation block, but kept on
+    /// the struct so future additions (e.g. mutating LogAttribute
+    /// directly by id) don't have to re-resolve it by name.
+    #[allow(dead_code)]
+    pub log_id: String,
+    pub conn_gen_to_log_id: String,
+}
+
+/// Seed the two versioned-flow PGs under `parent_pg_id`. Commits each
+/// to the NiFi Registry, then applies a richer mutation block to
+/// `versioned-modified` so it surfaces as `LOCALLY_MODIFIED` with a
+/// diff covering PROPERTY_CHANGED, COMPONENT_ADDED, and
+/// COMPONENT_REMOVED entries.
 pub async fn seed(
     client: &DynamicClient,
     parent_pg_id: &str,
@@ -30,7 +52,7 @@ pub async fn seed(
 ) -> Result<()> {
     tracing::info!("seeding versioned-clean and versioned-modified");
 
-    let clean_pg_id = create_versioned_pg_with_pipeline(
+    let clean_ids = create_versioned_pg_with_pipeline(
         client,
         parent_pg_id,
         "versioned-clean",
@@ -40,14 +62,16 @@ pub async fn seed(
     .await?;
     commit_to_registry(
         client,
-        &clean_pg_id,
+        &clean_ids.pg_id,
         registry_ids,
         "versioned-clean",
         "Initial commit",
     )
     .await?;
+    // versioned-clean stays untouched after commit so it remains
+    // UP_TO_DATE; the modal uses it to render the empty-diff state.
 
-    let modified_pg_id = create_versioned_pg_with_pipeline(
+    let modified_ids = create_versioned_pg_with_pipeline(
         client,
         parent_pg_id,
         "versioned-modified",
@@ -57,31 +81,88 @@ pub async fn seed(
     .await?;
     commit_to_registry(
         client,
-        &modified_pg_id,
+        &modified_ids.pg_id,
         registry_ids,
         "versioned-modified",
         "Initial commit",
     )
     .await?;
 
-    // Mutate the LogAttribute processor's "Log Level" so the PG
-    // surfaces as LOCALLY_MODIFIED on the next /versions/process-groups
-    // /{id} fetch.
-    let log_attr_name = "vc-mod-LogAttribute";
-    mutate_processor_property(client, &modified_pg_id, log_attr_name, "Log Level", "WARN").await?;
+    // === versioned-modified post-commit mutations ===
+    // Surfaces PROPERTY_CHANGED ×2 on different components,
+    // COMPONENT_ADDED for a new processor and a new connection, and
+    // COMPONENT_REMOVED for the original gen→log connection. Combined
+    // this gives the modal a rich diff to display.
+
+    // 1. Property change on LogAttribute: Log Level INFO → WARN.
+    mutate_processor_property(
+        client,
+        &modified_ids.pg_id,
+        "vc-mod-LogAttribute",
+        "Log Level",
+        "WARN",
+    )
+    .await?;
+
+    // 2. Property change on GenerateFlowFile: Batch Size 1 → 5.
+    mutate_processor_property(
+        client,
+        &modified_ids.pg_id,
+        "vc-mod-GenerateFlowFile",
+        "Batch Size",
+        "5",
+    )
+    .await?;
+
+    // 3. Add a new processor `vc-mod-UpdateAttribute-added`. Auto-
+    //    terminate `success` so the new processor stays valid.
+    let added_id = create_processor(
+        client,
+        &modified_ids.pg_id,
+        make_processor(
+            "vc-mod-UpdateAttribute-added",
+            "org.apache.nifi.processors.attributes.UpdateAttribute",
+            props(&[("post-commit-marker", "added-after-version-commit")]),
+            None,
+            vec!["success"],
+        ),
+        "vc-mod-UpdateAttribute-added",
+    )
+    .await?;
+
+    // 4. Add a new connection from GenerateFlowFile (success) → the
+    //    newly added processor. NiFi supports multiple outbound
+    //    connections from the same relationship, so this coexists
+    //    with the original gen→log connection until step 5 deletes
+    //    the latter.
+    create_connection_in_pg(
+        client,
+        &modified_ids.pg_id,
+        &modified_ids.gen_id,
+        "PROCESSOR",
+        &added_id,
+        "PROCESSOR",
+        vec!["success"],
+    )
+    .await?;
+
+    // 5. Delete the original gen → log connection so the diff also
+    //    shows a COMPONENT_REMOVED Connection entry.
+    delete_connection_by_id(client, &modified_ids.conn_gen_to_log_id).await?;
 
     Ok(())
 }
 
 /// Build a child PG containing a GenerateFlowFile → LogAttribute
-/// pipeline. Returns the new PG's id.
+/// pipeline. Returns the new PG's id along with the processor and
+/// connection ids needed for downstream post-commit mutations.
 async fn create_versioned_pg_with_pipeline(
     client: &DynamicClient,
     parent_pg_id: &str,
     pg_name: &str,
     component_prefix: &str,
     version: &semver::Version,
-) -> Result<String> {
+) -> Result<VersionedPgIds> {
     // Create the PG.
     let body = make_pg(pg_name);
     let created = client
@@ -136,7 +217,7 @@ async fn create_versioned_pg_with_pipeline(
     )
     .await?;
 
-    create_connection_in_pg(
+    let conn_gen_to_log_id = create_connection_in_pg(
         client,
         &pg_id,
         &gen_id,
@@ -147,7 +228,12 @@ async fn create_versioned_pg_with_pipeline(
     )
     .await?;
 
-    Ok(pg_id)
+    Ok(VersionedPgIds {
+        pg_id,
+        gen_id,
+        log_id,
+        conn_gen_to_log_id,
+    })
 }
 
 /// Commit a PG to the NiFi Registry under `flow_name`.
@@ -279,5 +365,40 @@ async fn mutate_processor_property(
             source: Box::new(e),
         })?;
 
+    Ok(())
+}
+
+/// Fetch a connection's current revision and delete it. Used to surface
+/// a COMPONENT_REMOVED entry in the version-control diff.
+async fn delete_connection_by_id(client: &DynamicClient, conn_id: &str) -> Result<()> {
+    let entity = client
+        .connections()
+        .get_connection(conn_id)
+        .await
+        .map_err(|e| SeederError::Api {
+            message: format!("get connection {conn_id} for revision lookup before delete"),
+            source: Box::new(e),
+        })?;
+    let version = entity
+        .revision
+        .as_ref()
+        .and_then(|r| r.version)
+        .ok_or_else(|| SeederError::Invariant {
+            message: format!("connection {conn_id} has no revision"),
+        })?;
+    let version_str = version.to_string();
+    client
+        .connections()
+        .delete_connection(
+            conn_id,
+            Some(version_str.as_str()),
+            Some("nifilens-fixture-seeder"),
+            None,
+        )
+        .await
+        .map_err(|e| SeederError::Api {
+            message: format!("delete connection {conn_id}"),
+            source: Box::new(e),
+        })?;
     Ok(())
 }
