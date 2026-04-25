@@ -75,6 +75,7 @@ fn render_content(frame: &mut Frame, area: Rect, state: &mut AppState) {
             &state.browser,
             &state.flow_index,
             &state.bulletins.ring,
+            &state.cluster.snapshot,
         ),
         ViewId::Events => events::render::render(frame, area, &state.events, &state.timestamp_cfg),
         ViewId::Tracer => {

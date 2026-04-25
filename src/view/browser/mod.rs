@@ -15,6 +15,7 @@ pub fn render(
     state: &BrowserState,
     flow_index: &Option<FlowIndex>,
     bulletins: &std::collections::VecDeque<crate::client::BulletinSnapshot>,
+    cluster: &crate::cluster::snapshot::ClusterSnapshot,
 ) {
-    render::render(frame, area, state, flow_index, bulletins);
+    render::render(frame, area, state, flow_index, bulletins, cluster);
 }

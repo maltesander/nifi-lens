@@ -44,7 +44,6 @@ pub(super) fn format_property_value(raw: &str, state: &BrowserState) -> Option<L
 /// Map a wire version-control state to the (label, style) shown as a
 /// trailing chip on Browser tree rows. Returns `None` for `UpToDate` —
 /// callers must skip rendering when this returns `None`.
-#[allow(dead_code)] // will be called by tree-row renderer in the next task
 pub(super) fn chip_for_state(
     state: nifi_rust_client::dynamic::types::VersionControlInformationDtoState,
 ) -> Option<(&'static str, ratatui::style::Style)> {
@@ -66,6 +65,7 @@ pub fn render(
     state: &BrowserState,
     _flow_index: &Option<FlowIndex>,
     bulletins: &std::collections::VecDeque<crate::client::BulletinSnapshot>,
+    cluster: &crate::cluster::snapshot::ClusterSnapshot,
 ) {
     let block = Block::default()
         .borders(Borders::ALL)
@@ -96,7 +96,7 @@ pub fn render(
         ])
         .split(inner);
 
-    render_tree(frame, chunks[0], state);
+    render_tree(frame, chunks[0], state, cluster);
 
     // Vertical separator between tree and detail panes.
     let sep = Block::default()
@@ -130,7 +130,12 @@ fn fmt_ago(when: SystemTime) -> String {
     }
 }
 
-fn render_tree(frame: &mut Frame, area: Rect, state: &BrowserState) {
+fn render_tree(
+    frame: &mut Frame,
+    area: Rect,
+    state: &BrowserState,
+    cluster: &crate::cluster::snapshot::ClusterSnapshot,
+) {
     let mut lines: Vec<Line> = Vec::with_capacity(state.visible.len());
     let window_height = area.height as usize;
     let top = state
@@ -188,12 +193,20 @@ fn render_tree(frame: &mut Frame, area: Rect, state: &BrowserState) {
             }
             _ => row_style,
         };
-        lines.push(Line::from(vec![
+        let mut row_spans = vec![
             Span::styled(indent.clone(), row_style),
             Span::styled(marker.to_string(), marker_style),
             Span::styled(format!("{glyph_owned} "), glyph_style.patch(row_style)),
             Span::styled(node.name.clone(), row_style),
-        ]));
+        ];
+        if matches!(node.kind, crate::client::NodeKind::ProcessGroup)
+            && let Some(summary) = BrowserState::version_control_for(cluster, &node.id)
+            && let Some((label, style)) = chip_for_state(summary.state)
+        {
+            row_spans.push(Span::raw(" "));
+            row_spans.push(Span::styled(format!("[{label}]"), style.patch(row_style)));
+        }
+        lines.push(Line::from(row_spans));
     }
     let p = Paragraph::new(lines);
     frame.render_widget(p, area);
@@ -407,6 +420,128 @@ mod chip_tests {
 }
 
 #[cfg(test)]
+mod tree_render_tests {
+    use super::*;
+    use crate::client::{NodeKind, NodeStatusSummary};
+    use crate::cluster::snapshot::{
+        ClusterSnapshot, EndpointState, FetchMeta, VersionControlMap, VersionControlSummary,
+    };
+    use crate::test_support::{TEST_BACKEND_SHORT, test_backend};
+    use crate::view::browser::state::TreeNode;
+    use insta::assert_snapshot;
+    use nifi_rust_client::dynamic::types::VersionControlInformationDtoState;
+    use ratatui::Terminal;
+
+    fn seeded_state_with_one_pg(pg_id: &str, pg_name: &str) -> BrowserState {
+        let mut state = BrowserState::new();
+        state.nodes.push(TreeNode {
+            parent: None,
+            children: vec![],
+            kind: NodeKind::ProcessGroup,
+            id: pg_id.into(),
+            group_id: String::new(),
+            name: pg_name.into(),
+            status_summary: NodeStatusSummary::ProcessGroup {
+                running: 0,
+                stopped: 0,
+                invalid: 0,
+                disabled: 0,
+            },
+        });
+        // Visible row pointing at the PG.
+        state.visible.push(0);
+        state
+    }
+
+    fn snapshot_with(pg_id: &str, st: VersionControlInformationDtoState) -> ClusterSnapshot {
+        let mut map = VersionControlMap::default();
+        map.by_pg_id.insert(
+            pg_id.into(),
+            VersionControlSummary {
+                state: st,
+                registry_name: Some("ops".into()),
+                bucket_name: Some("flows".into()),
+                branch: None,
+                flow_id: Some("f-1".into()),
+                flow_name: Some("ingest".into()),
+                version: Some("3".into()),
+                state_explanation: None,
+            },
+        );
+        ClusterSnapshot {
+            version_control: EndpointState::Ready {
+                data: map,
+                meta: FetchMeta {
+                    fetched_at: std::time::Instant::now(),
+                    fetch_duration: std::time::Duration::from_millis(10),
+                    next_interval: std::time::Duration::from_secs(30),
+                },
+            },
+            ..ClusterSnapshot::default()
+        }
+    }
+
+    #[test]
+    fn tree_row_renders_stale_chip() {
+        let state = seeded_state_with_one_pg("pg-1", "ingest");
+        let snap = snapshot_with("pg-1", VersionControlInformationDtoState::Stale);
+        let mut terminal = Terminal::new(test_backend(TEST_BACKEND_SHORT)).unwrap();
+        terminal
+            .draw(|f| render_tree(f, f.area(), &state, &snap))
+            .unwrap();
+        assert_snapshot!(
+            "tree_row_renders_stale_chip",
+            format!("{}", terminal.backend())
+        );
+    }
+
+    #[test]
+    fn tree_row_renders_no_chip_when_unversioned() {
+        let state = seeded_state_with_one_pg("pg-1", "ingest");
+        let snap = ClusterSnapshot::default();
+        let mut terminal = Terminal::new(test_backend(TEST_BACKEND_SHORT)).unwrap();
+        terminal
+            .draw(|f| render_tree(f, f.area(), &state, &snap))
+            .unwrap();
+        assert_snapshot!(
+            "tree_row_renders_no_chip_when_unversioned",
+            format!("{}", terminal.backend())
+        );
+    }
+
+    #[test]
+    fn tree_row_renders_stale_mod_chip_for_combined_state() {
+        let state = seeded_state_with_one_pg("pg-1", "ingest");
+        let snap = snapshot_with(
+            "pg-1",
+            VersionControlInformationDtoState::LocallyModifiedAndStale,
+        );
+        let mut terminal = Terminal::new(test_backend(TEST_BACKEND_SHORT)).unwrap();
+        terminal
+            .draw(|f| render_tree(f, f.area(), &state, &snap))
+            .unwrap();
+        assert_snapshot!(
+            "tree_row_renders_stale_mod_chip_for_combined_state",
+            format!("{}", terminal.backend())
+        );
+    }
+
+    #[test]
+    fn tree_row_renders_sync_err_chip() {
+        let state = seeded_state_with_one_pg("pg-1", "ingest");
+        let snap = snapshot_with("pg-1", VersionControlInformationDtoState::SyncFailure);
+        let mut terminal = Terminal::new(test_backend(TEST_BACKEND_SHORT)).unwrap();
+        terminal
+            .draw(|f| render_tree(f, f.area(), &state, &snap))
+            .unwrap();
+        assert_snapshot!(
+            "tree_row_renders_sync_err_chip",
+            format!("{}", terminal.backend())
+        );
+    }
+}
+
+#[cfg(test)]
 mod snapshots {
     use super::*;
     use crate::client::{NodeKind, NodeStatusSummary, RawNode, RecursiveSnapshot};
@@ -419,10 +554,11 @@ mod snapshots {
     fn render_to_string(state: &BrowserState) -> String {
         let bulletins: std::collections::VecDeque<crate::client::BulletinSnapshot> =
             std::collections::VecDeque::new();
+        let cluster = crate::cluster::snapshot::ClusterSnapshot::default();
         let mut terminal = Terminal::new(TestBackend::new(120, 30)).unwrap();
         terminal
             .draw(|f| {
-                super::render(f, f.area(), state, &None, &bulletins);
+                super::render(f, f.area(), state, &None, &bulletins, &cluster);
             })
             .unwrap();
         format!("{}", terminal.backend())
