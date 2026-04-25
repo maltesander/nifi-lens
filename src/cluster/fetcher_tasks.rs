@@ -709,6 +709,79 @@ pub(crate) fn spawn_tls_certs(
     })
 }
 
+/// Spawns the version-control fan-out fetch loop. Subscriber-gated
+/// (Browser only). On each tick, takes the latest PG-id list from
+/// `pg_ids_rx`, fans out `versions/process-groups/{id}` calls via
+/// `NifiClient::version_information_batch`, and emits the resulting
+/// map as `ClusterUpdate::VersionControl`. Per-PG errors degrade
+/// individual rows (logged at `warn!` inside the batch helper); the
+/// outer call always succeeds with whatever entries it could collect.
+///
+/// The select! mirrors `spawn_connections_by_pg`: waking on
+/// `pg_ids_rx.changed()` lets a refreshed PG list short-circuit the
+/// sleep, so newly added versioned PGs appear within one RootPgStatus
+/// tick.
+#[allow(dead_code)] // wired in Task 8 (spawn_fetchers)
+pub(crate) fn spawn_version_control(
+    client: Arc<RwLock<NifiClient>>,
+    tx: mpsc::Sender<AppEvent>,
+    mut pg_ids_rx: watch::Receiver<Vec<String>>,
+    cfg: FetchTaskConfig,
+) -> JoinHandle<()> {
+    tokio::task::spawn_local(async move {
+        let mut next_interval = cfg.base_interval;
+        loop {
+            if cfg.gated && !subscribers_present(&cfg.subscriber_counter) {
+                cfg.force.notified().await;
+                continue;
+            }
+            let pg_ids = pg_ids_rx.borrow_and_update().clone();
+            if pg_ids.is_empty() {
+                tokio::select! {
+                    _ = tokio::time::sleep(next_interval) => {}
+                    _ = cfg.force.notified() => {}
+                    _ = pg_ids_rx.changed() => {}
+                }
+                continue;
+            }
+
+            let t0 = Instant::now();
+            // version_information_batch never returns Err — per-PG
+            // failures are logged and omitted. The Result wrapper exists
+            // so this fetcher's variant matches the rest of the cluster
+            // store's "preserve last_ok on failure" contract.
+            let map = {
+                let guard = client.read().await;
+                guard.version_information_batch(&pg_ids).await
+            };
+            let duration = t0.elapsed();
+            next_interval = adaptive_interval(cfg.base_interval, duration, cfg.max_interval);
+            let meta = FetchMeta {
+                fetched_at: t0,
+                fetch_duration: duration,
+                next_interval,
+            };
+            if tx
+                .send(AppEvent::ClusterUpdate(ClusterUpdate::VersionControl(
+                    Ok(map),
+                    meta,
+                )))
+                .await
+                .is_err()
+            {
+                tracing::debug!("version_control fetch: channel closed, exiting");
+                return;
+            }
+
+            tokio::select! {
+                _ = tokio::time::sleep(next_interval) => {}
+                _ = cfg.force.notified() => {}
+                _ = pg_ids_rx.changed() => {}
+            }
+        }
+    })
+}
+
 /// Parse the context `base_url` into a `(host, port)` pair. Returns
 /// `None` for non-HTTPS URLs or unparseable input. Used as the TLS
 /// probe's fallback target when a node address isn't a valid
