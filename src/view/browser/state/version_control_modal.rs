@@ -47,26 +47,53 @@ impl VersionControlModalState {
     }
 
     /// Build the flat string body the search primitives operate on.
-    /// Mirrors `BulletinsState`'s use of `modal.details.raw_message` —
-    /// `widget::search::compute_matches` expects a `&str`. Excludes
-    /// environmental diffs when `show_environmental == false`.
+    /// Output format MUST match `view::browser::render::version_control_modal`'s
+    /// rendered diff body line-for-line so `MatchSpan` byte offsets align.
+    /// Excludes environmental diffs when `show_environmental == false`.
+    /// Sections whose remaining diffs are zero are collapsed entirely —
+    /// this mirrors the renderer's `visible` filter.
     pub fn searchable_body(&self) -> String {
         let mut out = String::new();
         if let VersionControlDifferenceLoad::Loaded(sections) = &self.differences {
-            for s in sections {
-                out.push_str(&format!(
-                    "{} · {} · {}\n",
-                    s.component_type, s.component_name, s.component_id
-                ));
-                for d in &s.differences {
-                    if !self.show_environmental && d.environmental {
-                        continue;
+            let visible: Vec<_> = sections
+                .iter()
+                .filter_map(|s| {
+                    let kept: Vec<_> = s
+                        .differences
+                        .iter()
+                        .filter(|d| self.show_environmental || !d.environmental)
+                        .collect();
+                    if kept.is_empty() {
+                        None
+                    } else {
+                        Some((s, kept))
                     }
-                    out.push_str(&format!("{}: {}\n", d.kind, d.description));
+                })
+                .collect();
+            for (section, diffs) in &visible {
+                out.push_str(&format!(
+                    "─ {} · {} · {} ─\n",
+                    section.component_type,
+                    section.component_name,
+                    short_id(&section.component_id)
+                ));
+                for d in diffs {
+                    out.push_str(&format!("{:<18} {}\n", d.kind, d.description));
                 }
                 out.push('\n');
             }
         }
         out
+    }
+}
+
+/// Truncate an id to first 4 hex chars + `…`. Shared between this
+/// state-side searchable body and the render-side header so the
+/// search-match byte offsets line up.
+pub(crate) fn short_id(id: &str) -> String {
+    if id.len() <= 4 {
+        id.to_string()
+    } else {
+        format!("{}…", &id[..4])
     }
 }

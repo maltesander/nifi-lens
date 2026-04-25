@@ -10,8 +10,10 @@ use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Borders, Clear, Paragraph};
 
 use crate::theme;
+use crate::view::browser::state::version_control_modal::short_id;
 use crate::view::browser::state::{VersionControlDifferenceLoad, VersionControlModalState};
 use crate::widget::panel::Panel;
+use crate::widget::search::{MatchSpan, SearchState};
 
 const MIN_WIDTH: u16 = 60;
 const MIN_HEIGHT: u16 = 20;
@@ -119,14 +121,6 @@ fn render_identity(frame: &mut Frame, area: Rect, modal: &VersionControlModalSta
     frame.render_widget(Paragraph::new(lines), inner);
 }
 
-fn short_id(id: &str) -> String {
-    if id.len() <= 4 {
-        id.to_string()
-    } else {
-        format!("{}…", &id[..4])
-    }
-}
-
 fn render_diff_body(frame: &mut Frame, area: Rect, modal: &VersionControlModalState) {
     match &modal.differences {
         VersionControlDifferenceLoad::Pending => {
@@ -194,6 +188,17 @@ fn render_diff_body(frame: &mut Frame, area: Rect, modal: &VersionControlModalSt
                 }
                 all_lines.push(Line::from(""));
             }
+            // Apply search highlights if a committed search is active.
+            // Match spans are computed against `searchable_body`, which
+            // is byte-aligned with `all_lines` above, so the per-line
+            // `(byte_start, byte_end)` offsets land cleanly on the
+            // rendered plaintext.
+            if let Some(search) = modal.search.as_ref()
+                && search.committed
+                && !search.matches.is_empty()
+            {
+                apply_search_highlights(&mut all_lines, search);
+            }
             // Apply scroll offset. `BidirectionalScrollState.vertical.offset`
             // is a usize that the modal verbs already mutate via
             // `VerticalScrollState::scroll_by` / `page_up` / `page_down`.
@@ -203,6 +208,51 @@ fn render_diff_body(frame: &mut Frame, area: Rect, modal: &VersionControlModalSt
                 .wrap(ratatui::widgets::Wrap { trim: false });
             frame.render_widget(p, area);
         }
+    }
+}
+
+/// Re-build each line's spans, splitting at every match's
+/// `(byte_start, byte_end)` and applying `UNDERLINED` (plus
+/// `REVERSED | BOLD` for the active match identified by
+/// `search.current`). Caller guarantees the line indices match the
+/// `searchable_body` used by `compute_matches`. This loses per-row
+/// styling on matched lines — matching the trade-off the Bulletins
+/// detail modal accepts.
+fn apply_search_highlights(lines: &mut [Line<'static>], search: &SearchState) {
+    for (line_idx, line) in lines.iter_mut().enumerate() {
+        let per_line: Vec<(usize, &MatchSpan)> = search
+            .matches
+            .iter()
+            .enumerate()
+            .filter(|(_, m)| m.line_idx == line_idx)
+            .collect();
+        if per_line.is_empty() {
+            continue;
+        }
+        // Reconstruct the line's plaintext to drive byte-offset slicing.
+        let plain: String = line.spans.iter().map(|s| s.content.as_ref()).collect();
+
+        let mut new_spans: Vec<Span<'static>> = Vec::new();
+        let mut cursor = 0usize;
+        for (global_idx, m) in per_line {
+            if m.byte_start > cursor {
+                new_spans.push(Span::raw(plain[cursor..m.byte_start].to_string()));
+            }
+            let hit = plain[m.byte_start..m.byte_end].to_string();
+            let mut style = Style::default().add_modifier(Modifier::UNDERLINED);
+            if search.current == Some(global_idx) {
+                style = style.add_modifier(Modifier::REVERSED | Modifier::BOLD);
+            }
+            new_spans.push(Span::styled(hit, style));
+            cursor = m.byte_end;
+        }
+        if cursor < plain.len() {
+            new_spans.push(Span::raw(plain[cursor..].to_string()));
+        }
+        if new_spans.is_empty() {
+            new_spans.push(Span::raw(""));
+        }
+        *line = Line::from(new_spans);
     }
 }
 
@@ -494,6 +544,44 @@ mod tests {
         // differences stays Pending
         term.draw(|f| render(f, f.area(), &modal)).unwrap();
         assert_snapshot!("vc_modal_footer_pending", format!("{}", term.backend()));
+    }
+
+    #[test]
+    fn search_highlights_matched_spans_in_diff_body() {
+        use crate::client::{ComponentDiffSection, RenderedDifference};
+        use crate::view::browser::state::VersionControlDifferenceLoad;
+        use crate::widget::search::{MatchSpan, SearchState, compute_matches};
+
+        let mut term = Terminal::new(test_backend(28)).unwrap();
+        let mut modal = modal_with_identity(VersionControlInformationDtoState::LocallyModified);
+        modal.differences = VersionControlDifferenceLoad::Loaded(vec![ComponentDiffSection {
+            component_id: "abcdabcd".into(),
+            component_name: "X".into(),
+            component_type: "Processor".into(),
+            differences: vec![
+                RenderedDifference {
+                    kind: "PROPERTY_CHANGED".into(),
+                    description: "Record Reader changed".into(),
+                    environmental: false,
+                },
+                RenderedDifference {
+                    kind: "PROPERTY_CHANGED".into(),
+                    description: "Record Writer changed".into(),
+                    environmental: false,
+                },
+            ],
+        }]);
+        let body = modal.searchable_body();
+        let matches: Vec<MatchSpan> = compute_matches(&body, "Record");
+        modal.search = Some(SearchState {
+            query: "Record".into(),
+            input_active: false,
+            committed: true,
+            matches,
+            current: Some(1),
+        });
+        term.draw(|f| render(f, f.area(), &modal)).unwrap();
+        assert_snapshot!("vc_modal_search_highlights", format!("{}", term.backend()));
     }
 
     #[test]
