@@ -120,6 +120,10 @@ pub async fn run(
                         | ClusterEndpoint::ClusterNodes
                         | ClusterEndpoint::TlsCerts
                 );
+                // `VersionControl` is intentionally NOT in this set — Task 13 wires it
+                // via a separate `affects_browser_version_control` flag that triggers
+                // the cheap `redraw_version_control` re-stamp (FlowIndex.version_state)
+                // rather than a full arena rebuild.
                 let affects_browser = matches!(
                     endpoint,
                     ClusterEndpoint::RootPgStatus
