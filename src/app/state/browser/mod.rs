@@ -1,6 +1,6 @@
 //! Browser tab key handler.
 
-use crossterm::event::KeyEvent;
+use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 
 use super::{AppState, Modal, UpdateResult, ViewKeyHandler};
 use crate::input::{FocusAction, ViewVerb};
@@ -608,12 +608,51 @@ impl ViewKeyHandler for BrowserHandler {
         None
     }
 
-    fn is_text_input_focused(_state: &AppState) -> bool {
-        false
+    fn is_text_input_focused(state: &AppState) -> bool {
+        // Version-control modal's search input.
+        state
+            .browser
+            .version_modal
+            .as_ref()
+            .and_then(|m| m.search.as_ref())
+            .map(|s| s.input_active)
+            .unwrap_or(false)
     }
 
-    fn handle_text_input(_state: &mut AppState, _key: KeyEvent) -> Option<UpdateResult> {
-        None
+    fn blocks_app_shortcuts(state: &AppState) -> bool {
+        // While the search bar is capturing keys, F1-F5 / `?` / `:` /
+        // Shift+F must NOT escape the modal — the user is mid-typing.
+        Self::is_text_input_focused(state)
+    }
+
+    fn handle_text_input(state: &mut AppState, key: KeyEvent) -> Option<UpdateResult> {
+        // Route raw key events to the version-control modal's search
+        // reducer methods (mirrors handle_content_modal_search_input
+        // for the Tracer modal).
+        let active = state
+            .browser
+            .version_modal
+            .as_ref()
+            .and_then(|m| m.search.as_ref())
+            .map(|s| s.input_active)
+            .unwrap_or(false);
+        if !active {
+            return None;
+        }
+        match key.code {
+            KeyCode::Esc => state.browser.version_modal_search_cancel(),
+            KeyCode::Enter => state.browser.version_modal_search_commit(),
+            KeyCode::Backspace => state.browser.version_modal_search_pop(),
+            KeyCode::Char(ch) if !key.modifiers.contains(KeyModifiers::CONTROL) => {
+                state.browser.version_modal_search_push(ch);
+            }
+            _ => return None,
+        }
+        Some(UpdateResult {
+            redraw: true,
+            intent: None,
+            tracer_followup: None,
+        })
     }
 }
 

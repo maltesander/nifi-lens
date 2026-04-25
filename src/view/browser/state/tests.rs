@@ -2340,3 +2340,36 @@ fn close_modal_clears_handle_field() {
     assert!(state.version_modal.is_none());
     assert!(state.version_modal_handle.is_none());
 }
+
+#[test]
+fn modal_search_push_appends_to_query_after_open() {
+    use crate::client::{ComponentDiffSection, FlowComparisonGrouped, RenderedDifference};
+    let mut state = BrowserState::new();
+    state.version_modal = Some(VersionControlModalState::pending(
+        "pg-1".into(),
+        "ingest".into(),
+        None,
+    ));
+    let grouped = FlowComparisonGrouped {
+        sections: vec![ComponentDiffSection {
+            component_id: "abcdabcd".into(),
+            component_name: "X".into(),
+            component_type: "Processor".into(),
+            differences: vec![RenderedDifference {
+                kind: "PROPERTY_CHANGED".into(),
+                description: "Record Reader changed".into(),
+                environmental: false,
+            }],
+        }],
+    };
+    state.apply_version_control_modal_loaded("pg-1".into(), None, grouped);
+
+    state.version_modal_search_open();
+    state.version_modal_search_push('R');
+    state.version_modal_search_push('e');
+    let modal = state.version_modal.as_ref().unwrap();
+    let search = modal.search.as_ref().unwrap();
+    assert_eq!(search.query, "Re");
+    assert!(search.input_active);
+    assert!(!search.committed);
+}
