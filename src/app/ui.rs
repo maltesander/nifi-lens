@@ -69,14 +69,19 @@ fn render_content(frame: &mut Frame, area: Rect, state: &mut AppState) {
             let cfg = &state.timestamp_cfg;
             bulletins::render(frame, area, &mut state.bulletins, browser, cfg);
         }
-        ViewId::Browser => browser::render(
-            frame,
-            area,
-            &state.browser,
-            &state.flow_index,
-            &state.bulletins.ring,
-            &state.cluster.snapshot,
-        ),
+        ViewId::Browser => {
+            browser::render(
+                frame,
+                area,
+                &state.browser,
+                &state.flow_index,
+                &state.bulletins.ring,
+                &state.cluster.snapshot,
+            );
+            if let Some(modal) = state.browser.version_modal.as_ref() {
+                crate::view::browser::render::version_control_modal::render(frame, area, modal);
+            }
+        }
         ViewId::Events => events::render::render(frame, area, &state.events, &state.timestamp_cfg),
         ViewId::Tracer => {
             tracer::render(frame, area, &state.tracer, &state.timestamp_cfg);

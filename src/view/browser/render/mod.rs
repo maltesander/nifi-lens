@@ -12,6 +12,7 @@ pub mod pg;
 pub mod port;
 pub mod processor;
 mod properties_modal;
+pub mod version_control_modal;
 pub use properties_modal::render_properties_modal;
 
 use std::time::SystemTime;
