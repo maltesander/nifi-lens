@@ -128,16 +128,80 @@ fn short_id(id: &str) -> String {
 }
 
 fn render_diff_body(frame: &mut Frame, area: Rect, modal: &VersionControlModalState) {
-    // Task 20: render Pending state only. Tasks 21/23 fill in the rest.
     match &modal.differences {
         VersionControlDifferenceLoad::Pending => {
             let line = Line::from(Span::styled("loading…", theme::muted()));
             frame.render_widget(Paragraph::new(line).alignment(Alignment::Center), area);
         }
-        _ => {
-            // Stub for Task 20 — Task 21 implements Loaded/Empty/Failed bodies.
-            let line = Line::from(Span::styled("(diff body — Task 21)", theme::muted()));
-            frame.render_widget(Paragraph::new(line).alignment(Alignment::Center), area);
+        VersionControlDifferenceLoad::Failed(err) => {
+            let lines = vec![
+                Line::from(Span::styled("failed to load:", theme::error())),
+                Line::from(Span::styled(err.clone(), theme::error())),
+                Line::from(""),
+                Line::from(Span::styled("press r to retry", theme::muted())),
+            ];
+            frame.render_widget(Paragraph::new(lines), area);
+        }
+        VersionControlDifferenceLoad::Loaded(sections) => {
+            // Filter out environmental diffs when show_environmental is false.
+            // Sections whose remaining diffs are zero are collapsed entirely.
+            let visible: Vec<(
+                &crate::client::ComponentDiffSection,
+                Vec<&crate::client::RenderedDifference>,
+            )> = sections
+                .iter()
+                .filter_map(|s| {
+                    let kept: Vec<_> = s
+                        .differences
+                        .iter()
+                        .filter(|d| modal.show_environmental || !d.environmental)
+                        .collect();
+                    if kept.is_empty() {
+                        None
+                    } else {
+                        Some((s, kept))
+                    }
+                })
+                .collect();
+            if visible.is_empty() {
+                let line = Line::from(Span::styled("no local modifications", theme::muted()));
+                frame.render_widget(Paragraph::new(line).alignment(Alignment::Center), area);
+                return;
+            }
+            // Build the body lines.
+            let mut all_lines: Vec<Line<'static>> = Vec::new();
+            for (section, diffs) in &visible {
+                // Section header line — accent-colored.
+                let header = format!(
+                    "─ {} · {} · {} ─",
+                    section.component_type,
+                    section.component_name,
+                    short_id(&section.component_id)
+                );
+                all_lines.push(Line::from(Span::styled(header, theme::accent())));
+                for d in diffs {
+                    let style = if d.environmental {
+                        theme::muted()
+                    } else {
+                        Style::default()
+                    };
+                    let line = Line::from(vec![
+                        Span::styled(format!("{:<18}", d.kind), theme::muted()),
+                        Span::raw(" "),
+                        Span::styled(d.description.clone(), style),
+                    ]);
+                    all_lines.push(line);
+                }
+                all_lines.push(Line::from(""));
+            }
+            // Apply scroll offset. `BidirectionalScrollState.vertical.offset`
+            // is a usize that the modal verbs already mutate via
+            // `VerticalScrollState::scroll_by` / `page_up` / `page_down`.
+            let scroll_y = modal.scroll.vertical.offset as u16;
+            let p = Paragraph::new(all_lines)
+                .scroll((scroll_y, 0))
+                .wrap(ratatui::widgets::Wrap { trim: false });
+            frame.render_widget(p, area);
         }
     }
 }
@@ -208,5 +272,130 @@ mod tests {
             "vc_modal_identity_sync_failure",
             format!("{}", term.backend())
         );
+    }
+
+    fn loaded_modal_with(
+        state: VersionControlInformationDtoState,
+        show_env: bool,
+        sections: Vec<crate::client::ComponentDiffSection>,
+    ) -> VersionControlModalState {
+        let mut m = modal_with_identity(state);
+        m.show_environmental = show_env;
+        m.differences = crate::view::browser::state::VersionControlDifferenceLoad::Loaded(sections);
+        m
+    }
+
+    #[test]
+    fn loaded_diff_body_renders_sections_by_component() {
+        use crate::client::{ComponentDiffSection, RenderedDifference};
+        let mut term = Terminal::new(test_backend(28)).unwrap();
+        let modal = loaded_modal_with(
+            VersionControlInformationDtoState::LocallyModifiedAndStale,
+            false,
+            vec![
+                ComponentDiffSection {
+                    component_id: "4f3aaaaa".into(),
+                    component_name: "UpdateRecord-enrich".into(),
+                    component_type: "Processor".into(),
+                    differences: vec![
+                        RenderedDifference {
+                            kind: "PROPERTY_CHANGED".into(),
+                            description: "\"Record Reader\"  'csv-reader' → 'json-reader'".into(),
+                            environmental: false,
+                        },
+                        RenderedDifference {
+                            kind: "BUNDLE_CHANGED".into(),
+                            description: "Bundle upgraded".into(),
+                            environmental: true,
+                        },
+                    ],
+                },
+                ComponentDiffSection {
+                    component_id: "71b2bbbb".into(),
+                    component_name: "csv→log".into(),
+                    component_type: "Connection".into(),
+                    differences: vec![RenderedDifference {
+                        kind: "COMPONENT_REMOVED".into(),
+                        description: "selected relationship 'retry'".into(),
+                        environmental: false,
+                    }],
+                },
+            ],
+        );
+        term.draw(|f| render(f, f.area(), &modal)).unwrap();
+        assert_snapshot!(
+            "vc_modal_loaded_two_components",
+            format!("{}", term.backend())
+        );
+    }
+
+    #[test]
+    fn environmental_hidden_collapses_section_when_only_env_diffs() {
+        use crate::client::{ComponentDiffSection, RenderedDifference};
+        let mut term = Terminal::new(test_backend(24)).unwrap();
+        let modal = loaded_modal_with(
+            VersionControlInformationDtoState::Stale,
+            false,
+            vec![ComponentDiffSection {
+                component_id: "4f3aaaaa".into(),
+                component_name: "UpdateRecord".into(),
+                component_type: "Processor".into(),
+                differences: vec![RenderedDifference {
+                    kind: "BUNDLE_CHANGED".into(),
+                    description: "Bundle upgraded".into(),
+                    environmental: true,
+                }],
+            }],
+        );
+        term.draw(|f| render(f, f.area(), &modal)).unwrap();
+        assert_snapshot!(
+            "vc_modal_env_hidden_collapses",
+            format!("{}", term.backend())
+        );
+    }
+
+    #[test]
+    fn environmental_shown_renders_dimmed_inline() {
+        use crate::client::{ComponentDiffSection, RenderedDifference};
+        let mut term = Terminal::new(test_backend(24)).unwrap();
+        let modal = loaded_modal_with(
+            VersionControlInformationDtoState::Stale,
+            true,
+            vec![ComponentDiffSection {
+                component_id: "4f3aaaaa".into(),
+                component_name: "UpdateRecord".into(),
+                component_type: "Processor".into(),
+                differences: vec![RenderedDifference {
+                    kind: "BUNDLE_CHANGED".into(),
+                    description: "Bundle upgraded".into(),
+                    environmental: true,
+                }],
+            }],
+        );
+        term.draw(|f| render(f, f.area(), &modal)).unwrap();
+        assert_snapshot!("vc_modal_env_shown_dimmed", format!("{}", term.backend()));
+    }
+
+    #[test]
+    fn loaded_empty_renders_no_local_modifications() {
+        let mut term = Terminal::new(test_backend(24)).unwrap();
+        let modal = loaded_modal_with(
+            VersionControlInformationDtoState::UpToDate,
+            false,
+            Vec::new(),
+        );
+        term.draw(|f| render(f, f.area(), &modal)).unwrap();
+        assert_snapshot!("vc_modal_loaded_empty", format!("{}", term.backend()));
+    }
+
+    #[test]
+    fn failed_renders_error_with_retry_hint() {
+        let mut term = Terminal::new(test_backend(24)).unwrap();
+        let mut modal = modal_with_identity(VersionControlInformationDtoState::SyncFailure);
+        modal.differences = crate::view::browser::state::VersionControlDifferenceLoad::Failed(
+            "registry unreachable: timeout".into(),
+        );
+        term.draw(|f| render(f, f.area(), &modal)).unwrap();
+        assert_snapshot!("vc_modal_failed", format!("{}", term.backend()));
     }
 }
