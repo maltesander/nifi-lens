@@ -93,9 +93,10 @@ State is mutated **only on the UI task**. No locks, no races.
 
 ### Central cluster store
 
-`src/cluster/ClusterStore` owns seven endpoint fetchers:
+`src/cluster/ClusterStore` owns ten endpoint fetchers:
 `root_pg_status`, `controller_services`, `controller_status`,
-`system_diagnostics`, `bulletins`, `connections_by_pg`, `about`. Each
+`system_diagnostics`, `bulletins`, `connections_by_pg`, `about`,
+`cluster_nodes`, `tls_certs`, `version_control`. Each
 runs as an independent `tokio::task::spawn_local` future on the main-
 thread `LocalSet`, pushes `AppEvent::ClusterUpdate` on success, and
 sleeps for its (adaptive, jittered) base cadence before the next tick.
@@ -105,9 +106,9 @@ Snapshot mutation is main-loop-only: the `ClusterUpdate` arm in
 `AppEvent::ClusterChanged(endpoint)`. Views observe the change by
 matching on the endpoint and invoking their `redraw_*` reducers.
 
-Three endpoints are **subscriber-gated** — they park when no view is
+Four endpoints are **subscriber-gated** — they park when no view is
 subscribed: `root_pg_status`, `controller_services`,
-`connections_by_pg`. `WorkerRegistry::ensure` calls
+`connections_by_pg`, `version_control`. `WorkerRegistry::ensure` calls
 `cluster.subscribe(endpoint, view)` on tab entry and
 `unsubscribe(endpoint, view)` on tab exit.
 
@@ -311,6 +312,46 @@ Severity thresholds (hardcoded for v0.1):
 - `7..30d` → yellow
 - `>=30d` → muted grey
 
+### Version control drift
+
+The `version_control` endpoint fetcher fans out
+`GET /versions/process-groups/{id}` per PG (using PG IDs cached in the
+`root_pg_status` snapshot) and stores a
+`BTreeMap<PgId, VersionControlSummary>` in the cluster snapshot.
+Subscriber-gated to Browser; default cadence `30s` via
+`[polling.cluster] version_control`.
+
+The Browser tree renders a trailing chip on PG rows whose state ≠
+`UP_TO_DATE`: `[STALE]` / `[MODIFIED]` / `[STALE+MOD]` (warning) and
+`[SYNC-ERR]` (error). Single-chip alphabet — combined-state PGs render
+`[STALE+MOD]`, not two chips.
+
+`FlowIndex` entries for ProcessGroup kinds carry an
+`Option<VersionControlInformationDtoState>` re-stamped on every
+`ClusterChanged(VersionControl)`. The fuzzy-find prefix parser is
+generalized to a `QueryFilter` enum supporting `:drift` /
+`:stale` / `:modified` / `:syncerr` aliases alongside the existing
+`:proc` / `:pg` / `:cs` / `:conn` / `:in` / `:out` kind aliases.
+
+Pressing `m` on a versioned PG row in Browser opens the **version
+control modal**: a full-screen overlay with an Identity panel
+(registry / bucket / branch / flow / version / state / state
+explanation) and a diff body sectioned by component. Diff data comes
+from a one-shot view-local worker that fans out
+`versions/process-groups/{id}` + `process-groups/{id}/local-modifications`
+in parallel. Identity is rendered immediately from the cluster snapshot;
+the diff body shows `loading…` until the worker completes.
+
+Modal-scoped chords use a separate `VersionControlModalVerb` enum that
+shadows outer-tab keys while the modal is open: `Esc` close, `↑`/`↓`/
+`PgUp`/`PgDn`/`Home`/`End` scroll, `/` search, `n`/`Shift+N` next/prev,
+`c` copy, `e` toggle environmental (hidden by default), `r` refresh.
+Search uses the shared `widget::search` primitives (same as Bulletins
+detail and Tracer content). Below 60×20 the modal degrades to a single
+muted line `terminal too small`.
+
+Read-only — no commit / revert / update-version actions in v0.1.
+
 ### Bulletins ring buffer
 
 The Bulletins tab holds a rolling in-memory window of recently-seen
@@ -448,13 +489,13 @@ Four scoped controller services back the chains:
 All periodic NiFi fetches are owned by `src/cluster/ClusterStore`.
 Base cadences come from `[polling.cluster]` in `config.toml` (keys:
 `root_pg_status`, `controller_services`, `controller_status`,
-`system_diagnostics`, `bulletins`, `cluster_nodes`,
-`connections_by_pg`, `about`, plus
+`system_diagnostics`, `bulletins`, `cluster_nodes`, `tls_certs`,
+`connections_by_pg`, `version_control`, `about`, plus
 the adaptive knobs `max_interval` and `jitter_percent`). The fetcher
 scales intervals adaptively (up to `max_interval`) based on measured
 latency, adds ±`jitter_percent/100` jitter, and parks expensive
 endpoints (`root_pg_status`, `controller_services`,
-`connections_by_pg`) when no view is subscribed.
+`connections_by_pg`, `version_control`) when no view is subscribed.
 
 Values use the humantime format (`"10s"`, `"750ms"`, `"2m"`). The
 loader emits a `tracing::warn!` (into the rotating log file) for
@@ -676,16 +717,22 @@ cargo run -- --config integration-tests/nifilens-config.toml \
 ```
 
 `--skip-if-seeded` makes re-runs of the seeder a no-op when the fixture
-marker PG (`nifilens-fixture-v3`) is already present, so iterating on
+marker PG (`nifilens-fixture-v6`) is already present, so iterating on
 `nifi-lens` itself doesn't reset the fixture state.
 
-The fixture is six process groups (`healthy-pipeline` with nested
+The fixture is eight process groups (`healthy-pipeline` with nested
 `ingest` / `enrich` children, `noisy-pipeline`, `backpressure-pipeline`,
-`invalid-pipeline`, `bulky-pipeline`, and `diff-pipeline`) plus four
-top-level controller services (`fixture-json-reader` ENABLED,
-`fixture-json-writer` ENABLED, `fixture-csv-reader` DISABLED,
-`fixture-broken-writer` INVALID/DISABLED), all under a top-level
-marker PG named `nifilens-fixture-v3`.
+`invalid-pipeline`, `bulky-pipeline`, `diff-pipeline`, `versioned-clean`,
+and `versioned-modified`) plus four top-level controller services
+(`fixture-json-reader` ENABLED, `fixture-json-writer` ENABLED,
+`fixture-csv-reader` DISABLED, `fixture-broken-writer` INVALID/DISABLED),
+all under a top-level marker PG named `nifilens-fixture-v6`.
+
+`versioned-clean` and `versioned-modified` are committed to a NiFi
+Registry bucket on seed; `versioned-modified` then has one property
+mutated locally so it shows `[MODIFIED]` (or `[STALE+MOD]` after a
+registry-side update) drift in the Browser tree, exercising the
+version-control modal coverage.
 
 `bulky-pipeline` produces ~1.5 MiB random-text flowfiles at a low rate,
 providing content for Tracer streaming / truncation testing.
