@@ -1213,6 +1213,14 @@ pub fn rebuild_arena_from_cluster(
         },
     );
     state.flow_index = Some(build_flow_index(&state.browser));
+    // The freshly-built FlowIndex starts with `version_state: None` on
+    // every entry. Re-stamp from the snapshot we already have so the
+    // fuzzy-find drift filters (`:drift` / `:modified` / `:stale` /
+    // `:syncerr`) keep returning matches across `RootPgStatus` ticks.
+    // Without this re-stamp the drift filters only matched in the brief
+    // window between a `VersionControl` tick and the next `RootPgStatus`
+    // arena rebuild.
+    redraw_version_control(state, snap);
 }
 
 /// Re-stamp `FlowIndexEntry.version_state` for ProcessGroup entries from
