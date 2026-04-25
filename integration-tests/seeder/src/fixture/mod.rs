@@ -9,6 +9,7 @@ pub mod noisy;
 pub mod payload;
 pub mod registry;
 pub mod services;
+pub mod versioned;
 
 use nifi_rust_client::dynamic::DynamicClient;
 
@@ -21,7 +22,7 @@ use crate::marker::FIXTURE_MARKER_NAME;
 /// nuke-and-repaved (or is fresh).
 pub async fn seed(client: &DynamicClient, detected_version: &semver::Version) -> Result<()> {
     tracing::info!("ensuring registry-client and fixture bucket");
-    registry::seed(client).await?;
+    let registry_ids = registry::seed(client).await?;
 
     tracing::info!("seeding controller services at root");
     let service_ids = services::seed(client, "root").await?;
@@ -50,6 +51,7 @@ pub async fn seed(client: &DynamicClient, detected_version: &semver::Version) ->
     invalid::seed(client, &marker_pg_id).await?;
     bulky::seed(client, &marker_pg_id).await?;
     diff::seed(client, &marker_pg_id, detected_version).await?;
+    versioned::seed(client, &marker_pg_id, &registry_ids, detected_version).await?;
 
     tracing::info!("fixture seed complete");
     Ok(())

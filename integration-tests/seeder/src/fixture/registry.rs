@@ -17,15 +17,26 @@ const REGISTRY_URL_FOR_SEEDER: &str = "http://localhost:18080";
 const REGISTRY_CLIENT_NAME: &str = "local-registry";
 const BUCKET_NAME: &str = "nifilens-fixture";
 
+/// Result of registry setup: caller uses these ids when committing
+/// flows to the registry.
+pub struct RegistryIds {
+    pub client_id: String,
+    pub bucket_id: String,
+}
+
 /// Idempotent registry setup: ensure a NiFi-side registry-client points at
 /// `http://nifi-registry:18080`, and a `nifilens-fixture` bucket exists in
-/// the registry.
-pub async fn seed(client: &DynamicClient) -> Result<()> {
+/// the registry. Returns the registry-client id and bucket id so callers
+/// can commit flows.
+pub async fn seed(client: &DynamicClient) -> Result<RegistryIds> {
     tracing::info!("ensuring NiFi-side registry-client");
-    let _client_id = ensure_registry_client(client).await?;
+    let client_id = ensure_registry_client(client).await?;
     tracing::info!("ensuring NiFi-Registry-side bucket");
-    let _bucket_id = ensure_bucket().await?;
-    Ok(())
+    let bucket_id = ensure_bucket().await?;
+    Ok(RegistryIds {
+        client_id,
+        bucket_id,
+    })
 }
 
 async fn ensure_registry_client(client: &DynamicClient) -> Result<String> {
