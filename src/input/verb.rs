@@ -40,6 +40,7 @@ pub enum BrowserVerb {
     Refresh,
     Copy,
     OpenProperties,
+    ShowVersionControl,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -167,6 +168,7 @@ impl Verb for BrowserVerb {
             Self::Refresh => Chord::simple(KeyCode::Char('r')),
             Self::Copy => Chord::simple(KeyCode::Char('c')),
             Self::OpenProperties => Chord::simple(KeyCode::Char('p')),
+            Self::ShowVersionControl => Chord::simple(KeyCode::Char('m')),
         }
     }
     fn label(self) -> &'static str {
@@ -174,6 +176,7 @@ impl Verb for BrowserVerb {
             Self::Refresh => "refresh flow",
             Self::Copy => "copy id / row value",
             Self::OpenProperties => "open properties",
+            Self::ShowVersionControl => "show version control",
         }
     }
     fn hint(self) -> &'static str {
@@ -181,6 +184,7 @@ impl Verb for BrowserVerb {
             Self::Refresh => "refresh",
             Self::Copy => "copy",
             Self::OpenProperties => "props",
+            Self::ShowVersionControl => "version",
         }
     }
     fn enabled(self, ctx: &HintContext<'_>) -> bool {
@@ -190,6 +194,10 @@ impl Verb for BrowserVerb {
                 ctx.state.current_tab == ViewId::Browser
                     && ctx.state.browser_selection_has_properties()
             }
+            Self::ShowVersionControl => {
+                ctx.state.current_tab == ViewId::Browser
+                    && ctx.state.browser_selection_is_versioned_pg()
+            }
             _ => true,
         }
     }
@@ -197,7 +205,12 @@ impl Verb for BrowserVerb {
         50
     }
     fn all() -> &'static [Self] {
-        &[Self::Refresh, Self::Copy, Self::OpenProperties]
+        &[
+            Self::Refresh,
+            Self::Copy,
+            Self::OpenProperties,
+            Self::ShowVersionControl,
+        ]
     }
 }
 
@@ -621,5 +634,28 @@ mod tests {
             "RaiseCap label {label:?} does not mention EXPANDED_RESULT_CAP={expanded_s}; \
              update the label or the constant",
         );
+    }
+
+    #[test]
+    fn show_version_control_chord_is_m() {
+        use crate::input::Verb;
+        let chord = BrowserVerb::ShowVersionControl.chord();
+        assert_eq!(chord, Chord::simple(KeyCode::Char('m')));
+    }
+
+    #[test]
+    fn show_version_control_label_and_hint() {
+        use crate::input::Verb;
+        assert_eq!(
+            BrowserVerb::ShowVersionControl.label(),
+            "show version control"
+        );
+        assert_eq!(BrowserVerb::ShowVersionControl.hint(), "version");
+    }
+
+    #[test]
+    fn show_version_control_in_all() {
+        use crate::input::Verb;
+        assert!(BrowserVerb::all().contains(&BrowserVerb::ShowVersionControl));
     }
 }

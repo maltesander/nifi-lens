@@ -81,6 +81,10 @@ impl ViewKeyHandler for BrowserHandler {
                     return Some(UpdateResult::default());
                 }
             }
+            BrowserVerb::ShowVersionControl => {
+                // Modal dispatch implemented in Task 19.
+                return Some(UpdateResult::default());
+            }
         }
         Some(UpdateResult {
             redraw: true,
