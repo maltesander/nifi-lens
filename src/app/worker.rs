@@ -158,13 +158,14 @@ impl WorkerRegistry {
             }
             ViewId::Browser => {
                 browser.detail_tx = None;
-                // The three cluster endpoints that feed the Browser
+                // The four cluster endpoints that feed the Browser
                 // arena are all released here — while Browser is
                 // inactive the store gates the connections fan-out so
                 // inactive tabs don't drive per-PG requests.
                 cluster.unsubscribe(ClusterEndpoint::RootPgStatus, ViewId::Browser);
                 cluster.unsubscribe(ClusterEndpoint::ControllerServices, ViewId::Browser);
                 cluster.unsubscribe(ClusterEndpoint::ConnectionsByPg, ViewId::Browser);
+                cluster.unsubscribe(ClusterEndpoint::VersionControl, ViewId::Browser);
             }
             ViewId::Events | ViewId::Tracer => {}
         }
@@ -204,10 +205,12 @@ impl WorkerRegistry {
                 // Subscribe to every endpoint it reads — RootPgStatus
                 // provides the PG/processor/connection/port skeleton,
                 // ControllerServices attaches CS rows, ConnectionsByPg
-                // backfills endpoint ids.
+                // backfills endpoint ids, VersionControl populates
+                // per-PG drift state for tree-row chips and the modal.
                 cluster.subscribe(ClusterEndpoint::RootPgStatus, ViewId::Browser);
                 cluster.subscribe(ClusterEndpoint::ControllerServices, ViewId::Browser);
                 cluster.subscribe(ClusterEndpoint::ConnectionsByPg, ViewId::Browser);
+                cluster.subscribe(ClusterEndpoint::VersionControl, ViewId::Browser);
             }
             ViewId::Events | ViewId::Tracer => {}
         }
@@ -358,6 +361,7 @@ mod tests {
                 ClusterEndpoint::RootPgStatus,
                 ClusterEndpoint::ControllerServices,
                 ClusterEndpoint::ConnectionsByPg,
+                ClusterEndpoint::VersionControl,
             ],
         )
     }
@@ -397,17 +401,17 @@ mod tests {
         );
         assert_eq!(registry.active, Some(ViewId::Events));
 
-        // Events → Browser: Browser subscribes to its three endpoints.
+        // Events → Browser: Browser subscribes to its four endpoints.
         ensure_subscriptions_only(&mut registry, ViewId::Browser, &mut browser, &mut store);
         assert_eq!(
             browser_subscriber_total(&store),
-            3,
-            "Browser entry should add three subscribers"
+            4,
+            "Browser entry should add four subscribers"
         );
         assert_eq!(overview_subscriber_total(&store), 0);
 
         // Browser → Tracer (handle-less transition out of a handle-
-        // owning view). Browser's three subscribers must be released.
+        // owning view). Browser's four subscribers must be released.
         ensure_subscriptions_only(&mut registry, ViewId::Tracer, &mut browser, &mut store);
         assert_eq!(
             browser_subscriber_total(&store),
@@ -494,5 +498,30 @@ mod tests {
             &mut fresh_store,
         );
         assert_eq!(overview_subscriber_total(&fresh_store), 8);
+    }
+
+    #[test]
+    fn browser_entry_subscribes_to_version_control() {
+        let mut store = ClusterStore::new(
+            ClusterPollingConfig::default(),
+            100,
+            "https://nifi.test:8443".into(),
+        );
+        let mut browser = BrowserState::default();
+        let mut registry = WorkerRegistry::new();
+
+        ensure_subscriptions_only(&mut registry, ViewId::Browser, &mut browser, &mut store);
+        assert_eq!(
+            store.subscribers.count(ClusterEndpoint::VersionControl),
+            1,
+            "Browser entry must subscribe to VersionControl"
+        );
+
+        ensure_subscriptions_only(&mut registry, ViewId::Overview, &mut browser, &mut store);
+        assert_eq!(
+            store.subscribers.count(ClusterEndpoint::VersionControl),
+            0,
+            "Browser → Overview must release the VersionControl subscription"
+        );
     }
 }
