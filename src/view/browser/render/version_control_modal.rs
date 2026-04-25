@@ -267,6 +267,23 @@ fn render_footer(frame: &mut Frame, area: Rect, modal: &VersionControlModalState
 }
 
 fn render_footer_status(frame: &mut Frame, area: Rect, modal: &VersionControlModalState) {
+    // While the user is actively typing into the search bar, show
+    // `/ {query}_` instead of the diff-count status.
+    if let Some(s) = modal.search.as_ref()
+        && s.input_active
+    {
+        let line = Line::from(vec![
+            Span::styled("/ ".to_string(), theme::accent()),
+            Span::raw(s.query.clone()),
+            Span::styled(
+                "_".to_string(),
+                ratatui::style::Style::default().add_modifier(ratatui::style::Modifier::REVERSED),
+            ),
+        ]);
+        frame.render_widget(Paragraph::new(line), area);
+        return;
+    }
+
     let env_label = if modal.show_environmental {
         "env shown"
     } else {
@@ -582,6 +599,25 @@ mod tests {
         });
         term.draw(|f| render(f, f.area(), &modal)).unwrap();
         assert_snapshot!("vc_modal_search_highlights", format!("{}", term.backend()));
+    }
+
+    #[test]
+    fn footer_shows_search_input_strip_when_active() {
+        use crate::widget::search::SearchState;
+        let mut term = Terminal::new(test_backend(24)).unwrap();
+        let mut modal = modal_with_identity(VersionControlInformationDtoState::Stale);
+        modal.search = Some(SearchState {
+            query: "Record".into(),
+            input_active: true,
+            committed: false,
+            matches: Vec::new(),
+            current: None,
+        });
+        term.draw(|f| render(f, f.area(), &modal)).unwrap();
+        assert_snapshot!(
+            "vc_modal_footer_search_input_strip",
+            format!("{}", term.backend())
+        );
     }
 
     #[test]
