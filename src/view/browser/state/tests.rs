@@ -2096,3 +2096,228 @@ fn redraw_version_control_no_op_when_flow_index_absent() {
     crate::view::browser::state::redraw_version_control(&mut s, &snap);
     assert!(s.flow_index.is_none());
 }
+
+fn seed_one_pg(state: &mut BrowserState, id: &str, name: &str) {
+    state.nodes.push(crate::view::browser::state::TreeNode {
+        parent: None,
+        children: vec![],
+        kind: crate::client::NodeKind::ProcessGroup,
+        id: id.into(),
+        group_id: String::new(),
+        name: name.into(),
+        status_summary: crate::client::NodeStatusSummary::ProcessGroup {
+            running: 0,
+            stopped: 0,
+            invalid: 0,
+            disabled: 0,
+        },
+    });
+    state.visible.push(0);
+    state.selected = 0;
+}
+
+fn snapshot_with_versioned_pg(
+    pg_id: &str,
+    state: nifi_rust_client::dynamic::types::VersionControlInformationDtoState,
+) -> crate::cluster::snapshot::ClusterSnapshot {
+    use crate::cluster::snapshot::{
+        ClusterSnapshot, EndpointState, FetchMeta, VersionControlMap, VersionControlSummary,
+    };
+    let mut map = VersionControlMap::default();
+    map.by_pg_id.insert(
+        pg_id.into(),
+        VersionControlSummary {
+            state,
+            registry_name: Some("ops".into()),
+            bucket_name: Some("flows".into()),
+            branch: None,
+            flow_id: Some("f-1".into()),
+            flow_name: Some("ingest".into()),
+            version: Some("3".into()),
+            state_explanation: None,
+        },
+    );
+    ClusterSnapshot {
+        version_control: EndpointState::Ready {
+            data: map,
+            meta: FetchMeta {
+                fetched_at: std::time::Instant::now(),
+                fetch_duration: std::time::Duration::from_millis(0),
+                next_interval: std::time::Duration::from_secs(30),
+            },
+        },
+        ..ClusterSnapshot::default()
+    }
+}
+
+#[test]
+fn open_version_control_modal_captures_pg_id_and_identity() {
+    use nifi_rust_client::dynamic::types::VersionControlInformationDtoState;
+
+    let mut state = BrowserState::new();
+    seed_one_pg(&mut state, "pg-1", "ingest");
+    let snap = snapshot_with_versioned_pg("pg-1", VersionControlInformationDtoState::Stale);
+
+    state.open_version_control_modal(&snap);
+
+    let modal = state.version_modal.as_ref().unwrap();
+    assert_eq!(modal.pg_id, "pg-1");
+    assert_eq!(modal.pg_name, "ingest");
+    assert!(matches!(
+        modal.differences,
+        crate::view::browser::state::VersionControlDifferenceLoad::Pending
+    ));
+    assert!(!modal.show_environmental);
+    assert!(modal.identity.is_some());
+    assert_eq!(
+        modal.identity.as_ref().unwrap().state,
+        VersionControlInformationDtoState::Stale
+    );
+}
+
+#[test]
+fn open_version_control_modal_no_op_on_unversioned_pg() {
+    use crate::cluster::snapshot::ClusterSnapshot;
+    let mut state = BrowserState::new();
+    seed_one_pg(&mut state, "pg-1", "ingest");
+    state.open_version_control_modal(&ClusterSnapshot::default());
+    assert!(state.version_modal.is_none());
+}
+
+#[test]
+fn close_version_control_modal_clears_state() {
+    use crate::view::browser::state::VersionControlModalState;
+    let mut state = BrowserState::new();
+    state.version_modal = Some(VersionControlModalState::pending(
+        "pg-1".into(),
+        "ingest".into(),
+        None,
+    ));
+    state.close_version_control_modal();
+    assert!(state.version_modal.is_none());
+}
+
+#[test]
+fn modal_loaded_event_with_mismatched_pg_id_is_ignored() {
+    use crate::client::FlowComparisonGrouped;
+    use crate::view::browser::state::{VersionControlDifferenceLoad, VersionControlModalState};
+    let mut state = BrowserState::new();
+    state.version_modal = Some(VersionControlModalState::pending(
+        "pg-1".into(),
+        "ingest".into(),
+        None,
+    ));
+    state.apply_version_control_modal_loaded(
+        "pg-OTHER".into(),
+        None,
+        FlowComparisonGrouped::default(),
+    );
+    assert!(matches!(
+        state.version_modal.as_ref().unwrap().differences,
+        VersionControlDifferenceLoad::Pending
+    ));
+}
+
+#[test]
+fn modal_loaded_event_with_matching_pg_id_populates_diffs() {
+    use crate::client::{ComponentDiffSection, FlowComparisonGrouped, RenderedDifference};
+    use crate::view::browser::state::{VersionControlDifferenceLoad, VersionControlModalState};
+    let mut state = BrowserState::new();
+    state.version_modal = Some(VersionControlModalState::pending(
+        "pg-1".into(),
+        "ingest".into(),
+        None,
+    ));
+    let grouped = FlowComparisonGrouped {
+        sections: vec![ComponentDiffSection {
+            component_id: "proc-a".into(),
+            component_name: "UpdateRecord".into(),
+            component_type: "Processor".into(),
+            differences: vec![RenderedDifference {
+                kind: "PROPERTY_CHANGED".into(),
+                description: "Record Reader changed".into(),
+                environmental: false,
+            }],
+        }],
+    };
+    state.apply_version_control_modal_loaded("pg-1".into(), None, grouped);
+    let modal = state.version_modal.as_ref().unwrap();
+    match &modal.differences {
+        VersionControlDifferenceLoad::Loaded(sections) => {
+            assert_eq!(sections.len(), 1);
+            assert_eq!(sections[0].differences.len(), 1);
+        }
+        other => panic!("expected Loaded, got {:?}", other),
+    }
+}
+
+#[test]
+fn toggle_environmental_flips_flag() {
+    use crate::view::browser::state::VersionControlModalState;
+    let mut state = BrowserState::new();
+    state.version_modal = Some(VersionControlModalState::pending(
+        "pg-1".into(),
+        "ingest".into(),
+        None,
+    ));
+    state.toggle_environmental();
+    assert!(state.version_modal.as_ref().unwrap().show_environmental);
+    state.toggle_environmental();
+    assert!(!state.version_modal.as_ref().unwrap().show_environmental);
+}
+
+#[test]
+fn modal_search_open_initializes_state() {
+    use crate::view::browser::state::VersionControlModalState;
+    let mut state = BrowserState::new();
+    state.version_modal = Some(VersionControlModalState::pending(
+        "pg-1".into(),
+        "ingest".into(),
+        None,
+    ));
+    state.version_modal_search_open();
+    let modal = state.version_modal.as_ref().unwrap();
+    let search = modal.search.as_ref().unwrap();
+    assert!(search.input_active);
+    assert!(!search.committed);
+    assert!(search.query.is_empty());
+}
+
+#[test]
+fn modal_search_commit_with_query_advances_state() {
+    use crate::client::{ComponentDiffSection, FlowComparisonGrouped, RenderedDifference};
+    use crate::view::browser::state::VersionControlModalState;
+
+    let mut state = BrowserState::new();
+    state.version_modal = Some(VersionControlModalState::pending(
+        "pg-1".into(),
+        "ingest".into(),
+        None,
+    ));
+    // Load some content so search has a body to match against.
+    let grouped = FlowComparisonGrouped {
+        sections: vec![ComponentDiffSection {
+            component_id: "proc-a".into(),
+            component_name: "UpdateRecord".into(),
+            component_type: "Processor".into(),
+            differences: vec![RenderedDifference {
+                kind: "PROPERTY_CHANGED".into(),
+                description: "Record Reader changed".into(),
+                environmental: false,
+            }],
+        }],
+    };
+    state.apply_version_control_modal_loaded("pg-1".into(), None, grouped);
+
+    state.version_modal_search_open();
+    state.version_modal_search_push('R');
+    state.version_modal_search_push('e');
+    state.version_modal_search_commit();
+
+    let modal = state.version_modal.as_ref().unwrap();
+    let search = modal.search.as_ref().unwrap();
+    assert!(!search.input_active);
+    assert!(search.committed);
+    assert_eq!(search.query, "Re");
+    assert!(!search.matches.is_empty());
+}

@@ -17,6 +17,9 @@ use crate::client::browser::{
 };
 use crate::client::status::{ControllerServiceState, ProcessorStatus};
 
+pub mod version_control_modal;
+pub use version_control_modal::{VersionControlDifferenceLoad, VersionControlModalState};
+
 /// Rolled-up health color for a Process Group's tree marker glyph.
 /// Red beats Yellow beats Green: any descendant processor with
 /// `INVALID` run-state promotes to Red; else any with `STOPPED`
@@ -175,6 +178,11 @@ pub struct BrowserState {
     /// Always reset to `Tree` by `reset_detail_focus`, called from every
     /// selection-mutating method on `BrowserState`.
     pub detail_focus: DetailFocus,
+    /// Open version-control modal state, if any. `None` while the
+    /// modal is closed. Captured at open time from the cluster
+    /// snapshot for identity, populated asynchronously with diff data
+    /// by the view-local worker (Task 19).
+    pub version_modal: Option<VersionControlModalState>,
 }
 
 /// One segment in the breadcrumb path.
@@ -275,6 +283,209 @@ impl BrowserState {
             .version_control
             .latest()
             .and_then(|m| m.by_pg_id.get(pg_id))
+    }
+
+    /// Open the version-control modal on the currently-selected node.
+    /// No-op when the selection is not a PG, when no PG is selected,
+    /// or when the PG is not under version control.
+    pub fn open_version_control_modal(
+        &mut self,
+        snapshot: &crate::cluster::snapshot::ClusterSnapshot,
+    ) {
+        let Some(&arena) = self.visible.get(self.selected) else {
+            return;
+        };
+        let Some(node) = self.nodes.get(arena) else {
+            return;
+        };
+        if !matches!(node.kind, crate::client::NodeKind::ProcessGroup) {
+            return;
+        }
+        let identity = Self::version_control_for(snapshot, &node.id).cloned();
+        if identity.is_none() {
+            // Defensive: keymap should have grayed out the verb. If we got
+            // here, the cluster snapshot raced ahead of the keypress.
+            return;
+        }
+        self.version_modal = Some(VersionControlModalState::pending(
+            node.id.clone(),
+            node.name.clone(),
+            identity,
+        ));
+    }
+
+    /// Close the version-control modal. Idempotent.
+    pub fn close_version_control_modal(&mut self) {
+        self.version_modal = None;
+    }
+
+    /// Apply a successful diff fetch to the open modal. Mismatched
+    /// `pg_id` is ignored (the user navigated since dispatch).
+    pub fn apply_version_control_modal_loaded(
+        &mut self,
+        pg_id: String,
+        identity: Option<crate::cluster::snapshot::VersionControlSummary>,
+        differences: crate::client::FlowComparisonGrouped,
+    ) {
+        let Some(modal) = self.version_modal.as_mut() else {
+            return;
+        };
+        if modal.pg_id != pg_id {
+            return;
+        }
+        if let Some(id) = identity {
+            modal.identity = Some(id);
+        }
+        modal.differences = VersionControlDifferenceLoad::Loaded(differences.sections);
+        // Drop any in-flight search; it indexed the previous body.
+        modal.search = None;
+    }
+
+    /// Apply a failed diff fetch to the open modal. Mismatched
+    /// `pg_id` is ignored.
+    pub fn apply_version_control_modal_failed(&mut self, pg_id: String, err: String) {
+        let Some(modal) = self.version_modal.as_mut() else {
+            return;
+        };
+        if modal.pg_id != pg_id {
+            return;
+        }
+        modal.differences = VersionControlDifferenceLoad::Failed(err);
+    }
+
+    /// Toggle the `show_environmental` flag on the open modal.
+    /// Invalidates any active search because the body composition
+    /// depends on the flag.
+    pub fn toggle_environmental(&mut self) {
+        if let Some(modal) = self.version_modal.as_mut() {
+            modal.show_environmental = !modal.show_environmental;
+            // Search body changes on toggle; invalidate the search index.
+            modal.search = None;
+        }
+    }
+
+    // Search reducer methods — mirror BulletinsState::modal_search_*
+    // (src/view/bulletins/state/mod.rs:790-905). Each operates against
+    // version_modal.search and the body returned by
+    // VersionControlModalState::searchable_body.
+
+    /// Open a fresh live-input search session on the modal.
+    pub fn version_modal_search_open(&mut self) {
+        let Some(modal) = self.version_modal.as_mut() else {
+            return;
+        };
+        modal.search = Some(crate::widget::search::SearchState {
+            query: String::new(),
+            input_active: true,
+            committed: false,
+            matches: Vec::new(),
+            current: None,
+        });
+    }
+
+    /// Append a character to the live search query and recompute matches.
+    /// No-op if no modal or no active search input.
+    pub fn version_modal_search_push(&mut self, ch: char) {
+        let Some(modal) = self.version_modal.as_mut() else {
+            return;
+        };
+        let body = modal.searchable_body();
+        let Some(search) = modal.search.as_mut() else {
+            return;
+        };
+        if !search.input_active {
+            return;
+        }
+        search.query.push(ch);
+        search.matches = crate::widget::search::compute_matches(&body, &search.query);
+        search.current = if search.matches.is_empty() {
+            None
+        } else {
+            Some(0)
+        };
+    }
+
+    /// Remove the last character from the live search query and recompute matches.
+    /// No-op if no modal or no active search input.
+    pub fn version_modal_search_pop(&mut self) {
+        let Some(modal) = self.version_modal.as_mut() else {
+            return;
+        };
+        let body = modal.searchable_body();
+        let Some(search) = modal.search.as_mut() else {
+            return;
+        };
+        if !search.input_active {
+            return;
+        }
+        search.query.pop();
+        search.matches = crate::widget::search::compute_matches(&body, &search.query);
+        search.current = if search.matches.is_empty() {
+            None
+        } else {
+            Some(0)
+        };
+    }
+
+    /// Commit the current query. If the query is empty, closes search
+    /// (sets `modal.search = None`). Otherwise flips `input_active` to
+    /// false and `committed` to true.
+    pub fn version_modal_search_commit(&mut self) {
+        let Some(modal) = self.version_modal.as_mut() else {
+            return;
+        };
+        let Some(search) = modal.search.as_mut() else {
+            return;
+        };
+        if search.query.is_empty() {
+            modal.search = None;
+            return;
+        }
+        search.input_active = false;
+        search.committed = true;
+    }
+
+    /// Cancel search and clear all search state from the modal.
+    pub fn version_modal_search_cancel(&mut self) {
+        if let Some(modal) = self.version_modal.as_mut() {
+            modal.search = None;
+        }
+    }
+
+    /// Advance to the next match, wrapping around. No-op unless search
+    /// is committed and has at least one match.
+    pub fn version_modal_search_cycle_next(&mut self) {
+        let Some(modal) = self.version_modal.as_mut() else {
+            return;
+        };
+        let Some(search) = modal.search.as_mut() else {
+            return;
+        };
+        if !search.committed || search.matches.is_empty() {
+            return;
+        }
+        let cur = search.current.unwrap_or(0);
+        search.current = Some((cur + 1) % search.matches.len());
+    }
+
+    /// Move to the previous match, wrapping around. No-op unless search
+    /// is committed and has at least one match.
+    pub fn version_modal_search_cycle_prev(&mut self) {
+        let Some(modal) = self.version_modal.as_mut() else {
+            return;
+        };
+        let Some(search) = modal.search.as_mut() else {
+            return;
+        };
+        if !search.committed || search.matches.is_empty() {
+            return;
+        }
+        let cur = search.current.unwrap_or(0);
+        search.current = Some(if cur == 0 {
+            search.matches.len() - 1
+        } else {
+            cur - 1
+        });
     }
 
     /// Called from every selection-changing entry point. Resets detail
