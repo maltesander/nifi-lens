@@ -594,4 +594,24 @@ mod tests {
         term.draw(|f| render(f, f.area(), &modal)).unwrap();
         assert_snapshot!("vc_modal_footer_failed", format!("{}", term.backend()));
     }
+
+    #[test]
+    fn below_minimum_size_shows_terminal_too_small() {
+        use ratatui::backend::TestBackend;
+        let backend = TestBackend::new(40, 15);
+        let mut term = Terminal::new(backend).unwrap();
+        let modal = modal_with_identity(VersionControlInformationDtoState::Stale);
+        term.draw(|f| render(f, f.area(), &modal)).unwrap();
+        assert_snapshot!("vc_modal_below_minimum_size", format!("{}", term.backend()));
+    }
+
+    #[test]
+    fn narrow_terminal_60x20_renders_without_panic() {
+        use ratatui::backend::TestBackend;
+        let backend = TestBackend::new(60, 20);
+        let mut term = Terminal::new(backend).unwrap();
+        let modal = modal_with_identity(VersionControlInformationDtoState::Stale);
+        term.draw(|f| render(f, f.area(), &modal)).unwrap();
+        assert_snapshot!("vc_modal_narrow_60x20", format!("{}", term.backend()));
+    }
 }
