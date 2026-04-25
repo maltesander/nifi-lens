@@ -7,6 +7,7 @@ pub mod healthy;
 pub mod invalid;
 pub mod noisy;
 pub mod payload;
+pub mod registry;
 pub mod services;
 
 use nifi_rust_client::dynamic::DynamicClient;
@@ -19,6 +20,9 @@ use crate::marker::FIXTURE_MARKER_NAME;
 /// with the full fixture topology. Assumes the cluster has already been
 /// nuke-and-repaved (or is fresh).
 pub async fn seed(client: &DynamicClient, detected_version: &semver::Version) -> Result<()> {
+    tracing::info!("ensuring registry-client and fixture bucket");
+    registry::seed(client).await?;
+
     tracing::info!("seeding controller services at root");
     let service_ids = services::seed(client, "root").await?;
 
