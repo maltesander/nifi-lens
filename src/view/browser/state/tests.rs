@@ -2233,6 +2233,7 @@ fn modal_loaded_event_with_matching_pg_id_populates_diffs() {
             component_id: "proc-a".into(),
             component_name: "UpdateRecord".into(),
             component_type: "Processor".into(),
+            display_label: "UpdateRecord".into(),
             differences: vec![RenderedDifference {
                 kind: "PROPERTY_CHANGED".into(),
                 description: "Record Reader changed".into(),
@@ -2300,6 +2301,7 @@ fn modal_search_commit_with_query_advances_state() {
             component_id: "proc-a".into(),
             component_name: "UpdateRecord".into(),
             component_type: "Processor".into(),
+            display_label: "UpdateRecord".into(),
             differences: vec![RenderedDifference {
                 kind: "PROPERTY_CHANGED".into(),
                 description: "Record Reader changed".into(),
@@ -2355,6 +2357,7 @@ fn modal_search_push_appends_to_query_after_open() {
             component_id: "abcdabcd".into(),
             component_name: "X".into(),
             component_type: "Processor".into(),
+            display_label: "X".into(),
             differences: vec![RenderedDifference {
                 kind: "PROPERTY_CHANGED".into(),
                 description: "Record Reader changed".into(),
@@ -2372,4 +2375,134 @@ fn modal_search_push_appends_to_query_after_open() {
     assert_eq!(search.query, "Re");
     assert!(search.input_active);
     assert!(!search.committed);
+}
+
+#[test]
+fn modal_loaded_resolves_connection_label_from_arena() {
+    use crate::client::{
+        ComponentDiffSection, FlowComparisonGrouped, NodeKind, NodeStatusSummary,
+        RenderedDifference,
+    };
+    use crate::view::browser::state::{
+        TreeNode, VersionControlDifferenceLoad, VersionControlModalState,
+    };
+
+    let mut state = BrowserState::new();
+    // Seed an arena with a connection whose source/destination names
+    // we want resolved.
+    state.nodes.push(TreeNode {
+        parent: None,
+        children: vec![],
+        kind: NodeKind::Connection,
+        id: "conn-xyz".into(),
+        group_id: "pg-1".into(),
+        name: String::new(),
+        status_summary: NodeStatusSummary::Connection {
+            fill_percent: 0,
+            flow_files_queued: 0,
+            queued_display: String::new(),
+            source_id: "src-uuid".into(),
+            source_name: "GenerateFlowFile".into(),
+            destination_id: "dst-uuid".into(),
+            destination_name: "LogAttribute".into(),
+        },
+    });
+
+    state.version_modal = Some(VersionControlModalState::pending(
+        "pg-1".into(),
+        "ingest".into(),
+        None,
+    ));
+    let grouped = FlowComparisonGrouped {
+        sections: vec![ComponentDiffSection {
+            component_id: "conn-xyz".into(),
+            component_name: String::new(),
+            component_type: "Connection".into(),
+            display_label: String::new(),
+            differences: vec![RenderedDifference {
+                kind: "COMPONENT_REMOVED".into(),
+                description: "Connection was removed".into(),
+                environmental: false,
+            }],
+        }],
+    };
+    state.apply_version_control_modal_loaded("pg-1".into(), None, grouped);
+
+    let modal = state.version_modal.as_ref().unwrap();
+    match &modal.differences {
+        VersionControlDifferenceLoad::Loaded(sections) => {
+            assert_eq!(sections[0].display_label, "GenerateFlowFile → LogAttribute");
+        }
+        other => panic!("expected Loaded, got {other:?}"),
+    }
+}
+
+#[test]
+fn modal_loaded_falls_back_for_unresolvable_connection() {
+    use crate::client::{ComponentDiffSection, FlowComparisonGrouped, RenderedDifference};
+    use crate::view::browser::state::{VersionControlDifferenceLoad, VersionControlModalState};
+
+    let mut state = BrowserState::new();
+    state.version_modal = Some(VersionControlModalState::pending(
+        "pg-1".into(),
+        "ingest".into(),
+        None,
+    ));
+    let grouped = FlowComparisonGrouped {
+        sections: vec![ComponentDiffSection {
+            component_id: "missing-conn".into(),
+            component_name: String::new(),
+            component_type: "Connection".into(),
+            display_label: String::new(),
+            differences: vec![RenderedDifference {
+                kind: "COMPONENT_REMOVED".into(),
+                description: "Connection was removed".into(),
+                environmental: false,
+            }],
+        }],
+    };
+    state.apply_version_control_modal_loaded("pg-1".into(), None, grouped);
+
+    let modal = state.version_modal.as_ref().unwrap();
+    match &modal.differences {
+        VersionControlDifferenceLoad::Loaded(sections) => {
+            assert_eq!(sections[0].display_label, "(unnamed connection)");
+        }
+        other => panic!("expected Loaded, got {other:?}"),
+    }
+}
+
+#[test]
+fn modal_loaded_falls_back_for_unnamed_processor() {
+    use crate::client::{ComponentDiffSection, FlowComparisonGrouped, RenderedDifference};
+    use crate::view::browser::state::{VersionControlDifferenceLoad, VersionControlModalState};
+
+    let mut state = BrowserState::new();
+    state.version_modal = Some(VersionControlModalState::pending(
+        "pg-1".into(),
+        "ingest".into(),
+        None,
+    ));
+    let grouped = FlowComparisonGrouped {
+        sections: vec![ComponentDiffSection {
+            component_id: "proc-z".into(),
+            component_name: String::new(),
+            component_type: "Processor".into(),
+            display_label: String::new(),
+            differences: vec![RenderedDifference {
+                kind: "COMPONENT_ADDED".into(),
+                description: "Processor was added".into(),
+                environmental: false,
+            }],
+        }],
+    };
+    state.apply_version_control_modal_loaded("pg-1".into(), None, grouped);
+
+    let modal = state.version_modal.as_ref().unwrap();
+    match &modal.differences {
+        VersionControlDifferenceLoad::Loaded(sections) => {
+            assert_eq!(sections[0].display_label, "(unnamed)");
+        }
+        other => panic!("expected Loaded, got {other:?}"),
+    }
 }

@@ -504,6 +504,7 @@ async fn local_modifications_groups_by_component() {
     assert_eq!(grouped.sections.len(), 1);
     let section = &grouped.sections[0];
     assert_eq!(section.component_id, "proc-a");
+    assert_eq!(section.display_label, "UpdateRecord");
     assert_eq!(section.component_type, "Processor");
     assert_eq!(section.differences.len(), 2);
     assert_eq!(section.differences[0].kind, "PROPERTY_CHANGED");

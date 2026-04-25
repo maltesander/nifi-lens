@@ -74,7 +74,7 @@ impl VersionControlModalState {
                 out.push_str(&format!(
                     "─ {} · {} · {} ─\n",
                     section.component_type,
-                    section.component_name,
+                    section.display_label,
                     short_id(&section.component_id)
                 ));
                 for d in diffs {
@@ -87,13 +87,15 @@ impl VersionControlModalState {
     }
 }
 
-/// Truncate an id to first 4 hex chars + `…`. Shared between this
-/// state-side searchable body and the render-side header so the
-/// search-match byte offsets line up.
+/// Truncate an id to first 8 hex chars + `…`. 8 chars is enough to
+/// disambiguate within a single PG and matches git's short-hash
+/// convention; the trailing `…` retained as a truncation indicator.
+/// Shared between this state-side searchable body and the render-side
+/// header so the search-match byte offsets line up.
 pub(crate) fn short_id(id: &str) -> String {
-    if id.len() <= 4 {
+    if id.len() <= 8 {
         id.to_string()
     } else {
-        format!("{}…", &id[..4])
+        format!("{}…", &id[..8])
     }
 }

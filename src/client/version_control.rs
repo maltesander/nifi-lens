@@ -21,6 +21,14 @@ pub struct ComponentDiffSection {
     pub component_id: String,
     pub component_name: String,
     pub component_type: String,
+    /// User-facing label for the section header. For Processors / CS /
+    /// Ports this is `component_name` (or `"(unnamed)"` when the wire
+    /// payload has no name). For Connections, the
+    /// `apply_version_control_modal_loaded` reducer rewrites this to
+    /// `"{source_name} → {destination_name}"` after resolving the
+    /// connection in the live Browser arena. Pre-populated to
+    /// `component_name` here; the reducer overrides for Connections.
+    pub display_label: String,
     pub differences: Vec<RenderedDifference>,
 }
 
@@ -117,8 +125,9 @@ impl NifiClient {
             .into_iter()
             .map(|cd| ComponentDiffSection {
                 component_id: cd.component_id.unwrap_or_default(),
-                component_name: cd.component_name.unwrap_or_default(),
+                component_name: cd.component_name.clone().unwrap_or_default(),
                 component_type: cd.component_type.unwrap_or_default(),
+                display_label: cd.component_name.unwrap_or_default(),
                 differences: cd
                     .differences
                     .unwrap_or_default()

@@ -169,7 +169,7 @@ fn render_diff_body(frame: &mut Frame, area: Rect, modal: &VersionControlModalSt
                 let header = format!(
                     "─ {} · {} · {} ─",
                     section.component_type,
-                    section.component_name,
+                    section.display_label,
                     short_id(&section.component_id)
                 );
                 all_lines.push(Line::from(Span::styled(header, theme::accent())));
@@ -417,6 +417,7 @@ mod tests {
                     component_id: "4f3aaaaa".into(),
                     component_name: "UpdateRecord-enrich".into(),
                     component_type: "Processor".into(),
+                    display_label: "UpdateRecord-enrich".into(),
                     differences: vec![
                         RenderedDifference {
                             kind: "PROPERTY_CHANGED".into(),
@@ -434,6 +435,7 @@ mod tests {
                     component_id: "71b2bbbb".into(),
                     component_name: "csv→log".into(),
                     component_type: "Connection".into(),
+                    display_label: "csv→log".into(),
                     differences: vec![RenderedDifference {
                         kind: "COMPONENT_REMOVED".into(),
                         description: "selected relationship 'retry'".into(),
@@ -460,6 +462,7 @@ mod tests {
                 component_id: "4f3aaaaa".into(),
                 component_name: "UpdateRecord".into(),
                 component_type: "Processor".into(),
+                display_label: "UpdateRecord".into(),
                 differences: vec![RenderedDifference {
                     kind: "BUNDLE_CHANGED".into(),
                     description: "Bundle upgraded".into(),
@@ -485,6 +488,7 @@ mod tests {
                 component_id: "4f3aaaaa".into(),
                 component_name: "UpdateRecord".into(),
                 component_type: "Processor".into(),
+                display_label: "UpdateRecord".into(),
                 differences: vec![RenderedDifference {
                     kind: "BUNDLE_CHANGED".into(),
                     description: "Bundle upgraded".into(),
@@ -530,6 +534,7 @@ mod tests {
                 component_id: "abcdabcd".into(),
                 component_name: "X".into(),
                 component_type: "Processor".into(),
+                display_label: "X".into(),
                 differences: vec![
                     RenderedDifference {
                         kind: "PROPERTY_CHANGED".into(),
@@ -575,6 +580,7 @@ mod tests {
             component_id: "abcdabcd".into(),
             component_name: "X".into(),
             component_type: "Processor".into(),
+            display_label: "X".into(),
             differences: vec![
                 RenderedDifference {
                     kind: "PROPERTY_CHANGED".into(),

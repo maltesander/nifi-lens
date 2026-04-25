@@ -335,8 +335,27 @@ impl BrowserState {
         &mut self,
         pg_id: String,
         identity: Option<crate::cluster::snapshot::VersionControlSummary>,
-        differences: crate::client::FlowComparisonGrouped,
+        mut differences: crate::client::FlowComparisonGrouped,
     ) {
+        // Resolve connection labels from the arena BEFORE taking the
+        // mutable borrow on `self.version_modal`. NiFi's
+        // local-modifications endpoint leaves `componentName` empty
+        // for connections (especially for `COMPONENT_REMOVED`, where
+        // the connection is already gone). Resolving against
+        // `self.nodes` gives us the source→destination pair so the
+        // section header is meaningful.
+        for section in &mut differences.sections {
+            if section.component_type.eq_ignore_ascii_case("Connection") {
+                if let Some(label) = self.resolve_connection_display_label(&section.component_id) {
+                    section.display_label = label;
+                } else if section.display_label.is_empty() {
+                    section.display_label = "(unnamed connection)".to_string();
+                }
+            } else if section.display_label.is_empty() {
+                section.display_label = "(unnamed)".to_string();
+            }
+        }
+
         let Some(modal) = self.version_modal.as_mut() else {
             return;
         };
@@ -349,6 +368,28 @@ impl BrowserState {
         modal.differences = VersionControlDifferenceLoad::Loaded(differences.sections);
         // Drop any in-flight search; it indexed the previous body.
         modal.search = None;
+    }
+
+    /// Look up a connection in the arena by id, returning
+    /// `"{source_name} → {destination_name}"` when found. Returns
+    /// `None` when the connection is not in the current arena (typical
+    /// for `COMPONENT_REMOVED` whose backing connection has already
+    /// been deleted from the live flow).
+    fn resolve_connection_display_label(&self, conn_id: &str) -> Option<String> {
+        let node = self
+            .nodes
+            .iter()
+            .find(|n| n.id == conn_id && matches!(n.kind, NodeKind::Connection))?;
+        if let NodeStatusSummary::Connection {
+            source_name,
+            destination_name,
+            ..
+        } = &node.status_summary
+        {
+            Some(format!("{source_name} → {destination_name}"))
+        } else {
+            None
+        }
     }
 
     /// Apply a failed diff fetch to the open modal. Mismatched
