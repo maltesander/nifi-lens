@@ -5,7 +5,7 @@
 
 use futures::future::join_all;
 
-use crate::client::NifiClient;
+use crate::client::{NifiClient, classify_or_fallback};
 use crate::cluster::snapshot::{VersionControlMap, VersionControlSummary};
 use crate::error::NifiLensError;
 
@@ -69,11 +69,15 @@ impl NifiClient {
             Ok(e) => e,
             Err(err) if is_not_found(&err) => return Ok(None),
             Err(err) => {
-                return Err(NifiLensError::VersionInformationFailed {
-                    context: self.context_name().to_string(),
-                    pg_id: pg_id.to_string(),
-                    source: Box::new(err),
-                });
+                return Err(classify_or_fallback(
+                    self.context_name(),
+                    Box::new(err),
+                    |source| NifiLensError::VersionInformationFailed {
+                        context: self.context_name().to_string(),
+                        pg_id: pg_id.to_string(),
+                        source,
+                    },
+                ));
             }
         };
         Ok(entity
@@ -97,10 +101,14 @@ impl NifiClient {
             .processgroups()
             .get_local_modifications(pg_id)
             .await
-            .map_err(|err| NifiLensError::LocalModificationsFailed {
-                context: self.context_name().to_string(),
-                pg_id: pg_id.to_string(),
-                source: Box::new(err),
+            .map_err(|err| {
+                classify_or_fallback(self.context_name(), Box::new(err), |source| {
+                    NifiLensError::LocalModificationsFailed {
+                        context: self.context_name().to_string(),
+                        pg_id: pg_id.to_string(),
+                        source,
+                    }
+                })
             })?;
 
         let mut sections: Vec<ComponentDiffSection> = entity
@@ -191,6 +199,5 @@ fn summary_from_dto(
 }
 
 fn is_not_found(err: &nifi_rust_client::NifiError) -> bool {
-    let s = format!("{err:?}");
-    s.contains("404") || s.contains("NotFound")
+    matches!(err, nifi_rust_client::NifiError::NotFound { .. })
 }
