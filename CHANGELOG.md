@@ -22,6 +22,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `.github/workflows/release.yml`); `cargo publish` continues to run
   from `publish-crate.yml`.
 
+- Browser tree-row drift chips (`[STALE]` / `[MODIFIED]` /
+  `[STALE+MOD]` / `[SYNC-ERR]`) on versioned process groups whose
+  registry state ≠ `UP_TO_DATE`.
+- Version-control modal opened with `m` on any versioned PG: registry /
+  bucket / branch / flow / version identity plus per-component,
+  per-property diff from `/process-groups/{id}/local-modifications`.
+  Search (`/` `n` `N`), copy (`c`), refresh (`r`), and an
+  environmental-toggle (`e`, hidden by default).
+- Fuzzy Find prefix tokens for drift filtering: `:drift`, `:stale`,
+  `:modified`, `:syncerr` (PG-only).
+- New `[polling.cluster] version_control` configuration key (default
+  `30s`); subscriber-gated to Browser.
+
 ### Changed
 
 - **Config / log paths** now resolve via `directories::ProjectDirs`
