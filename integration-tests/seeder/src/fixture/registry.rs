@@ -33,10 +33,85 @@ pub async fn seed(client: &DynamicClient) -> Result<RegistryIds> {
     let client_id = ensure_registry_client(client).await?;
     tracing::info!("ensuring NiFi-Registry-side bucket");
     let bucket_id = ensure_bucket().await?;
+    tracing::info!(%bucket_id, "wiping bucket flows for fresh seed");
+    wipe_bucket(&bucket_id).await?;
     Ok(RegistryIds {
         client_id,
         bucket_id,
     })
+}
+
+async fn wipe_bucket(bucket_id: &str) -> Result<()> {
+    let http = reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(10))
+        .build()
+        .map_err(|e| SeederError::Api {
+            message: "build registry HTTP client".into(),
+            source: Box::new(e),
+        })?;
+
+    let list_url = format!(
+        "{}/nifi-registry-api/buckets/{}/flows",
+        REGISTRY_URL_FOR_SEEDER, bucket_id
+    );
+    let response = http
+        .get(&list_url)
+        .send()
+        .await
+        .map_err(|e| SeederError::Api {
+            message: format!("GET {list_url}"),
+            source: Box::new(e),
+        })?;
+    response
+        .error_for_status_ref()
+        .map_err(|e| SeederError::Api {
+            message: format!("GET {list_url} failed"),
+            source: Box::new(e),
+        })?;
+    let flows: Vec<serde_json::Value> = response.json().await.map_err(|e| SeederError::Api {
+        message: format!("parse JSON from {list_url}"),
+        source: Box::new(e),
+    })?;
+    if flows.is_empty() {
+        tracing::info!(%bucket_id, "bucket already empty");
+        return Ok(());
+    }
+    for flow in &flows {
+        let Some(flow_id) = flow.get("identifier").and_then(|s| s.as_str()) else {
+            tracing::warn!(?flow, "skipping bucket entry without identifier");
+            continue;
+        };
+        let flow_name = flow.get("name").and_then(|s| s.as_str()).unwrap_or("?");
+        let delete_url = format!(
+            "{}/nifi-registry-api/buckets/{}/flows/{}",
+            REGISTRY_URL_FOR_SEEDER, bucket_id, flow_id
+        );
+        let response = http
+            .delete(&delete_url)
+            .send()
+            .await
+            .map_err(|e| SeederError::Api {
+                message: format!("DELETE {delete_url}"),
+                source: Box::new(e),
+            })?;
+        // 404 means the flow was already gone — accept it. Anything else
+        // non-2xx is a real failure.
+        if !response.status().is_success() && response.status() != reqwest::StatusCode::NOT_FOUND {
+            return Err(SeederError::Api {
+                message: format!(
+                    "DELETE {delete_url} failed ({}): flow={flow_name}",
+                    response.status()
+                ),
+                source: response
+                    .error_for_status()
+                    .err()
+                    .map(|e| Box::new(e) as Box<dyn std::error::Error + Send + Sync>)
+                    .unwrap_or_else(|| Box::<dyn std::error::Error + Send + Sync>::from("unknown")),
+            });
+        }
+        tracing::info!(%flow_id, %flow_name, "deleted flow from bucket");
+    }
+    Ok(())
 }
 
 async fn ensure_registry_client(client: &DynamicClient) -> Result<String> {
