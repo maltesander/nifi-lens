@@ -28,9 +28,10 @@ pub fn render(
     state: &BrowserState,
     bulletins: &VecDeque<BulletinSnapshot>,
     detail_focus: &DetailFocus,
+    cluster: &crate::cluster::snapshot::ClusterSnapshot,
 ) {
-    // Outer panel: " <name> · process group "
-    let outer = Panel::new(build_header_title(d)).into_block();
+    // Outer panel: " <name> · process group [STATE] "
+    let outer = Panel::new(build_header_title(d, cluster)).into_block();
     let inner = outer.inner(area);
     frame.render_widget(outer, area);
 
@@ -55,17 +56,30 @@ pub fn render(
     render_recent_bulletins_panel(frame, rows[3], d, bulletins, detail_focus);
 }
 
-/// Build the outer panel title: ` <name> · process group `.
-fn build_header_title(d: &ProcessGroupDetail) -> Line<'_> {
-    Line::from(vec![
+/// Build the outer panel title: ` <name> · process group [STATE] `.
+/// Appends a `[STALE]` / `[MODIFIED]` / `[STALE+MOD]` / `[SYNC-ERR]`
+/// chip when the PG is versioned and not `UP_TO_DATE`. Unversioned and
+/// `UP_TO_DATE` PGs render the original two-segment title.
+fn build_header_title<'a>(
+    d: &'a ProcessGroupDetail,
+    cluster: &'a crate::cluster::snapshot::ClusterSnapshot,
+) -> Line<'a> {
+    let mut spans = vec![
         Span::raw(" "),
         Span::styled(d.name.as_str(), theme::accent()),
         Span::raw(" "),
         Span::styled("·", theme::muted()),
         Span::raw(" "),
         Span::styled("process group", theme::muted()),
-        Span::raw(" "),
-    ])
+    ];
+    if let Some(summary) = BrowserState::version_control_for(cluster, &d.id)
+        && let Some((label, style)) = super::chip_for_state(summary.state)
+    {
+        spans.push(Span::raw(" "));
+        spans.push(Span::styled(format!("[{label}]"), style));
+    }
+    spans.push(Span::raw(" "));
+    Line::from(spans)
 }
 
 fn render_identity_panel(frame: &mut Frame, area: Rect, d: &ProcessGroupDetail) {
@@ -366,6 +380,7 @@ fn char_skip(s: &str, n: usize) -> String {
 #[cfg(test)]
 mod snapshots {
     use super::*;
+    use crate::cluster::snapshot::ClusterSnapshot;
     use crate::test_support::{TEST_BACKEND_MEDIUM, TEST_BACKEND_TALL, test_backend};
     use crate::view::browser::state::MAX_DETAIL_SECTIONS;
     use insta::assert_snapshot;
@@ -406,9 +421,20 @@ mod snapshots {
         let d = seeded_pg_detail();
         let state = BrowserState::new();
         let bulletins: VecDeque<BulletinSnapshot> = VecDeque::new();
+        let snap = ClusterSnapshot::default();
         let mut terminal = Terminal::new(test_backend(TEST_BACKEND_MEDIUM)).unwrap();
         terminal
-            .draw(|f| render(f, f.area(), &d, &state, &bulletins, &DetailFocus::Tree))
+            .draw(|f| {
+                render(
+                    f,
+                    f.area(),
+                    &d,
+                    &state,
+                    &bulletins,
+                    &DetailFocus::Tree,
+                    &snap,
+                )
+            })
             .unwrap();
         assert_snapshot!("pg_detail_with_cs_list", format!("{}", terminal.backend()));
     }
@@ -423,9 +449,10 @@ mod snapshots {
             rows: [1, 0, 0, 0, 0],
             x_offsets: [0; MAX_DETAIL_SECTIONS],
         };
+        let snap = ClusterSnapshot::default();
         let mut terminal = Terminal::new(test_backend(TEST_BACKEND_TALL)).unwrap();
         terminal
-            .draw(|f| render(f, f.area(), &d, &state, &bulletins, &focus))
+            .draw(|f| render(f, f.area(), &d, &state, &bulletins, &focus, &snap))
             .unwrap();
         assert_snapshot!(
             "pg_detail_controller_services_focused",
@@ -443,9 +470,10 @@ mod snapshots {
             rows: [0, 0, 0, 0, 0],
             x_offsets: [0; MAX_DETAIL_SECTIONS],
         };
+        let snap = ClusterSnapshot::default();
         let mut terminal = Terminal::new(test_backend(TEST_BACKEND_TALL)).unwrap();
         terminal
-            .draw(|f| render(f, f.area(), &d, &state, &bulletins, &focus))
+            .draw(|f| render(f, f.area(), &d, &state, &bulletins, &focus, &snap))
             .unwrap();
         assert_snapshot!(
             "pg_detail_child_groups_focused",
@@ -513,9 +541,20 @@ mod snapshots {
             },
         });
         let bulletins: VecDeque<BulletinSnapshot> = VecDeque::new();
+        let snap = ClusterSnapshot::default();
         let mut terminal = Terminal::new(test_backend(TEST_BACKEND_MEDIUM)).unwrap();
         terminal
-            .draw(|f| render(f, f.area(), &d, &state, &bulletins, &DetailFocus::Tree))
+            .draw(|f| {
+                render(
+                    f,
+                    f.area(),
+                    &d,
+                    &state,
+                    &bulletins,
+                    &DetailFocus::Tree,
+                    &snap,
+                )
+            })
             .unwrap();
         let out = format!("{}", terminal.backend());
         assert!(
@@ -553,12 +592,61 @@ mod snapshots {
             rows: [0, 0, 0, 0, 0],
             x_offsets: [0; MAX_DETAIL_SECTIONS],
         };
+        let snap = ClusterSnapshot::default();
         let mut terminal = Terminal::new(test_backend(TEST_BACKEND_TALL)).unwrap();
         terminal
-            .draw(|f| render(f, f.area(), &d, &state, &bulletins, &focus))
+            .draw(|f| render(f, f.area(), &d, &state, &bulletins, &focus, &snap))
             .unwrap();
         assert_snapshot!(
             "pg_detail_recent_bulletins_focused",
+            format!("{}", terminal.backend())
+        );
+    }
+
+    #[test]
+    fn pg_detail_header_shows_modified_chip() {
+        use crate::cluster::snapshot::{
+            EndpointState, FetchMeta, VersionControlMap, VersionControlSummary,
+        };
+        use nifi_rust_client::dynamic::types::VersionControlInformationDtoState;
+
+        let d = seeded_pg_detail();
+        let state = BrowserState::new();
+        let bulletins: VecDeque<BulletinSnapshot> = VecDeque::new();
+        let focus = DetailFocus::Tree;
+
+        let mut map = VersionControlMap::default();
+        map.by_pg_id.insert(
+            d.id.clone(),
+            VersionControlSummary {
+                state: VersionControlInformationDtoState::LocallyModified,
+                registry_name: Some("ops".into()),
+                bucket_name: Some("flows".into()),
+                branch: None,
+                flow_id: None,
+                flow_name: Some("ingest".into()),
+                version: Some("3".into()),
+                state_explanation: None,
+            },
+        );
+        let snap = ClusterSnapshot {
+            version_control: EndpointState::Ready {
+                data: map,
+                meta: FetchMeta {
+                    fetched_at: std::time::Instant::now(),
+                    fetch_duration: std::time::Duration::from_millis(0),
+                    next_interval: std::time::Duration::from_secs(30),
+                },
+            },
+            ..Default::default()
+        };
+
+        let mut terminal = Terminal::new(test_backend(TEST_BACKEND_TALL)).unwrap();
+        terminal
+            .draw(|f| render(f, f.area(), &d, &state, &bulletins, &focus, &snap))
+            .unwrap();
+        insta::assert_snapshot!(
+            "pg_detail_header_shows_modified_chip",
             format!("{}", terminal.backend())
         );
     }

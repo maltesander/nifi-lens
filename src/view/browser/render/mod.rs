@@ -105,7 +105,7 @@ pub fn render(
         .border_style(theme::muted());
     frame.render_widget(sep, chunks[1]);
 
-    render_detail(frame, chunks[2], state, bulletins);
+    render_detail(frame, chunks[2], state, bulletins, cluster);
 }
 
 fn tab_title(state: &BrowserState) -> String {
@@ -268,6 +268,7 @@ fn render_detail(
     area: Rect,
     state: &BrowserState,
     bulletins: &std::collections::VecDeque<crate::client::BulletinSnapshot>,
+    cluster: &crate::cluster::snapshot::ClusterSnapshot,
 ) {
     let Some(&arena_idx) = state.visible.get(state.selected) else {
         return;
@@ -306,7 +307,15 @@ fn render_detail(
 
     match state.details.get(&arena_idx) {
         Some(NodeDetail::ProcessGroup(d)) => {
-            pg::render(frame, detail_area, d, state, bulletins, &state.detail_focus);
+            pg::render(
+                frame,
+                detail_area,
+                d,
+                state,
+                bulletins,
+                &state.detail_focus,
+                cluster,
+            );
         }
         Some(NodeDetail::Processor(d)) => {
             processor::render(frame, detail_area, d, state, bulletins, &state.detail_focus);
