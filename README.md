@@ -199,6 +199,20 @@ browsable in a dedicated modal. The tree loads lazily the first time
 you open the tab — cross-tab `g` / `Shift+F` will only see Browser
 components after Browser has been visited at least once per session.
 
+### Version control drift
+
+Versioned process groups whose flow has drifted from the registry
+render a trailing chip on their Browser tree row: `[STALE]`,
+`[MODIFIED]`, `[STALE+MOD]`, or `[SYNC-ERR]`. Press `m` on any such PG
+to open the version-control modal — registry / bucket / branch / flow /
+version identity at the top, then a per-component, per-property diff
+sourced from NiFi's `local-modifications` endpoint. Press `e` to
+include or exclude environmental differences (NAR-bundle bumps after a
+NiFi upgrade, hidden by default).
+
+For a cluster-wide audit, open Fuzzy Find (`Shift+F`) and type `:drift`
+to filter the corpus to all non-clean versioned PGs.
+
 **Events** — Provenance search with a filter bar (time / type / source /
 flowfile UUID / attribute). Results are colored by event type and
 cross-linked from Bulletins and Browser.
@@ -228,10 +242,29 @@ reference; you don't need to memorise them.
 | `?`                 | Open context-aware help                          |
 | `q` / `Ctrl+C`      | Quit                                             |
 
-Inside the Fuzzy Find modal, a leading token narrows by kind:
-`:proc`, `:pg`, `:cs`, `:conn`, `:in`, `:out`. Clear the filter by
-backspacing through the prefix. The chip row above the query line
-reflects the active filter.
+Inside the Fuzzy Find modal, a leading token narrows the corpus
+before fuzzy scoring. Clear the filter by backspacing through the
+prefix; the chip row above the query line reflects the active filter.
+
+Kind filters:
+
+| Token   | Narrows to                              |
+|---------|-----------------------------------------|
+| `:proc` | Processors                              |
+| `:pg`   | Process groups                          |
+| `:cs`   | Controller services                     |
+| `:conn` | Connections                             |
+| `:in`   | Input ports                             |
+| `:out`  | Output ports                            |
+
+Drift filters (PG-only):
+
+| Token       | Narrows to                                            |
+|-------------|-------------------------------------------------------|
+| `:drift`    | Any PG whose registry state ≠ `UP_TO_DATE`            |
+| `:stale`    | PGs with `STALE` or `STALE+MOD`                       |
+| `:modified` | PGs with `MODIFIED` or `STALE+MOD`                    |
+| `:syncerr`  | PGs with `SYNC_FAILURE`                               |
 
 ### Bulletins
 
@@ -266,6 +299,7 @@ reflects the active filter.
 | `Enter` / `→` | Expand folder or drill into the selected node         |
 | `←`          | Collapse folder or ascend to parent                    |
 | `p`          | Open properties (processors and controller services)   |
+| `m`          | Show version control (versioned PG only)               |
 | `c`          | Copy the selected node's id                            |
 
 ### Events
@@ -371,6 +405,7 @@ system_diagnostics  = "30s"
 bulletins           = "5s"
 cluster_nodes       = "5s"
 connections_by_pg   = "15s"
+version_control     = "30s"
 about               = "5m"
 tls_certs           = "1h"
 max_interval        = "60s"
@@ -425,7 +460,9 @@ password_env = "NIFILENS_PROD_PASSWORD"
   (`root_pg_status`, `controller_services`, `connections_by_pg`) park
   entirely when no view subscribes — i.e. while neither Overview nor
   Browser is the active tab. In-flight polling for Events queries and
-  Tracer content stays on its internal cadence.
+  Tracer content stays on its internal cadence. Browser-only endpoints
+  (`version_control`) likewise park while Browser is not the active
+  tab.
 - **CLI overrides:** `nifilens --context stage`, `nifilens --config ./local.toml`.
 - **Version strategy** maps to `nifi-rust-client`'s `VersionResolutionStrategy`.
 
