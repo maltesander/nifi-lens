@@ -12,6 +12,7 @@ pub mod overview;
 pub mod status;
 pub mod tls_cert;
 pub mod tracer;
+pub mod version_control;
 
 use std::ops::{Deref, DerefMut};
 
@@ -753,6 +754,7 @@ pub use tracer::{
     INLINE_PREVIEW_BYTES, LatestEventsSnapshot, LineagePoll, LineageSnapshot,
     ProvenanceEventDetail, ProvenanceEventSummary,
 };
+pub use version_control::{ComponentDiffSection, FlowComparisonGrouped, RenderedDifference};
 
 #[cfg(test)]
 mod root_pg_status_snapshot_tests {

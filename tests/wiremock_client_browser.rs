@@ -412,3 +412,101 @@ async fn browser_port_detail_parses_input_port() {
 // Browser reducer handles a `Loading`/`Failed` CS slot by simply not
 // splicing any CS members into the arena (tested at the reducer level
 // in `src/view/browser/state.rs`).
+
+#[tokio::test]
+async fn version_information_returns_summary_on_versioned_pg() {
+    let server = MockServer::start().await;
+    stub_login_and_about(&server).await;
+
+    Mock::given(method("GET"))
+        .and(path("/nifi-api/versions/process-groups/pg-1"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+            "versionControlInformation": {
+                "groupId": "pg-1",
+                "registryId": "reg-1",
+                "registryName": "ops-registry",
+                "bucketId": "buck-1",
+                "bucketName": "ops",
+                "flowId": "flow-1",
+                "flowName": "ingest",
+                "version": "3",
+                "branch": "main",
+                "state": "STALE",
+                "stateExplanation": "A newer version exists"
+            }
+        })))
+        .mount(&server)
+        .await;
+
+    let client = NifiClient::connect(&ctx(server.uri())).await.unwrap();
+    let summary = client.version_information("pg-1").await.unwrap();
+    use nifi_rust_client::dynamic::types::VersionControlInformationDtoState;
+    assert_eq!(summary.state, VersionControlInformationDtoState::Stale);
+    assert_eq!(summary.registry_name.as_deref(), Some("ops-registry"));
+    assert_eq!(summary.bucket_name.as_deref(), Some("ops"));
+    assert_eq!(summary.branch.as_deref(), Some("main"));
+    assert_eq!(summary.flow_name.as_deref(), Some("ingest"));
+    assert_eq!(summary.version.as_deref(), Some("3"));
+    assert_eq!(
+        summary.state_explanation.as_deref(),
+        Some("A newer version exists")
+    );
+}
+
+#[tokio::test]
+async fn version_information_returns_unversioned_for_null_payload() {
+    let server = MockServer::start().await;
+    stub_login_and_about(&server).await;
+
+    Mock::given(method("GET"))
+        .and(path("/nifi-api/versions/process-groups/pg-2"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+            "versionControlInformation": null
+        })))
+        .mount(&server)
+        .await;
+
+    let client = NifiClient::connect(&ctx(server.uri())).await.unwrap();
+    let res = client.version_information_optional("pg-2").await.unwrap();
+    assert!(res.is_none());
+}
+
+#[tokio::test]
+async fn local_modifications_groups_by_component() {
+    let server = MockServer::start().await;
+    stub_login_and_about(&server).await;
+
+    Mock::given(method("GET"))
+        .and(path("/nifi-api/process-groups/pg-1/local-modifications"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+            "componentDifferences": [
+                {
+                    "componentId": "proc-a",
+                    "componentName": "UpdateRecord",
+                    "componentType": "Processor",
+                    "processGroupId": "pg-1",
+                    "differences": [
+                        {"differenceType": "PROPERTY_CHANGED",
+                         "difference": "Record Reader changed",
+                         "environmental": false},
+                        {"differenceType": "BUNDLE_CHANGED",
+                         "difference": "Bundle upgraded",
+                         "environmental": true}
+                    ]
+                }
+            ]
+        })))
+        .mount(&server)
+        .await;
+
+    let client = NifiClient::connect(&ctx(server.uri())).await.unwrap();
+    let grouped = client.local_modifications("pg-1").await.unwrap();
+    assert_eq!(grouped.sections.len(), 1);
+    let section = &grouped.sections[0];
+    assert_eq!(section.component_id, "proc-a");
+    assert_eq!(section.component_type, "Processor");
+    assert_eq!(section.differences.len(), 2);
+    assert_eq!(section.differences[0].kind, "PROPERTY_CHANGED");
+    assert!(!section.differences[0].environmental);
+    assert!(section.differences[1].environmental);
+}
