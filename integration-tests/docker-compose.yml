@@ -21,6 +21,9 @@ services:
       - ./scripts/certs/truststore.p12:/opt/nifi/nifi-current/conf/truststore.p12:ro
       - ./scripts/nars/nifi-hadoop-libraries-nar-2.6.0.nar:/opt/nifi/nifi-current/lib/nifi-hadoop-libraries-nar-2.6.0.nar:ro
       - ./scripts/nars/nifi-parquet-nar-2.6.0.nar:/opt/nifi/nifi-current/lib/nifi-parquet-nar-2.6.0.nar:ro
+    depends_on:
+      nifi-registry:
+        condition: service_healthy
     healthcheck:
       test:
         ["CMD-SHELL", "grep -q 'Started Server on https://' /opt/nifi/nifi-current/logs/nifi-app.log 2>/dev/null"]
@@ -28,6 +31,22 @@ services:
       timeout: 5s
       retries: 18
       start_period: 300s
+
+  nifi-registry:
+    image: apache/nifi-registry:2.6.0
+    container_name: nifilens-it-registry
+    ports:
+      - "18080:18080"
+    environment:
+      - NIFI_REGISTRY_WEB_HTTP_HOST=0.0.0.0
+      - NIFI_REGISTRY_WEB_HTTP_PORT=18080
+    healthcheck:
+      test:
+        ["CMD-SHELL", "curl -fsS http://localhost:18080/nifi-registry-api/buckets || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 30
+      start_period: 60s
 
   zookeeper:
     image: zookeeper:3.9
@@ -51,6 +70,8 @@ services:
       - "8444:8443"
     depends_on:
       zookeeper:
+        condition: service_healthy
+      nifi-registry:
         condition: service_healthy
     environment:
       - SINGLE_USER_CREDENTIALS_USERNAME=admin
@@ -93,6 +114,8 @@ services:
       - "8445:8443"
     depends_on:
       zookeeper:
+        condition: service_healthy
+      nifi-registry:
         condition: service_healthy
     environment:
       - SINGLE_USER_CREDENTIALS_USERNAME=admin
