@@ -2321,3 +2321,22 @@ fn modal_search_commit_with_query_advances_state() {
     assert_eq!(search.query, "Re");
     assert!(!search.matches.is_empty());
 }
+
+#[test]
+fn close_modal_clears_handle_field() {
+    use crate::view::browser::state::VersionControlModalState;
+
+    let mut state = BrowserState::new();
+    state.version_modal = Some(VersionControlModalState::pending(
+        "pg-1".into(),
+        "ingest".into(),
+        None,
+    ));
+    // We don't actually spawn a task — the abort path is a no-op when
+    // the handle is `None`. The contract being verified is that
+    // `close_version_control_modal` clears both the modal and its
+    // handle field, leaving the state ready for a fresh open.
+    state.close_version_control_modal();
+    assert!(state.version_modal.is_none());
+    assert!(state.version_modal_handle.is_none());
+}

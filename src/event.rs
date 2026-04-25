@@ -44,6 +44,20 @@ pub enum ViewPayload {
 #[derive(Debug, Clone)]
 pub enum BrowserPayload {
     Detail(Box<crate::view::browser::state::NodeDetailSnapshot>),
+    /// Result of a successful version-control modal load: identity
+    /// re-fetched from `/versions/process-groups/{id}` plus the
+    /// flattened diff from `/process-groups/{id}/local-modifications`.
+    VersionControlModalLoaded {
+        pg_id: String,
+        identity: Option<crate::cluster::snapshot::VersionControlSummary>,
+        differences: crate::client::FlowComparisonGrouped,
+    },
+    /// Failure of either fetch in the modal load. The reducer renders
+    /// `err` inside the modal and clears the worker handle.
+    VersionControlModalFailed {
+        pg_id: String,
+        err: String,
+    },
 }
 
 /// Result of a successful intent dispatch.

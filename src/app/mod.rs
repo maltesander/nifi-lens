@@ -278,6 +278,14 @@ pub async fn run(
                         )));
                     });
                 }
+                PendingIntent::SpawnVersionControlModalFetch { pg_id } => {
+                    let h = crate::view::browser::worker::spawn_version_control_modal_fetch(
+                        client.clone(),
+                        tx.clone(),
+                        pg_id,
+                    );
+                    state.browser.version_modal_handle = Some(h);
+                }
                 other => {
                     let intent = match other {
                         PendingIntent::SwitchContext(name) => Some(Intent::SwitchContext(name)),

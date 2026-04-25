@@ -14,6 +14,10 @@ pub(crate) struct BrowserHandler;
 impl ViewKeyHandler for BrowserHandler {
     fn handle_verb(state: &mut AppState, verb: ViewVerb) -> Option<UpdateResult> {
         use crate::input::BrowserVerb;
+        // VersionControlModal verbs take priority when the modal is open.
+        if let ViewVerb::VersionControlModal(v) = verb {
+            return Some(handle_version_control_modal_verb(state, v));
+        }
         let bv = match verb {
             ViewVerb::Browser(v) => v,
             _ => return None,
@@ -82,8 +86,25 @@ impl ViewKeyHandler for BrowserHandler {
                 }
             }
             BrowserVerb::ShowVersionControl => {
-                // Modal dispatch implemented in Task 19.
-                return Some(UpdateResult::default());
+                if !state.browser_selection_is_versioned_pg() {
+                    // Defensive — the verb's `enabled` predicate should
+                    // already gray it out. Surface a banner if we got
+                    // here anyway (e.g. the snapshot raced ahead).
+                    state.post_warning("not under version control".to_string());
+                    return Some(UpdateResult::default());
+                }
+                state
+                    .browser
+                    .open_version_control_modal(&state.cluster.snapshot);
+                let Some(modal) = state.browser.version_modal.as_ref() else {
+                    return Some(UpdateResult::default());
+                };
+                let pg_id = modal.pg_id.clone();
+                return Some(UpdateResult {
+                    redraw: true,
+                    intent: Some(super::PendingIntent::SpawnVersionControlModalFetch { pg_id }),
+                    tracer_followup: None,
+                });
             }
         }
         Some(UpdateResult {
@@ -594,6 +615,164 @@ impl ViewKeyHandler for BrowserHandler {
     fn handle_text_input(_state: &mut AppState, _key: KeyEvent) -> Option<UpdateResult> {
         None
     }
+}
+
+/// Dispatch a `VersionControlModalVerb` action. Called when the
+/// version-control modal is open and the keymap has routed
+/// `ViewVerb::VersionControlModal(v)` here.
+fn handle_version_control_modal_verb(
+    state: &mut AppState,
+    v: crate::input::VersionControlModalVerb,
+) -> UpdateResult {
+    use crate::input::VersionControlModalVerb as V;
+
+    let redraw = || UpdateResult {
+        redraw: true,
+        intent: None,
+        tracer_followup: None,
+    };
+
+    match v {
+        V::Close => {
+            // Esc cancels an active search first; only when no search
+            // is active does Esc close the modal.
+            let has_search = state
+                .browser
+                .version_modal
+                .as_ref()
+                .is_some_and(|m| m.search.is_some());
+            if has_search {
+                state.browser.version_modal_search_cancel();
+            } else {
+                state.browser.close_version_control_modal();
+            }
+            redraw()
+        }
+        V::OpenSearch => {
+            state.browser.version_modal_search_open();
+            redraw()
+        }
+        V::SearchNext => {
+            state.browser.version_modal_search_cycle_next();
+            redraw()
+        }
+        V::SearchPrev => {
+            state.browser.version_modal_search_cycle_prev();
+            redraw()
+        }
+        V::Copy => {
+            if let Some(text) = version_control_modal_copy_text(&state.browser) {
+                let preview: String = text.chars().take(40).collect();
+                match state.copy_to_clipboard(text) {
+                    Ok(()) => state.post_info(format!("copied: {preview}")),
+                    Err(err) => state.post_warning(format!("clipboard: {err}")),
+                }
+            }
+            redraw()
+        }
+        V::ToggleEnvironmental => {
+            state.browser.toggle_environmental();
+            redraw()
+        }
+        V::Refresh => {
+            // Re-spawn the worker. Refresh does NOT close the modal,
+            // so we abort the previous handle directly here rather
+            // than going through close_version_control_modal().
+            let Some(modal) = state.browser.version_modal.as_mut() else {
+                return UpdateResult::default();
+            };
+            modal.differences = crate::view::browser::state::VersionControlDifferenceLoad::Pending;
+            let pg_id = modal.pg_id.clone();
+            // Dropping the search index too — body is changing.
+            modal.search = None;
+            if let Some(h) = state.browser.version_modal_handle.take() {
+                h.abort();
+            }
+            UpdateResult {
+                redraw: true,
+                intent: Some(super::PendingIntent::SpawnVersionControlModalFetch { pg_id }),
+                tracer_followup: None,
+            }
+        }
+        V::ScrollUp => {
+            if let Some(modal) = state.browser.version_modal.as_mut() {
+                // Content_rows is unknown here; pass usize::MAX so the
+                // widget clamp degrades to "render is the source of
+                // truth" — render pass updates `last_viewport_rows`
+                // and re-clamps via page_down/jump_bottom on next tick.
+                modal.scroll.vertical.scroll_by(-1, usize::MAX);
+            }
+            redraw()
+        }
+        V::ScrollDown => {
+            if let Some(modal) = state.browser.version_modal.as_mut() {
+                modal.scroll.vertical.scroll_by(1, usize::MAX);
+            }
+            redraw()
+        }
+        V::PageUp => {
+            if let Some(modal) = state.browser.version_modal.as_mut() {
+                modal.scroll.vertical.page_up();
+            }
+            redraw()
+        }
+        V::PageDown => {
+            if let Some(modal) = state.browser.version_modal.as_mut() {
+                modal.scroll.vertical.page_down(usize::MAX);
+            }
+            redraw()
+        }
+        V::Home => {
+            if let Some(modal) = state.browser.version_modal.as_mut() {
+                modal.scroll.vertical.jump_top();
+            }
+            redraw()
+        }
+        V::End => {
+            if let Some(modal) = state.browser.version_modal.as_mut() {
+                modal.scroll.vertical.jump_bottom(usize::MAX);
+            }
+            redraw()
+        }
+    }
+}
+
+/// Build a plain-text rendering of the modal's identity + diff body
+/// for clipboard copy. Returns `None` when there is no content to
+/// copy (modal closed, or modal open but identity absent and diff
+/// still pending / failed).
+fn version_control_modal_copy_text(
+    browser: &crate::view::browser::state::BrowserState,
+) -> Option<String> {
+    let modal = browser.version_modal.as_ref()?;
+    let mut out = String::new();
+    if let Some(id) = &modal.identity {
+        if let Some(name) = &id.flow_name {
+            out.push_str(&format!("flow: {name}\n"));
+        }
+        if let Some(v) = &id.version {
+            out.push_str(&format!("version: {v}\n"));
+        }
+        out.push_str(&format!("state: {:?}\n\n", id.state));
+    }
+    if let crate::view::browser::state::VersionControlDifferenceLoad::Loaded(sections) =
+        &modal.differences
+    {
+        for s in sections {
+            out.push_str(&format!(
+                "{} · {} · {}\n",
+                s.component_type, s.component_name, s.component_id
+            ));
+            for d in &s.differences {
+                if !modal.show_environmental && d.environmental {
+                    continue;
+                }
+                out.push_str(&format!("  {}: {}\n", d.kind, d.description));
+            }
+            out.push('\n');
+        }
+    }
+    if out.is_empty() { None } else { Some(out) }
 }
 
 #[cfg(test)]

@@ -183,6 +183,10 @@ pub struct BrowserState {
     /// snapshot for identity, populated asynchronously with diff data
     /// by the view-local worker (Task 19).
     pub version_modal: Option<VersionControlModalState>,
+    /// Live worker handle for the version-control modal's diff fetch.
+    /// Aborted on `Close` and on `Refresh` (which spawns a new one).
+    /// Cleared by the loaded / failed event handlers.
+    pub version_modal_handle: Option<tokio::task::JoinHandle<()>>,
 }
 
 /// One segment in the breadcrumb path.
@@ -314,8 +318,14 @@ impl BrowserState {
         ));
     }
 
-    /// Close the version-control modal. Idempotent.
+    /// Close the version-control modal. Idempotent. Aborts any
+    /// in-flight worker — the worker's payload-emit will be cancelled
+    /// before it lands on the channel, so a stale `…Loaded` event
+    /// can't reopen state on a freshly-closed modal.
     pub fn close_version_control_modal(&mut self) {
+        if let Some(h) = self.version_modal_handle.take() {
+            h.abort();
+        }
         self.version_modal = None;
     }
 

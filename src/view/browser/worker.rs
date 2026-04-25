@@ -87,3 +87,37 @@ async fn fetch_detail_once(
     });
     send_poll_result(tx, "browser detail", result).await;
 }
+
+/// Fetch identity + diff for a single PG and emit
+/// `BrowserPayload::VersionControlModalLoaded` (or `…Failed`). One-shot;
+/// no polling. Uses `futures::future::try_join` to issue both calls in
+/// parallel — both share the same `NifiLensError` so `try_join` types
+/// align without an explicit error map.
+pub fn spawn_version_control_modal_fetch(
+    client: Arc<RwLock<NifiClient>>,
+    tx: mpsc::Sender<AppEvent>,
+    pg_id: String,
+) -> JoinHandle<()> {
+    tokio::task::spawn_local(async move {
+        let res = {
+            let guard = client.read().await;
+            futures::future::try_join(
+                guard.version_information_optional(&pg_id),
+                guard.local_modifications(&pg_id),
+            )
+            .await
+        };
+        let payload = match res {
+            Ok((identity, differences)) => BrowserPayload::VersionControlModalLoaded {
+                pg_id,
+                identity,
+                differences,
+            },
+            Err(err) => BrowserPayload::VersionControlModalFailed {
+                pg_id,
+                err: err.to_string(),
+            },
+        };
+        let _ = tx.send(AppEvent::Data(ViewPayload::Browser(payload))).await;
+    })
+}

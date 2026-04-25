@@ -557,6 +557,13 @@ pub enum PendingIntent {
         side: crate::client::ContentSide,
         bytes: Vec<u8>,
     },
+    /// Spawn the Browser version-control modal's one-shot
+    /// identity+diff fetch worker. The handle is stored on
+    /// `BrowserState.version_modal_handle` and aborted on close /
+    /// refresh.
+    SpawnVersionControlModalFetch {
+        pg_id: String,
+    },
     Quit,
 }
 
@@ -876,10 +883,15 @@ fn handle_key(state: &mut AppState, key: KeyEvent, config: &Config) -> UpdateRes
     let content_modal_open = state.current_tab == crate::app::state::ViewId::Tracer
         && state.tracer.content_modal.is_some()
         && state.modal.is_none();
-    let input_event = state
-        .keymap
-        // version_modal_open hardcoded to false until Task 18 adds the field
-        .translate(key, state.current_tab, content_modal_open, false);
+    let version_modal_open = state.current_tab == crate::app::state::ViewId::Browser
+        && state.browser.version_modal.is_some()
+        && state.modal.is_none();
+    let input_event = state.keymap.translate(
+        key,
+        state.current_tab,
+        content_modal_open,
+        version_modal_open,
+    );
 
     // Central dispatch for typed InputEvent variants. History / Tab / App
     // are handled here and return early. Focus / View dispatch to per-view
@@ -1664,6 +1676,20 @@ fn handle_browser_payload(state: &mut AppState, payload: crate::event::BrowserPa
     match payload {
         BrowserPayload::Detail(detail) => {
             crate::view::browser::state::apply_node_detail(&mut state.browser, *detail);
+        }
+        BrowserPayload::VersionControlModalLoaded {
+            pg_id,
+            identity,
+            differences,
+        } => {
+            state
+                .browser
+                .apply_version_control_modal_loaded(pg_id, identity, differences);
+            state.browser.version_modal_handle = None;
+        }
+        BrowserPayload::VersionControlModalFailed { pg_id, err } => {
+            state.browser.apply_version_control_modal_failed(pg_id, err);
+            state.browser.version_modal_handle = None;
         }
     }
 }
