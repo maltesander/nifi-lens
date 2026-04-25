@@ -721,7 +721,6 @@ pub(crate) fn spawn_tls_certs(
 /// `pg_ids_rx.changed()` lets a refreshed PG list short-circuit the
 /// sleep, so newly added versioned PGs appear within one RootPgStatus
 /// tick.
-#[allow(dead_code)] // wired in Task 8 (spawn_fetchers)
 pub(crate) fn spawn_version_control(
     client: Arc<RwLock<NifiClient>>,
     tx: mpsc::Sender<AppEvent>,
