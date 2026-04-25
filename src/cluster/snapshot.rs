@@ -199,6 +199,7 @@ impl ClusterSnapshot {
             ClusterEndpoint::Bulletins => self.bulletins.meta.map(|m| m.next_interval),
             ClusterEndpoint::ClusterNodes => meta_of(&self.cluster_nodes).map(|m| m.next_interval),
             ClusterEndpoint::TlsCerts => meta_of(&self.tls_certs).map(|m| m.next_interval),
+            ClusterEndpoint::VersionControl => todo!("Task 3: add VersionControlMap to snapshot"),
         }
     }
 }

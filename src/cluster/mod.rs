@@ -45,12 +45,13 @@ pub enum ClusterEndpoint {
     Bulletins = 6,
     ClusterNodes = 7,
     TlsCerts = 8,
+    VersionControl = 9,
 }
 
 impl ClusterEndpoint {
     /// Total count — used to size fixed arrays like
     /// `[AtomicUsize; ClusterEndpoint::COUNT]`.
-    pub const COUNT: usize = 9;
+    pub const COUNT: usize = 10;
 
     pub fn as_str(self) -> &'static str {
         match self {
@@ -63,6 +64,7 @@ impl ClusterEndpoint {
             Self::Bulletins => "bulletins",
             Self::ClusterNodes => "cluster_nodes",
             Self::TlsCerts => "tls_certs",
+            Self::VersionControl => "version_control",
         }
     }
 }
@@ -81,7 +83,16 @@ mod tests {
     fn endpoint_count_matches_variants() {
         // Guard: bumping this requires also updating the SubscriberRegistry
         // fixed-size arrays.
-        assert_eq!(ClusterEndpoint::COUNT, 9);
+        assert_eq!(ClusterEndpoint::COUNT, 10);
+    }
+
+    #[test]
+    fn version_control_as_str_is_stable() {
+        assert_eq!(ClusterEndpoint::VersionControl.as_str(), "version_control");
+        assert_eq!(
+            format!("{}", ClusterEndpoint::VersionControl),
+            "version_control"
+        );
     }
 
     #[test]
