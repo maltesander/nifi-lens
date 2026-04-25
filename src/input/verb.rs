@@ -458,6 +458,109 @@ impl Verb for ContentModalVerb {
     }
 }
 
+/// Verbs that are only active when the version-control modal is open.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum VersionControlModalVerb {
+    Close,
+    OpenSearch,
+    SearchNext,
+    SearchPrev,
+    Copy,
+    ToggleEnvironmental,
+    Refresh,
+    ScrollUp,
+    ScrollDown,
+    PageUp,
+    PageDown,
+    Home,
+    End,
+}
+
+impl Verb for VersionControlModalVerb {
+    fn chord(self) -> Chord {
+        match self {
+            Self::Close => Chord::simple(KeyCode::Esc),
+            Self::OpenSearch => Chord::simple(KeyCode::Char('/')),
+            Self::SearchNext => Chord::simple(KeyCode::Char('n')),
+            Self::SearchPrev => Chord::shift(KeyCode::Char('N')),
+            Self::Copy => Chord::simple(KeyCode::Char('c')),
+            Self::ToggleEnvironmental => Chord::simple(KeyCode::Char('e')),
+            Self::Refresh => Chord::simple(KeyCode::Char('r')),
+            Self::ScrollUp => Chord::simple(KeyCode::Up),
+            Self::ScrollDown => Chord::simple(KeyCode::Down),
+            Self::PageUp => Chord::simple(KeyCode::PageUp),
+            Self::PageDown => Chord::simple(KeyCode::PageDown),
+            Self::Home => Chord::simple(KeyCode::Home),
+            Self::End => Chord::simple(KeyCode::End),
+        }
+    }
+    fn label(self) -> &'static str {
+        match self {
+            Self::Close => "close modal",
+            Self::OpenSearch => "open text search",
+            Self::SearchNext => "next match",
+            Self::SearchPrev => "previous match",
+            Self::Copy => "copy diff to clipboard",
+            Self::ToggleEnvironmental => "toggle environmental differences",
+            Self::Refresh => "refresh diff",
+            Self::ScrollUp => "scroll up",
+            Self::ScrollDown => "scroll down",
+            Self::PageUp => "page up",
+            Self::PageDown => "page down",
+            Self::Home => "scroll to top",
+            Self::End => "scroll to bottom",
+        }
+    }
+    fn hint(self) -> &'static str {
+        match self {
+            Self::Close => "close",
+            Self::OpenSearch => "find",
+            Self::SearchNext => "match",
+            Self::Copy => "copy",
+            Self::ToggleEnvironmental => "env",
+            Self::Refresh => "refresh",
+            _ => "",
+        }
+    }
+    fn priority(self) -> u8 {
+        50
+    }
+    fn show_in_hint_bar(self) -> bool {
+        matches!(
+            self,
+            Self::Close
+                | Self::OpenSearch
+                | Self::SearchNext
+                | Self::Copy
+                | Self::ToggleEnvironmental
+                | Self::Refresh
+        )
+    }
+    fn enabled(self, _ctx: &HintContext<'_>) -> bool {
+        // Modal is the dispatch gate — chords only fire when the
+        // keymap is in modal mode (Task 19 wires the gate). Always
+        // return true here; dispatch suppresses outside the modal.
+        true
+    }
+    fn all() -> &'static [Self] {
+        &[
+            Self::Close,
+            Self::OpenSearch,
+            Self::SearchNext,
+            Self::SearchPrev,
+            Self::Copy,
+            Self::ToggleEnvironmental,
+            Self::Refresh,
+            Self::ScrollUp,
+            Self::ScrollDown,
+            Self::PageUp,
+            Self::PageDown,
+            Self::Home,
+            Self::End,
+        ]
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum ViewVerb {
     Bulletins(BulletinsVerb),
@@ -465,6 +568,7 @@ pub enum ViewVerb {
     Events(EventsVerb),
     Tracer(TracerVerb),
     ContentModal(ContentModalVerb),
+    VersionControlModal(VersionControlModalVerb),
 }
 
 #[cfg(test)]
@@ -611,7 +715,8 @@ mod tests {
             .chain(BrowserVerb::all().iter().map(|v| v.chord()))
             .chain(EventsVerb::all().iter().map(|v| v.chord()))
             .chain(TracerVerb::all().iter().map(|v| v.chord()))
-            .chain(ContentModalVerb::all().iter().map(|v| v.chord()));
+            .chain(ContentModalVerb::all().iter().map(|v| v.chord()))
+            .chain(VersionControlModalVerb::all().iter().map(|v| v.chord()));
         for c in chords {
             assert_ne!(c.key, KeyCode::Char('j'), "no view verb may bind j");
             assert_ne!(c.key, KeyCode::Char('k'), "no view verb may bind k");
@@ -657,5 +762,44 @@ mod tests {
     fn show_version_control_in_all() {
         use crate::input::Verb;
         assert!(BrowserVerb::all().contains(&BrowserVerb::ShowVersionControl));
+    }
+
+    #[test]
+    fn version_control_modal_verb_chords() {
+        use crate::input::Verb;
+        use VersionControlModalVerb as V;
+        assert_eq!(V::Close.chord(), Chord::simple(KeyCode::Esc));
+        assert_eq!(V::OpenSearch.chord(), Chord::simple(KeyCode::Char('/')));
+        assert_eq!(V::SearchNext.chord(), Chord::simple(KeyCode::Char('n')));
+        assert_eq!(V::SearchPrev.chord(), Chord::shift(KeyCode::Char('N')));
+        assert_eq!(V::Copy.chord(), Chord::simple(KeyCode::Char('c')));
+        assert_eq!(
+            V::ToggleEnvironmental.chord(),
+            Chord::simple(KeyCode::Char('e'))
+        );
+        assert_eq!(V::Refresh.chord(), Chord::simple(KeyCode::Char('r')));
+        assert_eq!(V::ScrollUp.chord(), Chord::simple(KeyCode::Up));
+        assert_eq!(V::ScrollDown.chord(), Chord::simple(KeyCode::Down));
+        assert_eq!(V::PageUp.chord(), Chord::simple(KeyCode::PageUp));
+        assert_eq!(V::PageDown.chord(), Chord::simple(KeyCode::PageDown));
+        assert_eq!(V::Home.chord(), Chord::simple(KeyCode::Home));
+        assert_eq!(V::End.chord(), Chord::simple(KeyCode::End));
+    }
+
+    #[test]
+    fn version_control_modal_verb_in_all() {
+        use crate::input::Verb;
+        let all = VersionControlModalVerb::all();
+        assert!(all.contains(&VersionControlModalVerb::Close));
+        assert_eq!(all.len(), 13);
+    }
+
+    #[test]
+    fn no_view_verb_binds_j_or_k_includes_version_control_modal() {
+        let chords = VersionControlModalVerb::all().iter().map(|v| v.chord());
+        for c in chords {
+            assert_ne!(c.key, KeyCode::Char('j'));
+            assert_ne!(c.key, KeyCode::Char('k'));
+        }
     }
 }

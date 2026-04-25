@@ -878,7 +878,8 @@ fn handle_key(state: &mut AppState, key: KeyEvent, config: &Config) -> UpdateRes
         && state.modal.is_none();
     let input_event = state
         .keymap
-        .translate(key, state.current_tab, content_modal_open);
+        // version_modal_open hardcoded to false until Task 18 adds the field
+        .translate(key, state.current_tab, content_modal_open, false);
 
     // Central dispatch for typed InputEvent variants. History / Tab / App
     // are handled here and return early. Focus / View dispatch to per-view
