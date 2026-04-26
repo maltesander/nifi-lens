@@ -17,10 +17,12 @@ use crate::cluster::ClusterEndpoint;
 use crate::cluster::config::ClusterPollingConfig;
 use crate::cluster::fetcher_tasks::{
     FetchTaskConfig, spawn_about, spawn_bulletins, spawn_cluster_nodes, spawn_connections_by_pg,
-    spawn_controller_services, spawn_controller_status, spawn_root_pg_status,
-    spawn_system_diagnostics, spawn_tls_certs, spawn_version_control,
+    spawn_controller_services, spawn_controller_status, spawn_parameter_context_bindings,
+    spawn_root_pg_status, spawn_system_diagnostics, spawn_tls_certs, spawn_version_control,
 };
-use crate::cluster::snapshot::{ClusterSnapshot, FetchMeta, VersionControlMap};
+use crate::cluster::snapshot::{
+    ClusterSnapshot, FetchMeta, ParameterContextBindingsMap, VersionControlMap,
+};
 use crate::cluster::subscriber::SubscriberRegistry;
 use crate::error::NifiLensError;
 use crate::event::AppEvent;
@@ -51,6 +53,10 @@ pub enum ClusterUpdate {
         meta: FetchMeta,
     },
     VersionControl(Result<VersionControlMap, NifiLensError>, FetchMeta),
+    ParameterContextBindings(
+        Result<ParameterContextBindingsMap, NifiLensError>,
+        FetchMeta,
+    ),
 }
 
 impl ClusterUpdate {
@@ -66,6 +72,7 @@ impl ClusterUpdate {
             Self::Connections { .. } => ClusterEndpoint::ConnectionsByPg,
             Self::BulletinsDelta { .. } => ClusterEndpoint::Bulletins,
             Self::VersionControl(..) => ClusterEndpoint::VersionControl,
+            Self::ParameterContextBindings(..) => ClusterEndpoint::ParameterContextBindings,
         }
     }
 }
@@ -382,6 +389,23 @@ impl ClusterStore {
             self.pg_ids_rx.clone(),
             version_control_cfg,
         ));
+
+        let parameter_context_bindings_cfg = FetchTaskConfig {
+            base_interval: self.config.parameter_context_bindings,
+            max_interval: self.config.max_interval,
+            jitter_percent: self.config.jitter_percent,
+            force: self.notifies.get(ClusterEndpoint::ParameterContextBindings),
+            gated: true,
+            subscriber_counter: self
+                .subscribers
+                .counter(ClusterEndpoint::ParameterContextBindings),
+        };
+        self.handles.push(spawn_parameter_context_bindings(
+            client.clone(),
+            tx.clone(),
+            self.pg_ids_rx.clone(),
+            parameter_context_bindings_cfg,
+        ));
     }
 
     pub fn subscribe(&mut self, endpoint: ClusterEndpoint, view: ViewId) {
@@ -445,6 +469,9 @@ impl ClusterStore {
             },
             ClusterUpdate::VersionControl(result, meta) => {
                 self.snapshot.version_control.apply(result, meta)
+            }
+            ClusterUpdate::ParameterContextBindings(result, meta) => {
+                self.snapshot.parameter_context_bindings.apply(result, meta);
             }
         }
         endpoint

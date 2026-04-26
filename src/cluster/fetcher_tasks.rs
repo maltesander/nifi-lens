@@ -781,6 +781,75 @@ pub(crate) fn spawn_version_control(
     })
 }
 
+/// Spawns the parameter-context-bindings fan-out fetch loop.
+/// Subscriber-gated (Browser only). On each tick, takes the latest
+/// PG-id list from `pg_ids_rx`, fans out
+/// `processgroups().get_process_group(id)` calls via
+/// `NifiClient::parameter_context_bindings_batch`, and emits the
+/// resulting map as `ClusterUpdate::ParameterContextBindings`.
+///
+/// The `select!` mirrors `spawn_version_control` exactly: waking on
+/// `pg_ids_rx.changed()` lets a refreshed PG list short-circuit the
+/// sleep so newly added PGs appear within one RootPgStatus tick.
+pub(crate) fn spawn_parameter_context_bindings(
+    client: Arc<RwLock<NifiClient>>,
+    tx: mpsc::Sender<AppEvent>,
+    mut pg_ids_rx: watch::Receiver<Vec<String>>,
+    cfg: FetchTaskConfig,
+) -> JoinHandle<()> {
+    tokio::task::spawn_local(async move {
+        let mut next_interval = cfg.base_interval;
+        loop {
+            if cfg.gated && !subscribers_present(&cfg.subscriber_counter) {
+                cfg.force.notified().await;
+                continue;
+            }
+            let pg_ids = pg_ids_rx.borrow_and_update().clone();
+            if pg_ids.is_empty() {
+                tokio::select! {
+                    _ = tokio::time::sleep(next_interval) => {}
+                    _ = cfg.force.notified() => {}
+                    _ = pg_ids_rx.changed() => {}
+                }
+                continue;
+            }
+
+            let t0 = Instant::now();
+            // `parameter_context_bindings_batch` never returns `Err` —
+            // per-PG failures are logged and omitted. The `Result` wrapper
+            // exists so this fetcher's variant matches the rest of the
+            // cluster store's "preserve last_ok on failure" contract.
+            let map = {
+                let guard = client.read().await;
+                guard.parameter_context_bindings_batch(&pg_ids).await
+            };
+            let duration = t0.elapsed();
+            next_interval = adaptive_interval(cfg.base_interval, duration, cfg.max_interval);
+            let meta = FetchMeta {
+                fetched_at: t0,
+                fetch_duration: duration,
+                next_interval,
+            };
+            if tx
+                .send(AppEvent::ClusterUpdate(
+                    ClusterUpdate::ParameterContextBindings(Ok(map), meta),
+                ))
+                .await
+                .is_err()
+            {
+                tracing::debug!("parameter_context_bindings fetch: channel closed, exiting");
+                return;
+            }
+
+            tokio::select! {
+                _ = tokio::time::sleep(next_interval) => {}
+                _ = cfg.force.notified() => {}
+                _ = pg_ids_rx.changed() => {}
+            }
+        }
+    })
+}
+
 /// Parse the context `base_url` into a `(host, port)` pair. Returns
 /// `None` for non-HTTPS URLs or unparseable input. Used as the TLS
 /// probe's fallback target when a node address isn't a valid
@@ -794,6 +863,154 @@ fn fallback_host_port(base_url: &str) -> Option<(String, u16)> {
     let host = parsed.host_str()?.to_string();
     let port = parsed.port_or_known_default()?;
     Some((host, port))
+}
+
+#[cfg(test)]
+mod parameter_context_bindings_fetcher_tests {
+    use super::*;
+    use std::sync::Arc;
+    use std::sync::atomic::AtomicUsize;
+    use std::time::Duration;
+    use tokio::sync::{Notify, RwLock, mpsc, watch};
+    use wiremock::matchers::{method, path};
+    use wiremock::{Mock, MockServer, ResponseTemplate};
+
+    use crate::client::NifiClient;
+    use crate::cluster::store::ClusterUpdate;
+
+    async fn test_client(server: &MockServer) -> NifiClient {
+        Mock::given(method("GET"))
+            .and(path("/nifi-api/flow/about"))
+            .respond_with(
+                ResponseTemplate::new(200).set_body_json(
+                    serde_json::json!({"about": {"version": "2.6.0", "title": "NiFi"}}),
+                ),
+            )
+            .mount(server)
+            .await;
+
+        let inner = nifi_rust_client::NifiClientBuilder::new(&server.uri())
+            .expect("builder")
+            .build_dynamic()
+            .expect("dynamic client");
+        inner.detect_version().await.expect("detect_version");
+        let version = semver::Version::parse("2.6.0").expect("parse");
+        NifiClient::from_parts(inner, "test", version)
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn emits_map_after_first_tick() {
+        let local = tokio::task::LocalSet::new();
+        local
+            .run_until(async {
+                let server = MockServer::start().await;
+
+                Mock::given(method("GET"))
+                    .and(path("/nifi-api/process-groups/pg-a"))
+                    .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                        "id": "pg-a",
+                        "parameterContext": {
+                            "id": "ctx-1",
+                            "component": { "id": "ctx-1", "name": "prod-ctx" }
+                        }
+                    })))
+                    .mount(&server)
+                    .await;
+
+                Mock::given(method("GET"))
+                    .and(path("/nifi-api/process-groups/pg-b"))
+                    .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                        "id": "pg-b"
+                    })))
+                    .mount(&server)
+                    .await;
+
+                let client = test_client(&server).await;
+                let client = Arc::new(RwLock::new(client));
+                let (tx, mut rx) = mpsc::channel::<AppEvent>(16);
+                let (pg_ids_tx, pg_ids_rx) =
+                    watch::channel(vec!["pg-a".to_string(), "pg-b".to_string()]);
+                let cfg = FetchTaskConfig {
+                    base_interval: Duration::from_millis(200),
+                    max_interval: Duration::from_secs(5),
+                    jitter_percent: 0,
+                    force: Arc::new(Notify::new()),
+                    gated: false,
+                    subscriber_counter: Arc::new(AtomicUsize::new(1)),
+                };
+
+                let handle = spawn_parameter_context_bindings(client, tx, pg_ids_rx, cfg);
+
+                let event = tokio::time::timeout(Duration::from_secs(2), rx.recv())
+                    .await
+                    .expect("fetcher emitted no event within timeout")
+                    .expect("channel closed");
+                handle.abort();
+                drop(pg_ids_tx);
+
+                match event {
+                    AppEvent::ClusterUpdate(ClusterUpdate::ParameterContextBindings(
+                        Ok(map),
+                        _meta,
+                    )) => {
+                        assert_eq!(
+                            map.by_pg_id.len(),
+                            2,
+                            "expected entries for both pg-a and pg-b"
+                        );
+                        let binding = map
+                            .by_pg_id
+                            .get("pg-a")
+                            .expect("pg-a present")
+                            .as_ref()
+                            .expect("pg-a has a binding");
+                        assert_eq!(binding.id, "ctx-1");
+                        assert_eq!(binding.name, "prod-ctx");
+                        assert!(
+                            map.by_pg_id.get("pg-b").expect("pg-b present").is_none(),
+                            "pg-b has no parameter context"
+                        );
+                    }
+                    _other => panic!("unexpected event variant"),
+                }
+            })
+            .await;
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn parks_when_pg_ids_empty() {
+        let local = tokio::task::LocalSet::new();
+        local
+            .run_until(async {
+                // We only need to verify that the fetcher does NOT emit
+                // an event when pg_ids is empty. A short timeout suffices.
+                let server = MockServer::start().await;
+                let client = test_client(&server).await;
+                let client = Arc::new(RwLock::new(client));
+                let (tx, mut rx) = mpsc::channel::<AppEvent>(16);
+                // Publish an empty PG list — fetcher should wait.
+                let (_pg_ids_tx, pg_ids_rx) = watch::channel::<Vec<String>>(Vec::new());
+                let cfg = FetchTaskConfig {
+                    base_interval: Duration::from_millis(50),
+                    max_interval: Duration::from_secs(5),
+                    jitter_percent: 0,
+                    force: Arc::new(Notify::new()),
+                    gated: false,
+                    subscriber_counter: Arc::new(AtomicUsize::new(1)),
+                };
+
+                let handle = spawn_parameter_context_bindings(client, tx, pg_ids_rx, cfg);
+
+                // Fetcher should not emit within a short window.
+                let result = tokio::time::timeout(Duration::from_millis(150), rx.recv()).await;
+                handle.abort();
+                assert!(
+                    result.is_err(),
+                    "fetcher should not emit when pg_ids is empty"
+                );
+            })
+            .await;
+    }
 }
 
 #[cfg(test)]
