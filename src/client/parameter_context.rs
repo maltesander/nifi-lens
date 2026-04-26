@@ -165,7 +165,6 @@ pub async fn fetch_chain(
             async move {
                 let guard = client.read().await;
                 let res = guard
-                    .inner
                     .parametercontexts()
                     .get_parameter_context(&id, None)
                     .await;
