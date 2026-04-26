@@ -58,42 +58,130 @@ impl ParameterContextModalState {
 
     /// Build the flat string body that the search primitives operate on.
     ///
-    /// Each row is `"{name}={value}\n"` (or `"{name}=(sensitive)\n"` for
-    /// sensitive params). The output format MUST match the rendered
-    /// parameter list line-for-line so `MatchSpan` byte offsets align
-    /// with what the render pass displays.
+    /// The output MUST be byte-for-byte identical to the plain text that
+    /// `render_flat` / `render_by_context` produce, line-for-line, so that
+    /// `MatchSpan` byte offsets computed by `compute_matches` land on the
+    /// correct rendered spans in `apply_search_highlights`.
     ///
-    /// In `by_context_mode` the body is scoped to the context at
-    /// `sidebar_index`; in flat mode (default) the resolved list is used.
+    /// Column widths here mirror the constants in the render module (22/22/12).
+    /// Line 0 is the column-header line; line 1 is a separator placeholder
+    /// (the actual rendered separator is area-width `─` chars that searches
+    /// never match, so any single-line placeholder works). Data rows start
+    /// at line 2, matching `render_flat`'s `all_lines` layout.
+    ///
+    /// In `by_context_mode` the body mirrors `render_by_context` (same
+    /// 2-line header + data rows without a `from` column).
     pub fn searchable_body(&self) -> String {
+        const NAME_W: usize = 22;
+        const VALUE_W: usize = 22;
+        const FROM_W: usize = 12;
+
         let chain = match &self.load {
             ParameterContextLoad::Loaded { chain } => chain,
             _ => return String::new(),
         };
         let mut out = String::new();
         if self.by_context_mode {
-            if let Some(ctx) = chain.get(self.sidebar_index) {
-                for entry in &ctx.parameters {
-                    let value = if entry.sensitive {
-                        "(sensitive)".to_string()
-                    } else {
-                        entry.value.clone().unwrap_or_default()
-                    };
-                    out.push_str(&format!("{}={}\n", entry.name, value));
+            let Some(ctx) = chain.get(self.sidebar_index) else {
+                return String::new();
+            };
+            // 2-line header matching render_by_context.
+            out.push_str(&format!(
+                "{:<NAME_W$} {:<VALUE_W$} flags\n",
+                "name", "value"
+            ));
+            out.push('\n'); // separator placeholder
+            for entry in &ctx.parameters {
+                let name = truncate_for_body(&entry.name, NAME_W);
+                let value = if entry.sensitive {
+                    truncate_for_body("(sensitive)", VALUE_W)
+                } else {
+                    truncate_for_body(entry.value.as_deref().unwrap_or("\u{2014}"), VALUE_W)
+                };
+                out.push_str(&format!("{name:<NAME_W$} {value:<VALUE_W$}"));
+                if entry.sensitive {
+                    out.push_str(" [S]");
                 }
+                if entry.provided {
+                    out.push(' ');
+                    out.push_str("[P]");
+                }
+                out.push('\n');
             }
         } else {
             let resolved = resolve(chain, self.preselect.as_deref());
+            // 2-line header matching render_flat.
+            out.push_str(&format!(
+                "{:<NAME_W$} {:<VALUE_W$} {:<FROM_W$} flags\n",
+                "name", "value", "from"
+            ));
+            out.push('\n'); // separator placeholder
             for row in &resolved {
+                let name = truncate_for_body(&row.winner.name, NAME_W);
                 let value = if row.winner.sensitive {
-                    "(sensitive)".to_string()
+                    truncate_for_body("(sensitive)", VALUE_W)
                 } else {
-                    row.winner.value.clone().unwrap_or_default()
+                    truncate_for_body(row.winner.value.as_deref().unwrap_or("\u{2014}"), VALUE_W)
                 };
-                out.push_str(&format!("{}={}\n", row.winner.name, value));
+                let from = if row.unresolved {
+                    truncate_for_body("\u{2014}", FROM_W)
+                } else {
+                    truncate_for_body(&row.winner_context, FROM_W)
+                };
+                out.push_str(&format!(
+                    "{name:<NAME_W$} {value:<VALUE_W$} {from:<FROM_W$}"
+                ));
+                // Flags (same order as render_flat::build_flags).
+                if row.winner.sensitive {
+                    out.push_str(" [S]");
+                }
+                if row.winner.provided {
+                    out.push_str(" [P]");
+                }
+                if !row.shadowed.is_empty() && !row.unresolved {
+                    out.push_str(" [O]");
+                }
+                if row.unresolved {
+                    out.push_str(" [!]");
+                }
+                out.push('\n');
+                if self.show_shadowed {
+                    for (shadowed_entry, shadowed_ctx) in &row.shadowed {
+                        let sname = truncate_for_body(&shadowed_entry.name, NAME_W);
+                        let svalue = if shadowed_entry.sensitive {
+                            truncate_for_body("(sensitive)", VALUE_W)
+                        } else {
+                            truncate_for_body(
+                                shadowed_entry.value.as_deref().unwrap_or("\u{2014}"),
+                                VALUE_W,
+                            )
+                        };
+                        let sfrom = truncate_for_body(shadowed_ctx, FROM_W);
+                        out.push_str(&format!(
+                            "  {sname:<NAME_W$} {svalue:<VALUE_W$} {sfrom:<FROM_W$}\n"
+                        ));
+                    }
+                }
             }
         }
         out
+    }
+}
+
+/// Truncate `s` to at most `max_chars` characters (char-count), appending
+/// `…` if cut. Mirrors the render-side `truncate_str` so that the byte
+/// offsets in `searchable_body` align with what `apply_search_highlights`
+/// reconstructs from the rendered spans.
+fn truncate_for_body(s: &str, max_chars: usize) -> String {
+    if max_chars == 0 {
+        return String::new();
+    }
+    let count = s.chars().count();
+    if count <= max_chars {
+        s.to_string()
+    } else {
+        let truncated: String = s.chars().take(max_chars.saturating_sub(1)).collect();
+        format!("{truncated}…")
     }
 }
 
