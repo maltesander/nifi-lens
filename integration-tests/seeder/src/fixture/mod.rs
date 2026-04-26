@@ -6,6 +6,7 @@ pub mod diff;
 pub mod healthy;
 pub mod invalid;
 pub mod noisy;
+pub mod parameterized;
 pub mod payload;
 pub mod registry;
 pub mod services;
@@ -45,6 +46,9 @@ pub async fn seed(client: &DynamicClient, detected_version: &semver::Version) ->
             message: "fixture marker PG has no id".into(),
         })?;
 
+    tracing::info!("seeding parameter contexts");
+    let pc_ids = parameterized::seed_parameter_contexts(client).await?;
+
     healthy::seed(client, &marker_pg_id, &service_ids, detected_version).await?;
     noisy::seed(client, &marker_pg_id).await?;
     backpressure::seed(client, &marker_pg_id).await?;
@@ -52,6 +56,8 @@ pub async fn seed(client: &DynamicClient, detected_version: &semver::Version) ->
     bulky::seed(client, &marker_pg_id).await?;
     diff::seed(client, &marker_pg_id, detected_version).await?;
     versioned::seed(client, &marker_pg_id, &registry_ids, detected_version).await?;
+    parameterized::seed_parameterized_pipeline(client, &marker_pg_id, &pc_ids, detected_version)
+        .await?;
 
     tracing::info!("fixture seed complete");
     Ok(())

@@ -9,7 +9,7 @@
 //!   - `versioned-clean` → `UP_TO_DATE`.
 //!   - `versioned-modified` → `LOCALLY_MODIFIED`.
 //!
-//! The marker PG (`nifilens-fixture-v6`) itself is unversioned.
+//! The marker PG (`nifilens-fixture-v7`) itself is unversioned.
 
 use nifi_lens::client::{NifiClient, NodeKind};
 use nifi_lens::config::{ResolvedAuth, ResolvedContext, VersionStrategy};
@@ -163,7 +163,7 @@ async fn unversioned_pg_returns_none_from_version_information_optional() {
         let client = NifiClient::connect(&ctx).await.unwrap();
 
         // Marker PG is unversioned.
-        let pg_id = find_pg_id_by_name(&client, "nifilens-fixture-v6")
+        let pg_id = find_pg_id_by_name(&client, "nifilens-fixture-v7")
             .await
             .unwrap_or_else(|| panic!("marker PG not found on {version}"));
 

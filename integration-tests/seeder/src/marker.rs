@@ -10,7 +10,7 @@ use crate::error::{Result, SeederError};
 /// Name of the marker PG. Bumping this (`v2` → `v3`) invalidates stale
 /// fixtures: the next nuke-and-repave pass will delete the old marker
 /// along with everything else.
-pub const FIXTURE_MARKER_NAME: &str = "nifilens-fixture-v6";
+pub const FIXTURE_MARKER_NAME: &str = "nifilens-fixture-v7";
 
 /// Returns `Some(pg_id)` if the marker PG exists as a direct child of
 /// root, `None` otherwise.

@@ -610,15 +610,20 @@ iterate without re-seeding), use
 seeder with `--skip-if-seeded`, and `cargo run -- --config
 integration-tests/nifilens-config.toml --context dev-nifi-2-9-0`.
 `--skip-if-seeded` makes re-runs a no-op when the fixture marker PG
-(`nifilens-fixture-v6`) is already present.
+(`nifilens-fixture-v7`) is already present.
 
-**Fixture inventory** — top-level marker PG `nifilens-fixture-v6`
-contains eight process groups and four top-level controller services:
+**Fixture inventory** — top-level marker PG `nifilens-fixture-v7`
+contains nine process groups, two parameter contexts, and four
+top-level controller services:
 
 - PGs: `healthy-pipeline` (with nested `ingest`/`enrich`),
   `noisy-pipeline`, `backpressure-pipeline`, `invalid-pipeline`,
   `bulky-pipeline`, `diff-pipeline`, `versioned-clean`,
-  `versioned-modified`.
+  `versioned-modified`, `parameterized-pipeline`.
+- Parameter contexts: `fixture-pc-base` (with `kafka_bootstrap`,
+  `retry_max`, sensitive `db_password`) and `fixture-pc-prod`
+  (inherits from `fixture-pc-base`, overrides `retry_max`, adds
+  `region`). `parameterized-pipeline` is bound to `fixture-pc-prod`.
 - CSes: `fixture-json-reader` ENABLED, `fixture-json-writer` ENABLED,
   `fixture-csv-reader` DISABLED, `fixture-broken-writer`
   INVALID/DISABLED.
@@ -629,6 +634,13 @@ What each pipeline exercises:
   `fixture-json-reader`/`-writer`, then `UpdateAttribute-enrich` →
   `UpdateAttribute-cleanup` → `LogAttribute-INFO` — exercises
   CS-referencing coverage on all NiFi versions including 2.6.0.
+- `parameterized-pipeline` is bound to `fixture-pc-prod` (which
+  inherits `fixture-pc-base`). Contains a single
+  `LogAttribute-parameterized` whose `Log Payload` is
+  `"connecting to #{kafka_bootstrap}"` (param reference) and
+  `Log Prefix` is `"##{literal_text}"` (escape — should NOT be
+  annotated). Exercises the Browser parameter-context modal (`p`) and
+  the `#{name}` cross-link annotation logic in T16.
 - `versioned-clean` and `versioned-modified` are committed to a NiFi
   Registry bucket on seed; `versioned-modified` then has one property
   mutated locally so it shows `[MODIFIED]` (or `[STALE+MOD]` after a
