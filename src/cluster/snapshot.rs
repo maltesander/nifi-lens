@@ -161,6 +161,25 @@ pub struct VersionControlMap {
     pub by_pg_id: BTreeMap<String, VersionControlSummary>,
 }
 
+/// Reference to a parameter context as bound to a process group:
+/// id and display name only. The full context (parameters, inheritance
+/// chain) is fetched on demand by the parameter-context modal worker.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ParameterContextRef {
+    pub id: String,
+    pub name: String,
+}
+
+/// Cluster-wide map of PG-id → bound parameter context. PGs without a
+/// bound context map to `None`. Stored as a single
+/// `EndpointState<ParameterContextBindingsMap>` value: each fetch cycle
+/// either succeeds and replaces the whole map, or fails and preserves
+/// the previous map via `last_ok`.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct ParameterContextBindingsMap {
+    pub by_pg_id: BTreeMap<String, Option<ParameterContextRef>>,
+}
+
 /// The cluster snapshot. Holds the raw client-level snapshot types
 /// (already normalized by `NifiClient`) — views project from these.
 #[derive(Debug, Default, Clone)]
@@ -175,6 +194,7 @@ pub struct ClusterSnapshot {
     pub connections_by_pg: HashMap<String, EndpointState<ConnectionEndpoints>>,
     pub bulletins: BulletinRing,
     pub version_control: EndpointState<VersionControlMap>,
+    pub parameter_context_bindings: EndpointState<ParameterContextBindingsMap>,
 }
 
 impl ClusterSnapshot {
@@ -228,7 +248,9 @@ impl ClusterSnapshot {
             ClusterEndpoint::VersionControl => {
                 meta_of(&self.version_control).map(|m| m.next_interval)
             }
-            ClusterEndpoint::ParameterContextBindings => None, // TODO(T2): implement with snapshot field
+            ClusterEndpoint::ParameterContextBindings => {
+                meta_of(&self.parameter_context_bindings).map(|m| m.next_interval)
+            }
         }
     }
 }
@@ -427,6 +449,19 @@ mod tests {
         assert!(
             snap.next_interval_for(ClusterEndpoint::VersionControl)
                 .is_none()
+        );
+    }
+
+    #[test]
+    fn parameter_context_bindings_endpoint_state_starts_loading() {
+        let snap = ClusterSnapshot::default();
+        assert!(matches!(
+            snap.parameter_context_bindings,
+            EndpointState::Loading
+        ));
+        assert_eq!(
+            snap.next_interval_for(ClusterEndpoint::ParameterContextBindings),
+            None
         );
     }
 }
