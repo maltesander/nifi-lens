@@ -227,11 +227,12 @@ pub struct KeyMap {}
 
 impl KeyMap {
     pub fn translate(
-        &mut self,
+        &self,
         mut key: crossterm::event::KeyEvent,
         active_view: crate::app::state::ViewId,
         content_modal_open: bool,
         version_modal_open: bool,
+        state: &crate::app::state::AppState,
     ) -> InputEvent {
         use crossterm::event::{KeyCode, KeyModifiers};
 
@@ -357,8 +358,10 @@ impl KeyMap {
                 }
             }
             ViewId::Browser => {
+                use crate::input::Verb as _;
+                let hint_ctx = HintContext::new(state);
                 for &v in BrowserVerb::all() {
-                    if chord_matches(v.chord(), key) {
+                    if chord_matches(v.chord(), key) && v.enabled(&hint_ctx) {
                         return InputEvent::View(ViewVerb::Browser(v));
                     }
                 }
@@ -496,34 +499,50 @@ mod keymap_tests {
     fn press_mod(code: KeyCode, mods: KeyModifiers) -> KeyEvent {
         KeyEvent::new(code, mods)
     }
+    fn dummy_state() -> crate::app::state::AppState {
+        crate::test_support::fresh_state()
+    }
 
     #[test]
     fn enter_translates_to_focus_descend() {
-        let mut km = KeyMap::default();
+        let km = KeyMap::default();
         assert_eq!(
-            km.translate(press(KeyCode::Enter), ViewId::Overview, false, false),
+            km.translate(
+                press(KeyCode::Enter),
+                ViewId::Overview,
+                false,
+                false,
+                &dummy_state()
+            ),
             InputEvent::Focus(FocusAction::Descend)
         );
     }
 
     #[test]
     fn esc_translates_to_focus_ascend() {
-        let mut km = KeyMap::default();
+        let km = KeyMap::default();
         assert_eq!(
-            km.translate(press(KeyCode::Esc), ViewId::Overview, false, false),
+            km.translate(
+                press(KeyCode::Esc),
+                ViewId::Overview,
+                false,
+                false,
+                &dummy_state()
+            ),
             InputEvent::Focus(FocusAction::Ascend)
         );
     }
 
     #[test]
     fn shift_left_is_history_back() {
-        let mut km = KeyMap::default();
+        let km = KeyMap::default();
         assert_eq!(
             km.translate(
                 press_mod(KeyCode::Left, KeyModifiers::SHIFT),
                 ViewId::Overview,
                 false,
                 false,
+                &dummy_state(),
             ),
             InputEvent::History(HistoryAction::Back)
         );
@@ -531,31 +550,55 @@ mod keymap_tests {
 
     #[test]
     fn bracket_still_unmapped_after_cleanup() {
-        let mut km = KeyMap::default();
+        let km = KeyMap::default();
         assert_eq!(
-            km.translate(press(KeyCode::Char('[')), ViewId::Overview, false, false),
+            km.translate(
+                press(KeyCode::Char('[')),
+                ViewId::Overview,
+                false,
+                false,
+                &dummy_state()
+            ),
             InputEvent::Unmapped
         );
         assert_eq!(
-            km.translate(press(KeyCode::Char(']')), ViewId::Overview, false, false),
+            km.translate(
+                press(KeyCode::Char(']')),
+                ViewId::Overview,
+                false,
+                false,
+                &dummy_state()
+            ),
             InputEvent::Unmapped
         );
     }
 
     #[test]
     fn tab_is_focus_next_pane() {
-        let mut km = KeyMap::default();
+        let km = KeyMap::default();
         assert_eq!(
-            km.translate(press(KeyCode::Tab), ViewId::Overview, false, false),
+            km.translate(
+                press(KeyCode::Tab),
+                ViewId::Overview,
+                false,
+                false,
+                &dummy_state()
+            ),
             InputEvent::Focus(FocusAction::NextPane)
         );
     }
 
     #[test]
     fn back_tab_is_focus_prev_pane() {
-        let mut km = KeyMap::default();
+        let km = KeyMap::default();
         assert_eq!(
-            km.translate(press(KeyCode::BackTab), ViewId::Overview, false, false),
+            km.translate(
+                press(KeyCode::BackTab),
+                ViewId::Overview,
+                false,
+                false,
+                &dummy_state()
+            ),
             InputEvent::Focus(FocusAction::PrevPane)
         );
     }
@@ -566,13 +609,14 @@ mod keymap_tests {
         // modifier bit set — not with KeyModifiers::NONE. The chord table
         // must translate both the "bare" BackTab used internally by tests
         // and the SHIFT-decorated BackTab emitted by real terminals.
-        let mut km = KeyMap::default();
+        let km = KeyMap::default();
         assert_eq!(
             km.translate(
                 press_mod(KeyCode::BackTab, KeyModifiers::SHIFT),
                 ViewId::Overview,
                 false,
                 false,
+                &dummy_state(),
             ),
             InputEvent::Focus(FocusAction::PrevPane)
         );
@@ -580,31 +624,44 @@ mod keymap_tests {
 
     #[test]
     fn f3_is_tab_goto_3() {
-        let mut km = KeyMap::default();
+        let km = KeyMap::default();
         assert_eq!(
-            km.translate(press(KeyCode::F(3)), ViewId::Overview, false, false),
+            km.translate(
+                press(KeyCode::F(3)),
+                ViewId::Overview,
+                false,
+                false,
+                &dummy_state()
+            ),
             InputEvent::Tab(TabAction::Goto(3))
         );
     }
 
     #[test]
     fn q_is_quit() {
-        let mut km = KeyMap::default();
+        let km = KeyMap::default();
         assert_eq!(
-            km.translate(press(KeyCode::Char('q')), ViewId::Overview, false, false),
+            km.translate(
+                press(KeyCode::Char('q')),
+                ViewId::Overview,
+                false,
+                false,
+                &dummy_state()
+            ),
             InputEvent::App(AppAction::Quit)
         );
     }
 
     #[test]
     fn ctrl_c_is_quit() {
-        let mut km = KeyMap::default();
+        let km = KeyMap::default();
         assert_eq!(
             km.translate(
                 press_mod(KeyCode::Char('c'), KeyModifiers::CONTROL),
                 ViewId::Overview,
                 false,
                 false,
+                &dummy_state(),
             ),
             InputEvent::App(AppAction::Quit)
         );
@@ -612,22 +669,40 @@ mod keymap_tests {
 
     #[test]
     fn bare_g_produces_app_goto() {
-        let mut km = KeyMap::default();
+        let km = KeyMap::default();
         assert_eq!(
-            km.translate(press(KeyCode::Char('g')), ViewId::Overview, false, false),
+            km.translate(
+                press(KeyCode::Char('g')),
+                ViewId::Overview,
+                false,
+                false,
+                &dummy_state()
+            ),
             InputEvent::App(AppAction::Goto)
         );
     }
 
     #[test]
     fn j_and_k_are_unmapped() {
-        let mut km = KeyMap::default();
+        let km = KeyMap::default();
         assert_eq!(
-            km.translate(press(KeyCode::Char('j')), ViewId::Overview, false, false),
+            km.translate(
+                press(KeyCode::Char('j')),
+                ViewId::Overview,
+                false,
+                false,
+                &dummy_state()
+            ),
             InputEvent::Unmapped
         );
         assert_eq!(
-            km.translate(press(KeyCode::Char('k')), ViewId::Overview, false, false),
+            km.translate(
+                press(KeyCode::Char('k')),
+                ViewId::Overview,
+                false,
+                false,
+                &dummy_state()
+            ),
             InputEvent::Unmapped
         );
     }
@@ -636,13 +711,25 @@ mod keymap_tests {
     fn r_on_events_produces_events_refresh_not_bulletins_refresh() {
         // Cross-view chord collision: `r` is bound to both BulletinsVerb::Refresh
         // and EventsVerb::Refresh. With view-aware translate, the active view wins.
-        let mut km = KeyMap::default();
+        let km = KeyMap::default();
         assert_eq!(
-            km.translate(press(KeyCode::Char('r')), ViewId::Events, false, false),
+            km.translate(
+                press(KeyCode::Char('r')),
+                ViewId::Events,
+                false,
+                false,
+                &dummy_state()
+            ),
             InputEvent::View(ViewVerb::Events(EventsVerb::Refresh))
         );
         assert_eq!(
-            km.translate(press(KeyCode::Char('r')), ViewId::Bulletins, false, false),
+            km.translate(
+                press(KeyCode::Char('r')),
+                ViewId::Bulletins,
+                false,
+                false,
+                &dummy_state()
+            ),
             InputEvent::View(ViewVerb::Bulletins(BulletinsVerb::Refresh))
         );
     }
@@ -652,13 +739,14 @@ mod keymap_tests {
         // Cross-view chord collision: Shift+T is bound to both
         // BulletinsVerb::CycleTypeFilter and EventsVerb::EditField(Types).
         use crate::input::{EventsVerb, FilterField};
-        let mut km = KeyMap::default();
+        let km = KeyMap::default();
         assert_eq!(
             km.translate(
                 press_mod(KeyCode::Char('T'), KeyModifiers::SHIFT),
                 ViewId::Events,
                 false,
                 false,
+                &dummy_state(),
             ),
             InputEvent::View(ViewVerb::Events(EventsVerb::EditField(FilterField::Types)))
         );
@@ -668,6 +756,7 @@ mod keymap_tests {
                 ViewId::Bulletins,
                 false,
                 false,
+                &dummy_state(),
             ),
             InputEvent::View(ViewVerb::Bulletins(BulletinsVerb::CycleTypeFilter))
         );
@@ -733,13 +822,53 @@ mod keymap_tests {
                 );
             }
         }
+        // BrowserVerb intentionally has two verbs on chord `p`:
+        // `OpenProperties` (Processor/CS rows) and `OpenParameterContext`
+        // (PG rows). The dispatcher resolves the collision via `enabled()`,
+        // so uniqueness is by (chord, selection-kind), not chord alone.
+        // We therefore skip the global uniqueness check for BrowserVerb
+        // and instead assert the intentional pair explicitly.
+        fn check_browser() {
+            use crate::input::BrowserVerb;
+            use crossterm::event::KeyCode;
+            let p_chord = crate::input::Chord::simple(KeyCode::Char('p'));
+            let p_verbs: Vec<BrowserVerb> = BrowserVerb::all()
+                .iter()
+                .copied()
+                .filter(|v| v.chord() == p_chord)
+                .collect();
+            assert_eq!(
+                p_verbs,
+                vec![
+                    BrowserVerb::OpenProperties,
+                    BrowserVerb::OpenParameterContext
+                ],
+                "exactly OpenProperties and OpenParameterContext share chord `p`"
+            );
+            // All OTHER BrowserVerb chords are unique.
+            let mut seen: HashSet<(
+                crossterm::event::KeyCode,
+                crossterm::event::KeyModifiers,
+                Option<crossterm::event::KeyCode>,
+            )> = HashSet::new();
+            for &v in BrowserVerb::all() {
+                if v.chord() == p_chord {
+                    continue; // intentional shared chord
+                }
+                let c = v.chord();
+                assert!(
+                    seen.insert((c.key, c.mods, c.leader)),
+                    "unexpected duplicate chord in BrowserVerb (non-p)"
+                );
+            }
+        }
         check::<crate::input::FocusAction>("FocusAction");
         check::<crate::input::HistoryAction>("HistoryAction");
         check::<crate::input::TabAction>("TabAction");
         check::<crate::input::AppAction>("AppAction");
         // GoTarget removed — no longer implements Verb
         check::<crate::input::BulletinsVerb>("BulletinsVerb");
-        check::<crate::input::BrowserVerb>("BrowserVerb");
+        check_browser();
         check::<crate::input::EventsVerb>("EventsVerb");
         check::<crate::input::TracerVerb>("TracerVerb");
         check::<crate::input::ContentModalVerb>("ContentModalVerb");
@@ -753,20 +882,38 @@ mod keymap_tests {
         // but there is no ContentModalVerb on `i`, so it should become Unmapped.
         // `c` is TracerVerb::Copy when modal is closed; it should become
         // ContentModal(Copy) when the modal is open.
-        let mut km = KeyMap::default();
+        let km = KeyMap::default();
         // Modal open: `c` → ContentModal(Copy)
         assert_eq!(
-            km.translate(press(KeyCode::Char('c')), ViewId::Tracer, true, false),
+            km.translate(
+                press(KeyCode::Char('c')),
+                ViewId::Tracer,
+                true,
+                false,
+                &dummy_state()
+            ),
             InputEvent::View(ViewVerb::ContentModal(ContentModalVerb::Copy))
         );
         // Modal open: `i` is not a ContentModalVerb chord → Unmapped
         assert_eq!(
-            km.translate(press(KeyCode::Char('i')), ViewId::Tracer, true, false),
+            km.translate(
+                press(KeyCode::Char('i')),
+                ViewId::Tracer,
+                true,
+                false,
+                &dummy_state()
+            ),
             InputEvent::Unmapped
         );
         // Modal closed: `i` → TracerVerb::OpenContentModal
         assert_eq!(
-            km.translate(press(KeyCode::Char('i')), ViewId::Tracer, false, false),
+            km.translate(
+                press(KeyCode::Char('i')),
+                ViewId::Tracer,
+                false,
+                false,
+                &dummy_state()
+            ),
             InputEvent::View(ViewVerb::Tracer(TracerVerb::OpenContentModal))
         );
     }
@@ -776,31 +923,44 @@ mod keymap_tests {
         // Esc is normally FocusAction::Ascend (priority slot), but
         // ContentModalVerb::Close binds Esc and the modal-open path checks
         // ContentModalVerb BEFORE falling through to FocusAction.
-        let mut km = KeyMap::default();
+        let km = KeyMap::default();
         assert_eq!(
-            km.translate(press(KeyCode::Esc), ViewId::Tracer, true, false),
+            km.translate(
+                press(KeyCode::Esc),
+                ViewId::Tracer,
+                true,
+                false,
+                &dummy_state()
+            ),
             InputEvent::View(ViewVerb::ContentModal(ContentModalVerb::Close))
         );
     }
 
     #[test]
     fn content_modal_tab_becomes_switch_tab_next() {
-        let mut km = KeyMap::default();
+        let km = KeyMap::default();
         assert_eq!(
-            km.translate(press(KeyCode::Tab), ViewId::Tracer, true, false),
+            km.translate(
+                press(KeyCode::Tab),
+                ViewId::Tracer,
+                true,
+                false,
+                &dummy_state()
+            ),
             InputEvent::View(ViewVerb::ContentModal(ContentModalVerb::SwitchTabNext))
         );
     }
 
     #[test]
     fn ctrl_c_quits_even_when_modal_open() {
-        let mut km = KeyMap::default();
+        let km = KeyMap::default();
         assert_eq!(
             km.translate(
                 press_mod(KeyCode::Char('c'), KeyModifiers::CONTROL),
                 ViewId::Tracer,
                 true,
                 false,
+                &dummy_state(),
             ),
             InputEvent::App(AppAction::Quit)
         );
@@ -810,6 +970,7 @@ mod keymap_tests {
                 ViewId::Tracer,
                 true,
                 false,
+                &dummy_state(),
             ),
             InputEvent::App(AppAction::Quit)
         );
@@ -818,29 +979,65 @@ mod keymap_tests {
     #[test]
     fn modal_scroll_keys_pass_through_as_focus_action() {
         use crate::input::{FocusAction, InputEvent};
-        let mut km = KeyMap::default();
+        let km = KeyMap::default();
         assert_eq!(
-            km.translate(press(KeyCode::Up), ViewId::Tracer, true, false),
+            km.translate(
+                press(KeyCode::Up),
+                ViewId::Tracer,
+                true,
+                false,
+                &dummy_state()
+            ),
             InputEvent::Focus(FocusAction::Up)
         );
         assert_eq!(
-            km.translate(press(KeyCode::Down), ViewId::Tracer, true, false),
+            km.translate(
+                press(KeyCode::Down),
+                ViewId::Tracer,
+                true,
+                false,
+                &dummy_state()
+            ),
             InputEvent::Focus(FocusAction::Down)
         );
         assert_eq!(
-            km.translate(press(KeyCode::PageUp), ViewId::Tracer, true, false),
+            km.translate(
+                press(KeyCode::PageUp),
+                ViewId::Tracer,
+                true,
+                false,
+                &dummy_state()
+            ),
             InputEvent::Focus(FocusAction::PageUp)
         );
         assert_eq!(
-            km.translate(press(KeyCode::PageDown), ViewId::Tracer, true, false),
+            km.translate(
+                press(KeyCode::PageDown),
+                ViewId::Tracer,
+                true,
+                false,
+                &dummy_state()
+            ),
             InputEvent::Focus(FocusAction::PageDown)
         );
         assert_eq!(
-            km.translate(press(KeyCode::Home), ViewId::Tracer, true, false),
+            km.translate(
+                press(KeyCode::Home),
+                ViewId::Tracer,
+                true,
+                false,
+                &dummy_state()
+            ),
             InputEvent::Focus(FocusAction::First)
         );
         assert_eq!(
-            km.translate(press(KeyCode::End), ViewId::Tracer, true, false),
+            km.translate(
+                press(KeyCode::End),
+                ViewId::Tracer,
+                true,
+                false,
+                &dummy_state()
+            ),
             InputEvent::Focus(FocusAction::Last)
         );
     }

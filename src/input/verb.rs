@@ -40,6 +40,7 @@ pub enum BrowserVerb {
     Refresh,
     Copy,
     OpenProperties,
+    OpenParameterContext,
     ShowVersionControl,
 }
 
@@ -168,6 +169,7 @@ impl Verb for BrowserVerb {
             Self::Refresh => Chord::simple(KeyCode::Char('r')),
             Self::Copy => Chord::simple(KeyCode::Char('c')),
             Self::OpenProperties => Chord::simple(KeyCode::Char('p')),
+            Self::OpenParameterContext => Chord::simple(KeyCode::Char('p')),
             Self::ShowVersionControl => Chord::simple(KeyCode::Char('m')),
         }
     }
@@ -176,6 +178,7 @@ impl Verb for BrowserVerb {
             Self::Refresh => "refresh flow",
             Self::Copy => "copy id / row value",
             Self::OpenProperties => "open properties",
+            Self::OpenParameterContext => "open parameter context",
             Self::ShowVersionControl => "show version control",
         }
     }
@@ -184,6 +187,7 @@ impl Verb for BrowserVerb {
             Self::Refresh => "refresh",
             Self::Copy => "copy",
             Self::OpenProperties => "props",
+            Self::OpenParameterContext => "param",
             Self::ShowVersionControl => "version",
         }
     }
@@ -193,6 +197,9 @@ impl Verb for BrowserVerb {
             Self::OpenProperties => {
                 ctx.state.current_tab == ViewId::Browser
                     && ctx.state.browser_selection_has_properties()
+            }
+            Self::OpenParameterContext => {
+                ctx.state.current_tab == ViewId::Browser && ctx.state.browser_selection_is_pg()
             }
             Self::ShowVersionControl => {
                 ctx.state.current_tab == ViewId::Browser
@@ -209,6 +216,7 @@ impl Verb for BrowserVerb {
             Self::Refresh,
             Self::Copy,
             Self::OpenProperties,
+            Self::OpenParameterContext,
             Self::ShowVersionControl,
         ]
     }
@@ -801,5 +809,133 @@ mod tests {
             assert_ne!(c.key, KeyCode::Char('j'));
             assert_ne!(c.key, KeyCode::Char('k'));
         }
+    }
+
+    #[test]
+    fn open_parameter_context_chord_is_p() {
+        let chord = BrowserVerb::OpenParameterContext.chord();
+        assert_eq!(chord.display(), "p");
+    }
+
+    #[test]
+    fn open_parameter_context_label_and_hint() {
+        assert_eq!(
+            BrowserVerb::OpenParameterContext.label(),
+            "open parameter context"
+        );
+        assert_eq!(BrowserVerb::OpenParameterContext.hint(), "param");
+    }
+
+    #[test]
+    fn open_parameter_context_in_all() {
+        assert!(BrowserVerb::all().contains(&BrowserVerb::OpenParameterContext));
+    }
+
+    #[test]
+    fn open_parameter_context_enabled_only_on_pg_rows() {
+        use crate::app::state::ViewId;
+        use crate::client::{NodeKind, NodeStatusSummary, RawNode, RecursiveSnapshot};
+        use crate::input::{HintContext, Verb};
+        use crate::test_support::fresh_state;
+        use crate::view::browser::state::apply_tree_snapshot;
+        use std::time::SystemTime;
+
+        // Build a seeded tree: root PG (idx 0) + one Processor child (idx 1).
+        let make_snap = || RecursiveSnapshot {
+            nodes: vec![
+                RawNode {
+                    parent_idx: None,
+                    kind: NodeKind::ProcessGroup,
+                    id: "root".into(),
+                    group_id: "root".into(),
+                    name: "root".into(),
+                    status_summary: NodeStatusSummary::ProcessGroup {
+                        running: 0,
+                        stopped: 0,
+                        invalid: 0,
+                        disabled: 0,
+                    },
+                },
+                RawNode {
+                    parent_idx: Some(0),
+                    kind: NodeKind::Processor,
+                    id: "gen".into(),
+                    group_id: "root".into(),
+                    name: "Gen".into(),
+                    status_summary: NodeStatusSummary::Processor {
+                        run_status: "Running".into(),
+                    },
+                },
+            ],
+            fetched_at: SystemTime::now(),
+        };
+
+        // PG row (visible row 0 is the root PG): enabled.
+        let mut pg_state = fresh_state();
+        apply_tree_snapshot(&mut pg_state.browser, make_snap());
+        pg_state.current_tab = ViewId::Browser;
+        pg_state.browser.selected = 0;
+        let ctx = HintContext::new(&pg_state);
+        assert!(
+            BrowserVerb::OpenParameterContext.enabled(&ctx),
+            "OpenParameterContext must be enabled on a PG row"
+        );
+
+        // Processor row (visible row 1 is 'Gen'): disabled.
+        let mut proc_state = fresh_state();
+        apply_tree_snapshot(&mut proc_state.browser, make_snap());
+        proc_state.current_tab = ViewId::Browser;
+        proc_state.browser.selected = 1;
+        let ctx = HintContext::new(&proc_state);
+        assert!(
+            !BrowserVerb::OpenParameterContext.enabled(&ctx),
+            "OpenParameterContext must be disabled on a Processor row"
+        );
+
+        // Off-tab: disabled even on a PG row.
+        let off_tab = fresh_state(); // current_tab is Overview by default
+        let ctx = HintContext::new(&off_tab);
+        assert!(
+            !BrowserVerb::OpenParameterContext.enabled(&ctx),
+            "OpenParameterContext must be disabled when not on the Browser tab"
+        );
+    }
+
+    #[test]
+    fn open_properties_disabled_on_pg_rows_so_p_only_resolves_to_one_verb() {
+        use crate::app::state::ViewId;
+        use crate::client::{NodeKind, NodeStatusSummary, RawNode, RecursiveSnapshot};
+        use crate::input::{HintContext, Verb};
+        use crate::test_support::fresh_state;
+        use crate::view::browser::state::apply_tree_snapshot;
+        use std::time::SystemTime;
+
+        let mut pg_state = fresh_state();
+        apply_tree_snapshot(
+            &mut pg_state.browser,
+            RecursiveSnapshot {
+                nodes: vec![RawNode {
+                    parent_idx: None,
+                    kind: NodeKind::ProcessGroup,
+                    id: "root".into(),
+                    group_id: "root".into(),
+                    name: "root".into(),
+                    status_summary: NodeStatusSummary::ProcessGroup {
+                        running: 0,
+                        stopped: 0,
+                        invalid: 0,
+                        disabled: 0,
+                    },
+                }],
+                fetched_at: SystemTime::now(),
+            },
+        );
+        pg_state.current_tab = ViewId::Browser;
+        pg_state.browser.selected = 0;
+        let ctx = HintContext::new(&pg_state);
+        assert!(
+            !BrowserVerb::OpenProperties.enabled(&ctx),
+            "OpenProperties must be disabled on a PG row (chord-collision invariant)"
+        );
     }
 }

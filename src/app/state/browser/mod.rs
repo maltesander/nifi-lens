@@ -85,6 +85,14 @@ impl ViewKeyHandler for BrowserHandler {
                     return Some(UpdateResult::default());
                 }
             }
+            BrowserVerb::OpenParameterContext => {
+                // The enabled() predicate gates this verb to PG rows only;
+                // the dispatcher now checks enabled() for BrowserVerb so this
+                // arm fires only when a PG is selected. The full modal open
+                // logic is wired in a later task (T13 CrossLink / T14 render).
+                // For now, silently no-op so the verb is routable.
+                return Some(UpdateResult::default());
+            }
             BrowserVerb::ShowVersionControl => {
                 if !state.browser_selection_is_versioned_pg() {
                     // Verb is grayed out in the hint bar via the

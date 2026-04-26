@@ -259,6 +259,21 @@ impl AppState {
         )
     }
 
+    /// True iff the Browser tab is active and the selected node is any
+    /// ProcessGroup (versioned or not, including the root PG).
+    pub fn browser_selection_is_pg(&self) -> bool {
+        if self.current_tab != ViewId::Browser {
+            return false;
+        }
+        let Some(&arena) = self.browser.visible.get(self.browser.selected) else {
+            return false;
+        };
+        let Some(node) = self.browser.nodes.get(arena) else {
+            return false;
+        };
+        matches!(node.kind, crate::client::NodeKind::ProcessGroup)
+    }
+
     /// True iff the Browser tab is active, the selected node is a
     /// ProcessGroup, and the cluster snapshot has a `VersionControlSummary`
     /// for that PG (i.e. the PG is under version control).
@@ -891,6 +906,7 @@ fn handle_key(state: &mut AppState, key: KeyEvent, config: &Config) -> UpdateRes
         state.current_tab,
         content_modal_open,
         version_modal_open,
+        state,
     );
 
     // Auto-clear non-Error banners on the next input event so info /
