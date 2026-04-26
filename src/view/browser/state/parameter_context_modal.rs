@@ -88,7 +88,8 @@ impl ParameterContextModalState {
     pub fn searchable_body(&self) -> String {
         // Column widths must mirror the render module exactly. The order is
         // flags | name | value | from. `by_context_mode` omits `from`.
-        const FLAG_W: usize = 12;
+        // Flags render as a single combined chip, e.g. `[SPO]`.
+        const FLAG_W: usize = 5;
         const NAME_W: usize = 22;
         const VALUE_W: usize = 22;
         const FROM_W: usize = 18;
@@ -109,16 +110,19 @@ impl ParameterContextModalState {
             ));
             out.push('\n'); // separator placeholder
             for entry in &ctx.parameters {
-                let mut flags = String::new();
+                // Combined flag chip — by_context view only emits S and P.
+                let mut letters = String::new();
                 if entry.sensitive {
-                    flags.push_str("[S]");
+                    letters.push('S');
                 }
                 if entry.provided {
-                    if !flags.is_empty() {
-                        flags.push(' ');
-                    }
-                    flags.push_str("[P]");
+                    letters.push('P');
                 }
+                let mut flags = if letters.is_empty() {
+                    String::new()
+                } else {
+                    format!("[{letters}]")
+                };
                 while flags.chars().count() < FLAG_W {
                     flags.push(' ');
                 }
@@ -140,30 +144,25 @@ impl ParameterContextModalState {
             ));
             out.push('\n'); // separator placeholder
             for row in &resolved {
-                // Flags first (same order as render_flat::build_flags):
-                // [S] sensitive, [P] provided, [O] override, [!] unresolved.
-                let mut flags = String::new();
+                // Combined flag chip in canonical order (S, P, O, !).
+                let mut letters = String::new();
                 if row.winner.sensitive {
-                    flags.push_str("[S]");
+                    letters.push('S');
                 }
                 if row.winner.provided {
-                    if !flags.is_empty() {
-                        flags.push(' ');
-                    }
-                    flags.push_str("[P]");
+                    letters.push('P');
                 }
                 if !row.shadowed.is_empty() && !row.unresolved {
-                    if !flags.is_empty() {
-                        flags.push(' ');
-                    }
-                    flags.push_str("[O]");
+                    letters.push('O');
                 }
                 if row.unresolved {
-                    if !flags.is_empty() {
-                        flags.push(' ');
-                    }
-                    flags.push_str("[!]");
+                    letters.push('!');
                 }
+                let mut flags = if letters.is_empty() {
+                    String::new()
+                } else {
+                    format!("[{letters}]")
+                };
                 while flags.chars().count() < FLAG_W {
                     flags.push(' ');
                 }

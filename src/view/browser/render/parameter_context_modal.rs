@@ -25,7 +25,10 @@ const MIN_HEIGHT: u16 = 20;
 /// Resolved-flat / by-context table column widths. Order: flags | name |
 /// value | from. The renderer and `searchable_body` MUST agree on these
 /// widths so search-match byte offsets align with the rendered cells.
-pub(super) const FLAG_W: usize = 12;
+///
+/// Flags render as a single combined chip — `[SPO]` not `[S] [P] [O]` —
+/// so the column stays narrow. Worst case is `[SPO]` (5 chars).
+pub(super) const FLAG_W: usize = 5;
 pub(super) const NAME_W: usize = 22;
 pub(super) const VALUE_W: usize = 22;
 pub(super) const FROM_W: usize = 18;
@@ -416,6 +419,7 @@ fn render_flat(
     let summary = build_summary(total, overrides, sensitive, unresolved_count);
     lines.push(Line::from(""));
     lines.push(Line::from(Span::styled(summary, theme::muted())));
+    lines.push(Line::from(legend_spans()));
 
     // Apply search highlights if active.
     if let Some(search) = modal.search.as_ref()
@@ -475,19 +479,21 @@ fn param_row(
     Line::from(spans)
 }
 
-/// Build styled flag spans padded to `width` columns. Empty when no
-/// flags apply; pure spaces still pad to `width`.
+/// Build a combined flag chip — `[SPO]` style with per-letter styling —
+/// padded to `width` columns. Empty rows pad to `width` with spaces.
 fn flag_spans_padded(rp: &ResolvedParameter, width: usize) -> Vec<Span<'static>> {
-    let flags = build_flags(rp);
+    let letters = flag_letters(rp);
     let mut spans: Vec<Span<'static>> = Vec::new();
     let mut consumed = 0usize;
-    for (i, (text, style)) in flags.iter().enumerate() {
-        if i > 0 {
-            spans.push(Span::raw(" "));
+    if !letters.is_empty() {
+        spans.push(Span::styled("[".to_string(), theme::muted()));
+        consumed += 1;
+        for (ch, style) in &letters {
+            spans.push(Span::styled(ch.to_string(), *style));
             consumed += 1;
         }
-        spans.push(Span::styled(text.clone(), *style));
-        consumed += text.chars().count();
+        spans.push(Span::styled("]".to_string(), theme::muted()));
+        consumed += 1;
     }
     if consumed < width {
         spans.push(Span::raw(" ".repeat(width - consumed)));
@@ -495,22 +501,45 @@ fn flag_spans_padded(rp: &ResolvedParameter, width: usize) -> Vec<Span<'static>>
     spans
 }
 
-/// Returns flag tokens in order: `[S]`, `[P]`, `[O]`, `[!]`.
-fn build_flags(rp: &ResolvedParameter) -> Vec<(String, Style)> {
-    let mut flags = Vec::new();
+/// Returns the flag letters that apply, in canonical order (S, P, O, !).
+/// Each letter carries its display style. Mirrors `build_flags` but
+/// returns single chars instead of `[X]`-bracketed strings.
+fn flag_letters(rp: &ResolvedParameter) -> Vec<(char, Style)> {
+    let mut letters = Vec::new();
     if rp.winner.sensitive {
-        flags.push(("[S]".to_string(), theme::warning()));
+        letters.push(('S', theme::warning()));
     }
     if rp.winner.provided {
-        flags.push(("[P]".to_string(), theme::muted()));
+        letters.push(('P', theme::muted()));
     }
     if !rp.shadowed.is_empty() && !rp.unresolved {
-        flags.push(("[O]".to_string(), theme::muted()));
+        letters.push(('O', theme::muted()));
     }
     if rp.unresolved {
-        flags.push(("[!]".to_string(), theme::error()));
+        letters.push(('!', theme::error()));
     }
-    flags
+    letters
+}
+
+/// One-line legend explaining the flag chip letters. Rendered below the
+/// summary so users can decode `[S]` / `[SP]` / `[O]` / `[!]` without
+/// leaving the modal.
+fn legend_spans() -> Vec<Span<'static>> {
+    let dot = || Span::styled(" · ", theme::muted());
+    vec![
+        Span::styled("flags: ", theme::muted()),
+        Span::styled("S", theme::warning()),
+        Span::styled(" sensitive", theme::muted()),
+        dot(),
+        Span::styled("P", theme::muted()),
+        Span::styled(" provided", theme::muted()),
+        dot(),
+        Span::styled("O", theme::muted()),
+        Span::styled(" overridden", theme::muted()),
+        dot(),
+        Span::styled("!", theme::error()),
+        Span::styled(" unresolved", theme::muted()),
+    ]
 }
 
 /// Render a parameter value: `(sensitive)` literal when sensitive,
@@ -576,25 +605,26 @@ fn render_by_context(
         let name = truncate_str(&entry.name, name_w);
         let value = render_value(entry.sensitive, &entry.value, value_w);
 
-        // Build flag spans (sensitive + provided only — by_context view
-        // doesn't model override / unresolved which are chain-wide
-        // properties).
-        let mut flag_parts: Vec<(String, Style)> = Vec::new();
+        // Combined flag chip (sensitive + provided only — by_context view
+        // doesn't model override / unresolved which are chain-wide).
+        let mut letters: Vec<(char, Style)> = Vec::new();
         if entry.sensitive {
-            flag_parts.push(("[S]".to_string(), theme::warning()));
+            letters.push(('S', theme::warning()));
         }
         if entry.provided {
-            flag_parts.push(("[P]".to_string(), theme::muted()));
+            letters.push(('P', theme::muted()));
         }
         let mut spans: Vec<Span<'static>> = Vec::new();
         let mut consumed = 0usize;
-        for (i, (text, style)) in flag_parts.iter().enumerate() {
-            if i > 0 {
-                spans.push(Span::raw(" "));
+        if !letters.is_empty() {
+            spans.push(Span::styled("[".to_string(), theme::muted()));
+            consumed += 1;
+            for (ch, style) in &letters {
+                spans.push(Span::styled(ch.to_string(), *style));
                 consumed += 1;
             }
-            spans.push(Span::styled(text.clone(), *style));
-            consumed += text.chars().count();
+            spans.push(Span::styled("]".to_string(), theme::muted()));
+            consumed += 1;
         }
         if consumed < flag_w {
             spans.push(Span::raw(" ".repeat(flag_w - consumed)));
@@ -604,6 +634,14 @@ fn render_by_context(
         spans.push(Span::raw(" "));
         spans.push(Span::styled(format!("{value:<value_w$}"), Style::default()));
         lines.push(Line::from(spans));
+    }
+
+    if !node.parameters.is_empty() {
+        // Legend mirrors render_flat's so users get the same decoder ring
+        // when switching to by-context view. Only S and P apply here; we
+        // include the others greyed out for consistency.
+        lines.push(Line::from(""));
+        lines.push(Line::from(legend_spans()));
     }
 
     if node.parameters.is_empty() {
