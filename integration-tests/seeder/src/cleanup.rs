@@ -51,38 +51,75 @@ pub async fn nuke_and_repave(client: &DynamicClient) -> Result<()> {
 
 async fn delete_all_parameter_contexts(client: &DynamicClient) -> Result<()> {
     // Parameter contexts are cluster-scoped — they aren't nested under any
-    // PG, so the child-PG delete pass leaves them behind. Deletion is only
-    // legal once no PG binds to a context; the previous step already
-    // removed every fixture PG, so any remaining bindings are out-of-scope
-    // (left there by another seeder or a manual operator) and we leave
-    // those contexts alone.
-    let entity = client
-        .flow()
-        .get_parameter_contexts()
-        .await
-        .map_err(|e| SeederError::Api {
-            message: "list parameter contexts".into(),
-            source: Box::new(e),
-        })?;
+    // PG, so the child-PG delete pass leaves them behind. Deletion is also
+    // gated by inter-context references: a context inherited by another
+    // (e.g. `fixture-pc-base` referenced by `fixture-pc-prod`) can only be
+    // deleted after every inheritor is gone.
+    //
+    // Multi-pass deletion handles both ordering constraints uniformly:
+    // each pass refetches the list and tries to delete every remaining
+    // context. NiFi 409s the ones still referenced; surviving contexts go
+    // into the next pass. The loop terminates when the list is empty
+    // (success) or no pass makes progress (genuine error).
+    const MAX_PASSES: usize = 8;
+    let mut last_error: Option<Box<dyn std::error::Error + Send + Sync>> = None;
 
-    let contexts = entity.parameter_contexts.unwrap_or_default();
-    for ctx in contexts {
-        let Some(id) = ctx.id.clone() else { continue };
-        let version = ctx
-            .revision
-            .as_ref()
-            .and_then(|r| r.version)
-            .map(|v| v.to_string());
-        client
-            .parametercontexts()
-            .delete_parameter_context(&id, version.as_deref(), None, None)
-            .await
-            .map_err(|e| SeederError::Api {
-                message: format!("delete parameter context {id}"),
-                source: Box::new(e),
-            })?;
+    for _ in 0..MAX_PASSES {
+        let entity =
+            client
+                .flow()
+                .get_parameter_contexts()
+                .await
+                .map_err(|e| SeederError::Api {
+                    message: "list parameter contexts".into(),
+                    source: Box::new(e),
+                })?;
+
+        let contexts = entity.parameter_contexts.unwrap_or_default();
+        if contexts.is_empty() {
+            return Ok(());
+        }
+
+        let mut progress = false;
+        for ctx in contexts {
+            let Some(id) = ctx.id.clone() else { continue };
+            let version = ctx
+                .revision
+                .as_ref()
+                .and_then(|r| r.version)
+                .map(|v| v.to_string());
+            match client
+                .parametercontexts()
+                .delete_parameter_context(&id, version.as_deref(), None, None)
+                .await
+            {
+                Ok(_) => {
+                    progress = true;
+                }
+                Err(e) => {
+                    // Likely 409 — context still referenced by an inheritor.
+                    // Retry on the next pass after the inheritor is deleted.
+                    last_error = Some(Box::new(e));
+                }
+            }
+        }
+
+        if !progress {
+            return Err(SeederError::Api {
+                message: "delete parameter contexts (no progress; check inheritance topology)"
+                    .into(),
+                source: last_error
+                    .unwrap_or_else(|| Box::new(std::io::Error::other("no error captured"))),
+            });
+        }
     }
-    Ok(())
+
+    Err(SeederError::Api {
+        message: format!(
+            "delete parameter contexts (exceeded {MAX_PASSES} passes — possible cycle?)"
+        ),
+        source: last_error.unwrap_or_else(|| Box::new(std::io::Error::other("no error captured"))),
+    })
 }
 
 async fn stop_all_under_root(client: &DynamicClient) -> Result<()> {
