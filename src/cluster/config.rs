@@ -29,6 +29,11 @@ pub struct ClusterPollingConfig {
     pub connections_by_pg: Duration,
     #[serde(default = "default_version_control", with = "humantime_serde")]
     pub version_control: Duration,
+    #[serde(
+        default = "default_parameter_context_bindings",
+        with = "humantime_serde"
+    )]
+    pub parameter_context_bindings: Duration,
     #[serde(default = "default_about", with = "humantime_serde")]
     pub about: Duration,
     #[serde(default = "default_max_interval", with = "humantime_serde")]
@@ -49,6 +54,7 @@ impl Default for ClusterPollingConfig {
             tls_certs: default_tls_certs(),
             connections_by_pg: default_connections_by_pg(),
             version_control: default_version_control(),
+            parameter_context_bindings: default_parameter_context_bindings(),
             about: default_about(),
             max_interval: default_max_interval(),
             jitter_percent: default_jitter_percent(),
@@ -81,6 +87,9 @@ fn default_connections_by_pg() -> Duration {
     Duration::from_secs(15)
 }
 fn default_version_control() -> Duration {
+    Duration::from_secs(30)
+}
+fn default_parameter_context_bindings() -> Duration {
     Duration::from_secs(30)
 }
 fn default_about() -> Duration {
@@ -161,5 +170,20 @@ mod tests {
         let toml = r#"version_control = "2m""#;
         let c: ClusterPollingConfig = toml::from_str(toml).unwrap();
         assert_eq!(c.version_control, Duration::from_secs(120));
+    }
+
+    #[test]
+    fn parameter_context_bindings_default_is_30s() {
+        let cfg = ClusterPollingConfig::default();
+        assert_eq!(cfg.parameter_context_bindings, Duration::from_secs(30));
+    }
+
+    #[test]
+    fn parameter_context_bindings_parses_humantime() {
+        let toml_str = r#"
+            parameter_context_bindings = "1m"
+        "#;
+        let cfg: ClusterPollingConfig = toml::from_str(toml_str).unwrap();
+        assert_eq!(cfg.parameter_context_bindings, Duration::from_secs(60));
     }
 }
