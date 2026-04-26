@@ -2903,3 +2903,53 @@ fn descend_on_parameter_context_section_dispatches_cross_link() {
         result.intent
     );
 }
+
+/// `Enter` in the parameter-context modal shifts focus from Sidebar to Body.
+#[test]
+fn enter_shifts_focus_from_sidebar_to_body() {
+    use crate::input::ParameterContextModalVerb;
+    use crate::view::browser::state::parameter_context_modal::ParameterContextPane;
+
+    let mut s = state_with_pc_modal_loaded();
+    // Default focused_pane is Sidebar.
+    assert_eq!(
+        s.browser.parameter_modal.as_ref().unwrap().focused_pane,
+        ParameterContextPane::Sidebar,
+        "modal must start with Sidebar focus"
+    );
+
+    let verb = crate::input::ViewVerb::ParameterContextModal(ParameterContextModalVerb::FocusBody);
+    BrowserHandler::handle_verb(&mut s, verb).expect("FocusBody must be handled");
+
+    assert_eq!(
+        s.browser.parameter_modal.as_ref().unwrap().focused_pane,
+        ParameterContextPane::Body,
+        "FocusBody must shift focus to Body"
+    );
+}
+
+/// `Esc` when Body is focused unfocuses back to Sidebar (does not close modal).
+#[test]
+fn esc_unfocuses_body_back_to_sidebar() {
+    use crate::input::ParameterContextModalVerb;
+    use crate::view::browser::state::parameter_context_modal::ParameterContextPane;
+
+    let mut s = state_with_pc_modal_loaded();
+    // Manually set Body focus.
+    s.browser.parameter_modal.as_mut().unwrap().focused_pane = ParameterContextPane::Body;
+
+    let verb = crate::input::ViewVerb::ParameterContextModal(ParameterContextModalVerb::Close);
+    BrowserHandler::handle_verb(&mut s, verb).expect("Close must be handled");
+
+    // Modal must still be open.
+    assert!(
+        s.browser.parameter_modal.is_some(),
+        "Esc in Body focus must not close the modal"
+    );
+    // Focus must have returned to Sidebar.
+    assert_eq!(
+        s.browser.parameter_modal.as_ref().unwrap().focused_pane,
+        ParameterContextPane::Sidebar,
+        "Esc in Body focus must return to Sidebar"
+    );
+}

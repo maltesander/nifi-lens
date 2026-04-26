@@ -957,10 +957,11 @@ fn handle_parameter_context_modal_verb(
         tracer_followup: None,
     };
 
+    use crate::view::browser::state::parameter_context_modal::ParameterContextPane;
+
     match v {
         V::Close => {
-            // Esc cancels an active search first; only when no search
-            // is active does Esc close the modal.
+            // Priority: cancel search → unfocus Body → close modal.
             let has_search = state
                 .browser
                 .parameter_modal
@@ -968,6 +969,16 @@ fn handle_parameter_context_modal_verb(
                 .is_some_and(|m| m.search.is_some());
             if has_search {
                 state.browser.parameter_modal_search_cancel();
+            } else if state
+                .browser
+                .parameter_modal
+                .as_ref()
+                .is_some_and(|m| m.focused_pane == ParameterContextPane::Body)
+            {
+                // Unfocus body → return to sidebar.
+                if let Some(modal) = state.browser.parameter_modal.as_mut() {
+                    modal.focused_pane = ParameterContextPane::Sidebar;
+                }
             } else {
                 state.browser.close_parameter_context_modal();
             }
@@ -1012,6 +1023,15 @@ fn handle_parameter_context_modal_verb(
                 redraw()
             }
         }
+        V::FocusBody => {
+            // Enter shifts focus from Sidebar → Body. Already in Body: no-op.
+            if let Some(modal) = state.browser.parameter_modal.as_mut()
+                && modal.focused_pane == ParameterContextPane::Sidebar
+            {
+                modal.focused_pane = ParameterContextPane::Body;
+            }
+            redraw()
+        }
         V::ToggleByContext => {
             if let Some(modal) = state.browser.parameter_modal.as_mut() {
                 modal.by_context_mode = !modal.by_context_mode;
@@ -1034,67 +1054,98 @@ fn handle_parameter_context_modal_verb(
         }
         V::RowUp => {
             if let Some(modal) = state.browser.parameter_modal.as_mut() {
-                modal.scroll.scroll_by(-1, usize::MAX);
+                match modal.focused_pane {
+                    ParameterContextPane::Sidebar => {
+                        modal.sidebar_index = modal.sidebar_index.saturating_sub(1);
+                    }
+                    ParameterContextPane::Body => {
+                        modal.scroll.scroll_by(-1, usize::MAX);
+                    }
+                }
             }
             redraw()
         }
         V::RowDown => {
             if let Some(modal) = state.browser.parameter_modal.as_mut() {
-                modal.scroll.scroll_by(1, usize::MAX);
+                match modal.focused_pane {
+                    ParameterContextPane::Sidebar => {
+                        let chain_len = match &modal.load {
+                            crate::view::browser::state::parameter_context_modal::ParameterContextLoad::Loaded { chain } => chain.len(),
+                            _ => 0,
+                        };
+                        if chain_len > 0 {
+                            modal.sidebar_index =
+                                (modal.sidebar_index + 1).min(chain_len.saturating_sub(1));
+                        }
+                    }
+                    ParameterContextPane::Body => {
+                        modal.scroll.scroll_by(1, usize::MAX);
+                    }
+                }
             }
             redraw()
         }
         V::PageUp => {
             if let Some(modal) = state.browser.parameter_modal.as_mut() {
-                modal.scroll.page_up();
+                match modal.focused_pane {
+                    ParameterContextPane::Sidebar => {
+                        modal.sidebar_index = 0;
+                    }
+                    ParameterContextPane::Body => {
+                        modal.scroll.page_up();
+                    }
+                }
             }
             redraw()
         }
         V::PageDown => {
             if let Some(modal) = state.browser.parameter_modal.as_mut() {
-                modal.scroll.page_down(usize::MAX);
+                match modal.focused_pane {
+                    ParameterContextPane::Sidebar => {
+                        let chain_len = match &modal.load {
+                            crate::view::browser::state::parameter_context_modal::ParameterContextLoad::Loaded { chain } => chain.len(),
+                            _ => 0,
+                        };
+                        if chain_len > 0 {
+                            modal.sidebar_index = chain_len.saturating_sub(1);
+                        }
+                    }
+                    ParameterContextPane::Body => {
+                        modal.scroll.page_down(usize::MAX);
+                    }
+                }
             }
             redraw()
         }
         V::JumpTop => {
             if let Some(modal) = state.browser.parameter_modal.as_mut() {
-                modal.scroll.jump_top();
+                match modal.focused_pane {
+                    ParameterContextPane::Sidebar => {
+                        modal.sidebar_index = 0;
+                    }
+                    ParameterContextPane::Body => {
+                        modal.scroll.jump_top();
+                    }
+                }
             }
             redraw()
         }
         V::JumpBottom => {
             if let Some(modal) = state.browser.parameter_modal.as_mut() {
-                modal.scroll.jump_bottom(usize::MAX);
-            }
-            redraw()
-        }
-        V::ChainFocusLeft => {
-            if let Some(modal) = state.browser.parameter_modal.as_mut() {
-                modal.sidebar_index = modal.sidebar_index.saturating_sub(1);
-            }
-            redraw()
-        }
-        V::ChainFocusRight => {
-            if let Some(modal) = state.browser.parameter_modal.as_mut() {
-                let chain_len = match &modal.load {
-                    crate::view::browser::state::parameter_context_modal::ParameterContextLoad::Loaded {
-                        chain,
-                    } => chain.len(),
-                    _ => 0,
-                };
-                if chain_len > 0 {
-                    modal.sidebar_index =
-                        (modal.sidebar_index + 1).min(chain_len.saturating_sub(1));
+                match modal.focused_pane {
+                    ParameterContextPane::Sidebar => {
+                        let chain_len = match &modal.load {
+                            crate::view::browser::state::parameter_context_modal::ParameterContextLoad::Loaded { chain } => chain.len(),
+                            _ => 0,
+                        };
+                        if chain_len > 0 {
+                            modal.sidebar_index = chain_len.saturating_sub(1);
+                        }
+                    }
+                    ParameterContextPane::Body => {
+                        modal.scroll.jump_bottom(usize::MAX);
+                    }
                 }
-            }
-            redraw()
-        }
-        V::ChainEnter => {
-            // Selecting a chain entry switches to by-context mode
-            // scoped to the current sidebar_index.
-            if let Some(modal) = state.browser.parameter_modal.as_mut() {
-                modal.by_context_mode = true;
-                modal.scroll.jump_top();
             }
             redraw()
         }

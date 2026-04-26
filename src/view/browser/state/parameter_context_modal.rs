@@ -7,6 +7,16 @@ use crate::client::parameter_context::{ParameterContextNode, ParameterEntry};
 use crate::widget::scroll::VerticalScrollState;
 use crate::widget::search::SearchState;
 
+/// Which pane of the parameter-context modal has keyboard focus.
+/// Default is `Sidebar` — the user starts on the chain list and
+/// presses Enter to move focus to the Body (params table).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum ParameterContextPane {
+    #[default]
+    Sidebar,
+    Body,
+}
+
 #[derive(Debug, Clone)]
 pub struct ParameterContextModalState {
     /// PG that triggered the open. Stays fixed for the modal session.
@@ -15,6 +25,9 @@ pub struct ParameterContextModalState {
     /// Optional pre-selected param name from a `#{name}` cross-link.
     pub preselect: Option<String>,
     pub load: ParameterContextLoad,
+    /// Which pane currently has keyboard focus. Default `Sidebar`.
+    /// Reset to `Sidebar` each time the modal is opened.
+    pub focused_pane: ParameterContextPane,
     /// Index into `chain` selecting which context the sidebar cursor
     /// is on. `0` is the bound (originating) context.
     pub sidebar_index: usize,
@@ -47,6 +60,7 @@ impl ParameterContextModalState {
             originating_pg_path,
             preselect,
             load: ParameterContextLoad::Loading,
+            focused_pane: ParameterContextPane::Sidebar,
             sidebar_index: 0,
             by_context_mode: false,
             show_shadowed: false,

@@ -12,6 +12,7 @@ use ratatui::widgets::{Block, Borders, Clear, Paragraph};
 
 use crate::cluster::snapshot::{ClusterSnapshot, ParameterContextRef};
 use crate::theme;
+use crate::view::browser::state::parameter_context_modal::ParameterContextPane;
 use crate::view::browser::state::{
     BrowserState, ParameterContextLoad, ParameterContextModalState, ResolvedParameter, resolve,
 };
@@ -214,10 +215,17 @@ fn render_body(
 }
 
 /// Left sidebar: one row per chain node, cursor arrow on sidebar_index.
+/// Border accent reflects `focused_pane == Sidebar`.
 fn render_sidebar(frame: &mut Frame, area: Rect, modal: &ParameterContextModalState) {
+    let sidebar_focused = modal.focused_pane == ParameterContextPane::Sidebar;
+    let border_style = if sidebar_focused {
+        theme::accent()
+    } else {
+        theme::border_dim()
+    };
     let block = Block::default()
         .borders(Borders::RIGHT)
-        .border_style(theme::muted());
+        .border_style(border_style);
     let inner = block.inner(area);
     frame.render_widget(block, area);
 
@@ -246,8 +254,14 @@ fn render_sidebar(frame: &mut Frame, area: Rect, modal: &ParameterContextModalSt
         };
         let param_count = node.parameters.len();
         let name = truncate_str(&node.name, max_name_width);
+        // Accent the cursor row when Sidebar is focused; mute it when Body
+        // has focus (the cursor remains visible but indicates non-active pane).
         let style = if i == modal.sidebar_index {
-            theme::accent()
+            if sidebar_focused {
+                theme::accent()
+            } else {
+                theme::muted()
+            }
         } else {
             Style::default()
         };
@@ -293,21 +307,30 @@ fn render_params(
                 let selected = chain.get(modal.sidebar_index);
                 render_by_context(frame, area, modal, selected);
             } else {
-                // Resolved-flat view.
+                // Resolved-flat view — pass the sidebar-selected context name
+                // so matching rows can be subtly highlighted.
                 let preselect = modal.preselect.as_deref();
                 let resolved = resolve(chain, preselect);
-                render_flat(frame, area, modal, &resolved);
+                let sidebar_ctx = chain
+                    .get(modal.sidebar_index)
+                    .map(|n| n.name.as_str())
+                    .unwrap_or("");
+                render_flat(frame, area, modal, &resolved, sidebar_ctx);
             }
         }
     }
 }
 
 /// Render the resolved-flat parameter table.
+/// `sidebar_ctx` is the name of the chain node selected in the sidebar;
+/// rows whose `winner_context` matches it are given a leading `·` marker
+/// to show which params come from that context.
 fn render_flat(
     frame: &mut Frame,
     area: Rect,
     modal: &ParameterContextModalState,
     resolved: &[ResolvedParameter],
+    sidebar_ctx: &str,
 ) {
     if resolved.is_empty() {
         let line = Line::from(Span::styled("no parameters", theme::muted()));
@@ -352,7 +375,8 @@ fn render_flat(
             overrides += rp.shadowed.len();
         }
 
-        lines.push(param_row(rp, name_w, value_w, from_w));
+        let from_sidebar = !sidebar_ctx.is_empty() && rp.winner_context == sidebar_ctx;
+        lines.push(param_row(rp, name_w, value_w, from_w, from_sidebar));
 
         if modal.show_shadowed {
             for (shadowed_entry, shadowed_ctx) in &rp.shadowed {
@@ -392,11 +416,15 @@ fn render_flat(
 }
 
 /// Build one param row line (winner only).
+/// `from_sidebar` — when true, the row's `winner_context` matches the
+/// sidebar cursor; a leading `·` marker is prepended and the `from`
+/// column is styled with a subtle accent so the contribution is visible.
 fn param_row(
     rp: &ResolvedParameter,
     name_w: usize,
     value_w: usize,
     from_w: usize,
+    from_sidebar: bool,
 ) -> Line<'static> {
     let name = truncate_str(&rp.winner.name, name_w);
     let value = render_value(rp.winner.sensitive, &rp.winner.value, value_w);
@@ -412,13 +440,18 @@ fn param_row(
     } else {
         Style::default()
     };
+    let from_style = if from_sidebar && !rp.unresolved {
+        theme::accent()
+    } else {
+        row_style
+    };
 
     let mut spans = vec![
         Span::styled(format!("{name:<name_w$}"), row_style),
         Span::raw(" "),
         Span::styled(format!("{value:<value_w$}"), row_style),
         Span::raw(" "),
-        Span::styled(format!("{from:<from_w$}"), row_style),
+        Span::styled(format!("{from:<from_w$}"), from_style),
     ];
 
     if !flags.is_empty() {
