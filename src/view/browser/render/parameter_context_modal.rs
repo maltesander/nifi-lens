@@ -15,6 +15,7 @@ use crate::theme;
 use crate::view::browser::state::{
     BrowserState, ParameterContextLoad, ParameterContextModalState, ResolvedParameter, resolve,
 };
+use crate::widget::panel::Panel;
 use crate::widget::search::{MatchSpan, SearchState};
 
 const MIN_WIDTH: u16 = 60;
@@ -69,25 +70,42 @@ pub fn render(
 
     frame.render_widget(Clear, area);
 
-    // Outer frame — title shows context name + short id.
-    let ctx_name = match &modal.load {
-        ParameterContextLoad::Loaded { chain } => chain
-            .first()
-            .map(|n| n.name.as_str())
-            .unwrap_or("parameter context"),
-        _ => "parameter context",
+    // Compute used_by once and thread it into render_header and render_used_by.
+    let ctx_id = match &modal.load {
+        ParameterContextLoad::Loaded { chain } => {
+            chain.first().map(|n| n.id.as_str()).unwrap_or("")
+        }
+        _ => "",
     };
-    let short_pg = short_path(&modal.originating_pg_path);
+    let used_by = used_by_pgs(snapshot, ctx_id, browser);
+
+    // Outer frame — title shows context name + id prefix (first 6 chars).
+    let (ctx_name, ctx_id_prefix) = match &modal.load {
+        ParameterContextLoad::Loaded { chain } => {
+            let name = chain
+                .first()
+                .map(|n| n.name.as_str())
+                .unwrap_or("parameter context");
+            let prefix: String = ctx_id.chars().take(6).collect();
+            (name, prefix)
+        }
+        _ => ("parameter context", String::new()),
+    };
+    let id_chip = if ctx_id_prefix.is_empty() {
+        String::new()
+    } else {
+        format!("({ctx_id_prefix})")
+    };
     let outer_title = Line::from(vec![
         Span::raw(" "),
         Span::styled("Parameter Context", theme::muted()),
         Span::raw(": "),
         Span::styled(ctx_name.to_string(), theme::accent()),
         Span::raw("  "),
-        Span::styled(format!("[ {short_pg} ]"), theme::muted()),
+        Span::styled(id_chip, theme::muted()),
         Span::raw(" "),
     ]);
-    let outer = Block::default().borders(Borders::ALL).title(outer_title);
+    let outer = Panel::new(outer_title).into_block();
     let inner = outer.inner(area);
     frame.render_widget(outer, area);
 
@@ -101,8 +119,8 @@ pub fn render(
         ])
         .split(inner);
 
-    render_header(frame, rows[0], modal, browser, snapshot);
-    render_body(frame, rows[1], modal, browser, snapshot);
+    render_header(frame, rows[0], modal, &used_by);
+    render_body(frame, rows[1], modal, &used_by);
     render_footer(frame, rows[2], modal);
 }
 
@@ -111,22 +129,19 @@ fn render_header(
     frame: &mut Frame,
     area: Rect,
     modal: &ParameterContextModalState,
-    browser: &BrowserState,
-    snapshot: &ClusterSnapshot,
+    used_by: &[UsedByRow],
 ) {
-    let (ctx_id, ctx_name, chain_names) = match &modal.load {
+    let (ctx_name, chain_names) = match &modal.load {
         ParameterContextLoad::Loaded { chain } => {
-            let id = chain.first().map(|n| n.id.as_str()).unwrap_or("");
             let name = chain.first().map(|n| n.name.as_str()).unwrap_or("?");
             let names: Vec<&str> = chain.iter().map(|n| n.name.as_str()).collect();
-            (id, name, names)
+            (name, names)
         }
-        _ => ("", "?", vec![]),
+        _ => ("?", vec![]),
     };
 
     // Line 0: bound-by PG path + used-by count chip.
-    let used = used_by_pgs(snapshot, ctx_id, browser);
-    let used_count = used.len();
+    let used_count = used_by.len();
     let mut bound_spans = vec![
         Span::styled(format!("{:<10}", "Bound by"), theme::muted()),
         Span::raw(modal.originating_pg_path.clone()),
@@ -186,8 +201,7 @@ fn render_body(
     frame: &mut Frame,
     area: Rect,
     modal: &ParameterContextModalState,
-    browser: &BrowserState,
-    snapshot: &ClusterSnapshot,
+    used_by: &[UsedByRow],
 ) {
     let sidebar_width = 22u16.min(area.width / 3);
     let cols = Layout::default()
@@ -196,7 +210,7 @@ fn render_body(
         .split(area);
 
     render_sidebar(frame, cols[0], modal);
-    render_params(frame, cols[1], modal, browser, snapshot);
+    render_params(frame, cols[1], modal, used_by);
 }
 
 /// Left sidebar: one row per chain node, cursor arrow on sidebar_index.
@@ -253,8 +267,7 @@ fn render_params(
     frame: &mut Frame,
     area: Rect,
     modal: &ParameterContextModalState,
-    browser: &BrowserState,
-    snapshot: &ClusterSnapshot,
+    used_by: &[UsedByRow],
 ) {
     match &modal.load {
         ParameterContextLoad::Loading => {
@@ -272,7 +285,7 @@ fn render_params(
         }
         ParameterContextLoad::Loaded { chain } => {
             if modal.show_used_by {
-                render_used_by(frame, area, modal, browser, snapshot);
+                render_used_by(frame, area, modal, used_by);
                 return;
             }
             if modal.by_context_mode {
@@ -539,16 +552,8 @@ fn render_used_by(
     frame: &mut Frame,
     area: Rect,
     modal: &ParameterContextModalState,
-    browser: &BrowserState,
-    snapshot: &ClusterSnapshot,
+    rows: &[UsedByRow],
 ) {
-    let ctx_id = match &modal.load {
-        ParameterContextLoad::Loaded { chain } => {
-            chain.first().map(|n| n.id.as_str()).unwrap_or("")
-        }
-        _ => "",
-    };
-    let rows = used_by_pgs(snapshot, ctx_id, browser);
     if rows.is_empty() {
         let line = Line::from(Span::styled("(not used by any other PG)", theme::muted()));
         frame.render_widget(Paragraph::new(line).alignment(Alignment::Center), area);
@@ -562,7 +567,7 @@ fn render_used_by(
         )),
         Line::from(""),
     ];
-    for row in &rows {
+    for row in rows {
         lines.push(Line::from(row.pg_path.clone()));
     }
 
@@ -596,11 +601,6 @@ fn truncate_str(s: &str, max_chars: usize) -> String {
         let truncated: String = s.chars().take(max_chars.saturating_sub(1)).collect();
         format!("{truncated}…")
     }
-}
-
-/// Shorten a PG path to its last segment for the outer title.
-fn short_path(path: &str) -> &str {
-    path.rsplit('/').next().unwrap_or(path)
 }
 
 /// Apply search match highlights to the flat-table lines in-place.
