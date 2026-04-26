@@ -199,7 +199,10 @@ impl Verb for BrowserVerb {
                     && ctx.state.browser_selection_has_properties()
             }
             Self::OpenParameterContext => {
-                ctx.state.current_tab == ViewId::Browser && ctx.state.browser_selection_is_pg()
+                ctx.state.current_tab == ViewId::Browser
+                    && ctx
+                        .state
+                        .browser_selection_pg_has_parameter_context_binding()
             }
             Self::ShowVersionControl => {
                 ctx.state.current_tab == ViewId::Browser

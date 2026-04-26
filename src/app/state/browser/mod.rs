@@ -90,9 +90,13 @@ impl ViewKeyHandler for BrowserHandler {
                 }
             }
             BrowserVerb::OpenParameterContext => {
-                // The enabled() predicate gates this verb to PG rows with a
-                // bound parameter context. Look up the binding id and open
-                // the modal, mirroring ShowVersionControl.
+                // The enabled() predicate gates this verb to PG rows that have
+                // a bound parameter context. Add a defensive guard (belt-and-
+                // suspenders against future refactors that bypass the enabled
+                // check) mirroring the ShowVersionControl pattern.
+                if !state.browser_selection_pg_has_parameter_context_binding() {
+                    return Some(UpdateResult::default());
+                }
                 let Some(&arena_idx) = state.browser.visible.get(state.browser.selected) else {
                     return Some(UpdateResult::default());
                 };
@@ -115,16 +119,9 @@ impl ViewKeyHandler for BrowserHandler {
                         tracer_followup: None,
                     });
                 }
-                // No binding yet — mark as failed immediately.
-                state.browser.apply_parameter_context_modal_failed(
-                    pg_id,
-                    "no bound parameter context found".into(),
-                );
-                return Some(UpdateResult {
-                    redraw: true,
-                    intent: None,
-                    tracer_followup: None,
-                });
+                // This branch is unreachable when the enabled() predicate is
+                // respected; kept for defensive completeness.
+                return Some(UpdateResult::default());
             }
             BrowserVerb::ShowVersionControl => {
                 if !state.browser_selection_is_versioned_pg() {

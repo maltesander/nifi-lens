@@ -154,6 +154,29 @@ fn m_on_unversioned_selection_is_silent_no_op() {
 }
 
 #[test]
+fn open_parameter_context_disabled_on_pg_with_no_binding() {
+    // `p` on a PG with no bound parameter context must be a silent no-op.
+    // The enabled() predicate returns false so the hint bar grays out the
+    // verb; the reducer defensive guard catches any bypass.
+    let (mut s, c) = seeded_browser_state();
+    // seeded_browser_state has "ingest" (index 2) with no parameter context.
+    s.browser.selected = 2;
+    assert!(
+        !s.browser_selection_pg_has_parameter_context_binding(),
+        "seeded PG must have no binding"
+    );
+    update(&mut s, key(KeyCode::Char('p'), KeyModifiers::NONE), &c);
+    assert!(
+        s.browser.parameter_modal.is_none(),
+        "p on a PG with no binding must not open the modal"
+    );
+    assert!(
+        s.status.banner.is_none(),
+        "p on a PG with no binding must not post a banner"
+    );
+}
+
+#[test]
 fn on_browser_tab_enter_on_collapsed_pg_drills_in() {
     let (mut s, c) = seeded_browser_state();
     // Move selection to "ingest" (visible row 2 in a seeded tree with

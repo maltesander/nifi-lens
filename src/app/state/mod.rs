@@ -275,6 +275,25 @@ impl AppState {
     }
 
     /// True iff the Browser tab is active, the selected node is a
+    /// ProcessGroup, and the cluster snapshot has a bound parameter context
+    /// for that PG.
+    pub fn browser_selection_pg_has_parameter_context_binding(&self) -> bool {
+        if self.current_tab != ViewId::Browser {
+            return false;
+        }
+        let Some(&arena) = self.browser.visible.get(self.browser.selected) else {
+            return false;
+        };
+        let Some(node) = self.browser.nodes.get(arena) else {
+            return false;
+        };
+        if !matches!(node.kind, crate::client::NodeKind::ProcessGroup) {
+            return false;
+        }
+        node.parameter_context_ref.is_some()
+    }
+
+    /// True iff the Browser tab is active, the selected node is a
     /// ProcessGroup, and the cluster snapshot has a `VersionControlSummary`
     /// for that PG (i.e. the PG is under version control).
     pub fn browser_selection_is_versioned_pg(&self) -> bool {
