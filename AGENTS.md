@@ -668,12 +668,14 @@ What each pipeline exercises:
   `UpdateAttribute-cleanup` → `LogAttribute-INFO` — exercises
   CS-referencing coverage on all NiFi versions including 2.6.0.
 - `parameterized-pipeline` is bound to `fixture-pc-prod` (which
-  inherits `fixture-pc-base`). Contains a single
-  `LogAttribute-parameterized` whose `Log Payload` is
-  `"connecting to #{kafka_bootstrap}"` (param reference) and
-  `Log Prefix` is `"##{literal_text}"` (escape — should NOT be
-  annotated). Exercises the Browser parameter-context modal (`p`) and
-  the `#{name}` cross-link annotation logic in T16.
+  inherits `fixture-pc-base`). Contains `LogAttribute-parameterized`
+  (`Log Payload = "connecting to #{kafka_bootstrap}"`, param reference;
+  `Log Prefix = "##{literal_text}"`, escape — should NOT be annotated)
+  and `UpdateAttribute-parameterized` (dynamic properties
+  `broker = "#{kafka_bootstrap}"` and `max_retries = "#{retry_max}"` —
+  exercises `#{name}` cross-link annotations in the processor properties
+  modal). Exercises the Browser parameter-context modal (`p`) and the
+  `#{name}` cross-link annotation logic in T16.
 - `versioned-clean` and `versioned-modified` are committed to a NiFi
   Registry bucket on seed; `versioned-modified` then has one property
   mutated locally so it shows `[MODIFIED]` (or `[STALE+MOD]` after a

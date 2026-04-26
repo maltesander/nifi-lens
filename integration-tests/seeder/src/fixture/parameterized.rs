@@ -14,20 +14,23 @@
 //!   region = eu-west-1
 //!
 //! parameterized-pipeline/   bound to fixture-pc-prod
-//! └── LogAttribute-parameterized
-//!       Log Payload  = "connecting to #{kafka_bootstrap}"
-//!       Log Prefix   = "##{literal_text}"   ← escape case (no annotation expected)
+//! ├── LogAttribute-parameterized
+//! │     Log Payload  = "connecting to #{kafka_bootstrap}"
+//! │     Log Prefix   = "##{literal_text}"   ← escape case (no annotation expected)
+//! └── UpdateAttribute-parameterized
+//!       broker       = "#{kafka_bootstrap}"   ← property-value cross-link
+//!       max_retries  = "#{retry_max}"         ← property-value cross-link
 //! ```
 //!
-//! The pipeline is intentionally not started — LogAttribute is invalid
-//! (no incoming connection, no auto-terminate) in isolation, which is
-//! fine for the fixture's purpose of testing the Browser + parameter
-//! context modal.
+//! The processors are intentionally not started — they have no incoming
+//! connections, which is fine for the fixture's purpose of testing the
+//! Browser parameter-context modal and `#{name}` cross-link annotations.
 
 use nifi_rust_client::dynamic::{DynamicClient, types};
 
+use crate::entities::{make_processor, props};
 use crate::error::{Result, SeederError};
-use crate::fixture::healthy::create_child_pg;
+use crate::fixture::healthy::{create_child_pg, create_processor};
 
 /// Seeded parameter context IDs, returned so callers can assert on them.
 // T19 integration tests consume both fields; allow on the struct for now.
@@ -136,7 +139,35 @@ pub async fn seed_parameterized_pipeline(
 
     tracing::info!(
         %proc_id,
-        "parameterized-pipeline seeded (processor not started — no connections)"
+        "LogAttribute-parameterized created"
+    );
+
+    // Add an UpdateAttribute processor with dynamic properties that use
+    // parameter references.  This exercises the `#{name}` cross-link
+    // annotation on property values in the Browser properties modal.
+    //
+    // Dynamic properties on UpdateAttribute are user-defined; they are set
+    // the same way as any other property (no special API call needed).
+    let ua_id = create_processor(
+        client,
+        &pg_id,
+        make_processor(
+            "UpdateAttribute-parameterized",
+            "org.apache.nifi.processors.attributes.UpdateAttribute",
+            props(&[
+                ("broker", "#{kafka_bootstrap}"),
+                ("max_retries", "#{retry_max}"),
+            ]),
+            None,
+            vec![],
+        ),
+        "UpdateAttribute-parameterized",
+    )
+    .await?;
+
+    tracing::info!(
+        %ua_id,
+        "parameterized-pipeline seeded (processors not started — no connections)"
     );
     Ok(())
 }
