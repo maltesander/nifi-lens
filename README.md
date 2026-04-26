@@ -514,6 +514,13 @@ up:
 # First-time only: generate the CA + server certs the containers mount.
 ./integration-tests/scripts/generate-certs.sh
 
+# First-time only: fetch the Parquet/Hadoop NARs from Maven Central into
+# a gitignored cache. The base apache/nifi images don't bundle the
+# standalone Parquet writer, so this mount is required for the
+# diff-pipeline fixture to enable. `run.sh` invokes this automatically;
+# the live-dev workflow needs it run once up front.
+./integration-tests/scripts/download-nars.sh
+
 # --wait blocks until every service's healthcheck goes green; NiFi can
 # take several minutes to finish booting on a cold start.
 docker compose -f integration-tests/docker-compose.yml up -d --wait
