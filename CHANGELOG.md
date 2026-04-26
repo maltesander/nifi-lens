@@ -60,6 +60,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   to the tree on each `RootPgStatus` / `ControllerServices` /
   `ConnectionsByPg` tick (default 10s). Focus now persists as long
   as the selected `(id, kind)` survives the arena rebuild.
+- Status-line `info` and `warning` banners now auto-clear on the next
+  input event so transient toasts (e.g. `copied: …`,
+  `clipboard: no display`) do not linger after the user has moved on.
+  `error` banners stay sticky — they may carry detail to expand and
+  must be acknowledged with `Esc`.
+- Pressing `m` on a non-versioned Browser selection is now a silent
+  no-op. The verb is grayed out in the hint bar, but the keymap still
+  dispatched it, surfacing a sticky `not under version control`
+  warning banner that could only be cleared with `Esc`.
 
 ## [0.7.0] — 2026-04-24
 

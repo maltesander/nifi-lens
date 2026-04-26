@@ -893,6 +893,28 @@ fn handle_key(state: &mut AppState, key: KeyEvent, config: &Config) -> UpdateRes
         version_modal_open,
     );
 
+    // Auto-clear non-Error banners on the next input event so info /
+    // warning toasts don't linger after the user has moved on. Error
+    // banners stay sticky — they're acknowledgements, not transients,
+    // and may have detail the user wants to expand. Skip when the
+    // input is `Focus(Ascend)` (Esc): the existing top-level handler
+    // below dismisses the banner *and* short-circuits per-view
+    // dispatch, so we mustn't clear it here or the view would also
+    // consume the Ascend.
+    if state.modal.is_none()
+        && !matches!(
+            input_event,
+            InputEvent::Focus(crate::input::FocusAction::Ascend)
+        )
+        && state
+            .status
+            .banner
+            .as_ref()
+            .is_some_and(|b| b.severity != BannerSeverity::Error)
+    {
+        state.status.banner = None;
+    }
+
     // Central dispatch for typed InputEvent variants. History / Tab / App
     // are handled here and return early. Focus / View dispatch to per-view
     // handlers. Unmapped falls through to the modal block then drops.

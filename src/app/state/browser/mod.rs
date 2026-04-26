@@ -87,10 +87,10 @@ impl ViewKeyHandler for BrowserHandler {
             }
             BrowserVerb::ShowVersionControl => {
                 if !state.browser_selection_is_versioned_pg() {
-                    // Defensive — the verb's `enabled` predicate should
-                    // already gray it out. Surface a banner if we got
-                    // here anyway (e.g. the snapshot raced ahead).
-                    state.post_warning("not under version control".to_string());
+                    // Verb is grayed out in the hint bar via the
+                    // `enabled` predicate; the keymap still dispatches
+                    // it, so silently no-op rather than posting a
+                    // banner the user can't dismiss without Esc.
                     return Some(UpdateResult::default());
                 }
                 state

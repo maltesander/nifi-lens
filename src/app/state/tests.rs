@@ -227,6 +227,46 @@ fn esc_with_no_banner_is_idempotent() {
 }
 
 #[test]
+fn next_input_clears_warning_banner() {
+    let mut s = fresh_state();
+    let c = tiny_config();
+    s.post_warning("clipboard: no display".to_string());
+    // Any non-Ascend input should clear the warning toast.
+    update(&mut s, key(KeyCode::Down, KeyModifiers::NONE), &c);
+    assert!(
+        s.status.banner.is_none(),
+        "warning banner must auto-clear on next input"
+    );
+}
+
+#[test]
+fn next_input_clears_info_banner() {
+    let mut s = fresh_state();
+    let c = tiny_config();
+    s.post_info("copied: foo".to_string());
+    update(&mut s, key(KeyCode::Tab, KeyModifiers::NONE), &c);
+    assert!(
+        s.status.banner.is_none(),
+        "info banner must auto-clear on next input"
+    );
+}
+
+#[test]
+fn next_input_does_not_clear_error_banner() {
+    let mut s = fresh_state();
+    let c = tiny_config();
+    s.post_error("query failed".to_string(), Some("stack".into()));
+    update(&mut s, key(KeyCode::Down, KeyModifiers::NONE), &c);
+    assert!(
+        s.status.banner.is_some(),
+        "error banner must stay sticky across input events"
+    );
+    let b = s.status.banner.as_ref().unwrap();
+    assert_eq!(b.severity, BannerSeverity::Error);
+    assert_eq!(b.detail.as_deref(), Some("stack"));
+}
+
+#[test]
 fn capital_k_opens_context_switcher() {
     let mut s = fresh_state();
     let c = tiny_config();

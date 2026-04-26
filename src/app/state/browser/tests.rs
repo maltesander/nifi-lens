@@ -135,6 +135,25 @@ fn on_browser_tab_down_moves_selection_down() {
 }
 
 #[test]
+fn m_on_unversioned_selection_is_silent_no_op() {
+    // The verb is grayed out in the hint bar via the `enabled`
+    // predicate, but the keymap still dispatches the key. The reducer
+    // must silently no-op rather than posting a sticky warning banner.
+    let (mut s, c) = seeded_browser_state();
+    // The seeded tree has no version-controlled PGs.
+    assert!(!s.browser_selection_is_versioned_pg());
+    update(&mut s, key(KeyCode::Char('m'), KeyModifiers::NONE), &c);
+    assert!(
+        s.status.banner.is_none(),
+        "m on a non-versioned selection must not post a banner"
+    );
+    assert!(
+        s.browser.version_modal.is_none(),
+        "m on a non-versioned selection must not open the modal"
+    );
+}
+
+#[test]
 fn on_browser_tab_enter_on_collapsed_pg_drills_in() {
     let (mut s, c) = seeded_browser_state();
     // Move selection to "ingest" (visible row 2 in a seeded tree with
