@@ -83,6 +83,13 @@ pub enum CrossLink {
     /// From Events result row `t`: open Tracer and auto-run a lineage
     /// query on the selected event's flowfile uuid.
     TraceByUuid { uuid: String },
+    /// From Browser `p` on a PG row, or from a `#{name}` cross-link
+    /// annotation: open the parameter-context modal scoped to the given
+    /// PG, optionally pre-selecting a parameter name.
+    OpenParameterContextModal {
+        pg_id: String,
+        preselect: Option<String>,
+    },
 }
 
 impl Intent {
@@ -98,6 +105,7 @@ impl Intent {
             Self::Goto(CrossLink::TraceComponent { .. }) => "trace component",
             Self::Goto(CrossLink::GotoEvents { .. }) => "goto Events",
             Self::Goto(CrossLink::TraceByUuid { .. }) => "trace by uuid",
+            Self::Goto(CrossLink::OpenParameterContextModal { .. }) => "open parameter context",
             Self::CancelLineageQuery => "CancelLineageQuery",
             Self::DeleteLineageQuery { .. } => "DeleteLineageQuery",
             Self::LoadEventDetail { .. } => "LoadEventDetail",
@@ -161,6 +169,12 @@ impl IntentDispatcher {
             }
             // TraceByUuid spawns the lineage worker; not pure.
             Intent::Goto(CrossLink::TraceByUuid { .. }) => None,
+            Intent::Goto(CrossLink::OpenParameterContextModal { pg_id, preselect }) => {
+                Some(Ok(IntentOutcome::OpenParameterContextModalTarget {
+                    pg_id: pg_id.clone(),
+                    preselect: preselect.clone(),
+                }))
+            }
             _ => None,
         }
     }

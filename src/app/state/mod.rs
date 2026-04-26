@@ -1904,6 +1904,26 @@ fn handle_intent_outcome(
                 tracer_followup: None,
             }
         }
+        Ok(IntentOutcome::OpenParameterContextModalTarget { pg_id, preselect }) => {
+            // Look up the PG's display name from the arena; fall back to
+            // the bare id if the PG isn't found (race between navigation
+            // and the arena rebuild).
+            let pg_path = state
+                .browser
+                .pg_name_for(&pg_id)
+                .unwrap_or(&pg_id)
+                .to_string();
+            state
+                .browser
+                .open_parameter_context_modal(pg_id, pg_path, preselect);
+            // T17 will wire the chain-fetch worker spawn triggered by this
+            // state change.
+            UpdateResult {
+                redraw: true,
+                intent: None,
+                tracer_followup: None,
+            }
+        }
         Err(err) => {
             state.post_error(err.to_string(), Some(format!("{err:?}")));
             // Close the context switcher modal so the banner is visible.

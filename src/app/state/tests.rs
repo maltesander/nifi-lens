@@ -423,6 +423,45 @@ fn cross_link_tracer_landing_pushes_history() {
 }
 
 #[test]
+fn open_parameter_context_modal_cross_link_opens_modal_with_preselect() {
+    // seeded_browser_state has a PG with id "ingest" and name "ingest".
+    let (mut s, c) = seeded_browser_state();
+    let outcome = Ok(IntentOutcome::OpenParameterContextModalTarget {
+        pg_id: "ingest".into(),
+        preselect: Some("kafka_bootstrap".into()),
+    });
+    update(&mut s, AppEvent::IntentOutcome(outcome), &c);
+
+    let modal = s
+        .browser
+        .parameter_modal
+        .as_ref()
+        .expect("modal should be open");
+    assert_eq!(modal.originating_pg_id, "ingest");
+    assert_eq!(modal.preselect.as_deref(), Some("kafka_bootstrap"));
+}
+
+#[test]
+fn open_parameter_context_modal_cross_link_unknown_pg_falls_back_to_id() {
+    // When the PG is not in the arena, pg_path falls back to the bare id.
+    let (mut s, c) = seeded_browser_state();
+    let outcome = Ok(IntentOutcome::OpenParameterContextModalTarget {
+        pg_id: "pg-unknown".into(),
+        preselect: None,
+    });
+    update(&mut s, AppEvent::IntentOutcome(outcome), &c);
+
+    let modal = s
+        .browser
+        .parameter_modal
+        .as_ref()
+        .expect("modal should be open even for unknown pg");
+    assert_eq!(modal.originating_pg_id, "pg-unknown");
+    // originating_pg_path falls back to the bare id when name not found.
+    assert_eq!(modal.originating_pg_path, "pg-unknown");
+}
+
+#[test]
 fn shift_left_navigates_history_back_replaces_bracket() {
     // `[` is unmapped; history back is now Shift+Left via the central
     // InputEvent::History(Back) dispatch.

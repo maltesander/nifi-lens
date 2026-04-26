@@ -312,6 +312,15 @@ impl BrowserState {
     }
 
     /// Return the bound `ParameterContextRef` for a PG by id, or `None`
+    /// Look up the name of a PG by id. Returns `None` when the id is not
+    /// in the arena or the node is not a process group. Used as a
+    /// display-only label in the parameter-context modal header.
+    pub fn pg_name_for(&self, pg_id: &str) -> Option<&str> {
+        self.nodes.iter().find_map(|n| {
+            (n.id == pg_id && n.kind == NodeKind::ProcessGroup).then_some(n.name.as_str())
+        })
+    }
+
     /// when the PG is unbound, the id is not in the arena, or the node
     /// is not a PG.
     pub fn parameter_context_ref_for(

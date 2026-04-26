@@ -104,6 +104,14 @@ pub enum IntentOutcome {
     EventsLandingOn {
         component_id: String,
     },
+    /// Parameter-contexts feature: open the parameter-context modal on
+    /// Browser scoped to the given PG, optionally pre-selecting a
+    /// parameter name. The reducer calls
+    /// `BrowserState::open_parameter_context_modal`.
+    OpenParameterContextModalTarget {
+        pg_id: String,
+        preselect: Option<String>,
+    },
 }
 
 /// Payload variants pushed from Tracer workers back into the UI loop.
