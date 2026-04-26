@@ -579,6 +579,14 @@ pub enum PendingIntent {
     SpawnVersionControlModalFetch {
         pg_id: String,
     },
+    /// Spawn the Browser parameter-context modal's one-shot chain-fetch
+    /// worker. The handle is stored on
+    /// `BrowserState.parameter_modal_handle` and aborted on close /
+    /// refresh.
+    SpawnParameterContextModalFetch {
+        pg_id: String,
+        bound_context_id: String,
+    },
     Quit,
 }
 
@@ -1773,6 +1781,18 @@ fn handle_browser_payload(state: &mut AppState, payload: crate::event::BrowserPa
             state.browser.apply_version_control_modal_failed(pg_id, err);
             state.browser.version_modal_handle = None;
         }
+        BrowserPayload::ParameterContextModalLoaded { pg_id, chain } => {
+            state
+                .browser
+                .apply_parameter_context_modal_loaded(pg_id, chain);
+            state.browser.parameter_modal_handle = None;
+        }
+        BrowserPayload::ParameterContextModalFailed { pg_id, err } => {
+            state
+                .browser
+                .apply_parameter_context_modal_failed(pg_id, err);
+            state.browser.parameter_modal_handle = None;
+        }
     }
 }
 
@@ -1953,15 +1973,40 @@ fn handle_intent_outcome(
                 .pg_name_for(&pg_id)
                 .unwrap_or(&pg_id)
                 .to_string();
+            // Look up the bound context id before opening the modal.
+            // If the binding isn't known yet (race with the fetcher),
+            // open the modal in Error state rather than firing a
+            // worker with an unknown id.
+            let bound_context_id = state
+                .browser
+                .parameter_context_ref_for(&pg_id)
+                .map(|r| r.id.clone());
             state
                 .browser
-                .open_parameter_context_modal(pg_id, pg_path, preselect);
-            // T17 will wire the chain-fetch worker spawn triggered by this
-            // state change.
-            UpdateResult {
-                redraw: true,
-                intent: None,
-                tracer_followup: None,
+                .open_parameter_context_modal(pg_id.clone(), pg_path, preselect);
+            if let Some(bound_context_id) = bound_context_id {
+                UpdateResult {
+                    redraw: true,
+                    intent: Some(PendingIntent::SpawnParameterContextModalFetch {
+                        pg_id,
+                        bound_context_id,
+                    }),
+                    tracer_followup: None,
+                }
+            } else {
+                // No binding known yet; mark the modal as failed so the
+                // user sees a message rather than a spinner that never
+                // resolves. They can press `r` once the bindings fetch
+                // completes.
+                state.browser.apply_parameter_context_modal_failed(
+                    pg_id,
+                    "no bound parameter context found".into(),
+                );
+                UpdateResult {
+                    redraw: true,
+                    intent: None,
+                    tracer_followup: None,
+                }
             }
         }
         Err(err) => {

@@ -158,6 +158,12 @@ impl WorkerRegistry {
             }
             ViewId::Browser => {
                 browser.detail_tx = None;
+                // Abort any in-flight parameter-context modal worker so
+                // it can't deliver stale data after the user has left
+                // the Browser tab.
+                if let Some(h) = browser.parameter_modal_handle.take() {
+                    h.abort();
+                }
                 // The five cluster endpoints that feed the Browser
                 // arena are all released here — while Browser is
                 // inactive the store gates the connections fan-out so

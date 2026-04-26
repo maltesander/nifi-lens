@@ -195,6 +195,10 @@ pub struct BrowserState {
     /// modal is closed. Populated asynchronously with chain data by
     /// the view-local worker (Task 17).
     pub parameter_modal: Option<ParameterContextModalState>,
+    /// Live worker handle for the parameter-context modal's chain fetch.
+    /// Aborted on `Close` and on `Refresh` (which spawns a new one).
+    /// Cleared by the loaded / failed event handlers.
+    pub parameter_modal_handle: Option<tokio::task::JoinHandle<()>>,
 }
 
 /// One segment in the breadcrumb path.
@@ -462,8 +466,13 @@ impl BrowserState {
         ));
     }
 
-    /// Close the parameter-context modal. Idempotent.
+    /// Close the parameter-context modal. Idempotent. Aborts any
+    /// in-flight worker so a stale `…Loaded` event can't update a
+    /// freshly-closed (or re-opened) modal.
     pub fn close_parameter_context_modal(&mut self) {
+        if let Some(h) = self.parameter_modal_handle.take() {
+            h.abort();
+        }
         self.parameter_modal = None;
     }
 
@@ -610,6 +619,129 @@ impl BrowserState {
     /// is committed and has at least one match.
     pub fn version_modal_search_cycle_prev(&mut self) {
         let Some(modal) = self.version_modal.as_mut() else {
+            return;
+        };
+        let Some(search) = modal.search.as_mut() else {
+            return;
+        };
+        if !search.committed || search.matches.is_empty() {
+            return;
+        }
+        let cur = search.current.unwrap_or(0);
+        search.current = Some(if cur == 0 {
+            search.matches.len() - 1
+        } else {
+            cur - 1
+        });
+    }
+
+    // Search reducer methods for the parameter-context modal. Mirror the
+    // version_modal_search_* methods above; each operates against
+    // parameter_modal.search and the body from
+    // ParameterContextModalState::searchable_body.
+
+    /// Open a fresh live-input search session on the parameter-context modal.
+    pub fn parameter_modal_search_open(&mut self) {
+        let Some(modal) = self.parameter_modal.as_mut() else {
+            return;
+        };
+        modal.search = Some(crate::widget::search::SearchState {
+            query: String::new(),
+            input_active: true,
+            committed: false,
+            matches: Vec::new(),
+            current: None,
+        });
+    }
+
+    /// Append a character to the live search query and recompute matches.
+    /// No-op if no modal or no active search input.
+    pub fn parameter_modal_search_push(&mut self, ch: char) {
+        let Some(modal) = self.parameter_modal.as_mut() else {
+            return;
+        };
+        let body = modal.searchable_body();
+        let Some(search) = modal.search.as_mut() else {
+            return;
+        };
+        if !search.input_active {
+            return;
+        }
+        search.query.push(ch);
+        search.matches = crate::widget::search::compute_matches(&body, &search.query);
+        search.current = if search.matches.is_empty() {
+            None
+        } else {
+            Some(0)
+        };
+    }
+
+    /// Remove the last character from the live search query and recompute matches.
+    /// No-op if no modal or no active search input.
+    pub fn parameter_modal_search_pop(&mut self) {
+        let Some(modal) = self.parameter_modal.as_mut() else {
+            return;
+        };
+        let body = modal.searchable_body();
+        let Some(search) = modal.search.as_mut() else {
+            return;
+        };
+        if !search.input_active {
+            return;
+        }
+        search.query.pop();
+        search.matches = crate::widget::search::compute_matches(&body, &search.query);
+        search.current = if search.matches.is_empty() {
+            None
+        } else {
+            Some(0)
+        };
+    }
+
+    /// Commit the current query. If the query is empty, closes search.
+    /// Otherwise flips `input_active` to false and `committed` to true.
+    pub fn parameter_modal_search_commit(&mut self) {
+        let Some(modal) = self.parameter_modal.as_mut() else {
+            return;
+        };
+        let Some(search) = modal.search.as_mut() else {
+            return;
+        };
+        if search.query.is_empty() {
+            modal.search = None;
+            return;
+        }
+        search.input_active = false;
+        search.committed = true;
+    }
+
+    /// Cancel search and clear all search state from the parameter-context modal.
+    pub fn parameter_modal_search_cancel(&mut self) {
+        if let Some(modal) = self.parameter_modal.as_mut() {
+            modal.search = None;
+        }
+    }
+
+    /// Advance to the next match in the parameter-context modal. No-op
+    /// unless search is committed and has at least one match.
+    pub fn parameter_modal_search_cycle_next(&mut self) {
+        let Some(modal) = self.parameter_modal.as_mut() else {
+            return;
+        };
+        let Some(search) = modal.search.as_mut() else {
+            return;
+        };
+        if !search.committed || search.matches.is_empty() {
+            return;
+        }
+        let cur = search.current.unwrap_or(0);
+        search.current = Some((cur + 1) % search.matches.len());
+    }
+
+    /// Move to the previous match in the parameter-context modal. No-op
+    /// unless search is committed and has at least one match.
+    pub fn parameter_modal_search_cycle_prev(&mut self) {
+        let Some(modal) = self.parameter_modal.as_mut() else {
             return;
         };
         let Some(search) = modal.search.as_mut() else {

@@ -55,6 +55,46 @@ impl ParameterContextModalState {
             search: None,
         }
     }
+
+    /// Build the flat string body that the search primitives operate on.
+    ///
+    /// Each row is `"{name}={value}\n"` (or `"{name}=(sensitive)\n"` for
+    /// sensitive params). The output format MUST match the rendered
+    /// parameter list line-for-line so `MatchSpan` byte offsets align
+    /// with what the render pass displays.
+    ///
+    /// In `by_context_mode` the body is scoped to the context at
+    /// `sidebar_index`; in flat mode (default) the resolved list is used.
+    pub fn searchable_body(&self) -> String {
+        let chain = match &self.load {
+            ParameterContextLoad::Loaded { chain } => chain,
+            _ => return String::new(),
+        };
+        let mut out = String::new();
+        if self.by_context_mode {
+            if let Some(ctx) = chain.get(self.sidebar_index) {
+                for entry in &ctx.parameters {
+                    let value = if entry.sensitive {
+                        "(sensitive)".to_string()
+                    } else {
+                        entry.value.clone().unwrap_or_default()
+                    };
+                    out.push_str(&format!("{}={}\n", entry.name, value));
+                }
+            }
+        } else {
+            let resolved = resolve(chain, self.preselect.as_deref());
+            for row in &resolved {
+                let value = if row.winner.sensitive {
+                    "(sensitive)".to_string()
+                } else {
+                    row.winner.value.clone().unwrap_or_default()
+                };
+                out.push_str(&format!("{}={}\n", row.winner.name, value));
+            }
+        }
+        out
+    }
 }
 
 /// One row in the resolved-flat view. `shadowed` carries every

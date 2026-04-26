@@ -2599,3 +2599,224 @@ fn properties_modal_hint_spans_advertise_new_chords() {
     assert!(keys.contains(&"c"));
     assert!(keys.contains(&"Esc"));
 }
+
+// ── T17 parameter-context modal verb tests ──────────────────────────────────
+
+/// Build an AppState with the parameter-context modal open in Loaded state.
+fn state_with_pc_modal_loaded() -> AppState {
+    use crate::client::parameter_context::{ParameterContextNode, ParameterEntry};
+    use crate::cluster::snapshot::ParameterContextRef;
+    use crate::view::browser::state::parameter_context_modal::ParameterContextLoad;
+
+    let (mut s, _c) = seeded_browser_state();
+    // Stamp a parameter context ref onto the root PG (arena 0).
+    s.browser.nodes[0].parameter_context_ref = Some(ParameterContextRef {
+        id: "ctx-1".into(),
+        name: "my-context".into(),
+    });
+    // Open the modal in Loading state, then immediately install a chain.
+    s.browser
+        .open_parameter_context_modal("root".into(), "root".into(), None);
+    let chain = vec![ParameterContextNode {
+        id: "ctx-1".into(),
+        name: "my-context".into(),
+        parameters: vec![
+            ParameterEntry {
+                name: "host".into(),
+                value: Some("localhost".into()),
+                description: None,
+                sensitive: false,
+                provided: false,
+            },
+            ParameterEntry {
+                name: "token".into(),
+                value: None,
+                description: None,
+                sensitive: true,
+                provided: false,
+            },
+        ],
+        inherited_ids: vec![],
+        fetch_error: None,
+    }];
+    s.browser
+        .apply_parameter_context_modal_loaded("root".into(), chain);
+    assert!(
+        matches!(
+            s.browser.parameter_modal.as_ref().map(|m| &m.load),
+            Some(ParameterContextLoad::Loaded { .. })
+        ),
+        "modal must be Loaded"
+    );
+    s
+}
+
+#[test]
+fn toggle_by_context_flips_modal_flag() {
+    let mut s = state_with_pc_modal_loaded();
+    assert!(!s.browser.parameter_modal.as_ref().unwrap().by_context_mode);
+
+    let result = BrowserHandler::handle_verb(
+        &mut s,
+        crate::input::ViewVerb::ParameterContextModal(
+            crate::input::ParameterContextModalVerb::ToggleByContext,
+        ),
+    );
+    assert!(result.is_some());
+    assert!(s.browser.parameter_modal.as_ref().unwrap().by_context_mode);
+
+    // Second toggle flips back.
+    BrowserHandler::handle_verb(
+        &mut s,
+        crate::input::ViewVerb::ParameterContextModal(
+            crate::input::ParameterContextModalVerb::ToggleByContext,
+        ),
+    );
+    assert!(!s.browser.parameter_modal.as_ref().unwrap().by_context_mode);
+}
+
+#[test]
+fn close_modal_verb_clears_parameter_modal() {
+    let mut s = state_with_pc_modal_loaded();
+    assert!(s.browser.parameter_modal.is_some());
+
+    BrowserHandler::handle_verb(
+        &mut s,
+        crate::input::ViewVerb::ParameterContextModal(
+            crate::input::ParameterContextModalVerb::Close,
+        ),
+    );
+
+    assert!(
+        s.browser.parameter_modal.is_none(),
+        "Close must clear parameter_modal"
+    );
+}
+
+#[test]
+fn close_modal_verb_cancels_active_search_first() {
+    let mut s = state_with_pc_modal_loaded();
+    // Open a search session.
+    s.browser.parameter_modal_search_open();
+    assert!(
+        s.browser.parameter_modal.as_ref().unwrap().search.is_some(),
+        "search should be open"
+    );
+
+    // Pressing Close while search is active should cancel search, not close the modal.
+    BrowserHandler::handle_verb(
+        &mut s,
+        crate::input::ViewVerb::ParameterContextModal(
+            crate::input::ParameterContextModalVerb::Close,
+        ),
+    );
+
+    assert!(
+        s.browser.parameter_modal.is_some(),
+        "modal must remain open after cancelling search"
+    );
+    assert!(
+        s.browser.parameter_modal.as_ref().unwrap().search.is_none(),
+        "search must be cleared"
+    );
+}
+
+#[test]
+fn toggle_shadowed_flips_flag() {
+    let mut s = state_with_pc_modal_loaded();
+    assert!(!s.browser.parameter_modal.as_ref().unwrap().show_shadowed);
+
+    BrowserHandler::handle_verb(
+        &mut s,
+        crate::input::ViewVerb::ParameterContextModal(
+            crate::input::ParameterContextModalVerb::ToggleShadowed,
+        ),
+    );
+    assert!(s.browser.parameter_modal.as_ref().unwrap().show_shadowed);
+}
+
+#[test]
+fn toggle_used_by_flips_flag() {
+    let mut s = state_with_pc_modal_loaded();
+    assert!(!s.browser.parameter_modal.as_ref().unwrap().show_used_by);
+
+    BrowserHandler::handle_verb(
+        &mut s,
+        crate::input::ViewVerb::ParameterContextModal(
+            crate::input::ParameterContextModalVerb::ToggleUsedBy,
+        ),
+    );
+    assert!(s.browser.parameter_modal.as_ref().unwrap().show_used_by);
+}
+
+#[test]
+fn refresh_verb_sets_modal_to_loading_and_emits_spawn_intent() {
+    use crate::cluster::snapshot::ParameterContextRef;
+    use crate::view::browser::state::parameter_context_modal::ParameterContextLoad;
+
+    let mut s = state_with_pc_modal_loaded();
+    // Ensure the PG has a bound context id.
+    s.browser.nodes[0].parameter_context_ref = Some(ParameterContextRef {
+        id: "ctx-1".into(),
+        name: "my-context".into(),
+    });
+
+    let result = BrowserHandler::handle_verb(
+        &mut s,
+        crate::input::ViewVerb::ParameterContextModal(
+            crate::input::ParameterContextModalVerb::Refresh,
+        ),
+    )
+    .expect("Refresh must produce a result");
+
+    assert!(
+        matches!(
+            s.browser.parameter_modal.as_ref().map(|m| &m.load),
+            Some(ParameterContextLoad::Loading)
+        ),
+        "Refresh must set modal back to Loading"
+    );
+    assert!(
+        matches!(
+            result.intent,
+            Some(PendingIntent::SpawnParameterContextModalFetch { .. })
+        ),
+        "Refresh must emit SpawnParameterContextModalFetch, got {:?}",
+        result.intent
+    );
+}
+
+#[test]
+fn open_parameter_context_verb_spawns_fetch_intent() {
+    use crate::cluster::snapshot::ParameterContextRef;
+    use crate::input::{BrowserVerb, ViewVerb};
+
+    let (mut s, _c) = seeded_browser_state();
+    // Arena 0 is the root PG. Stamp a bound context ref.
+    s.browser.nodes[0].parameter_context_ref = Some(ParameterContextRef {
+        id: "ctx-bound".into(),
+        name: "bound-ctx".into(),
+    });
+    // Select the root PG.
+    s.browser.selected = 0;
+
+    let result =
+        BrowserHandler::handle_verb(&mut s, ViewVerb::Browser(BrowserVerb::OpenParameterContext))
+            .expect("verb must be handled");
+
+    assert!(
+        s.browser.parameter_modal.is_some(),
+        "modal must be open after OpenParameterContext"
+    );
+    assert!(
+        matches!(
+            result.intent,
+            Some(PendingIntent::SpawnParameterContextModalFetch {
+                ref bound_context_id,
+                ..
+            }) if bound_context_id == "ctx-bound"
+        ),
+        "must spawn fetch with the bound context id, got {:?}",
+        result.intent
+    );
+}

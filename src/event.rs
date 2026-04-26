@@ -58,6 +58,18 @@ pub enum BrowserPayload {
         pg_id: String,
         err: String,
     },
+    /// Successful chain fetch for the parameter-context modal. The
+    /// reducer installs the chain and clears the worker handle.
+    ParameterContextModalLoaded {
+        pg_id: String,
+        chain: Vec<crate::client::parameter_context::ParameterContextNode>,
+    },
+    /// Failed chain fetch for the parameter-context modal. The reducer
+    /// renders the error inside the modal and clears the worker handle.
+    ParameterContextModalFailed {
+        pg_id: String,
+        err: String,
+    },
 }
 
 /// Result of a successful intent dispatch.

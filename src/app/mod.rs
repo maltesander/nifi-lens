@@ -299,6 +299,18 @@ pub async fn run(
                     );
                     state.browser.version_modal_handle = Some(h);
                 }
+                PendingIntent::SpawnParameterContextModalFetch {
+                    pg_id,
+                    bound_context_id,
+                } => {
+                    let h = crate::view::browser::worker::spawn_parameter_context_modal_fetch(
+                        client.clone(),
+                        tx.clone(),
+                        pg_id,
+                        bound_context_id,
+                    );
+                    state.browser.parameter_modal_handle = Some(h);
+                }
                 other => {
                     let intent = match other {
                         PendingIntent::SwitchContext(name) => Some(Intent::SwitchContext(name)),

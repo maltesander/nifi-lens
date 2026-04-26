@@ -18,6 +18,10 @@ impl ViewKeyHandler for BrowserHandler {
         if let ViewVerb::VersionControlModal(v) = verb {
             return Some(handle_version_control_modal_verb(state, v));
         }
+        // ParameterContextModal verbs take priority when the modal is open.
+        if let ViewVerb::ParameterContextModal(v) = verb {
+            return Some(handle_parameter_context_modal_verb(state, v));
+        }
         let bv = match verb {
             ViewVerb::Browser(v) => v,
             _ => return None,
@@ -86,12 +90,41 @@ impl ViewKeyHandler for BrowserHandler {
                 }
             }
             BrowserVerb::OpenParameterContext => {
-                // The enabled() predicate gates this verb to PG rows only;
-                // the dispatcher now checks enabled() for BrowserVerb so this
-                // arm fires only when a PG is selected. The full modal open
-                // logic is wired in a later task (T13 CrossLink / T14 render).
-                // For now, silently no-op so the verb is routable.
-                return Some(UpdateResult::default());
+                // The enabled() predicate gates this verb to PG rows with a
+                // bound parameter context. Look up the binding id and open
+                // the modal, mirroring ShowVersionControl.
+                let Some(&arena_idx) = state.browser.visible.get(state.browser.selected) else {
+                    return Some(UpdateResult::default());
+                };
+                let pg_id = state.browser.nodes[arena_idx].id.clone();
+                let pg_path = state.browser.nodes[arena_idx].name.clone();
+                let bound_context_id = state
+                    .browser
+                    .parameter_context_ref_for(&pg_id)
+                    .map(|r| r.id.clone());
+                state
+                    .browser
+                    .open_parameter_context_modal(pg_id.clone(), pg_path, None);
+                if let Some(bound_context_id) = bound_context_id {
+                    return Some(UpdateResult {
+                        redraw: true,
+                        intent: Some(super::PendingIntent::SpawnParameterContextModalFetch {
+                            pg_id,
+                            bound_context_id,
+                        }),
+                        tracer_followup: None,
+                    });
+                }
+                // No binding yet — mark as failed immediately.
+                state.browser.apply_parameter_context_modal_failed(
+                    pg_id,
+                    "no bound parameter context found".into(),
+                );
+                return Some(UpdateResult {
+                    redraw: true,
+                    intent: None,
+                    tracer_followup: None,
+                });
             }
             BrowserVerb::ShowVersionControl => {
                 if !state.browser_selection_is_versioned_pg() {
@@ -656,9 +689,20 @@ impl ViewKeyHandler for BrowserHandler {
 
     fn is_text_input_focused(state: &AppState) -> bool {
         // Version-control modal's search input.
-        state
+        let vc_active = state
             .browser
             .version_modal
+            .as_ref()
+            .and_then(|m| m.search.as_ref())
+            .map(|s| s.input_active)
+            .unwrap_or(false);
+        if vc_active {
+            return true;
+        }
+        // Parameter-context modal's search input.
+        state
+            .browser
+            .parameter_modal
             .as_ref()
             .and_then(|m| m.search.as_ref())
             .map(|s| s.input_active)
@@ -675,22 +719,47 @@ impl ViewKeyHandler for BrowserHandler {
         // Route raw key events to the version-control modal's search
         // reducer methods (mirrors handle_content_modal_search_input
         // for the Tracer modal).
-        let active = state
+        let vc_active = state
             .browser
             .version_modal
             .as_ref()
             .and_then(|m| m.search.as_ref())
             .map(|s| s.input_active)
             .unwrap_or(false);
-        if !active {
+        if vc_active {
+            match key.code {
+                KeyCode::Esc => state.browser.version_modal_search_cancel(),
+                KeyCode::Enter => state.browser.version_modal_search_commit(),
+                KeyCode::Backspace => state.browser.version_modal_search_pop(),
+                KeyCode::Char(ch) if !key.modifiers.contains(KeyModifiers::CONTROL) => {
+                    state.browser.version_modal_search_push(ch);
+                }
+                _ => return None,
+            }
+            return Some(UpdateResult {
+                redraw: true,
+                intent: None,
+                tracer_followup: None,
+            });
+        }
+
+        // Parameter-context modal's search input.
+        let pc_active = state
+            .browser
+            .parameter_modal
+            .as_ref()
+            .and_then(|m| m.search.as_ref())
+            .map(|s| s.input_active)
+            .unwrap_or(false);
+        if !pc_active {
             return None;
         }
         match key.code {
-            KeyCode::Esc => state.browser.version_modal_search_cancel(),
-            KeyCode::Enter => state.browser.version_modal_search_commit(),
-            KeyCode::Backspace => state.browser.version_modal_search_pop(),
+            KeyCode::Esc => state.browser.parameter_modal_search_cancel(),
+            KeyCode::Enter => state.browser.parameter_modal_search_commit(),
+            KeyCode::Backspace => state.browser.parameter_modal_search_pop(),
             KeyCode::Char(ch) if !key.modifiers.contains(KeyModifiers::CONTROL) => {
-                state.browser.version_modal_search_push(ch);
+                state.browser.parameter_modal_search_push(ch);
             }
             _ => return None,
         }
@@ -820,6 +889,214 @@ fn handle_version_control_modal_verb(
             redraw()
         }
     }
+}
+
+/// Dispatch a `ParameterContextModalVerb` action. Called when the
+/// parameter-context modal is open and the keymap has routed
+/// `ViewVerb::ParameterContextModal(v)` here.
+fn handle_parameter_context_modal_verb(
+    state: &mut AppState,
+    v: crate::input::ParameterContextModalVerb,
+) -> UpdateResult {
+    use crate::input::ParameterContextModalVerb as V;
+
+    let redraw = || UpdateResult {
+        redraw: true,
+        intent: None,
+        tracer_followup: None,
+    };
+
+    match v {
+        V::Close => {
+            // Esc cancels an active search first; only when no search
+            // is active does Esc close the modal.
+            let has_search = state
+                .browser
+                .parameter_modal
+                .as_ref()
+                .is_some_and(|m| m.search.is_some());
+            if has_search {
+                state.browser.parameter_modal_search_cancel();
+            } else {
+                state.browser.close_parameter_context_modal();
+            }
+            redraw()
+        }
+        V::Refresh => {
+            // Re-spawn the worker. Refresh does NOT close the modal,
+            // so we abort the previous handle directly here rather
+            // than going through close_parameter_context_modal().
+            let modal = state.browser.parameter_modal.as_mut();
+            let Some(modal) = modal else {
+                return UpdateResult::default();
+            };
+            let pg_id = modal.originating_pg_id.clone();
+            modal.load =
+                crate::view::browser::state::parameter_context_modal::ParameterContextLoad::Loading;
+            // Drop the search index too — body is changing.
+            modal.search = None;
+            if let Some(h) = state.browser.parameter_modal_handle.take() {
+                h.abort();
+            }
+            // Re-look up the bound context id. The binding may have
+            // updated since the modal was first opened.
+            let bound_context_id = state
+                .browser
+                .parameter_context_ref_for(&pg_id)
+                .map(|r| r.id.clone());
+            if let Some(bound_context_id) = bound_context_id {
+                UpdateResult {
+                    redraw: true,
+                    intent: Some(super::PendingIntent::SpawnParameterContextModalFetch {
+                        pg_id,
+                        bound_context_id,
+                    }),
+                    tracer_followup: None,
+                }
+            } else {
+                state.browser.apply_parameter_context_modal_failed(
+                    pg_id,
+                    "no bound parameter context found".into(),
+                );
+                redraw()
+            }
+        }
+        V::ToggleByContext => {
+            if let Some(modal) = state.browser.parameter_modal.as_mut() {
+                modal.by_context_mode = !modal.by_context_mode;
+                modal.scroll.jump_top();
+            }
+            redraw()
+        }
+        V::ToggleShadowed => {
+            if let Some(modal) = state.browser.parameter_modal.as_mut() {
+                modal.show_shadowed = !modal.show_shadowed;
+            }
+            redraw()
+        }
+        V::ToggleUsedBy => {
+            if let Some(modal) = state.browser.parameter_modal.as_mut() {
+                modal.show_used_by = !modal.show_used_by;
+                modal.scroll.jump_top();
+            }
+            redraw()
+        }
+        V::RowUp => {
+            if let Some(modal) = state.browser.parameter_modal.as_mut() {
+                modal.scroll.scroll_by(-1, usize::MAX);
+            }
+            redraw()
+        }
+        V::RowDown => {
+            if let Some(modal) = state.browser.parameter_modal.as_mut() {
+                modal.scroll.scroll_by(1, usize::MAX);
+            }
+            redraw()
+        }
+        V::PageUp => {
+            if let Some(modal) = state.browser.parameter_modal.as_mut() {
+                modal.scroll.page_up();
+            }
+            redraw()
+        }
+        V::PageDown => {
+            if let Some(modal) = state.browser.parameter_modal.as_mut() {
+                modal.scroll.page_down(usize::MAX);
+            }
+            redraw()
+        }
+        V::JumpTop => {
+            if let Some(modal) = state.browser.parameter_modal.as_mut() {
+                modal.scroll.jump_top();
+            }
+            redraw()
+        }
+        V::JumpBottom => {
+            if let Some(modal) = state.browser.parameter_modal.as_mut() {
+                modal.scroll.jump_bottom(usize::MAX);
+            }
+            redraw()
+        }
+        V::ChainFocusLeft => {
+            if let Some(modal) = state.browser.parameter_modal.as_mut() {
+                modal.sidebar_index = modal.sidebar_index.saturating_sub(1);
+            }
+            redraw()
+        }
+        V::ChainFocusRight => {
+            if let Some(modal) = state.browser.parameter_modal.as_mut() {
+                let chain_len = match &modal.load {
+                    crate::view::browser::state::parameter_context_modal::ParameterContextLoad::Loaded {
+                        chain,
+                    } => chain.len(),
+                    _ => 0,
+                };
+                if chain_len > 0 {
+                    modal.sidebar_index =
+                        (modal.sidebar_index + 1).min(chain_len.saturating_sub(1));
+                }
+            }
+            redraw()
+        }
+        V::ChainEnter => {
+            // Selecting a chain entry switches to by-context mode
+            // scoped to the current sidebar_index.
+            if let Some(modal) = state.browser.parameter_modal.as_mut() {
+                modal.by_context_mode = true;
+                modal.scroll.jump_top();
+            }
+            redraw()
+        }
+        V::Search => {
+            state.browser.parameter_modal_search_open();
+            redraw()
+        }
+        V::SearchNext => {
+            state.browser.parameter_modal_search_cycle_next();
+            redraw()
+        }
+        V::SearchPrev => {
+            state.browser.parameter_modal_search_cycle_prev();
+            redraw()
+        }
+        V::Copy => {
+            if let Some(text) = parameter_context_modal_copy_text(&state.browser) {
+                let preview: String = text.chars().take(40).collect();
+                match state.copy_to_clipboard(text) {
+                    Ok(()) => state.post_info(format!("copied: {preview}")),
+                    Err(err) => state.post_warning(format!("clipboard: {err}")),
+                }
+            }
+            redraw()
+        }
+    }
+}
+
+/// Build a plain-text rendering of the resolved parameter list for
+/// clipboard copy. Returns `None` when the modal is not loaded.
+fn parameter_context_modal_copy_text(
+    browser: &crate::view::browser::state::BrowserState,
+) -> Option<String> {
+    use crate::view::browser::state::parameter_context_modal::{ParameterContextLoad, resolve};
+    let modal = browser.parameter_modal.as_ref()?;
+    let chain = match &modal.load {
+        ParameterContextLoad::Loaded { chain } => chain,
+        _ => return None,
+    };
+    let resolved = resolve(chain, modal.preselect.as_deref());
+    if resolved.is_empty() {
+        return None;
+    }
+    let mut out = String::new();
+    for row in &resolved {
+        let value = if row.winner.sensitive {
+            "(sensitive)".to_string()
+        } else {
+            row.winner.value.clone().unwrap_or_default()
+        };
+        out.push_str(&format!("{}={}\n", row.winner.name, value));
+    }
+    Some(out)
 }
 
 /// Build a plain-text rendering of the modal's identity + diff body
