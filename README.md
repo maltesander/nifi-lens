@@ -213,6 +213,25 @@ NiFi upgrade, hidden by default).
 For a cluster-wide audit, open Fuzzy Find (`Shift+F`) and type `:drift`
 to filter the corpus to all non-clean versioned PGs.
 
+### Parameter contexts
+
+Press `p` on any process group (including root) to open the
+parameter-context modal. The modal shows the context's Identity header,
+an inheritance chain sidebar (use `←`/`→` to step through ancestors),
+and a resolved-flat parameters table listing each parameter's name,
+value, originating context, and flag chips: `[O]` override, `[S]`
+sensitive, `[P]` provided, `[!]` unresolved. Toggle the by-context view
+with `t`, show shadowed entries with `s`, and open the reverse-lookup
+("Used by N PGs") panel with `u`.
+
+Processor and controller-service property values that contain `#{name}`
+parameter references gain a trailing `→` when the owning PG has a bound
+context — pressing Enter jumps directly into the modal pre-selected to
+that parameter. `##{...}` escapes are recognized and not annotated.
+
+The PG detail pane also shows a `Parameter context: <name> →` identity
+row; pressing Enter there opens the same modal.
+
 **Events** — Provenance search with a filter bar (time / type / source /
 flowfile UUID / attribute). Results are colored by event type and
 cross-linked from Bulletins and Browser.
@@ -298,7 +317,7 @@ Drift filters (PG-only):
 |--------------|--------------------------------------------------------|
 | `Enter` / `→` | Expand folder or drill into the selected node         |
 | `←`          | Collapse folder or ascend to parent                    |
-| `p`          | Open properties (processors and controller services)   |
+| `p`          | Open Parameter Context modal (PG selected) / Properties modal (processor or CS selected) |
 | `m`          | Show version control (versioned PG only)               |
 | `c`          | Copy the selected node's id                            |
 

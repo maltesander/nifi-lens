@@ -76,25 +76,25 @@ State is mutated **only on the UI task**. No locks, no races.
 
 ### Central cluster store
 
-`src/cluster/ClusterStore` owns ten endpoint fetchers: `root_pg_status`,
+`src/cluster/ClusterStore` owns eleven endpoint fetchers: `root_pg_status`,
 `controller_services`, `controller_status`, `system_diagnostics`,
 `bulletins`, `connections_by_pg`, `about`, `cluster_nodes`, `tls_certs`,
-`version_control`. Each runs as an independent `tokio::task::spawn_local`
-future on the main-thread `LocalSet`, pushes `AppEvent::ClusterUpdate` on
-success, and sleeps for its base cadence (scaled adaptively up to
-`max_interval` based on measured latency, with ±`jitter_percent/100`
-jitter) before the next tick.
+`version_control`, `parameter_context_bindings`. Each runs as an independent
+`tokio::task::spawn_local` future on the main-thread `LocalSet`, pushes
+`AppEvent::ClusterUpdate` on success, and sleeps for its base cadence
+(scaled adaptively up to `max_interval` based on measured latency, with
+±`jitter_percent/100` jitter) before the next tick.
 
 Snapshot mutation is main-loop-only: the `ClusterUpdate` arm in
 `src/app/mod.rs` calls `state.cluster.apply_update(...)` and re-emits
 `AppEvent::ClusterChanged(endpoint)`. Views observe the change by
 matching on the endpoint and invoking their `redraw_*` reducers.
 
-Four endpoints are **subscriber-gated** — they park when no view is
+Five endpoints are **subscriber-gated** — they park when no view is
 subscribed: `root_pg_status`, `controller_services`, `connections_by_pg`,
-`version_control`. `WorkerRegistry::ensure` calls
-`cluster.subscribe(endpoint, view)` on tab entry and `unsubscribe(...)`
-on tab exit.
+`version_control`, `parameter_context_bindings`. `WorkerRegistry::ensure`
+calls `cluster.subscribe(endpoint, view)` on tab entry and
+`unsubscribe(...)` on tab exit.
 
 Context switch: `cluster.shutdown()` aborts every fetcher and the store
 is rebuilt with the new `NifiClient` in the main loop's
@@ -322,6 +322,39 @@ modal degrades to a single muted line `terminal too small`.
 
 Read-only — no commit / revert / update-version actions in v0.1.
 
+### Parameter Contexts modal
+
+The `parameter_context_bindings` endpoint fetcher fans out
+`processgroups().get_process_group(id)` per PG (using PG IDs cached in
+the `root_pg_status` snapshot) and stores a
+`BTreeMap<PgId, Option<ParameterContextRef>>` in the cluster snapshot.
+Default cadence `30s` via `[polling.cluster] parameter_context_bindings`.
+Subscriber-gated to Browser views only.
+
+`Enter` (Descend) on the `Parameter context: <name> →` identity row in
+a PG detail pane, or `p` on a PG row in the tree, opens the
+**parameter-context modal**: a full-screen overlay with an Identity
+header, an inheritance chain sidebar, and a resolved-flat parameters
+table with `name | value | from | flags`. Flag chips: `[O]` override,
+`[S]` sensitive, `[P]` provided, `[!]` unresolved.
+
+Modal-scoped chords use a separate `ParameterContextModalVerb` enum
+that shadows outer-tab keys while the modal is open: `Esc` close,
+`↑`/`↓`/`PgUp`/`PgDn`/`Home`/`End` scroll, `←`/`→` move chain focus,
+`t` toggle by-context view, `s` show shadowed, `u` toggle Used-by
+panel, `/` search, `n`/`Shift+N` next/prev match, `c` copy, `r`
+refresh. Search uses the shared `widget::search` primitives. Below
+60×20 the modal degrades to a single muted line `terminal too small`.
+
+`#{name}` parameter references in processor / controller-service
+property values gain a trailing `→` annotation when the owning PG has
+a bound context — pressing Enter opens the modal pre-selected to that
+parameter (or with `[!]` synthesised for unresolved names). The
+`##{...}` escape is honoured: `##{literal}` is *not* annotated.
+Multi-ref values (`#{a}#{b}`) annotate but open without a preselect.
+
+Read-only — no edits / creates / submits in v0.1.
+
 ### Bulletins ring buffer & detail modal
 
 The Bulletins tab holds a rolling in-memory window of recently-seen
@@ -411,9 +444,9 @@ All periodic NiFi fetches are owned by `src/cluster/ClusterStore`.
 Base cadences come from `[polling.cluster]` in `config.toml` (keys:
 `root_pg_status`, `controller_services`, `controller_status`,
 `system_diagnostics`, `bulletins`, `cluster_nodes`, `tls_certs`,
-`connections_by_pg`, `version_control`, `about`, plus the adaptive
-knobs `max_interval` and `jitter_percent`). For scaling and
-subscriber-gating behavior, see "Central cluster store".
+`connections_by_pg`, `version_control`, `parameter_context_bindings`,
+`about`, plus the adaptive knobs `max_interval` and `jitter_percent`).
+For scaling and subscriber-gating behavior, see "Central cluster store".
 
 Values use the humantime format (`"10s"`, `"750ms"`, `"2m"`). The
 loader emits a `tracing::warn!` (into the rotating log file) for values

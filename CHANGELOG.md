@@ -34,6 +34,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `:modified`, `:syncerr` (PG-only).
 - New `[polling.cluster] version_control` configuration key (default
   `30s`); subscriber-gated to Browser.
+- Browser: Parameter Context modal — open via `p` on any PG (incl.
+  root). Walks the inheritance chain, renders resolved parameters with
+  override / sensitive / provided / unresolved flags, surfaces
+  reverse-lookup ("Used by N PGs"), and adds `→` cross-links from
+  `#{name}` parameter references in processor / controller-service
+  property values. The PG detail pane gains a `Parameter context:` row
+  cross-linking into the same modal. Read-only.
 
 ### Changed
 
