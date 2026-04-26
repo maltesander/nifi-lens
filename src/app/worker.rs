@@ -158,7 +158,7 @@ impl WorkerRegistry {
             }
             ViewId::Browser => {
                 browser.detail_tx = None;
-                // The four cluster endpoints that feed the Browser
+                // The five cluster endpoints that feed the Browser
                 // arena are all released here — while Browser is
                 // inactive the store gates the connections fan-out so
                 // inactive tabs don't drive per-PG requests.
@@ -166,6 +166,7 @@ impl WorkerRegistry {
                 cluster.unsubscribe(ClusterEndpoint::ControllerServices, ViewId::Browser);
                 cluster.unsubscribe(ClusterEndpoint::ConnectionsByPg, ViewId::Browser);
                 cluster.unsubscribe(ClusterEndpoint::VersionControl, ViewId::Browser);
+                cluster.unsubscribe(ClusterEndpoint::ParameterContextBindings, ViewId::Browser);
             }
             ViewId::Events | ViewId::Tracer => {}
         }
@@ -206,11 +207,14 @@ impl WorkerRegistry {
                 // provides the PG/processor/connection/port skeleton,
                 // ControllerServices attaches CS rows, ConnectionsByPg
                 // backfills endpoint ids, VersionControl populates
-                // per-PG drift state for tree-row chips and the modal.
+                // per-PG drift state for tree-row chips and the modal,
+                // and ParameterContextBindings stamps parameter context
+                // references onto PGs for the parameter context modal.
                 cluster.subscribe(ClusterEndpoint::RootPgStatus, ViewId::Browser);
                 cluster.subscribe(ClusterEndpoint::ControllerServices, ViewId::Browser);
                 cluster.subscribe(ClusterEndpoint::ConnectionsByPg, ViewId::Browser);
                 cluster.subscribe(ClusterEndpoint::VersionControl, ViewId::Browser);
+                cluster.subscribe(ClusterEndpoint::ParameterContextBindings, ViewId::Browser);
             }
             ViewId::Events | ViewId::Tracer => {}
         }
@@ -362,6 +366,7 @@ mod tests {
                 ClusterEndpoint::ControllerServices,
                 ClusterEndpoint::ConnectionsByPg,
                 ClusterEndpoint::VersionControl,
+                ClusterEndpoint::ParameterContextBindings,
             ],
         )
     }
@@ -401,17 +406,17 @@ mod tests {
         );
         assert_eq!(registry.active, Some(ViewId::Events));
 
-        // Events → Browser: Browser subscribes to its four endpoints.
+        // Events → Browser: Browser subscribes to its five endpoints.
         ensure_subscriptions_only(&mut registry, ViewId::Browser, &mut browser, &mut store);
         assert_eq!(
             browser_subscriber_total(&store),
-            4,
-            "Browser entry should add four subscribers"
+            5,
+            "Browser entry should add five subscribers"
         );
         assert_eq!(overview_subscriber_total(&store), 0);
 
         // Browser → Tracer (handle-less transition out of a handle-
-        // owning view). Browser's four subscribers must be released.
+        // owning view). Browser's five subscribers must be released.
         ensure_subscriptions_only(&mut registry, ViewId::Tracer, &mut browser, &mut store);
         assert_eq!(
             browser_subscriber_total(&store),
@@ -522,6 +527,35 @@ mod tests {
             store.subscribers.count(ClusterEndpoint::VersionControl),
             0,
             "Browser → Overview must release the VersionControl subscription"
+        );
+    }
+
+    #[test]
+    fn browser_entry_subscribes_to_parameter_context_bindings() {
+        let mut store = ClusterStore::new(
+            ClusterPollingConfig::default(),
+            100,
+            "https://nifi.test:8443".into(),
+        );
+        let mut browser = BrowserState::default();
+        let mut registry = WorkerRegistry::new();
+
+        ensure_subscriptions_only(&mut registry, ViewId::Browser, &mut browser, &mut store);
+        assert_eq!(
+            store
+                .subscribers
+                .count(ClusterEndpoint::ParameterContextBindings),
+            1,
+            "Browser entry must subscribe to ParameterContextBindings"
+        );
+
+        ensure_subscriptions_only(&mut registry, ViewId::Overview, &mut browser, &mut store);
+        assert_eq!(
+            store
+                .subscribers
+                .count(ClusterEndpoint::ParameterContextBindings),
+            0,
+            "Browser → Overview must release the ParameterContextBindings subscription"
         );
     }
 }
