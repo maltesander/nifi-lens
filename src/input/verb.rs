@@ -658,7 +658,22 @@ impl Verb for ParameterContextModalVerb {
     }
 
     fn show_in_hint_bar(self) -> bool {
-        !matches!(self, Self::SearchNext | Self::SearchPrev)
+        // Hide natural-navigation chords (arrows, paging, jump, focus)
+        // and search-cycling chords from the footer strip — they're
+        // intuitive and crowd out the meaningful verbs (search, copy,
+        // refresh, toggles, close).
+        !matches!(
+            self,
+            Self::RowUp
+                | Self::RowDown
+                | Self::PageUp
+                | Self::PageDown
+                | Self::JumpTop
+                | Self::JumpBottom
+                | Self::FocusBody
+                | Self::SearchNext
+                | Self::SearchPrev
+        )
     }
 
     fn enabled(self, _ctx: &HintContext<'_>) -> bool {

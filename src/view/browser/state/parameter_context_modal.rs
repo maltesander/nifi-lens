@@ -86,9 +86,12 @@ impl ParameterContextModalState {
     /// In `by_context_mode` the body mirrors `render_by_context` (same
     /// 2-line header + data rows without a `from` column).
     pub fn searchable_body(&self) -> String {
+        // Column widths must mirror the render module exactly. The order is
+        // flags | name | value | from. `by_context_mode` omits `from`.
+        const FLAG_W: usize = 12;
         const NAME_W: usize = 22;
         const VALUE_W: usize = 22;
-        const FROM_W: usize = 12;
+        const FROM_W: usize = 18;
 
         let chain = match &self.load {
             ParameterContextLoad::Loaded { chain } => chain,
@@ -101,36 +104,70 @@ impl ParameterContextModalState {
             };
             // 2-line header matching render_by_context.
             out.push_str(&format!(
-                "{:<NAME_W$} {:<VALUE_W$} flags\n",
-                "name", "value"
+                "{:<FLAG_W$} {:<NAME_W$} {:<VALUE_W$}\n",
+                "flags", "name", "value"
             ));
             out.push('\n'); // separator placeholder
             for entry in &ctx.parameters {
+                let mut flags = String::new();
+                if entry.sensitive {
+                    flags.push_str("[S]");
+                }
+                if entry.provided {
+                    if !flags.is_empty() {
+                        flags.push(' ');
+                    }
+                    flags.push_str("[P]");
+                }
+                while flags.chars().count() < FLAG_W {
+                    flags.push(' ');
+                }
+
                 let name = truncate_for_body(&entry.name, NAME_W);
                 let value = if entry.sensitive {
                     truncate_for_body("(sensitive)", VALUE_W)
                 } else {
                     truncate_for_body(entry.value.as_deref().unwrap_or("\u{2014}"), VALUE_W)
                 };
-                out.push_str(&format!("{name:<NAME_W$} {value:<VALUE_W$}"));
-                if entry.sensitive {
-                    out.push_str(" [S]");
-                }
-                if entry.provided {
-                    out.push(' ');
-                    out.push_str("[P]");
-                }
-                out.push('\n');
+                out.push_str(&format!("{flags} {name:<NAME_W$} {value:<VALUE_W$}\n"));
             }
         } else {
             let resolved = resolve(chain, self.preselect.as_deref());
             // 2-line header matching render_flat.
             out.push_str(&format!(
-                "{:<NAME_W$} {:<VALUE_W$} {:<FROM_W$} flags\n",
-                "name", "value", "from"
+                "{:<FLAG_W$} {:<NAME_W$} {:<VALUE_W$} {:<FROM_W$}\n",
+                "flags", "name", "value", "from"
             ));
             out.push('\n'); // separator placeholder
             for row in &resolved {
+                // Flags first (same order as render_flat::build_flags):
+                // [S] sensitive, [P] provided, [O] override, [!] unresolved.
+                let mut flags = String::new();
+                if row.winner.sensitive {
+                    flags.push_str("[S]");
+                }
+                if row.winner.provided {
+                    if !flags.is_empty() {
+                        flags.push(' ');
+                    }
+                    flags.push_str("[P]");
+                }
+                if !row.shadowed.is_empty() && !row.unresolved {
+                    if !flags.is_empty() {
+                        flags.push(' ');
+                    }
+                    flags.push_str("[O]");
+                }
+                if row.unresolved {
+                    if !flags.is_empty() {
+                        flags.push(' ');
+                    }
+                    flags.push_str("[!]");
+                }
+                while flags.chars().count() < FLAG_W {
+                    flags.push(' ');
+                }
+
                 let name = truncate_for_body(&row.winner.name, NAME_W);
                 let value = if row.winner.sensitive {
                     truncate_for_body("(sensitive)", VALUE_W)
@@ -143,25 +180,12 @@ impl ParameterContextModalState {
                     truncate_for_body(&row.winner_context, FROM_W)
                 };
                 out.push_str(&format!(
-                    "{name:<NAME_W$} {value:<VALUE_W$} {from:<FROM_W$}"
+                    "{flags} {name:<NAME_W$} {value:<VALUE_W$} {from:<FROM_W$}\n"
                 ));
-                // Flags (same order as render_flat::build_flags).
-                if row.winner.sensitive {
-                    out.push_str(" [S]");
-                }
-                if row.winner.provided {
-                    out.push_str(" [P]");
-                }
-                if !row.shadowed.is_empty() && !row.unresolved {
-                    out.push_str(" [O]");
-                }
-                if row.unresolved {
-                    out.push_str(" [!]");
-                }
-                out.push('\n');
                 if self.show_shadowed {
                     for (shadowed_entry, shadowed_ctx) in &row.shadowed {
-                        let sname = truncate_for_body(&shadowed_entry.name, NAME_W);
+                        let blank_flags = " ".repeat(FLAG_W);
+                        let sname = truncate_for_body(&shadowed_entry.name, NAME_W - 2);
                         let svalue = if shadowed_entry.sensitive {
                             truncate_for_body("(sensitive)", VALUE_W)
                         } else {
@@ -172,7 +196,8 @@ impl ParameterContextModalState {
                         };
                         let sfrom = truncate_for_body(shadowed_ctx, FROM_W);
                         out.push_str(&format!(
-                            "  {sname:<NAME_W$} {svalue:<VALUE_W$} {sfrom:<FROM_W$}\n"
+                            "{blank_flags}   {sname:<width$} {svalue:<VALUE_W$} {sfrom:<FROM_W$}\n",
+                            width = NAME_W - 2
                         ));
                     }
                 }

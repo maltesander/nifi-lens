@@ -22,6 +22,14 @@ use crate::widget::search::{MatchSpan, SearchState};
 const MIN_WIDTH: u16 = 60;
 const MIN_HEIGHT: u16 = 20;
 
+/// Resolved-flat / by-context table column widths. Order: flags | name |
+/// value | from. The renderer and `searchable_body` MUST agree on these
+/// widths so search-match byte offsets align with the rendered cells.
+pub(super) const FLAG_W: usize = 12;
+pub(super) const NAME_W: usize = 22;
+pub(super) const VALUE_W: usize = 22;
+pub(super) const FROM_W: usize = 18;
+
 /// A row in the used-by panel — a PG that binds this parameter context.
 struct UsedByRow {
     pg_path: String,
@@ -338,22 +346,27 @@ fn render_flat(
         return;
     }
 
-    // Column widths (fixed for now — could be computed from content).
-    let name_w = 22usize;
-    let value_w = 22usize;
-    let from_w = 12usize;
+    // Column widths (fixed). Order: flags | name | value | from.
+    // `from` is wider than the original 12 so longer context display names
+    // don't truncate (e.g. `payments-shared`). Flags first puts the most
+    // forensic info — override / sensitive / provided / unresolved — at
+    // the eye line.
+    let flag_w = FLAG_W;
+    let name_w = NAME_W;
+    let value_w = VALUE_W;
+    let from_w = FROM_W;
 
     // Header separator line.
     let sep = "─".repeat(area.width as usize);
     let mut lines: Vec<Line<'static>> = vec![
         Line::from(vec![
+            Span::styled(format!("{:<flag_w$}", "flags"), theme::muted()),
+            Span::raw(" "),
             Span::styled(format!("{:<name_w$}", "name"), theme::muted()),
             Span::raw(" "),
             Span::styled(format!("{:<value_w$}", "value"), theme::muted()),
             Span::raw(" "),
             Span::styled(format!("{:<from_w$}", "from"), theme::muted()),
-            Span::raw(" "),
-            Span::styled("flags".to_string(), theme::muted()),
         ]),
         Line::from(Span::styled(sep, theme::muted())),
     ];
@@ -376,16 +389,20 @@ fn render_flat(
         }
 
         let from_sidebar = !sidebar_ctx.is_empty() && rp.winner_context == sidebar_ctx;
-        lines.push(param_row(rp, name_w, value_w, from_w, from_sidebar));
+        lines.push(param_row(rp, flag_w, name_w, value_w, from_w, from_sidebar));
 
         if modal.show_shadowed {
             for (shadowed_entry, shadowed_ctx) in &rp.shadowed {
                 let dim = theme::muted();
-                let name = truncate_str(&shadowed_entry.name, name_w);
+                let name = truncate_str(&shadowed_entry.name, name_w.saturating_sub(2));
                 let value = render_value(shadowed_entry.sensitive, &shadowed_entry.value, value_w);
                 let from = truncate_str(shadowed_ctx, from_w);
+                // Shadowed rows: empty flag column (the dim style is the
+                // visual cue) + indented name + value + from.
                 lines.push(Line::from(vec![
-                    Span::styled(format!("  {name:<name_w$}"), dim),
+                    Span::raw(" ".repeat(flag_w)),
+                    Span::raw(" "),
+                    Span::styled(format!("  {name:<width$}", width = name_w - 2), dim),
                     Span::raw(" "),
                     Span::styled(format!("{value:<value_w$}"), dim),
                     Span::raw(" "),
@@ -417,10 +434,11 @@ fn render_flat(
 
 /// Build one param row line (winner only).
 /// `from_sidebar` — when true, the row's `winner_context` matches the
-/// sidebar cursor; a leading `·` marker is prepended and the `from`
-/// column is styled with a subtle accent so the contribution is visible.
+/// sidebar cursor; the `from` column is styled with a subtle accent so
+/// the contribution is visible.
 fn param_row(
     rp: &ResolvedParameter,
+    flag_w: usize,
     name_w: usize,
     value_w: usize,
     from_w: usize,
@@ -433,7 +451,6 @@ fn param_row(
     } else {
         truncate_str(&rp.winner_context, from_w)
     };
-    let flags = build_flags(rp);
 
     let row_style = if rp.unresolved {
         theme::error()
@@ -446,25 +463,36 @@ fn param_row(
         row_style
     };
 
-    let mut spans = vec![
-        Span::styled(format!("{name:<name_w$}"), row_style),
-        Span::raw(" "),
-        Span::styled(format!("{value:<value_w$}"), row_style),
-        Span::raw(" "),
-        Span::styled(format!("{from:<from_w$}"), from_style),
-    ];
-
-    if !flags.is_empty() {
-        spans.push(Span::raw(" "));
-        for (i, (text, style)) in flags.iter().enumerate() {
-            if i > 0 {
-                spans.push(Span::raw(" "));
-            }
-            spans.push(Span::styled(text.clone(), *style));
-        }
-    }
+    // Column order: flags | name | value | from.
+    let mut spans = flag_spans_padded(rp, flag_w);
+    spans.push(Span::raw(" "));
+    spans.push(Span::styled(format!("{name:<name_w$}"), row_style));
+    spans.push(Span::raw(" "));
+    spans.push(Span::styled(format!("{value:<value_w$}"), row_style));
+    spans.push(Span::raw(" "));
+    spans.push(Span::styled(format!("{from:<from_w$}"), from_style));
 
     Line::from(spans)
+}
+
+/// Build styled flag spans padded to `width` columns. Empty when no
+/// flags apply; pure spaces still pad to `width`.
+fn flag_spans_padded(rp: &ResolvedParameter, width: usize) -> Vec<Span<'static>> {
+    let flags = build_flags(rp);
+    let mut spans: Vec<Span<'static>> = Vec::new();
+    let mut consumed = 0usize;
+    for (i, (text, style)) in flags.iter().enumerate() {
+        if i > 0 {
+            spans.push(Span::raw(" "));
+            consumed += 1;
+        }
+        spans.push(Span::styled(text.clone(), *style));
+        consumed += text.chars().count();
+    }
+    if consumed < width {
+        spans.push(Span::raw(" ".repeat(width - consumed)));
+    }
+    spans
 }
 
 /// Returns flag tokens in order: `[S]`, `[P]`, `[O]`, `[!]`.
@@ -528,17 +556,18 @@ fn render_by_context(
         return;
     }
 
-    let name_w = 22usize;
-    let value_w = 22usize;
+    let flag_w = FLAG_W;
+    let name_w = NAME_W;
+    let value_w = VALUE_W;
     let sep = "─".repeat(area.width as usize);
 
     let mut lines: Vec<Line<'static>> = vec![
         Line::from(vec![
+            Span::styled(format!("{:<flag_w$}", "flags"), theme::muted()),
+            Span::raw(" "),
             Span::styled(format!("{:<name_w$}", "name"), theme::muted()),
             Span::raw(" "),
             Span::styled(format!("{:<value_w$}", "value"), theme::muted()),
-            Span::raw(" "),
-            Span::styled("flags".to_string(), theme::muted()),
         ]),
         Line::from(Span::styled(sep, theme::muted())),
     ];
@@ -546,11 +575,10 @@ fn render_by_context(
     for entry in &node.parameters {
         let name = truncate_str(&entry.name, name_w);
         let value = render_value(entry.sensitive, &entry.value, value_w);
-        let mut spans = vec![
-            Span::styled(format!("{name:<name_w$}"), Style::default()),
-            Span::raw(" "),
-            Span::styled(format!("{value:<value_w$}"), Style::default()),
-        ];
+
+        // Build flag spans (sensitive + provided only — by_context view
+        // doesn't model override / unresolved which are chain-wide
+        // properties).
         let mut flag_parts: Vec<(String, Style)> = Vec::new();
         if entry.sensitive {
             flag_parts.push(("[S]".to_string(), theme::warning()));
@@ -558,15 +586,23 @@ fn render_by_context(
         if entry.provided {
             flag_parts.push(("[P]".to_string(), theme::muted()));
         }
-        if !flag_parts.is_empty() {
-            spans.push(Span::raw(" "));
-            for (i, (text, style)) in flag_parts.iter().enumerate() {
-                if i > 0 {
-                    spans.push(Span::raw(" "));
-                }
-                spans.push(Span::styled(text.clone(), *style));
+        let mut spans: Vec<Span<'static>> = Vec::new();
+        let mut consumed = 0usize;
+        for (i, (text, style)) in flag_parts.iter().enumerate() {
+            if i > 0 {
+                spans.push(Span::raw(" "));
+                consumed += 1;
             }
+            spans.push(Span::styled(text.clone(), *style));
+            consumed += text.chars().count();
         }
+        if consumed < flag_w {
+            spans.push(Span::raw(" ".repeat(flag_w - consumed)));
+        }
+        spans.push(Span::raw(" "));
+        spans.push(Span::styled(format!("{name:<name_w$}"), Style::default()));
+        spans.push(Span::raw(" "));
+        spans.push(Span::styled(format!("{value:<value_w$}"), Style::default()));
         lines.push(Line::from(spans));
     }
 
