@@ -1254,6 +1254,16 @@ pub fn rebuild_arena_from_cluster(
     // window between a `VersionControl` tick and the next `RootPgStatus`
     // arena rebuild.
     redraw_version_control(state, snap);
+    // Re-stamp parameter_context_ref from the snapshot we already hold.
+    // `apply_tree_snapshot` constructs fresh TreeNode literals with
+    // `parameter_context_ref: None`, so without this call every arena
+    // rebuild (triggered by `ClusterChanged(RootPgStatus)` etc.) would
+    // silently clear the field until the next
+    // `ClusterChanged(ParameterContextBindings)` — typically up to 30 s
+    // of stale-`None` between events.
+    if let Some(map) = snap.parameter_context_bindings.latest() {
+        state.browser.apply_parameter_context_bindings(map);
+    }
 }
 
 /// Re-stamp `FlowIndexEntry.version_state` for ProcessGroup entries from

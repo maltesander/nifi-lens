@@ -2672,7 +2672,10 @@ fn apply_parameter_context_bindings_does_not_touch_non_pg_nodes() {
     use std::collections::BTreeMap;
 
     let mut state = fresh_browser_with_two_pgs();
-    // Push a Processor node whose id does not appear in the bindings map.
+    // Push a Processor node. Its id ("proc-x") is deliberately included in
+    // the bindings map below so that the only thing preventing a stamp is
+    // the kind guard (`NodeKind::ProcessGroup`), not the absence of the id
+    // from the map. If the kind guard were removed the test would fail.
     state.nodes.push(crate::view::browser::state::TreeNode {
         parent: Some(0),
         children: vec![],
@@ -2694,9 +2697,19 @@ fn apply_parameter_context_bindings_does_not_touch_non_pg_nodes() {
             name: "ctx-prod".into(),
         }),
     );
+    // Also add an entry for "proc-x" so the kind guard is the sole
+    // discriminant — without it the Processor would be stamped.
+    by_pg_id.insert(
+        "proc-x".to_string(),
+        Some(ParameterContextRef {
+            id: "ctx-2".into(),
+            name: "ctx-dev".into(),
+        }),
+    );
     state.apply_parameter_context_bindings(&ParameterContextBindingsMap { by_pg_id });
 
-    // The processor node must not have been stamped with a ref.
+    // The processor node must not have been stamped with a ref, because
+    // `apply_parameter_context_bindings` only touches ProcessGroup nodes.
     let proc_node = state.nodes.iter().find(|n| n.id == "proc-x").unwrap();
     assert!(proc_node.parameter_context_ref.is_none());
 }
