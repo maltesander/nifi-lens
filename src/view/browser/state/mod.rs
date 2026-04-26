@@ -17,6 +17,10 @@ use crate::client::browser::{
 };
 use crate::client::status::{ControllerServiceState, ProcessorStatus};
 
+pub mod parameter_context_modal;
+pub use parameter_context_modal::{
+    ParameterContextLoad, ParameterContextModalState, ResolvedParameter, resolve,
+};
 pub mod version_control_modal;
 pub use version_control_modal::{VersionControlDifferenceLoad, VersionControlModalState};
 
@@ -187,6 +191,10 @@ pub struct BrowserState {
     /// Aborted on `Close` and on `Refresh` (which spawns a new one).
     /// Cleared by the loaded / failed event handlers.
     pub version_modal_handle: Option<tokio::task::JoinHandle<()>>,
+    /// Open parameter-context modal state, if any. `None` while the
+    /// modal is closed. Populated asynchronously with chain data by
+    /// the view-local worker (Task 17).
+    pub parameter_modal: Option<ParameterContextModalState>,
 }
 
 /// One segment in the breadcrumb path.
@@ -430,6 +438,49 @@ impl BrowserState {
             return;
         }
         modal.differences = VersionControlDifferenceLoad::Failed(err);
+    }
+
+    /// Open the parameter-context modal for the given PG. Creates a
+    /// `Loading` placeholder immediately; the chain is populated
+    /// asynchronously by the view-local worker (Task 17).
+    pub fn open_parameter_context_modal(
+        &mut self,
+        pg_id: String,
+        pg_path: String,
+        preselect: Option<String>,
+    ) {
+        self.parameter_modal = Some(ParameterContextModalState::pending(
+            pg_id, pg_path, preselect,
+        ));
+    }
+
+    /// Close the parameter-context modal. Idempotent.
+    pub fn close_parameter_context_modal(&mut self) {
+        self.parameter_modal = None;
+    }
+
+    /// Apply a successful chain fetch to the open modal. Mismatched
+    /// `pg_id` is ignored (the user navigated since dispatch).
+    pub fn apply_parameter_context_modal_loaded(
+        &mut self,
+        pg_id: String,
+        chain: Vec<crate::client::parameter_context::ParameterContextNode>,
+    ) {
+        if let Some(modal) = self.parameter_modal.as_mut()
+            && modal.originating_pg_id == pg_id
+        {
+            modal.load = ParameterContextLoad::Loaded { chain };
+        }
+    }
+
+    /// Apply a failed chain fetch to the open modal. Mismatched
+    /// `pg_id` is ignored.
+    pub fn apply_parameter_context_modal_failed(&mut self, pg_id: String, err: String) {
+        if let Some(modal) = self.parameter_modal.as_mut()
+            && modal.originating_pg_id == pg_id
+        {
+            modal.load = ParameterContextLoad::Error { message: err };
+        }
     }
 
     /// Toggle the `show_environmental` flag on the open modal.
