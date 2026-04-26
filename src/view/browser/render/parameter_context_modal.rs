@@ -675,8 +675,10 @@ fn render_footer_status(frame: &mut Frame, area: Rect, modal: &ParameterContextM
         ParameterContextLoad::Loading => "loading…".to_string(),
         ParameterContextLoad::Error { .. } => "failed — press r to retry".to_string(),
         ParameterContextLoad::Loaded { chain } => {
-            let total: usize = chain.iter().map(|n| n.parameters.len()).sum();
-            format!("{} params across {} contexts", total, chain.len())
+            // Count unique resolved names (shadowed duplicates excluded) so the
+            // count matches what the resolved-flat view actually shows.
+            let unique = resolve(chain, None).len();
+            format!("{} params across {} contexts", unique, chain.len())
         }
     };
     frame.render_widget(
