@@ -160,6 +160,79 @@ fn selection_resets_to_zero_when_previously_selected_node_is_gone() {
 }
 
 #[test]
+fn detail_focus_is_preserved_when_selected_node_persists_across_arena_rebuild() {
+    let mut s = BrowserState::new();
+    apply_tree_snapshot(&mut s, demo_snap());
+    // Move selection to "gen" (Processor leaf).
+    let gen_arena = s
+        .nodes
+        .iter()
+        .position(|n| n.kind == NodeKind::Processor && n.id == "gen")
+        .unwrap();
+    s.selected = s.visible.iter().position(|&i| i == gen_arena).unwrap();
+
+    // Simulate the user descending into the detail pane and scrolling
+    // around: focus on Properties (idx 0), row cursor at 3, horizontal
+    // offset 5 — the state every periodic ClusterChanged tick would
+    // otherwise wipe.
+    s.detail_focus = DetailFocus::Section {
+        idx: 0,
+        rows: [3, 0, 0, 0, 0],
+        x_offsets: [5, 0, 0, 0, 0],
+    };
+
+    // Re-apply the same snapshot (mirrors a periodic
+    // ClusterChanged(RootPgStatus) arena rebuild while Browser is the
+    // active tab).
+    apply_tree_snapshot(&mut s, demo_snap());
+
+    let gen_arena_after = s
+        .nodes
+        .iter()
+        .position(|n| n.kind == NodeKind::Processor && n.id == "gen")
+        .unwrap();
+    assert_eq!(s.visible[s.selected], gen_arena_after);
+    assert_eq!(
+        s.detail_focus,
+        DetailFocus::Section {
+            idx: 0,
+            rows: [3, 0, 0, 0, 0],
+            x_offsets: [5, 0, 0, 0, 0],
+        }
+    );
+}
+
+#[test]
+fn detail_focus_resets_to_tree_when_selected_node_is_gone_after_rebuild() {
+    let mut s = BrowserState::new();
+    apply_tree_snapshot(&mut s, demo_snap());
+    let gen_arena = s
+        .nodes
+        .iter()
+        .position(|n| n.kind == NodeKind::Processor && n.id == "gen")
+        .unwrap();
+    s.selected = s.visible.iter().position(|&i| i == gen_arena).unwrap();
+    s.detail_focus = DetailFocus::Section {
+        idx: 1,
+        rows: [0, 2, 0, 0, 0],
+        x_offsets: [0; MAX_DETAIL_SECTIONS],
+    };
+
+    // Rebuild without "gen" — selection falls back to root (different
+    // node), so any carried-over section idx would be meaningless.
+    apply_tree_snapshot(
+        &mut s,
+        snap(vec![
+            pg("root", None, 2),
+            conn("c1", 0, 30),
+            pg("ingest", Some(0), 1),
+            proc("upd", 2, "Running"),
+        ]),
+    );
+    assert_eq!(s.detail_focus, DetailFocus::Tree);
+}
+
+#[test]
 fn details_are_dropped_when_their_node_leaves_the_arena() {
     let mut s = BrowserState::new();
     apply_tree_snapshot(&mut s, demo_snap());

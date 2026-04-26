@@ -54,6 +54,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   Tabular renderer previously bypassed the search-overlay loop, so
   matches counted and `n`/`N` navigation worked but no row was
   visually marked.
+- Browser detail-pane focus is no longer wiped on every periodic
+  cluster refresh. Selecting a processor's Properties row, scrolling
+  inside it, or stepping between detail sections used to reset back
+  to the tree on each `RootPgStatus` / `ControllerServices` /
+  `ConnectionsByPg` tick (default 10s). Focus now persists as long
+  as the selected `(id, kind)` survives the arena rebuild.
 
 ## [0.7.0] — 2026-04-24
 

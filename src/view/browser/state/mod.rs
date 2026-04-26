@@ -1391,11 +1391,15 @@ pub fn apply_tree_snapshot(state: &mut BrowserState, snap: RecursiveSnapshot) {
     }
 
     // 6) Commit the new arena, then rebuild visible + translate selection.
+    //    `detail_focus` is taken aside (defaulting to Tree) so we can
+    //    re-apply it in step 8 only when the selection lands back on
+    //    the same node — otherwise the carried-over section index
+    //    would point at unrelated content on a different node.
+    let prev_detail_focus = std::mem::take(&mut state.detail_focus);
     state.nodes = nodes;
     state.expanded = new_expanded;
     state.details = new_details;
     state.pending_detail = None;
-    state.detail_focus = DetailFocus::Tree;
     state.last_tree_fetched_at = Some(snap.fetched_at);
 
     rebuild_visible(state);
@@ -1409,11 +1413,22 @@ pub fn apply_tree_snapshot(state: &mut BrowserState, snap: RecursiveSnapshot) {
             node.id == *id && node.kind == *kind
         })
     });
+    let selection_preserved = new_selected.is_some();
     state.selected = new_selected.unwrap_or(0);
     if state.visible.is_empty() {
         state.selected = 0;
     } else if state.selected >= state.visible.len() {
         state.selected = state.visible.len() - 1;
+    }
+
+    // 8) Restore detail focus when the selection landed on the same
+    //    (id, kind). Section list is keyed off node kind, which is
+    //    pinned by the (id, kind) match — so the carried-over `idx`
+    //    still indexes the same section. Without this, the user's
+    //    right-pane focus, per-section row cursor, and horizontal
+    //    scroll were wiped on every periodic cluster tick.
+    if selection_preserved {
+        state.detail_focus = prev_detail_focus;
     }
 }
 
