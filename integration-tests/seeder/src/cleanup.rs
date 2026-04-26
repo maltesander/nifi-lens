@@ -12,6 +12,10 @@
 //!      processors, connections, ports, and controller services in one
 //!      atomic operation.
 //!   4. Delete any remaining root-level controller services.
+//!   5. Delete all parameter contexts. Contexts are cluster-scoped (not
+//!      nested under any PG), so they survive step 3 and must be cleaned
+//!      up explicitly. Deletion is only legal once no PG binds to the
+//!      context, which is why this runs after step 3.
 //!
 //! Step 3 subsumes the other component types because deleting a PG
 //! deletes its contents atomically.
@@ -38,7 +42,46 @@ pub async fn nuke_and_repave(client: &DynamicClient) -> Result<()> {
     tracing::info!("nuke-and-repave: deleting root controller services");
     delete_all_root_controller_services(client).await?;
 
+    tracing::info!("nuke-and-repave: deleting parameter contexts");
+    delete_all_parameter_contexts(client).await?;
+
     tracing::info!("nuke-and-repave: complete");
+    Ok(())
+}
+
+async fn delete_all_parameter_contexts(client: &DynamicClient) -> Result<()> {
+    // Parameter contexts are cluster-scoped — they aren't nested under any
+    // PG, so the child-PG delete pass leaves them behind. Deletion is only
+    // legal once no PG binds to a context; the previous step already
+    // removed every fixture PG, so any remaining bindings are out-of-scope
+    // (left there by another seeder or a manual operator) and we leave
+    // those contexts alone.
+    let entity = client
+        .flow()
+        .get_parameter_contexts()
+        .await
+        .map_err(|e| SeederError::Api {
+            message: "list parameter contexts".into(),
+            source: Box::new(e),
+        })?;
+
+    let contexts = entity.parameter_contexts.unwrap_or_default();
+    for ctx in contexts {
+        let Some(id) = ctx.id.clone() else { continue };
+        let version = ctx
+            .revision
+            .as_ref()
+            .and_then(|r| r.version)
+            .map(|v| v.to_string());
+        client
+            .parametercontexts()
+            .delete_parameter_context(&id, version.as_deref(), None, None)
+            .await
+            .map_err(|e| SeederError::Api {
+                message: format!("delete parameter context {id}"),
+                source: Box::new(e),
+            })?;
+    }
     Ok(())
 }
 
