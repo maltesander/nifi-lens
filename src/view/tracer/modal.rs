@@ -188,6 +188,16 @@ fn total_gutter_width(lines: &[Line<'static>], gutter_columns: usize) -> usize {
     0
 }
 
+/// One row in the visible window. `gutter` and `base_style` are
+/// resolved per-variant before the shared search-overlay loop runs, so
+/// Text / Hex / Tabular all flow through the same highlight code path.
+struct RenderRow {
+    abs_idx: usize,
+    text: String,
+    base_style: ratatui::style::Style,
+    gutter: Span<'static>,
+}
+
 fn text_body_lines(
     render: &crate::client::tracer::ContentRender,
     scroll: usize,
@@ -196,78 +206,91 @@ fn text_body_lines(
 ) -> Vec<Line<'static>> {
     use crate::client::tracer::ContentRender;
 
-    // Collect the visible window + the TOTAL line count so we can size
-    // the line-number gutter.
-    let (raw, total_lines): (Vec<(usize, String)>, usize) = match render {
+    // Build the visible window. Each row carries its gutter span and a
+    // base style — Tabular schema rows render muted, the separator
+    // bolded-muted, body rows use default style; Text / Hex use a
+    // numbered gutter and default style. The search-overlay loop below
+    // is variant-agnostic.
+    let rows: Vec<RenderRow> = match render {
         ContentRender::Empty => {
             return vec![Line::from(Span::styled("<empty>", theme::muted()))];
         }
         ContentRender::Text { text, .. } => {
-            let total = text.lines().count();
-            let window: Vec<(usize, String)> = text
-                .lines()
+            let gutter_width = line_number_width(text.lines().count());
+            text.lines()
                 .enumerate()
                 .skip(scroll)
                 .take(height)
-                .map(|(abs_idx, l)| (abs_idx, l.to_string()))
-                .collect();
-            (window, total)
+                .map(|(abs_idx, l)| RenderRow {
+                    abs_idx,
+                    text: l.to_string(),
+                    base_style: ratatui::style::Style::default(),
+                    gutter: gutter_span(Some(abs_idx + 1), gutter_width),
+                })
+                .collect()
         }
         ContentRender::Hex { first_4k } => {
-            let total = first_4k.lines().count();
-            let window: Vec<(usize, String)> = first_4k
+            let gutter_width = line_number_width(first_4k.lines().count());
+            first_4k
                 .lines()
                 .enumerate()
                 .skip(scroll)
                 .take(height)
-                .map(|(abs_idx, l)| (abs_idx, l.to_string()))
-                .collect();
-            (window, total)
+                .map(|(abs_idx, l)| RenderRow {
+                    abs_idx,
+                    text: l.to_string(),
+                    base_style: ratatui::style::Style::default(),
+                    gutter: gutter_span(Some(abs_idx + 1), gutter_width),
+                })
+                .collect()
         }
         ContentRender::Tabular {
             schema_summary,
             body,
             ..
         } => {
-            // Build the full ordered line list (schema → separator → body),
-            // then apply the same skip(scroll).take(height) window the Text/Hex
-            // arms use. Each line gets a zero-width empty gutter span first so
-            // the render_body gutter-splitter finds gutter_width = 0 and routes
-            // the content span into the body column (not the gutter column).
+            // The full ordered line stream (schema → separator → body)
+            // matches the search corpus shape in `content_modal_search_body`,
+            // so `abs_idx` here is the same `line_idx` `compute_matches`
+            // produced. The gutter is a zero-width empty span so the
+            // render_body gutter-splitter routes the content span into
+            // the body column.
             let empty_gutter = Span::raw("");
-            let all_lines: Vec<Line<'static>> = schema_summary
+            let separator_style = theme::muted().add_modifier(Modifier::BOLD);
+            schema_summary
                 .lines()
-                .map(|s| {
-                    Line::from(vec![
-                        empty_gutter.clone(),
-                        Span::styled(s.to_string(), theme::muted()),
-                    ])
-                })
-                .chain(std::iter::once(Line::from(vec![
-                    empty_gutter.clone(),
-                    Span::styled("-- schema --", theme::muted().add_modifier(Modifier::BOLD)),
-                ])))
+                .map(|s| (s.to_string(), theme::muted()))
+                .chain(std::iter::once((
+                    "-- schema --".to_string(),
+                    separator_style,
+                )))
                 .chain(
                     body.lines()
-                        .map(|b| Line::from(vec![empty_gutter.clone(), Span::raw(b.to_string())])),
+                        .map(|b| (b.to_string(), ratatui::style::Style::default())),
                 )
-                .collect();
-            return all_lines.into_iter().skip(scroll).take(height).collect();
+                .enumerate()
+                .skip(scroll)
+                .take(height)
+                .map(|(abs_idx, (text, base_style))| RenderRow {
+                    abs_idx,
+                    text,
+                    base_style,
+                    gutter: empty_gutter.clone(),
+                })
+                .collect()
         }
     };
-
-    let gutter_width = line_number_width(total_lines);
 
     let search_active = search
         .map(|s| s.committed && !s.matches.is_empty())
         .unwrap_or(false);
 
-    raw.into_iter()
-        .map(|(abs_idx, line_text)| {
-            let mut spans: Vec<Span<'static>> = vec![gutter_span(Some(abs_idx + 1), gutter_width)];
+    rows.into_iter()
+        .map(|row| {
+            let mut spans: Vec<Span<'static>> = vec![row.gutter];
 
             if !search_active {
-                spans.push(Span::raw(line_text));
+                spans.push(Span::styled(row.text, row.base_style));
                 return Line::from(spans);
             }
             let s = search.expect("search_active implies search Some");
@@ -275,32 +298,35 @@ fn text_body_lines(
                 .matches
                 .iter()
                 .enumerate()
-                .filter(|(_, m)| m.line_idx == abs_idx)
+                .filter(|(_, m)| m.line_idx == row.abs_idx)
                 .map(|(mi, m)| {
-                    let start = m.byte_start.min(line_text.len());
-                    let end = m.byte_end.min(line_text.len());
+                    let start = m.byte_start.min(row.text.len());
+                    let end = m.byte_end.min(row.text.len());
                     (start, end, Some(mi) == s.current)
                 })
                 .collect();
             if line_matches.is_empty() {
-                spans.push(Span::raw(line_text));
+                spans.push(Span::styled(row.text, row.base_style));
                 return Line::from(spans);
             }
             let mut cursor = 0usize;
             for (start, end, is_current) in line_matches {
                 if cursor < start {
-                    spans.push(Span::raw(line_text[cursor..start].to_string()));
+                    spans.push(Span::styled(
+                        row.text[cursor..start].to_string(),
+                        row.base_style,
+                    ));
                 }
                 let style = if is_current {
                     theme::highlight()
                 } else {
                     theme::bold()
                 };
-                spans.push(Span::styled(line_text[start..end].to_string(), style));
+                spans.push(Span::styled(row.text[start..end].to_string(), style));
                 cursor = end;
             }
-            if cursor < line_text.len() {
-                spans.push(Span::raw(line_text[cursor..].to_string()));
+            if cursor < row.text.len() {
+                spans.push(Span::styled(row.text[cursor..].to_string(), row.base_style));
             }
             Line::from(spans)
         })
@@ -1046,6 +1072,97 @@ mod tests {
             "modal_input_tabular_parquet_renders_schema_then_body",
             terminal.backend().buffer()
         );
+    }
+
+    /// Tabular content used to early-return without applying the
+    /// search-overlay loop, so committed matches found "5/1500" but
+    /// nothing rendered highlighted. This guards the unified pipeline
+    /// in `text_body_lines`.
+    #[test]
+    fn modal_search_highlights_tabular_body_row() {
+        use crate::client::tracer::TabularFormat;
+        let mut modal = stub_modal(ContentModalTab::Input);
+        modal.input.decoded = ContentRender::Tabular {
+            format: TabularFormat::Parquet,
+            schema_summary: "id : Int64\nname : Utf8".into(),
+            body: "{\"id\":0,\"name\":\"alpha\"}\n{\"id\":1,\"name\":\"alpha\"}".into(),
+            decoded_bytes: 46,
+            truncated: false,
+        };
+        // Search corpus is `schema + "\n-- schema --\n" + body`, which
+        // gives line indices: 0/1 = schema rows, 2 = separator,
+        // 3/4 = body rows. "alpha" sits at bytes 16..21 in each body row.
+        modal.search = Some(crate::widget::search::SearchState {
+            query: "alpha".to_string(),
+            input_active: false,
+            committed: true,
+            matches: vec![
+                crate::widget::search::MatchSpan {
+                    line_idx: 3,
+                    byte_start: 16,
+                    byte_end: 21,
+                },
+                crate::widget::search::MatchSpan {
+                    line_idx: 4,
+                    byte_start: 16,
+                    byte_end: 21,
+                },
+            ],
+            current: Some(0),
+        });
+        let backend = TestBackend::new(80, 20);
+        let mut terminal = Terminal::new(backend).unwrap();
+        terminal
+            .draw(|f| {
+                render(
+                    f,
+                    f.area(),
+                    &mut modal,
+                    &crate::config::TracerCeilingConfig::default(),
+                )
+            })
+            .unwrap();
+        let buf = terminal.backend().buffer();
+
+        // Locate the first body row ("{...alpha...}") and assert the
+        // five "alpha" cells carry the current-match highlight modifier.
+        let mut row_y = None;
+        for y in 0..buf.area.height {
+            let mut line = String::new();
+            for x in 0..buf.area.width {
+                line.push_str(buf.cell((x, y)).unwrap().symbol());
+            }
+            if line.contains("\"id\":0") && line.contains("alpha") {
+                row_y = Some(y);
+                break;
+            }
+        }
+        let y = row_y.expect("body row with alpha must render");
+
+        let mut alpha_x = None;
+        for x in 0..buf.area.width.saturating_sub(5) {
+            let mut chunk = String::new();
+            for dx in 0..5 {
+                chunk.push_str(buf.cell((x + dx, y)).unwrap().symbol());
+            }
+            if chunk == "alpha" {
+                alpha_x = Some(x);
+                break;
+            }
+        }
+        let x = alpha_x.expect("alpha substring must be on this row");
+
+        // theme::highlight() is REVERSED. The Paragraph renderer fills
+        // Reset fg/bg/underline_color around it, so compare modifiers
+        // rather than the whole Style.
+        for dx in 0..5 {
+            let cell = buf.cell((x + dx, y)).unwrap();
+            assert!(
+                cell.modifier.contains(ratatui::style::Modifier::REVERSED),
+                "byte {dx} of 'alpha' on the current-match row must carry REVERSED, got {:?}",
+                cell.modifier,
+            );
+        }
     }
 
     #[test]

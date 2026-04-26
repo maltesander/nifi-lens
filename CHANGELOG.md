@@ -47,6 +47,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   The binary previously refused to start on Windows because `HOME`
   is not set there.
 
+### Fixed
+
+- Tracer content viewer modal: `/`-search highlights now render on
+  Input/Output rows for Parquet- and Avro-decoded tabular content. The
+  Tabular renderer previously bypassed the search-overlay loop, so
+  matches counted and `n`/`N` navigation worked but no row was
+  visually marked.
+
 ## [0.7.0] — 2026-04-24
 
 ### Added
