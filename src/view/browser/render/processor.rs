@@ -61,14 +61,26 @@ pub fn render(
 
     // 2. Inner vertical layout.
     //    identity:    4  (2 borders + 2 content lines)
-    //    properties(+validation): Min(5) — 2 borders + header + ≥2 data rows
+    //    properties(+validation): Min(N) — sized to keep ≥2 data rows in
+    //      Properties even when the (variable-height) Validation panel is
+    //      present. 3 chrome + 2 data rows = 5 for Properties; Validation
+    //      panel takes its own height on top.
     //    connections: 6  (2 borders + header + 3 data rows)
     //    bulletins:   6  (2 borders + 4 content rows)
+    let validation_h = if d.validation_errors.is_empty() {
+        0
+    } else {
+        (d.validation_errors
+            .len()
+            .min(layout::VALIDATION_ERROR_ROWS_MAX)
+            + 2) as u16
+    };
+    let props_plus_validation_min = 5 + validation_h;
     let rows = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
             Constraint::Length(4),
-            Constraint::Min(5),
+            Constraint::Min(props_plus_validation_min),
             Constraint::Length(6),
             Constraint::Length(6),
         ])
