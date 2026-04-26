@@ -293,10 +293,12 @@ mod tests {
     use crate::app::state::ViewId;
     use crate::app::state::tests::fresh_state;
 
-    /// On a PG row, only `p param` should appear — not a second `p props`.
+    /// On a PG row with a bound parameter context, only `p param` should
+    /// appear — not a second `p props` — and it should be enabled.
     #[test]
     fn browser_hint_bar_deduplicates_p_chord_on_pg_row() {
         use crate::client::{NodeKind, NodeStatusSummary, RawNode, RecursiveSnapshot};
+        use crate::cluster::snapshot::ParameterContextRef;
         use std::time::SystemTime;
 
         let mut s = fresh_state();
@@ -332,6 +334,12 @@ mod tests {
             fetched_at: SystemTime::now(),
         };
         crate::view::browser::state::apply_tree_snapshot(&mut s.browser, snap);
+        // Stamp a binding on "ingest" (arena index 1) so OpenParameterContext
+        // is enabled (required since Fix 1 tightened the enabled predicate).
+        s.browser.nodes[1].parameter_context_ref = Some(ParameterContextRef {
+            id: "ctx-x".into(),
+            name: "ctx-x".into(),
+        });
         s.current_tab = ViewId::Browser;
         s.browser.selected = 1; // "ingest" PG row
 

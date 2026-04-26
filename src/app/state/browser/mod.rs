@@ -163,13 +163,13 @@ impl ViewKeyHandler for BrowserHandler {
             let Some(&arena_idx) = state.browser.visible.get(state.browser.selected) else {
                 return Some(UpdateResult::default());
             };
-            let kind = state.browser.nodes[arena_idx].kind;
             let has_validation = match state.browser.details.get(&arena_idx) {
                 Some(NodeDetail::Processor(p)) => !p.validation_errors.is_empty(),
                 Some(NodeDetail::ControllerService(cs)) => !cs.validation_errors.is_empty(),
                 _ => false,
             };
-            let sections = DetailSections::for_node_detail(kind, has_validation);
+            let sections =
+                sections_for_arena_with_detail(&state.browser, arena_idx, has_validation);
             return match action {
                 FocusAction::Ascend => {
                     // Return to tree focus.
@@ -423,6 +423,26 @@ impl ViewKeyHandler for BrowserHandler {
                             tracer_followup: None,
                         });
                     }
+                    // ParameterContext section: open the parameter-context modal.
+                    if sections.0.get(idx) == Some(&DetailSection::ParameterContext) {
+                        let Some(NodeDetail::ProcessGroup(d)) =
+                            state.browser.details.get(&arena_idx)
+                        else {
+                            return Some(UpdateResult::default());
+                        };
+                        let pg_id = d.id.clone();
+                        let intent = super::PendingIntent::Goto(
+                            crate::intent::CrossLink::OpenParameterContextModal {
+                                pg_id,
+                                preselect: None,
+                            },
+                        );
+                        return Some(UpdateResult {
+                            redraw: true,
+                            intent: Some(intent),
+                            tracer_followup: None,
+                        });
+                    }
                     // Other sections: no local descent.
                     None
                 }
@@ -584,7 +604,7 @@ impl ViewKeyHandler for BrowserHandler {
                 // if applicable).
                 let &arena_idx = state.browser.visible.get(state.browser.selected)?;
                 let kind = state.browser.nodes[arena_idx].kind;
-                let sections = DetailSections::for_node(kind);
+                let sections = sections_for_arena(&state.browser, arena_idx);
                 use crate::client::NodeKind as NK;
                 if matches!(kind, NK::Folder(_)) {
                     if state.browser.expanded.contains(&arena_idx) {
@@ -639,8 +659,7 @@ impl ViewKeyHandler for BrowserHandler {
                 let Some(&arena_idx) = state.browser.visible.get(state.browser.selected) else {
                     return Some(UpdateResult::default());
                 };
-                let kind = state.browser.nodes[arena_idx].kind;
-                let sections = DetailSections::for_node(kind);
+                let sections = sections_for_arena(&state.browser, arena_idx);
                 if sections.is_empty() {
                     return Some(UpdateResult::default());
                 }
@@ -660,8 +679,7 @@ impl ViewKeyHandler for BrowserHandler {
                 let Some(&arena_idx) = state.browser.visible.get(state.browser.selected) else {
                     return Some(UpdateResult::default());
                 };
-                let kind = state.browser.nodes[arena_idx].kind;
-                let sections = DetailSections::for_node(kind);
+                let sections = sections_for_arena(&state.browser, arena_idx);
                 if sections.is_empty() {
                     return Some(UpdateResult::default());
                 }
@@ -766,6 +784,42 @@ impl ViewKeyHandler for BrowserHandler {
             tracer_followup: None,
         })
     }
+}
+
+/// Return the `DetailSections` for the node at `arena_idx`, taking the
+/// PG parameter-context binding into account. For ProcessGroup nodes this
+/// calls `DetailSections::for_pg_node(has_param_ctx)` instead of the
+/// generic `for_node(kind)`; all other kinds fall back to `for_node`.
+fn sections_for_arena(
+    browser: &crate::view::browser::state::BrowserState,
+    arena_idx: usize,
+) -> DetailSections {
+    let Some(node) = browser.nodes.get(arena_idx) else {
+        return DetailSections(&[]);
+    };
+    if matches!(node.kind, crate::client::NodeKind::ProcessGroup) {
+        let has_param_ctx = node.parameter_context_ref.is_some();
+        return DetailSections::for_pg_node(has_param_ctx);
+    }
+    DetailSections::for_node(node.kind)
+}
+
+/// Return the `DetailSections` for the node at `arena_idx`, including
+/// `ValidationErrors` when the detail snapshot reports errors. PG nodes
+/// use `for_pg_node` to conditionally include the ParameterContext section.
+fn sections_for_arena_with_detail(
+    browser: &crate::view::browser::state::BrowserState,
+    arena_idx: usize,
+    has_validation: bool,
+) -> DetailSections {
+    let Some(node) = browser.nodes.get(arena_idx) else {
+        return DetailSections(&[]);
+    };
+    if matches!(node.kind, crate::client::NodeKind::ProcessGroup) {
+        let has_param_ctx = node.parameter_context_ref.is_some();
+        return DetailSections::for_pg_node(has_param_ctx);
+    }
+    DetailSections::for_node_detail(node.kind, has_validation)
 }
 
 /// Dispatch a `VersionControlModalVerb` action. Called when the

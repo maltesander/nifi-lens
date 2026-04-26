@@ -2843,3 +2843,63 @@ fn open_parameter_context_verb_spawns_fetch_intent() {
         result.intent
     );
 }
+
+/// Pressing Enter (Descend) on the `ParameterContext` detail section of a PG
+/// that has a bound context dispatches `OpenParameterContextModal`.
+#[test]
+fn descend_on_parameter_context_section_dispatches_cross_link() {
+    use crate::client::ProcessGroupDetail;
+    use crate::cluster::snapshot::ParameterContextRef;
+    use crate::input::FocusAction;
+    use crate::view::browser::state::{DetailFocus, NodeDetail};
+
+    let (mut s, _c) = seeded_browser_state();
+    // Stamp a binding on the root PG (arena 0).
+    s.browser.nodes[0].parameter_context_ref = Some(ParameterContextRef {
+        id: "ctx-bound".into(),
+        name: "bound-ctx".into(),
+    });
+    s.browser.selected = 0;
+    let arena_idx = s.browser.visible[s.browser.selected];
+
+    // Inject a minimal ProcessGroup detail so the Descend handler can read pg.id.
+    let pg_id = s.browser.nodes[arena_idx].id.clone();
+    s.browser.details.insert(
+        arena_idx,
+        NodeDetail::ProcessGroup(ProcessGroupDetail {
+            id: pg_id.clone(),
+            name: "root".into(),
+            parent_group_id: None,
+            running: 0,
+            stopped: 0,
+            invalid: 0,
+            disabled: 0,
+            active_threads: 0,
+            flow_files_queued: 0,
+            bytes_queued: 0,
+            queued_display: "0 / 0 B".into(),
+            controller_services: vec![],
+        }),
+    );
+
+    // Section index 0 = ParameterContext when the PG has a binding.
+    s.browser.detail_focus = DetailFocus::Section {
+        idx: 0,
+        rows: [0; MAX_DETAIL_SECTIONS],
+        x_offsets: [0; MAX_DETAIL_SECTIONS],
+    };
+
+    let result =
+        BrowserHandler::handle_focus(&mut s, FocusAction::Descend).expect("must return Some");
+    assert!(
+        matches!(
+            result.intent,
+            Some(PendingIntent::Goto(CrossLink::OpenParameterContextModal {
+                ref pg_id,
+                preselect: None,
+            })) if pg_id == "root"
+        ),
+        "Descend on ParameterContext section must dispatch OpenParameterContextModal, got {:?}",
+        result.intent
+    );
+}

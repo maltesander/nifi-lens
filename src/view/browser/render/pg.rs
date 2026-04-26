@@ -13,7 +13,7 @@ use ratatui::text::{Line, Span};
 use ratatui::widgets::{Cell, Paragraph, Row, Table, TableState};
 
 use crate::client::status::ControllerServiceState;
-use crate::client::{BulletinSnapshot, ControllerServiceSummary, NodeKind, ProcessGroupDetail};
+use crate::client::{BulletinSnapshot, ControllerServiceSummary, ProcessGroupDetail};
 use crate::cluster::snapshot::ParameterContextRef;
 use crate::theme;
 use crate::view::browser::state::{
@@ -37,30 +37,37 @@ pub fn render(
     frame.render_widget(outer, area);
 
     // Resolve the parameter-context binding for this PG so the identity
-    // panel can render the optional "Parameter context" row.
+    // panel and the focusable ParameterContext section can render it.
     let pc_ref = state.parameter_context_ref_for(&d.id);
+
+    // Section list drives both focus dispatch and the render ordering.
+    let sections = DetailSections::for_pg_node(pc_ref.is_some());
 
     // Inner vertical layout.
     //   identity:  5 rows  (2 borders + 3 content lines)
-    //              6 rows when a parameter context is bound (+ 1 extra line)
+    //   param ctx: 3 rows when bound (2 borders + 1 content line), else 0
     //   cs:        Fill(1) — split with child groups
     //   kids:      Fill(1)
     //   bulletins: 5 rows  (2 borders + 1 header + 2 data rows)
-    let identity_height: u16 = if pc_ref.is_some() { 6 } else { 5 };
+    let pc_height: u16 = if pc_ref.is_some() { 3 } else { 0 };
     let rows = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
-            Constraint::Length(identity_height),
+            Constraint::Length(5),
+            Constraint::Length(pc_height),
             Constraint::Fill(1),
             Constraint::Fill(1),
             Constraint::Length(5),
         ])
         .split(inner);
 
-    render_identity_panel(frame, rows[0], d, pc_ref);
-    render_controller_services_panel(frame, rows[1], d, state, detail_focus);
-    render_child_groups_panel(frame, rows[2], d, state, detail_focus);
-    render_recent_bulletins_panel(frame, rows[3], d, bulletins, detail_focus);
+    render_identity_panel(frame, rows[0], d);
+    if let Some(pc) = pc_ref {
+        render_parameter_context_panel(frame, rows[1], d, pc, detail_focus, &sections);
+    }
+    render_controller_services_panel(frame, rows[2], d, state, detail_focus, &sections);
+    render_child_groups_panel(frame, rows[3], d, state, detail_focus, &sections);
+    render_recent_bulletins_panel(frame, rows[4], d, bulletins, detail_focus, &sections);
 }
 
 /// Build the outer panel title: ` <name> · process group [STATE] `.
@@ -89,17 +96,12 @@ fn build_header_title<'a>(
     Line::from(spans)
 }
 
-fn render_identity_panel(
-    frame: &mut Frame,
-    area: Rect,
-    d: &ProcessGroupDetail,
-    pc_ref: Option<&ParameterContextRef>,
-) {
+fn render_identity_panel(frame: &mut Frame, area: Rect, d: &ProcessGroupDetail) {
     let block = Panel::new(" Identity ").into_block();
     let inner = block.inner(area);
     frame.render_widget(block, area);
 
-    let mut lines = vec![
+    let lines = vec![
         Line::from(vec![
             Span::styled("Processors ", theme::muted()),
             Span::raw(format!(
@@ -119,13 +121,44 @@ fn render_identity_panel(
             )),
         ]),
     ];
-    if let Some(pc) = pc_ref {
-        lines.push(Line::from(vec![
-            Span::styled("Param ctx  ", theme::muted()),
-            Span::raw(format!("{} \u{2192}", pc.name)),
-        ]));
-    }
     frame.render_widget(Paragraph::new(lines), inner);
+}
+
+/// Focusable single-row mini-section showing the bound parameter context
+/// for this PG. Pressing Enter (Descend) dispatches `OpenParameterContextModal`.
+fn render_parameter_context_panel(
+    frame: &mut Frame,
+    area: Rect,
+    d: &ProcessGroupDetail,
+    pc: &ParameterContextRef,
+    detail_focus: &DetailFocus,
+    sections: &DetailSections,
+) {
+    if area.height == 0 {
+        return;
+    }
+    let my_idx = sections
+        .0
+        .iter()
+        .position(|s| *s == DetailSection::ParameterContext)
+        .unwrap_or(0);
+    let is_focused = matches!(
+        detail_focus,
+        DetailFocus::Section { idx, .. } if *idx == my_idx
+    );
+    let panel = Panel::new(" Parameter context ")
+        .focused(is_focused)
+        .into_block();
+    let inner = panel.inner(area);
+    frame.render_widget(panel, area);
+
+    let _ = d; // PG id not needed here; pc.name is the display value.
+    let line = Line::from(vec![
+        Span::raw(pc.name.clone()),
+        Span::raw("  "),
+        Span::styled("\u{2192}", theme::accent()),
+    ]);
+    frame.render_widget(Paragraph::new(line), inner);
 }
 
 fn render_controller_services_panel(
@@ -134,8 +167,8 @@ fn render_controller_services_panel(
     d: &ProcessGroupDetail,
     state: &BrowserState,
     detail_focus: &DetailFocus,
+    sections: &DetailSections,
 ) {
-    let sections = DetailSections::for_node(NodeKind::ProcessGroup);
     let my_idx = sections
         .0
         .iter()
@@ -215,8 +248,8 @@ fn render_child_groups_panel(
     d: &ProcessGroupDetail,
     state: &BrowserState,
     detail_focus: &DetailFocus,
+    sections: &DetailSections,
 ) {
-    let sections = DetailSections::for_node(NodeKind::ProcessGroup);
     let my_idx = sections
         .0
         .iter()
@@ -291,8 +324,8 @@ fn render_recent_bulletins_panel(
     d: &ProcessGroupDetail,
     bulletins: &VecDeque<BulletinSnapshot>,
     detail_focus: &DetailFocus,
+    sections: &DetailSections,
 ) {
-    let sections = DetailSections::for_node(NodeKind::ProcessGroup);
     let my_idx = sections
         .0
         .iter()
@@ -398,6 +431,7 @@ fn char_skip(s: &str, n: usize) -> String {
 #[cfg(test)]
 mod snapshots {
     use super::*;
+    use crate::client::NodeKind;
     use crate::cluster::snapshot::ClusterSnapshot;
     use crate::test_support::{TEST_BACKEND_MEDIUM, TEST_BACKEND_TALL, test_backend};
     use crate::view::browser::state::MAX_DETAIL_SECTIONS;
@@ -732,16 +766,16 @@ mod snapshots {
             .unwrap();
         let out = format!("{}", terminal.backend());
         assert!(
-            out.contains("Param ctx"),
-            "expected 'Param ctx' label in identity panel, got:\n{out}"
+            out.contains("Parameter context"),
+            "expected 'Parameter context' section panel, got:\n{out}"
         );
         assert!(
             out.contains("ctx-prod"),
-            "expected context name 'ctx-prod' in identity panel, got:\n{out}"
+            "expected context name 'ctx-prod' in parameter context panel, got:\n{out}"
         );
         assert!(
             out.contains('\u{2192}'),
-            "expected cross-link arrow '\u{2192}' in identity panel, got:\n{out}"
+            "expected cross-link arrow '\u{2192}' in parameter context panel, got:\n{out}"
         );
         insta::assert_snapshot!("pg_detail_renders_parameter_context_row_when_bound", out);
     }
@@ -770,8 +804,73 @@ mod snapshots {
             .unwrap();
         let out = format!("{}", terminal.backend());
         assert!(
-            !out.contains("Param ctx"),
-            "expected no 'Param ctx' row for unbound PG, got:\n{out}"
+            !out.contains("Parameter context"),
+            "expected no 'Parameter context' section for unbound PG, got:\n{out}"
+        );
+    }
+
+    #[test]
+    fn pg_detail_parameter_context_panel_is_focused_when_section_selected() {
+        use crate::client::NodeStatusSummary;
+        use crate::cluster::snapshot::ParameterContextRef;
+        use crate::view::browser::state::{DetailFocus, TreeNode};
+
+        let pg_uuid = "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee";
+        let d = ProcessGroupDetail {
+            id: pg_uuid.into(),
+            name: "ingest".into(),
+            parent_group_id: Some("root".into()),
+            running: 0,
+            stopped: 0,
+            invalid: 0,
+            disabled: 0,
+            active_threads: 0,
+            flow_files_queued: 0,
+            bytes_queued: 0,
+            queued_display: "0 / 0 B".into(),
+            controller_services: vec![],
+        };
+        let mut state = BrowserState::new();
+        state.nodes.push(TreeNode {
+            parent: None,
+            children: vec![],
+            kind: NodeKind::ProcessGroup,
+            id: pg_uuid.into(),
+            group_id: "root".into(),
+            name: "ingest".into(),
+            status_summary: NodeStatusSummary::ProcessGroup {
+                running: 0,
+                stopped: 0,
+                invalid: 0,
+                disabled: 0,
+            },
+            parameter_context_ref: Some(ParameterContextRef {
+                id: "ctx-id-001".into(),
+                name: "ctx-prod".into(),
+            }),
+        });
+
+        // Section index 0 = ParameterContext (for_pg_node(true)).
+        let focus = DetailFocus::Section {
+            idx: 0,
+            rows: [0; MAX_DETAIL_SECTIONS],
+            x_offsets: [0; MAX_DETAIL_SECTIONS],
+        };
+        let bulletins: VecDeque<BulletinSnapshot> = VecDeque::new();
+        let snap = ClusterSnapshot::default();
+        let mut terminal = Terminal::new(test_backend(TEST_BACKEND_MEDIUM)).unwrap();
+        terminal
+            .draw(|f| render(f, f.area(), &d, &state, &bulletins, &focus, &snap))
+            .unwrap();
+        let out = format!("{}", terminal.backend());
+        // The param context panel should appear and contain the context name.
+        assert!(
+            out.contains("Parameter context"),
+            "expected 'Parameter context' section; got:\n{out}"
+        );
+        assert!(
+            out.contains("ctx-prod"),
+            "expected context name; got:\n{out}"
         );
     }
 }

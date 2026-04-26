@@ -962,9 +962,10 @@ mod tests {
     }
 
     #[test]
-    fn open_parameter_context_enabled_only_on_pg_rows() {
+    fn open_parameter_context_enabled_only_on_pg_rows_with_binding() {
         use crate::app::state::ViewId;
         use crate::client::{NodeKind, NodeStatusSummary, RawNode, RecursiveSnapshot};
+        use crate::cluster::snapshot::ParameterContextRef;
         use crate::input::{HintContext, Verb};
         use crate::test_support::fresh_state;
         use crate::view::browser::state::apply_tree_snapshot;
@@ -1000,15 +1001,31 @@ mod tests {
             fetched_at: SystemTime::now(),
         };
 
-        // PG row (visible row 0 is the root PG): enabled.
+        // PG row with a bound context: enabled.
         let mut pg_state = fresh_state();
         apply_tree_snapshot(&mut pg_state.browser, make_snap());
+        pg_state.browser.nodes[0].parameter_context_ref = Some(ParameterContextRef {
+            id: "ctx-x".into(),
+            name: "ctx-x".into(),
+        });
         pg_state.current_tab = ViewId::Browser;
         pg_state.browser.selected = 0;
         let ctx = HintContext::new(&pg_state);
         assert!(
             BrowserVerb::OpenParameterContext.enabled(&ctx),
-            "OpenParameterContext must be enabled on a PG row"
+            "OpenParameterContext must be enabled on a PG row with a binding"
+        );
+
+        // PG row without a binding: disabled.
+        let mut pg_unbound = fresh_state();
+        apply_tree_snapshot(&mut pg_unbound.browser, make_snap());
+        // nodes[0] has no parameter_context_ref by default.
+        pg_unbound.current_tab = ViewId::Browser;
+        pg_unbound.browser.selected = 0;
+        let ctx = HintContext::new(&pg_unbound);
+        assert!(
+            !BrowserVerb::OpenParameterContext.enabled(&ctx),
+            "OpenParameterContext must be disabled on a PG row without a binding"
         );
 
         // Processor row (visible row 1 is 'Gen'): disabled.
@@ -1022,7 +1039,7 @@ mod tests {
             "OpenParameterContext must be disabled on a Processor row"
         );
 
-        // Off-tab: disabled even on a PG row.
+        // Off-tab: disabled even on a PG row with a binding.
         let off_tab = fresh_state(); // current_tab is Overview by default
         let ctx = HintContext::new(&off_tab);
         assert!(

@@ -69,6 +69,10 @@ pub enum DetailSection {
     ReferencingComponents,
     Endpoints,
     Connections,
+    /// Focusable single-row section in the PG detail pane. Pressing Enter
+    /// opens the parameter-context modal (same as the `p` verb). Only
+    /// present in the section list when the PG has a bound context.
+    ParameterContext,
 }
 
 /// Per-node-kind list of focusable sections, in cycle order.
@@ -102,6 +106,26 @@ impl DetailSections {
             NK::InputPort | NK::OutputPort => DetailSections(&[DetailSection::RecentBulletins]),
             NK::Connection => DetailSections(&[DetailSection::Endpoints]),
             _ => DetailSections(&[]),
+        }
+    }
+
+    /// Variant for ProcessGroup nodes that conditionally includes a
+    /// `ParameterContext` section at index 0 when `has_param_ctx` is true.
+    /// Use this (rather than `for_node`) when the binding state is known.
+    pub fn for_pg_node(has_param_ctx: bool) -> Self {
+        if has_param_ctx {
+            DetailSections(&[
+                DetailSection::ParameterContext,
+                DetailSection::ControllerServices,
+                DetailSection::ChildGroups,
+                DetailSection::RecentBulletins,
+            ])
+        } else {
+            DetailSections(&[
+                DetailSection::ControllerServices,
+                DetailSection::ChildGroups,
+                DetailSection::RecentBulletins,
+            ])
         }
     }
 
@@ -1055,6 +1079,16 @@ impl BrowserState {
             (DetailSection::Connections, NodeDetail::Processor(_)) => {
                 let source_id = &self.nodes[arena_idx].id;
                 self.connections_for_processor(source_id).len()
+            }
+            // ParameterContext is a single-row section; the row is the binding
+            // line itself. Returns 0 when no binding (focus can't land here
+            // because `for_pg_node(false)` omits the section).
+            (DetailSection::ParameterContext, NodeDetail::ProcessGroup(d)) => {
+                if self.parameter_context_ref_for(&d.id).is_some() {
+                    1
+                } else {
+                    0
+                }
             }
             _ => 0,
         }
