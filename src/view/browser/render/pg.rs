@@ -14,6 +14,7 @@ use ratatui::widgets::{Cell, Paragraph, Row, Table, TableState};
 
 use crate::client::status::ControllerServiceState;
 use crate::client::{BulletinSnapshot, ControllerServiceSummary, NodeKind, ProcessGroupDetail};
+use crate::cluster::snapshot::ParameterContextRef;
 use crate::theme;
 use crate::view::browser::state::{
     BrowserState, ChildPgSummary, DetailFocus, DetailSection, DetailSections,
@@ -35,22 +36,28 @@ pub fn render(
     let inner = outer.inner(area);
     frame.render_widget(outer, area);
 
+    // Resolve the parameter-context binding for this PG so the identity
+    // panel can render the optional "Parameter context" row.
+    let pc_ref = state.parameter_context_ref_for(&d.id);
+
     // Inner vertical layout.
     //   identity:  5 rows  (2 borders + 3 content lines)
+    //              6 rows when a parameter context is bound (+ 1 extra line)
     //   cs:        Fill(1) — split with child groups
     //   kids:      Fill(1)
     //   bulletins: 5 rows  (2 borders + 1 header + 2 data rows)
+    let identity_height: u16 = if pc_ref.is_some() { 6 } else { 5 };
     let rows = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
-            Constraint::Length(5),
+            Constraint::Length(identity_height),
             Constraint::Fill(1),
             Constraint::Fill(1),
             Constraint::Length(5),
         ])
         .split(inner);
 
-    render_identity_panel(frame, rows[0], d);
+    render_identity_panel(frame, rows[0], d, pc_ref);
     render_controller_services_panel(frame, rows[1], d, state, detail_focus);
     render_child_groups_panel(frame, rows[2], d, state, detail_focus);
     render_recent_bulletins_panel(frame, rows[3], d, bulletins, detail_focus);
@@ -82,12 +89,17 @@ fn build_header_title<'a>(
     Line::from(spans)
 }
 
-fn render_identity_panel(frame: &mut Frame, area: Rect, d: &ProcessGroupDetail) {
+fn render_identity_panel(
+    frame: &mut Frame,
+    area: Rect,
+    d: &ProcessGroupDetail,
+    pc_ref: Option<&ParameterContextRef>,
+) {
     let block = Panel::new(" Identity ").into_block();
     let inner = block.inner(area);
     frame.render_widget(block, area);
 
-    let lines = vec![
+    let mut lines = vec![
         Line::from(vec![
             Span::styled("Processors ", theme::muted()),
             Span::raw(format!(
@@ -107,6 +119,12 @@ fn render_identity_panel(frame: &mut Frame, area: Rect, d: &ProcessGroupDetail) 
             )),
         ]),
     ];
+    if let Some(pc) = pc_ref {
+        lines.push(Line::from(vec![
+            Span::styled("Param ctx  ", theme::muted()),
+            Span::raw(format!("{} \u{2192}", pc.name)),
+        ]));
+    }
     frame.render_widget(Paragraph::new(lines), inner);
 }
 
@@ -650,6 +668,110 @@ mod snapshots {
         insta::assert_snapshot!(
             "pg_detail_header_shows_modified_chip",
             format!("{}", terminal.backend())
+        );
+    }
+
+    #[test]
+    fn pg_detail_renders_parameter_context_row_when_bound() {
+        use crate::client::NodeStatusSummary;
+        use crate::cluster::snapshot::ParameterContextRef;
+        use crate::view::browser::state::TreeNode;
+
+        let pg_uuid = "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee";
+        let d = ProcessGroupDetail {
+            id: pg_uuid.into(),
+            name: "ingest".into(),
+            parent_group_id: Some("root".into()),
+            running: 1,
+            stopped: 0,
+            invalid: 0,
+            disabled: 0,
+            active_threads: 1,
+            flow_files_queued: 0,
+            bytes_queued: 0,
+            queued_display: "0 / 0 B".into(),
+            controller_services: vec![],
+        };
+
+        // Seed the arena with a PG node that carries a parameter_context_ref.
+        let mut state = BrowserState::new();
+        state.nodes.push(TreeNode {
+            parent: None,
+            children: vec![],
+            kind: NodeKind::ProcessGroup,
+            id: pg_uuid.into(),
+            group_id: "root".into(),
+            name: "ingest".into(),
+            status_summary: NodeStatusSummary::ProcessGroup {
+                running: 1,
+                stopped: 0,
+                invalid: 0,
+                disabled: 0,
+            },
+            parameter_context_ref: Some(ParameterContextRef {
+                id: "ctx-id-001".into(),
+                name: "ctx-prod".into(),
+            }),
+        });
+
+        let bulletins: VecDeque<BulletinSnapshot> = VecDeque::new();
+        let snap = ClusterSnapshot::default();
+        let mut terminal = Terminal::new(test_backend(TEST_BACKEND_MEDIUM)).unwrap();
+        terminal
+            .draw(|f| {
+                render(
+                    f,
+                    f.area(),
+                    &d,
+                    &state,
+                    &bulletins,
+                    &DetailFocus::Tree,
+                    &snap,
+                )
+            })
+            .unwrap();
+        let out = format!("{}", terminal.backend());
+        assert!(
+            out.contains("Param ctx"),
+            "expected 'Param ctx' label in identity panel, got:\n{out}"
+        );
+        assert!(
+            out.contains("ctx-prod"),
+            "expected context name 'ctx-prod' in identity panel, got:\n{out}"
+        );
+        assert!(
+            out.contains('\u{2192}'),
+            "expected cross-link arrow '\u{2192}' in identity panel, got:\n{out}"
+        );
+        insta::assert_snapshot!("pg_detail_renders_parameter_context_row_when_bound", out);
+    }
+
+    #[test]
+    fn pg_detail_omits_parameter_context_row_when_unbound() {
+        // seeded_pg_detail() has id "ingest" and BrowserState::new() has no
+        // arena nodes, so parameter_context_ref_for("ingest") returns None.
+        let d = seeded_pg_detail();
+        let state = BrowserState::new();
+        let bulletins: VecDeque<BulletinSnapshot> = VecDeque::new();
+        let snap = ClusterSnapshot::default();
+        let mut terminal = Terminal::new(test_backend(TEST_BACKEND_MEDIUM)).unwrap();
+        terminal
+            .draw(|f| {
+                render(
+                    f,
+                    f.area(),
+                    &d,
+                    &state,
+                    &bulletins,
+                    &DetailFocus::Tree,
+                    &snap,
+                )
+            })
+            .unwrap();
+        let out = format!("{}", terminal.backend());
+        assert!(
+            !out.contains("Param ctx"),
+            "expected no 'Param ctx' row for unbound PG, got:\n{out}"
         );
     }
 }
