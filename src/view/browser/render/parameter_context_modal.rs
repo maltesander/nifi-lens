@@ -377,8 +377,11 @@ fn render_flat(
     lines.push(Line::from(Span::styled(summary, theme::muted())));
 
     // Apply search highlights if active.
-    if modal.search.committed && !modal.search.matches.is_empty() {
-        apply_search_highlights(&mut lines, &modal.search);
+    if let Some(search) = modal.search.as_ref()
+        && search.committed
+        && !search.matches.is_empty()
+    {
+        apply_search_highlights(&mut lines, search);
     }
 
     let scroll_y = modal.scroll.offset as u16;
@@ -653,10 +656,12 @@ fn render_footer(frame: &mut Frame, area: Rect, modal: &ParameterContextModalSta
 
 fn render_footer_status(frame: &mut Frame, area: Rect, modal: &ParameterContextModalState) {
     // While search input is active, show the search bar.
-    if modal.search.input_active {
+    if let Some(search) = modal.search.as_ref()
+        && search.input_active
+    {
         let line = Line::from(vec![
             Span::styled("/ ".to_string(), theme::accent()),
-            Span::raw(modal.search.query.clone()),
+            Span::raw(search.query.clone()),
             Span::styled(
                 "_".to_string(),
                 Style::default().add_modifier(Modifier::REVERSED),

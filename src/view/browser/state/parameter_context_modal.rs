@@ -26,7 +26,7 @@ pub struct ParameterContextModalState {
     /// Whether the Used-by panel replaces the params table.
     pub show_used_by: bool,
     pub scroll: VerticalScrollState,
-    pub search: SearchState,
+    pub search: Option<SearchState>,
 }
 
 #[derive(Debug, Clone)]
@@ -52,7 +52,7 @@ impl ParameterContextModalState {
             show_shadowed: false,
             show_used_by: false,
             scroll: VerticalScrollState::default(),
-            search: SearchState::default(),
+            search: None,
         }
     }
 }
