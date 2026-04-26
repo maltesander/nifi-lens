@@ -9,6 +9,7 @@
 pub mod connection;
 pub mod controller_service;
 mod param_ref_scan;
+pub mod parameter_context_modal;
 pub mod pg;
 pub mod port;
 pub mod processor;

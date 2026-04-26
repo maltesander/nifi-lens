@@ -81,6 +81,15 @@ fn render_content(frame: &mut Frame, area: Rect, state: &mut AppState) {
             if let Some(modal) = state.browser.version_modal.as_ref() {
                 crate::view::browser::render::version_control_modal::render(frame, area, modal);
             }
+            if let Some(modal) = state.browser.parameter_modal.as_ref() {
+                crate::view::browser::render::parameter_context_modal::render(
+                    frame,
+                    area,
+                    modal,
+                    &state.browser,
+                    &state.cluster.snapshot,
+                );
+            }
         }
         ViewId::Events => events::render::render(frame, area, &state.events, &state.timestamp_cfg),
         ViewId::Tracer => {
