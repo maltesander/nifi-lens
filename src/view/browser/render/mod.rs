@@ -32,17 +32,48 @@ use crate::view::browser::state::{BrowserState, FlowIndex, NodeDetail, PgHealth}
 
 /// Format a property value for Processor/CS detail tables. Returns
 /// `Some(Line)` when the raw value is a UUID that resolves to a known
-/// arena node (rendered as `<name> (short8…) →`). Returns `None`
-/// otherwise, so the caller can fall back to raw-value rendering
-/// (with x-offset scrolling).
-pub(super) fn format_property_value(raw: &str, state: &BrowserState) -> Option<Line<'static>> {
-    let r = state.resolve_id(raw)?;
-    let short: String = raw.trim().chars().take(8).collect();
-    Some(Line::from(vec![
-        Span::raw(r.name),
-        Span::styled(format!(" ({short}…)"), theme::muted()),
-        Span::styled(" →", theme::muted()),
-    ]))
+/// arena node (rendered as `<name> (short8…) →`), or when the raw
+/// value contains a `#{name}` parameter reference and the owning PG
+/// has a bound parameter context (rendered as `#{name} →` or
+/// `#{…} →` for multiple refs). Returns `None` otherwise, so the
+/// caller can fall back to raw-value rendering (with x-offset
+/// scrolling).
+///
+/// UUID annotation takes precedence when both conditions apply.
+pub(super) fn format_property_value(
+    raw: &str,
+    owning_pg_id: &str,
+    state: &BrowserState,
+) -> Option<Line<'static>> {
+    // UUID cross-link takes priority.
+    if let Some(r) = state.resolve_id(raw) {
+        let short: String = raw.trim().chars().take(8).collect();
+        return Some(Line::from(vec![
+            Span::raw(r.name),
+            Span::styled(format!(" ({short}…)"), theme::muted()),
+            Span::styled(" →", theme::muted()),
+        ]));
+    }
+    // Parameter reference annotation — only when the owning PG has a
+    // bound context.
+    if state.parameter_context_ref_for(owning_pg_id).is_some() {
+        match scan_param_refs(raw) {
+            ParamRefScan::None => {}
+            ParamRefScan::Single { name } => {
+                return Some(Line::from(vec![
+                    Span::raw(format!("#{{{name}}}")),
+                    Span::styled(" →", theme::muted()),
+                ]));
+            }
+            ParamRefScan::Multiple => {
+                return Some(Line::from(vec![
+                    Span::raw("#{…}"),
+                    Span::styled(" →", theme::muted()),
+                ]));
+            }
+        }
+    }
+    None
 }
 
 /// Map a wire version-control state to the (label, style) shown as a

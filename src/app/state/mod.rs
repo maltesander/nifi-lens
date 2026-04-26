@@ -1400,31 +1400,71 @@ fn handle_key(state: &mut AppState, key: KeyEvent, config: &Config) -> UpdateRes
                         };
                     }
                     (KeyCode::Enter, _) => {
-                        // Descend: if the selected row's value resolves to an arena
-                        // node, close the modal and emit a Goto(OpenInBrowser) intent.
+                        // Descend: if the selected row's value resolves to an
+                        // arena node, close the modal and emit
+                        // Goto(OpenInBrowser). If the value contains a
+                        // #{name} parameter ref and the owning PG has a bound
+                        // context, emit Goto(OpenParameterContextModal).
                         // Non-resolvable rows are a no-op.
-                        let props: Vec<(String, String)> =
+                        let (props, owning_pg_id): (Vec<(String, String)>, String) =
                             match state.browser.details.get(&ps.arena_idx) {
-                                Some(NodeDetail::Processor(p)) => p.properties.clone(),
-                                Some(NodeDetail::ControllerService(c)) => c.properties.clone(),
-                                _ => Vec::new(),
+                                Some(NodeDetail::Processor(p)) => {
+                                    let pg = state
+                                        .browser
+                                        .nodes
+                                        .iter()
+                                        .find(|n| n.id == p.id)
+                                        .map(|n| n.group_id.clone())
+                                        .unwrap_or_default();
+                                    (p.properties.clone(), pg)
+                                }
+                                Some(NodeDetail::ControllerService(c)) => {
+                                    let pg = c.parent_group_id.clone().unwrap_or_default();
+                                    (c.properties.clone(), pg)
+                                }
+                                _ => (Vec::new(), String::new()),
                             };
                         let Some((_, value)) = props.get(ps.selected) else {
                             return UpdateResult::default();
                         };
-                        let Some(resolved) = state.browser.resolve_id(value) else {
-                            return UpdateResult::default();
-                        };
-                        let intent = PendingIntent::Goto(CrossLink::OpenInBrowser {
-                            component_id: value.trim().to_string(),
-                            group_id: resolved.group_id,
-                        });
-                        state.modal = None;
-                        return UpdateResult {
-                            redraw: true,
-                            intent: Some(intent),
-                            tracer_followup: None,
-                        };
+                        // UUID cross-link takes priority.
+                        if let Some(resolved) = state.browser.resolve_id(value) {
+                            let intent = PendingIntent::Goto(CrossLink::OpenInBrowser {
+                                component_id: value.trim().to_string(),
+                                group_id: resolved.group_id,
+                            });
+                            state.modal = None;
+                            return UpdateResult {
+                                redraw: true,
+                                intent: Some(intent),
+                                tracer_followup: None,
+                            };
+                        }
+                        // Parameter reference cross-link.
+                        if state
+                            .browser
+                            .parameter_context_ref_for(&owning_pg_id)
+                            .is_some()
+                        {
+                            use crate::view::browser::render::{ParamRefScan, scan_param_refs};
+                            let preselect = match scan_param_refs(value.as_str()) {
+                                ParamRefScan::Single { name } => Some(name),
+                                ParamRefScan::Multiple => None,
+                                ParamRefScan::None => return UpdateResult::default(),
+                            };
+                            let intent =
+                                PendingIntent::Goto(CrossLink::OpenParameterContextModal {
+                                    pg_id: owning_pg_id,
+                                    preselect,
+                                });
+                            state.modal = None;
+                            return UpdateResult {
+                                redraw: true,
+                                intent: Some(intent),
+                                tracer_followup: None,
+                            };
+                        }
+                        return UpdateResult::default();
                     }
                     _ => return UpdateResult::default(),
                 }

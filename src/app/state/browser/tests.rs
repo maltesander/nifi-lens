@@ -2403,6 +2403,187 @@ fn properties_modal_descend_on_non_uuid_is_noop() {
     assert!(r.intent.is_none());
 }
 
+// ── T16 parameter-reference cross-link tests ──────────────────────────────
+
+/// Builds a minimal AppState with one root PG that has a bound parameter
+/// context and one processor (arena 1) whose group_id is that PG.
+/// Returns the AppState, the owning PG id, and the processor's arena index.
+fn browser_with_bound_pg_and_processor(prop_value: &str) -> (AppState, String, usize) {
+    use crate::client::ProcessorDetail;
+    use crate::cluster::snapshot::ParameterContextRef;
+    use crate::view::browser::state::NodeDetail;
+
+    let (mut s, _c) = seeded_browser_state();
+    let pg_id = "root".to_string();
+
+    // Stamp a parameter context ref onto the root PG (arena 0).
+    s.browser.nodes[0].parameter_context_ref = Some(ParameterContextRef {
+        id: "ctx-1".into(),
+        name: "my-context".into(),
+    });
+
+    // Rewrite the processor detail (arena 1) to have our test property.
+    s.browser.details.insert(
+        1,
+        NodeDetail::Processor(ProcessorDetail {
+            id: "gen".into(),
+            name: "Gen".into(),
+            type_name: "x".into(),
+            bundle: String::new(),
+            run_status: "Running".into(),
+            scheduling_strategy: String::new(),
+            scheduling_period: String::new(),
+            concurrent_tasks: 1,
+            run_duration_ms: 0,
+            penalty_duration: String::new(),
+            yield_duration: String::new(),
+            bulletin_level: String::new(),
+            properties: vec![("Bootstrap".into(), prop_value.into())],
+            validation_errors: vec![],
+        }),
+    );
+    (s, pg_id, 1)
+}
+
+/// Focus the Properties section row 0 of the node at `arena_idx`.
+fn focus_properties_row_0(s: &mut AppState, arena_idx: usize) {
+    use crate::view::browser::state::{DetailFocus, DetailSection, DetailSections};
+
+    let kind = s.browser.nodes[arena_idx].kind;
+    let sections = DetailSections::for_node_detail(kind, false);
+    let props_idx = sections
+        .0
+        .iter()
+        .position(|x| *x == DetailSection::Properties)
+        .expect("node has Properties section");
+    s.browser.selected = s
+        .browser
+        .visible
+        .iter()
+        .position(|&i| i == arena_idx)
+        .expect("arena_idx is visible");
+    s.browser.detail_focus = DetailFocus::Section {
+        idx: props_idx,
+        rows: [0; MAX_DETAIL_SECTIONS],
+        x_offsets: [0; MAX_DETAIL_SECTIONS],
+    };
+}
+
+#[test]
+fn t16_single_param_ref_emits_open_parameter_context_modal_with_preselect() {
+    // A single `#{kafka_bootstrap}` value on a processor whose owning PG has a
+    // bound context should emit `OpenParameterContextModal { pg_id, preselect:
+    // Some("kafka_bootstrap") }`.
+    let (mut s, pg_id, arena_idx) = browser_with_bound_pg_and_processor("#{kafka_bootstrap}");
+    focus_properties_row_0(&mut s, arena_idx);
+
+    let result = BrowserHandler::handle_focus(&mut s, crate::input::FocusAction::Descend)
+        .expect("Descend must be handled");
+
+    match result.intent {
+        Some(PendingIntent::Goto(CrossLink::OpenParameterContextModal {
+            pg_id: got_pg,
+            preselect,
+        })) => {
+            assert_eq!(got_pg, pg_id, "pg_id must match the owning PG");
+            assert_eq!(
+                preselect,
+                Some("kafka_bootstrap".to_string()),
+                "single ref must preselect the name"
+            );
+        }
+        other => {
+            panic!("expected Goto(OpenParameterContextModal {{ preselect: Some }}), got {other:?}")
+        }
+    }
+}
+
+#[test]
+fn t16_multiple_param_refs_emit_open_parameter_context_modal_no_preselect() {
+    // Multiple refs `#{a}#{b}` → `preselect: None` (user picks in the modal).
+    let (mut s, pg_id, arena_idx) = browser_with_bound_pg_and_processor("#{host}:#{port}");
+    focus_properties_row_0(&mut s, arena_idx);
+
+    let result = BrowserHandler::handle_focus(&mut s, crate::input::FocusAction::Descend)
+        .expect("Descend must be handled");
+
+    match result.intent {
+        Some(PendingIntent::Goto(CrossLink::OpenParameterContextModal {
+            pg_id: got_pg,
+            preselect,
+        })) => {
+            assert_eq!(got_pg, pg_id);
+            assert!(
+                preselect.is_none(),
+                "multiple refs must produce preselect: None"
+            );
+        }
+        other => {
+            panic!("expected Goto(OpenParameterContextModal {{ preselect: None }}), got {other:?}")
+        }
+    }
+}
+
+#[test]
+fn t16_escaped_param_ref_produces_no_annotation() {
+    // `##{literal}` is the escape for a literal `#{literal}` — not a ref.
+    // Descend must be a no-op (no intent emitted).
+    let (mut s, _pg, arena_idx) = browser_with_bound_pg_and_processor("##{literal}");
+    focus_properties_row_0(&mut s, arena_idx);
+
+    let result = BrowserHandler::handle_focus(&mut s, crate::input::FocusAction::Descend)
+        .expect("Descend must be handled");
+
+    assert!(
+        result.intent.is_none(),
+        "escaped #{{literal}} must produce no annotation, got {:?}",
+        result.intent
+    );
+}
+
+#[test]
+fn t16_no_bound_context_produces_no_annotation() {
+    // A value with `#{ref}` but the owning PG has no parameter context —
+    // the annotation must NOT fire. Existing UUID logic still applies but
+    // `#{ref}` should be silent.
+    use crate::client::ProcessorDetail;
+    use crate::view::browser::state::NodeDetail;
+
+    let (mut s, _c) = seeded_browser_state();
+    // Ensure the root PG (arena 0) has NO parameter context (default).
+    assert!(s.browser.nodes[0].parameter_context_ref.is_none());
+
+    s.browser.details.insert(
+        1,
+        NodeDetail::Processor(ProcessorDetail {
+            id: "gen".into(),
+            name: "Gen".into(),
+            type_name: "x".into(),
+            bundle: String::new(),
+            run_status: "Running".into(),
+            scheduling_strategy: String::new(),
+            scheduling_period: String::new(),
+            concurrent_tasks: 1,
+            run_duration_ms: 0,
+            penalty_duration: String::new(),
+            yield_duration: String::new(),
+            bulletin_level: String::new(),
+            properties: vec![("Bootstrap".into(), "#{kafka_bootstrap}".into())],
+            validation_errors: vec![],
+        }),
+    );
+    focus_properties_row_0(&mut s, 1);
+
+    let result = BrowserHandler::handle_focus(&mut s, crate::input::FocusAction::Descend)
+        .expect("Descend must be handled");
+
+    assert!(
+        result.intent.is_none(),
+        "no bound context → no annotation, got {:?}",
+        result.intent
+    );
+}
+
 #[test]
 fn properties_modal_hint_spans_advertise_new_chords() {
     use crate::view::browser::state::PropertiesModalState;

@@ -31,10 +31,22 @@ pub fn render_properties_modal(
         height: h,
     };
 
-    let (name, props) = match state.details.get(&modal.arena_idx) {
-        Some(NodeDetail::Processor(p)) => (p.name.clone(), p.properties.clone()),
-        Some(NodeDetail::ControllerService(c)) => (c.name.clone(), c.properties.clone()),
-        _ => (String::new(), Vec::new()),
+    let (name, props, owning_pg_id) = match state.details.get(&modal.arena_idx) {
+        Some(NodeDetail::Processor(p)) => {
+            // Resolve owning PG via the arena node's group_id.
+            let pg_id = state
+                .nodes
+                .iter()
+                .find(|n| n.id == p.id)
+                .map(|n| n.group_id.clone())
+                .unwrap_or_default();
+            (p.name.clone(), p.properties.clone(), pg_id)
+        }
+        Some(NodeDetail::ControllerService(c)) => {
+            let pg_id = c.parent_group_id.clone().unwrap_or_default();
+            (c.name.clone(), c.properties.clone(), pg_id)
+        }
+        _ => (String::new(), Vec::new(), String::new()),
     };
 
     let total = props.len();
@@ -61,7 +73,7 @@ pub fn render_properties_modal(
         Layout::vertical([Constraint::Min(1), Constraint::Length(DETAIL_STRIP_HEIGHT)])
             .areas(inner);
 
-    render_table(frame, table_area, state, &props, selected);
+    render_table(frame, table_area, state, &props, &owning_pg_id, selected);
     render_detail_strip(frame, detail_area, &props, selected);
 }
 
@@ -70,9 +82,10 @@ fn render_table(
     area: Rect,
     state: &BrowserState,
     props: &[(String, String)],
+    owning_pg_id: &str,
     selected: usize,
 ) {
-    let rows_data = property_rows(state, props);
+    let rows_data = property_rows(state, owning_pg_id, props);
 
     // Value column width = total inner width − key column − 1 gap.
     let value_col_width = area
@@ -104,16 +117,18 @@ fn render_table(
 }
 
 /// Build a value cell. Truncates with ellipsis and appends a
-/// cross-link arrow when the value resolves to a known arena node.
+/// cross-link arrow when the value resolves to a known arena node or
+/// contains a parameter reference whose owning PG has a bound context.
 fn value_cell<'a>(
     row: &'a crate::view::browser::state::PropertyRow<'a>,
     col_width: u16,
 ) -> Cell<'a> {
-    let arrow_reserve: u16 = if row.resolves_to.is_some() { 2 } else { 0 };
+    let has_arrow = row.resolves_to.is_some() || row.param_ref.is_some();
+    let arrow_reserve: u16 = if has_arrow { 2 } else { 0 };
     let max_value_chars = col_width.saturating_sub(arrow_reserve) as usize;
     let truncated = truncate_ellipsis(row.value, max_value_chars);
     let mut spans: Vec<Span> = vec![Span::raw(truncated)];
-    if row.resolves_to.is_some() {
+    if has_arrow {
         spans.push(Span::raw(" "));
         spans.push(Span::styled("\u{2192}", theme::accent()));
     }

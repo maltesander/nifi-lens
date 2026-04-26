@@ -233,11 +233,18 @@ fn render_properties_panel(
     let header = Row::new(vec![Cell::from("KEY"), Cell::from("VALUE")])
         .style(theme::muted().add_modifier(Modifier::BOLD));
 
+    // Find the owning PG id from the arena by matching the processor id.
+    let owning_pg_id: String = state
+        .nodes
+        .iter()
+        .find(|n| n.id == d.id)
+        .map(|n| n.group_id.clone())
+        .unwrap_or_default();
     let rows_data: Vec<Row> = d
         .properties
         .iter()
         .map(|(k, v)| {
-            let value_cell = match super::format_property_value(v, state) {
+            let value_cell = match super::format_property_value(v, &owning_pg_id, state) {
                 Some(formatted) => Cell::from(formatted),
                 None => Cell::from(char_skip(v, x_offset)),
             };

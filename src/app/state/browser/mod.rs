@@ -238,31 +238,69 @@ impl ViewKeyHandler for BrowserHandler {
                         });
                     }
                     // Properties (Processor or CS): jump when the selected
-                    // row's value resolves to a known arena node.
+                    // row's value resolves to a known arena node (UUID
+                    // cross-link) or contains a #{name} parameter
+                    // reference whose owning PG has a bound context.
                     if sections.0.get(idx) == Some(&DetailSection::Properties) {
-                        let value = match state.browser.details.get(&arena_idx) {
+                        let (value, owning_pg_id) = match state.browser.details.get(&arena_idx) {
                             Some(NodeDetail::Processor(p)) => {
-                                p.properties.get(rows[idx]).map(|(_, v)| v.clone())
+                                let v = p.properties.get(rows[idx]).map(|(_, v)| v.clone());
+                                let pg = state
+                                    .browser
+                                    .nodes
+                                    .get(arena_idx)
+                                    .map(|n| n.group_id.clone())
+                                    .unwrap_or_default();
+                                (v, pg)
                             }
                             Some(NodeDetail::ControllerService(cs)) => {
-                                cs.properties.get(rows[idx]).map(|(_, v)| v.clone())
+                                let v = cs.properties.get(rows[idx]).map(|(_, v)| v.clone());
+                                let pg = cs.parent_group_id.clone().unwrap_or_default();
+                                (v, pg)
                             }
-                            _ => None,
+                            _ => (None, String::new()),
                         };
-                        if let Some(v) = value
-                            && let Some(r) = state.browser.resolve_id(&v)
-                        {
-                            let intent = super::PendingIntent::Goto(
-                                crate::intent::CrossLink::OpenInBrowser {
-                                    component_id: v.trim().to_string(),
-                                    group_id: r.group_id,
-                                },
-                            );
-                            return Some(UpdateResult {
-                                redraw: true,
-                                intent: Some(intent),
-                                tracer_followup: None,
-                            });
+                        if let Some(v) = value {
+                            // UUID cross-link takes priority.
+                            if let Some(r) = state.browser.resolve_id(&v) {
+                                let intent = super::PendingIntent::Goto(
+                                    crate::intent::CrossLink::OpenInBrowser {
+                                        component_id: v.trim().to_string(),
+                                        group_id: r.group_id,
+                                    },
+                                );
+                                return Some(UpdateResult {
+                                    redraw: true,
+                                    intent: Some(intent),
+                                    tracer_followup: None,
+                                });
+                            }
+                            // Parameter reference cross-link.
+                            if state
+                                .browser
+                                .parameter_context_ref_for(&owning_pg_id)
+                                .is_some()
+                            {
+                                use crate::view::browser::render::{ParamRefScan, scan_param_refs};
+                                let preselect = match scan_param_refs(&v) {
+                                    ParamRefScan::Single { name } => Some(name),
+                                    ParamRefScan::Multiple => None,
+                                    ParamRefScan::None => {
+                                        return Some(UpdateResult::default());
+                                    }
+                                };
+                                let intent = super::PendingIntent::Goto(
+                                    crate::intent::CrossLink::OpenParameterContextModal {
+                                        pg_id: owning_pg_id,
+                                        preselect,
+                                    },
+                                );
+                                return Some(UpdateResult {
+                                    redraw: true,
+                                    intent: Some(intent),
+                                    tracer_followup: None,
+                                });
+                            }
                         }
                         return Some(UpdateResult::default());
                     }

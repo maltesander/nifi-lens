@@ -1887,7 +1887,7 @@ fn property_rows_marks_uuid_values_that_resolve() {
         ("Record Reader Alt".to_string(), "not-a-uuid".to_string()),
     ];
 
-    let rows = property_rows(&s, &props);
+    let rows = property_rows(&s, "", &props);
     assert_eq!(rows.len(), 3);
     assert_eq!(rows[0].resolves_to, None);
     assert_eq!(rows[1].resolves_to, Some(0));

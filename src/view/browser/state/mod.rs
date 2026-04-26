@@ -1673,21 +1673,46 @@ pub struct PropertyRow<'a> {
     /// resolves to a known arena node (renderable `→`). `None`
     /// otherwise.
     pub resolves_to: Option<usize>,
+    /// Parameter reference annotation for this row. `Some(preselect)`
+    /// when the value contains `#{name}` reference(s) and the owning
+    /// PG has a bound parameter context. `preselect` is `Some(name)`
+    /// for a single ref, `None` for multiple refs. When `resolves_to`
+    /// is also `Some`, UUID annotation takes precedence and
+    /// `param_ref` should be ignored by renderers.
+    pub param_ref: Option<Option<String>>,
 }
 
-/// Classify each property row against the browser arena. Callers
-/// (renderer + reducer) share this so the `→` marker and the
-/// Descend cross-link agree on resolvability.
+/// Classify each property row against the browser arena. The
+/// `owning_pg_id` is used to gate parameter-reference annotations:
+/// only PGs that have a bound parameter context can produce
+/// cross-links. Callers (renderer + reducer) share this so the `→`
+/// marker and the Descend cross-link agree on annotation state.
 pub fn property_rows<'a>(
     state: &BrowserState,
+    owning_pg_id: &str,
     props: &'a [(String, String)],
 ) -> Vec<PropertyRow<'a>> {
+    let has_ctx = state.parameter_context_ref_for(owning_pg_id).is_some();
     props
         .iter()
-        .map(|(k, v)| PropertyRow {
-            key: k.as_str(),
-            value: v.as_str(),
-            resolves_to: state.resolve_id(v).map(|r| r.arena_idx),
+        .map(|(k, v)| {
+            let resolves_to = state.resolve_id(v).map(|r| r.arena_idx);
+            let param_ref = if resolves_to.is_none() && has_ctx {
+                use crate::view::browser::render::{ParamRefScan, scan_param_refs};
+                match scan_param_refs(v.as_str()) {
+                    ParamRefScan::None => None,
+                    ParamRefScan::Single { name } => Some(Some(name)),
+                    ParamRefScan::Multiple => Some(None),
+                }
+            } else {
+                None
+            };
+            PropertyRow {
+                key: k.as_str(),
+                value: v.as_str(),
+                resolves_to,
+                param_ref,
+            }
         })
         .collect()
 }
