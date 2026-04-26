@@ -74,8 +74,35 @@ pub fn collect_hints(state: &AppState) -> Vec<crate::widget::hint_bar::HintSpan>
             }
         }
         ViewId::Browser => {
-            for &v in BrowserVerb::all() {
-                push_verb(&mut out, v, &ctx);
+            // Multiple BrowserVerbs can share the same chord (e.g. both
+            // `OpenProperties` and `OpenParameterContext` are bound to `p`).
+            // The dispatcher routes correctly via `enabled()`, but the hint
+            // bar must not show two entries for the same key. Dedup by chord,
+            // preferring the enabled verb; if none is enabled, keep the first.
+            use std::collections::HashMap;
+            let all_browser = BrowserVerb::all();
+            // Build a chord → verb map, replacing any incumbent when the
+            // challenger is enabled and the incumbent is not.
+            let mut by_chord: HashMap<crate::input::Chord, BrowserVerb> =
+                HashMap::with_capacity(all_browser.len());
+            for &v in all_browser {
+                match by_chord.entry(v.chord()) {
+                    std::collections::hash_map::Entry::Vacant(e) => {
+                        e.insert(v);
+                    }
+                    std::collections::hash_map::Entry::Occupied(mut e) => {
+                        if !e.get().enabled(&ctx) && v.enabled(&ctx) {
+                            e.insert(v);
+                        }
+                    }
+                }
+            }
+            // Re-walk `BrowserVerb::all()` to preserve the canonical ordering,
+            // emitting only the verb that won its chord slot.
+            for &v in all_browser {
+                if by_chord.get(&v.chord()) == Some(&v) {
+                    push_verb(&mut out, v, &ctx);
+                }
             }
         }
         ViewId::Events => {
@@ -258,4 +285,134 @@ fn modal_hints(modal: &Modal) -> Vec<crate::widget::hint_bar::HintSpan> {
 #[cfg(test)]
 pub(crate) fn modal_hints_for_test(state: &AppState) -> Vec<crate::widget::hint_bar::HintSpan> {
     state.modal.as_ref().map(modal_hints).unwrap_or_default()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::collect_hints;
+    use crate::app::state::ViewId;
+    use crate::app::state::tests::fresh_state;
+
+    /// On a PG row, only `p param` should appear — not a second `p props`.
+    #[test]
+    fn browser_hint_bar_deduplicates_p_chord_on_pg_row() {
+        use crate::client::{NodeKind, NodeStatusSummary, RawNode, RecursiveSnapshot};
+        use std::time::SystemTime;
+
+        let mut s = fresh_state();
+        let snap = RecursiveSnapshot {
+            nodes: vec![
+                RawNode {
+                    parent_idx: None,
+                    kind: NodeKind::ProcessGroup,
+                    id: "root".into(),
+                    group_id: "root".into(),
+                    name: "root".into(),
+                    status_summary: NodeStatusSummary::ProcessGroup {
+                        running: 0,
+                        stopped: 0,
+                        invalid: 0,
+                        disabled: 0,
+                    },
+                },
+                RawNode {
+                    parent_idx: Some(0),
+                    kind: NodeKind::ProcessGroup,
+                    id: "ingest".into(),
+                    group_id: "root".into(),
+                    name: "ingest".into(),
+                    status_summary: NodeStatusSummary::ProcessGroup {
+                        running: 0,
+                        stopped: 0,
+                        invalid: 0,
+                        disabled: 0,
+                    },
+                },
+            ],
+            fetched_at: SystemTime::now(),
+        };
+        crate::view::browser::state::apply_tree_snapshot(&mut s.browser, snap);
+        s.current_tab = ViewId::Browser;
+        s.browser.selected = 1; // "ingest" PG row
+
+        let hints = collect_hints(&s);
+        let p_hints: Vec<_> = hints.iter().filter(|h| h.key == "p").collect();
+
+        assert_eq!(
+            p_hints.len(),
+            1,
+            "expected exactly one `p` hint on a PG row; got: {:?}",
+            p_hints
+        );
+        // The surviving hint should be the enabled one: `param` (OpenParameterContext).
+        assert_eq!(
+            p_hints[0].action, "param",
+            "PG row: surviving `p` hint should be `param`, got {:?}",
+            p_hints[0].action
+        );
+        assert!(
+            p_hints[0].enabled,
+            "PG row: the surviving `p` hint should be enabled"
+        );
+    }
+
+    /// On a Processor row, only `p props` should appear — not a second `p param`.
+    #[test]
+    fn browser_hint_bar_deduplicates_p_chord_on_processor_row() {
+        use crate::client::{NodeKind, NodeStatusSummary, RawNode, RecursiveSnapshot};
+        use std::time::SystemTime;
+
+        let mut s = fresh_state();
+        let snap = RecursiveSnapshot {
+            nodes: vec![
+                RawNode {
+                    parent_idx: None,
+                    kind: NodeKind::ProcessGroup,
+                    id: "root".into(),
+                    group_id: "root".into(),
+                    name: "root".into(),
+                    status_summary: NodeStatusSummary::ProcessGroup {
+                        running: 0,
+                        stopped: 0,
+                        invalid: 0,
+                        disabled: 0,
+                    },
+                },
+                RawNode {
+                    parent_idx: Some(0),
+                    kind: NodeKind::Processor,
+                    id: "gen".into(),
+                    group_id: "root".into(),
+                    name: "Gen".into(),
+                    status_summary: NodeStatusSummary::Processor {
+                        run_status: "Running".into(),
+                    },
+                },
+            ],
+            fetched_at: SystemTime::now(),
+        };
+        crate::view::browser::state::apply_tree_snapshot(&mut s.browser, snap);
+        s.current_tab = ViewId::Browser;
+        s.browser.selected = 1; // "gen" Processor row
+
+        let hints = collect_hints(&s);
+        let p_hints: Vec<_> = hints.iter().filter(|h| h.key == "p").collect();
+
+        assert_eq!(
+            p_hints.len(),
+            1,
+            "expected exactly one `p` hint on a Processor row; got: {:?}",
+            p_hints
+        );
+        // The surviving hint should be the enabled one: `props` (OpenProperties).
+        assert_eq!(
+            p_hints[0].action, "props",
+            "Processor row: surviving `p` hint should be `props`, got {:?}",
+            p_hints[0].action
+        );
+        assert!(
+            p_hints[0].enabled,
+            "Processor row: the surviving `p` hint should be enabled"
+        );
+    }
 }
