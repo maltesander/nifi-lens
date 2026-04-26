@@ -228,6 +228,7 @@ impl ClusterSnapshot {
             ClusterEndpoint::VersionControl => {
                 meta_of(&self.version_control).map(|m| m.next_interval)
             }
+            ClusterEndpoint::ParameterContextBindings => None, // TODO(T2): implement with snapshot field
         }
     }
 }
