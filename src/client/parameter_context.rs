@@ -56,7 +56,6 @@ impl NifiClient {
                 }
                 Err(err) => {
                     tracing::warn!(
-                        target: "parameter_context",
                         context = %context,
                         pg_id = %pg_id,
                         error = %err,
