@@ -311,7 +311,6 @@ impl BrowserState {
         }
     }
 
-    /// Return the bound `ParameterContextRef` for a PG by id, or `None`
     /// Look up the name of a PG by id. Returns `None` when the id is not
     /// in the arena or the node is not a process group. Used as a
     /// display-only label in the parameter-context modal header.
