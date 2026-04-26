@@ -266,6 +266,7 @@ mod snapshots {
             status_summary: NodeStatusSummary::Processor {
                 run_status: "Running".into(),
             },
+            parameter_context_ref: None,
         });
         state.nodes.push(TreeNode {
             parent: None,
@@ -277,6 +278,7 @@ mod snapshots {
             status_summary: NodeStatusSummary::Processor {
                 run_status: "Running".into(),
             },
+            parameter_context_ref: None,
         });
         (d, state)
     }

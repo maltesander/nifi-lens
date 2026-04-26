@@ -289,6 +289,34 @@ impl BrowserState {
             .and_then(|m| m.by_pg_id.get(pg_id))
     }
 
+    /// Re-stamp every PG node in the arena with its bound parameter context
+    /// from the cluster snapshot. Non-PG nodes are untouched. PGs absent
+    /// from the map have their field cleared to `None`.
+    pub fn apply_parameter_context_bindings(
+        &mut self,
+        map: &crate::cluster::snapshot::ParameterContextBindingsMap,
+    ) {
+        for node in self.nodes.iter_mut() {
+            if let crate::client::NodeKind::ProcessGroup = node.kind {
+                node.parameter_context_ref = map.by_pg_id.get(&node.id).cloned().flatten();
+            }
+        }
+    }
+
+    /// Return the bound `ParameterContextRef` for a PG by id, or `None`
+    /// when the PG is unbound, the id is not in the arena, or the node
+    /// is not a PG.
+    pub fn parameter_context_ref_for(
+        &self,
+        pg_id: &str,
+    ) -> Option<&crate::cluster::snapshot::ParameterContextRef> {
+        self.nodes.iter().find_map(|n| {
+            (n.id == pg_id)
+                .then_some(n.parameter_context_ref.as_ref())
+                .flatten()
+        })
+    }
+
     /// Open the version-control modal on the currently-selected node.
     /// No-op when the selection is not a PG, when no PG is selected,
     /// or when the PG is not under version control.
@@ -1071,6 +1099,11 @@ pub struct TreeNode {
     pub group_id: String,
     pub name: String,
     pub status_summary: NodeStatusSummary,
+    /// Bound parameter context for this PG. `None` for non-PG nodes,
+    /// unbound PGs, and while the endpoint is still loading. Re-stamped
+    /// on every `ClusterChanged(ParameterContextBindings)` event via
+    /// `BrowserState::apply_parameter_context_bindings`.
+    pub parameter_context_ref: Option<crate::cluster::snapshot::ParameterContextRef>,
 }
 
 #[derive(Debug, Clone)]
@@ -1294,6 +1327,7 @@ pub fn apply_tree_snapshot(state: &mut BrowserState, snap: RecursiveSnapshot) {
             group_id,
             name,
             status_summary,
+            parameter_context_ref: None,
         });
     }
     // Fill each parent's children list in arena order.
@@ -1338,6 +1372,7 @@ pub fn apply_tree_snapshot(state: &mut BrowserState, snap: RecursiveSnapshot) {
                 status_summary: NodeStatusSummary::Folder {
                     count: queues.len() as u32,
                 },
+                parameter_context_ref: None,
             });
             for q in &queues {
                 nodes[*q].parent = Some(folder_idx);
@@ -1357,6 +1392,7 @@ pub fn apply_tree_snapshot(state: &mut BrowserState, snap: RecursiveSnapshot) {
                 status_summary: NodeStatusSummary::Folder {
                     count: cs_kids.len() as u32,
                 },
+                parameter_context_ref: None,
             });
             for c in &cs_kids {
                 nodes[*c].parent = Some(folder_idx);

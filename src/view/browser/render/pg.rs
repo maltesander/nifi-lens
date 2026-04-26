@@ -528,6 +528,7 @@ mod snapshots {
             status_summary: NodeStatusSummary::ControllerService {
                 state: "ENABLED".into(),
             },
+            parameter_context_ref: None,
         });
         state.nodes.push(TreeNode {
             parent: None,
@@ -539,6 +540,7 @@ mod snapshots {
             status_summary: NodeStatusSummary::ControllerService {
                 state: "DISABLED".into(),
             },
+            parameter_context_ref: None,
         });
         let bulletins: VecDeque<BulletinSnapshot> = VecDeque::new();
         let snap = ClusterSnapshot::default();

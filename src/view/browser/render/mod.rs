@@ -383,6 +383,7 @@ mod tests {
                 invalid: 0,
                 disabled: 0,
             },
+            parameter_context_ref: None,
         });
         state.nodes.push(TreeNode {
             parent: Some(0),
@@ -394,6 +395,7 @@ mod tests {
             status_summary: NodeStatusSummary::Processor {
                 run_status: "Running".into(),
             },
+            parameter_context_ref: None,
         });
         state.expanded.insert(0);
         rebuild_visible(&mut state);
@@ -457,6 +459,7 @@ mod tree_render_tests {
                 invalid: 0,
                 disabled: 0,
             },
+            parameter_context_ref: None,
         });
         // Visible row pointing at the PG.
         state.visible.push(0);

@@ -261,6 +261,7 @@ mod snapshots {
                 invalid: 0,
                 disabled: 0,
             },
+            parameter_context_ref: None,
         });
         let bulletins: VecDeque<BulletinSnapshot> = VecDeque::new();
         let mut term = Terminal::new(test_backend(TEST_BACKEND_SHORT)).unwrap();

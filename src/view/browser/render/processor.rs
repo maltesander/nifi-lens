@@ -572,6 +572,7 @@ mod snapshots {
             status_summary: NodeStatusSummary::ControllerService {
                 state: "ENABLED".into(),
             },
+            parameter_context_ref: None,
         });
         let bulletins = std::collections::VecDeque::new();
         (d, state, bulletins)
@@ -648,6 +649,7 @@ mod snapshots {
                 status_summary: NodeStatusSummary::Processor {
                     run_status: "Running".into(),
                 },
+                parameter_context_ref: None,
             });
         }
         state.nodes.push(TreeNode {
@@ -666,6 +668,7 @@ mod snapshots {
                 destination_id: "enrich-proc".into(),
                 destination_name: "EnrichAttribute".into(),
             },
+            parameter_context_ref: None,
         });
         state.nodes.push(TreeNode {
             parent: None,
@@ -683,6 +686,7 @@ mod snapshots {
                 destination_id: "pub-proc".into(),
                 destination_name: "PublishKafka".into(),
             },
+            parameter_context_ref: None,
         });
         let bulletins = std::collections::VecDeque::new();
         (d, state, bulletins)

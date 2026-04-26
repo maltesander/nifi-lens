@@ -607,6 +607,7 @@ mod snapshots {
             status_summary: NodeStatusSummary::ControllerService {
                 state: "ENABLED".into(),
             },
+            parameter_context_ref: None,
         });
         (d, state)
     }
@@ -651,6 +652,7 @@ mod snapshots {
                 invalid: 0,
                 disabled: 0,
             },
+            parameter_context_ref: None,
         });
         let bulletins: std::collections::VecDeque<crate::client::BulletinSnapshot> =
             std::collections::VecDeque::new();

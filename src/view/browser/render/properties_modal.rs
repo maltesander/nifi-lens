@@ -179,6 +179,7 @@ mod tests {
                 invalid: 0,
                 disabled: 0,
             },
+            parameter_context_ref: None,
         });
         // Processor (arena 1).
         s.nodes.push(TreeNode {
@@ -191,6 +192,7 @@ mod tests {
             status_summary: NodeStatusSummary::Processor {
                 run_status: "Running".into(),
             },
+            parameter_context_ref: None,
         });
         // CS (arena 2) — id is a UUID so properties can reference it.
         let cs_uuid = "7f3e1c22-1111-4444-8888-abcdef012345".to_string();
@@ -204,6 +206,7 @@ mod tests {
             status_summary: NodeStatusSummary::ControllerService {
                 state: "ENABLED".into(),
             },
+            parameter_context_ref: None,
         });
 
         s.details.insert(

@@ -1599,6 +1599,7 @@ fn descend_on_referencing_component_emits_goto() {
             invalid: 0,
             disabled: 0,
         },
+        parameter_context_ref: None,
     });
     s.browser.nodes.push(crate::view::browser::state::TreeNode {
         parent: Some(0),
@@ -1610,6 +1611,7 @@ fn descend_on_referencing_component_emits_goto() {
         status_summary: NodeStatusSummary::ControllerService {
             state: "ENABLED".into(),
         },
+        parameter_context_ref: None,
     });
     s.browser.expanded.insert(0);
     crate::view::browser::state::rebuild_visible(&mut s.browser);
@@ -1701,6 +1703,7 @@ fn descend_on_pg_controller_service_emits_goto() {
             invalid: 0,
             disabled: 0,
         },
+        parameter_context_ref: None,
     });
     s.browser.nodes.push(crate::view::browser::state::TreeNode {
         parent: Some(0),
@@ -1715,6 +1718,7 @@ fn descend_on_pg_controller_service_emits_goto() {
             invalid: 0,
             disabled: 0,
         },
+        parameter_context_ref: None,
     });
     s.browser.nodes.push(crate::view::browser::state::TreeNode {
         parent: Some(1),
@@ -1726,6 +1730,7 @@ fn descend_on_pg_controller_service_emits_goto() {
         status_summary: NodeStatusSummary::ControllerService {
             state: "ENABLED".into(),
         },
+        parameter_context_ref: None,
     });
     s.browser.expanded.insert(0);
     s.browser.expanded.insert(1);
@@ -1806,6 +1811,7 @@ fn properties_hotkey_opens_modal_on_cs_tree_row() {
             invalid: 0,
             disabled: 0,
         },
+        parameter_context_ref: None,
     });
     s.browser.nodes.push(crate::view::browser::state::TreeNode {
         parent: Some(0),
@@ -1817,6 +1823,7 @@ fn properties_hotkey_opens_modal_on_cs_tree_row() {
         status_summary: NodeStatusSummary::ControllerService {
             state: "ENABLED".into(),
         },
+        parameter_context_ref: None,
     });
     s.browser.expanded.insert(0);
     crate::view::browser::state::rebuild_visible(&mut s.browser);
@@ -1855,6 +1862,7 @@ fn browser_state_on_connection_endpoints(row: usize) -> (AppState, crate::config
             invalid: 0,
             disabled: 0,
         },
+        parameter_context_ref: None,
     });
     s.browser.nodes.push(TreeNode {
         parent: Some(0),
@@ -1872,6 +1880,7 @@ fn browser_state_on_connection_endpoints(row: usize) -> (AppState, crate::config
             destination_id: "dst-proc".into(),
             destination_name: "Dest".into(),
         },
+        parameter_context_ref: None,
     });
     s.browser.expanded.insert(0);
     rebuild_visible(&mut s.browser);
@@ -1983,6 +1992,7 @@ fn descend_on_focused_properties_row_with_resolvable_uuid_emits_goto() {
         status_summary: NodeStatusSummary::ControllerService {
             state: "ENABLED".into(),
         },
+        parameter_context_ref: None,
     });
 
     // Rewrite the selected processor's detail to have our one property.
@@ -2080,6 +2090,7 @@ fn descend_on_focused_connections_row_emits_open_in_browser_for_opposite() {
             destination_id: "sink".into(),
             destination_name: "Sink".into(),
         },
+        parameter_context_ref: None,
     });
     // And a Processor node for the "sink" so the group_id resolves.
     s.browser.nodes.push(TreeNode {
@@ -2092,6 +2103,7 @@ fn descend_on_focused_connections_row_emits_open_in_browser_for_opposite() {
         status_summary: NodeStatusSummary::Processor {
             run_status: "Running".into(),
         },
+        parameter_context_ref: None,
     });
     crate::view::browser::state::rebuild_visible(&mut s.browser);
     // Make sure we're still on gen (arena 1).
@@ -2313,6 +2325,7 @@ fn properties_modal_descend_on_uuid_emits_open_in_browser_and_closes() {
         status_summary: NodeStatusSummary::ControllerService {
             state: "ENABLED".into(),
         },
+        parameter_context_ref: None,
     });
 
     // Processor (arena 1) has a property whose value is that UUID.

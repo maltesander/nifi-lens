@@ -525,6 +525,7 @@ fn build_flow_index_populates_cs_state_badge() {
             invalid: 0,
             disabled: 0,
         },
+        parameter_context_ref: None,
     });
     s.nodes.push(TreeNode {
         parent: Some(0),
@@ -536,6 +537,7 @@ fn build_flow_index_populates_cs_state_badge() {
         status_summary: NodeStatusSummary::ControllerService {
             state: "ENABLED".into(),
         },
+        parameter_context_ref: None,
     });
     let idx = build_flow_index(&s);
     let cs = idx.entries.iter().find(|e| e.id == "cs1").unwrap();
@@ -561,6 +563,7 @@ fn build_flow_index_populates_invalid_count_for_pg() {
             invalid: 2,
             disabled: 0,
         },
+        parameter_context_ref: None,
     });
     let idx = build_flow_index(&s);
     let pg = idx.entries.iter().find(|e| e.id == "root").unwrap();
@@ -619,6 +622,7 @@ fn breadcrumb_segments_at_root() {
             invalid: 0,
             disabled: 0,
         },
+        parameter_context_ref: None,
     });
     state.visible = vec![0];
     state.selected = 0;
@@ -646,6 +650,7 @@ fn breadcrumb_segments_nested() {
             invalid: 0,
             disabled: 0,
         },
+        parameter_context_ref: None,
     });
     state.nodes.push(TreeNode {
         parent: Some(0),
@@ -660,6 +665,7 @@ fn breadcrumb_segments_nested() {
             invalid: 0,
             disabled: 0,
         },
+        parameter_context_ref: None,
     });
     state.nodes.push(TreeNode {
         parent: Some(1),
@@ -671,6 +677,7 @@ fn breadcrumb_segments_nested() {
         status_summary: NodeStatusSummary::Processor {
             run_status: "Running".into(),
         },
+        parameter_context_ref: None,
     });
     state.visible = vec![0, 1, 2];
     state.selected = 2;
@@ -1108,6 +1115,7 @@ fn section_len_process_group_sections() {
             invalid: 0,
             disabled: 0,
         },
+        parameter_context_ref: None,
     });
     s.visible = vec![0];
     s.selected = 0;
@@ -1182,6 +1190,7 @@ fn focused_row_copy_value_pg_controller_services() {
             invalid: 0,
             disabled: 0,
         },
+        parameter_context_ref: None,
     });
     s.visible = vec![0];
     s.selected = 0;
@@ -1244,6 +1253,7 @@ fn focused_row_source_id_pg_recent_bulletins_returns_nth_newest_source() {
             invalid: 0,
             disabled: 0,
         },
+        parameter_context_ref: None,
     });
     s.visible = vec![0];
     s.selected = 0;
@@ -1309,6 +1319,7 @@ fn drill_into_group_expands_ancestors_and_selects_child() {
             invalid: 0,
             disabled: 0,
         },
+        parameter_context_ref: None,
     });
     s.nodes.push(TreeNode {
         parent: Some(0),
@@ -1323,6 +1334,7 @@ fn drill_into_group_expands_ancestors_and_selects_child() {
             invalid: 0,
             disabled: 0,
         },
+        parameter_context_ref: None,
     });
     s.nodes.push(TreeNode {
         parent: Some(1),
@@ -1337,6 +1349,7 @@ fn drill_into_group_expands_ancestors_and_selects_child() {
             invalid: 0,
             disabled: 0,
         },
+        parameter_context_ref: None,
     });
     // Start with only the root visible, selection on root, no expansion.
     s.visible = vec![0];
@@ -1502,6 +1515,7 @@ fn resolve_id_returns_ref_for_known_node() {
         status_summary: NodeStatusSummary::ControllerService {
             state: "ENABLED".into(),
         },
+        parameter_context_ref: None,
     });
     let got = s
         .resolve_id("a1b2c3d4-e5f6-7890-abcd-ef1234567890")
@@ -1526,6 +1540,7 @@ fn resolve_id_trims_whitespace() {
         status_summary: NodeStatusSummary::Processor {
             run_status: "Running".into(),
         },
+        parameter_context_ref: None,
     });
     assert!(
         s.resolve_id("   a1b2c3d4-e5f6-7890-abcd-ef1234567890   ")
@@ -1554,6 +1569,7 @@ fn connections_for_processor_splits_in_and_out_edges() {
             invalid: 0,
             disabled: 0,
         },
+        parameter_context_ref: None,
     });
     for (id, name) in [("proc-A", "A"), ("proc-B", "B")] {
         s.nodes.push(TreeNode {
@@ -1566,6 +1582,7 @@ fn connections_for_processor_splits_in_and_out_edges() {
             status_summary: NodeStatusSummary::Processor {
                 run_status: "Running".into(),
             },
+            parameter_context_ref: None,
         });
     }
     s.nodes.push(TreeNode {
@@ -1584,6 +1601,7 @@ fn connections_for_processor_splits_in_and_out_edges() {
             destination_id: "proc-B".into(),
             destination_name: "B".into(),
         },
+        parameter_context_ref: None,
     });
     s.nodes.push(TreeNode {
         parent: Some(0),
@@ -1601,6 +1619,7 @@ fn connections_for_processor_splits_in_and_out_edges() {
             destination_id: "proc-A".into(),
             destination_name: "A".into(),
         },
+        parameter_context_ref: None,
     });
 
     let edges = s.connections_for_processor("proc-A");
@@ -1653,6 +1672,7 @@ fn connections_for_processor_falls_back_to_empty_group_id_for_unresolvable_oppos
             destination_id: "proc-B".into(),
             destination_name: "B".into(),
         },
+        parameter_context_ref: None,
     });
     let edges = s.connections_for_processor("proc-A");
     assert_eq!(edges.len(), 1);
@@ -1690,6 +1710,7 @@ fn section_len_endpoints_is_always_two() {
             destination_id: "d".into(),
             destination_name: "D".into(),
         },
+        parameter_context_ref: None,
     });
     crate::view::browser::state::rebuild_visible(&mut s);
     s.selected = 0;
@@ -1772,6 +1793,7 @@ fn section_len_connections_counts_processor_edges() {
             invalid: 0,
             disabled: 0,
         },
+        parameter_context_ref: None,
     });
     s.nodes.push(TreeNode {
         parent: Some(0),
@@ -1783,6 +1805,7 @@ fn section_len_connections_counts_processor_edges() {
         status_summary: NodeStatusSummary::Processor {
             run_status: "Running".into(),
         },
+        parameter_context_ref: None,
     });
     for (id, src, dst) in [("c-in", "src", "proc"), ("c-out", "proc", "dst")] {
         s.nodes.push(TreeNode {
@@ -1801,6 +1824,7 @@ fn section_len_connections_counts_processor_edges() {
                 destination_id: dst.into(),
                 destination_name: dst.into(),
             },
+            parameter_context_ref: None,
         });
     }
     // Expand the root PG so children appear in visible.
@@ -1854,6 +1878,7 @@ fn property_rows_marks_uuid_values_that_resolve() {
         status_summary: crate::client::NodeStatusSummary::ControllerService {
             state: "ENABLED".into(),
         },
+        parameter_context_ref: None,
     });
 
     let props = vec![
@@ -2065,6 +2090,7 @@ fn redraw_version_control_stamps_pg_entries_only() {
             invalid: 0,
             disabled: 0,
         },
+        parameter_context_ref: None,
     });
     s.browser.nodes.push(TreeNode {
         parent: Some(0),
@@ -2076,6 +2102,7 @@ fn redraw_version_control_stamps_pg_entries_only() {
         status_summary: crate::client::NodeStatusSummary::Processor {
             run_status: "Running".into(),
         },
+        parameter_context_ref: None,
     });
     s.flow_index = Some(build_flow_index(&s.browser));
 
@@ -2145,6 +2172,7 @@ fn redraw_version_control_clears_when_endpoint_loading() {
             invalid: 0,
             disabled: 0,
         },
+        parameter_context_ref: None,
     });
     s.flow_index = Some(build_flow_index(&s.browser));
 
@@ -2184,6 +2212,7 @@ fn seed_one_pg(state: &mut BrowserState, id: &str, name: &str) {
             invalid: 0,
             disabled: 0,
         },
+        parameter_context_ref: None,
     });
     state.visible.push(0);
     state.selected = 0;
@@ -2479,6 +2508,7 @@ fn modal_loaded_resolves_connection_label_from_arena() {
             destination_id: "dst-uuid".into(),
             destination_name: "LogAttribute".into(),
         },
+        parameter_context_ref: None,
     });
 
     state.version_modal = Some(VersionControlModalState::pending(
@@ -2578,4 +2608,95 @@ fn modal_loaded_falls_back_for_unnamed_processor() {
         }
         other => panic!("expected Loaded, got {other:?}"),
     }
+}
+
+// ---------------------------------------------------------------------------
+// apply_parameter_context_bindings / parameter_context_ref_for
+// ---------------------------------------------------------------------------
+
+fn fresh_browser_with_two_pgs() -> BrowserState {
+    let mut state = BrowserState::default();
+    for (id, name) in [("pg-a", "alpha"), ("pg-b", "beta")] {
+        state.nodes.push(crate::view::browser::state::TreeNode {
+            parent: None,
+            children: vec![],
+            kind: crate::client::NodeKind::ProcessGroup,
+            id: id.into(),
+            group_id: String::new(),
+            name: name.into(),
+            status_summary: crate::client::NodeStatusSummary::ProcessGroup {
+                running: 0,
+                stopped: 0,
+                invalid: 0,
+                disabled: 0,
+            },
+            parameter_context_ref: None,
+        });
+    }
+    state
+}
+
+#[test]
+fn apply_parameter_context_bindings_stamps_pg_entries() {
+    use crate::cluster::snapshot::{ParameterContextBindingsMap, ParameterContextRef};
+    use std::collections::BTreeMap;
+
+    let mut state = fresh_browser_with_two_pgs();
+    // Sanity: no PG has a ref yet.
+    assert!(state.parameter_context_ref_for("pg-a").is_none());
+    assert!(state.parameter_context_ref_for("pg-b").is_none());
+
+    let mut by_pg_id: BTreeMap<String, Option<ParameterContextRef>> = BTreeMap::new();
+    by_pg_id.insert(
+        "pg-a".to_string(),
+        Some(ParameterContextRef {
+            id: "ctx-1".into(),
+            name: "ctx-prod".into(),
+        }),
+    );
+    by_pg_id.insert("pg-b".to_string(), None);
+    state.apply_parameter_context_bindings(&ParameterContextBindingsMap { by_pg_id });
+
+    assert_eq!(
+        state
+            .parameter_context_ref_for("pg-a")
+            .map(|r| r.name.clone()),
+        Some("ctx-prod".into())
+    );
+    assert!(state.parameter_context_ref_for("pg-b").is_none());
+}
+
+#[test]
+fn apply_parameter_context_bindings_does_not_touch_non_pg_nodes() {
+    use crate::cluster::snapshot::{ParameterContextBindingsMap, ParameterContextRef};
+    use std::collections::BTreeMap;
+
+    let mut state = fresh_browser_with_two_pgs();
+    // Push a Processor node whose id does not appear in the bindings map.
+    state.nodes.push(crate::view::browser::state::TreeNode {
+        parent: Some(0),
+        children: vec![],
+        kind: crate::client::NodeKind::Processor,
+        id: "proc-x".into(),
+        group_id: "pg-a".into(),
+        name: "Proc".into(),
+        status_summary: crate::client::NodeStatusSummary::Processor {
+            run_status: "Running".into(),
+        },
+        parameter_context_ref: None,
+    });
+
+    let mut by_pg_id: BTreeMap<String, Option<ParameterContextRef>> = BTreeMap::new();
+    by_pg_id.insert(
+        "pg-a".to_string(),
+        Some(ParameterContextRef {
+            id: "ctx-1".into(),
+            name: "ctx-prod".into(),
+        }),
+    );
+    state.apply_parameter_context_bindings(&ParameterContextBindingsMap { by_pg_id });
+
+    // The processor node must not have been stamped with a ref.
+    let proc_node = state.nodes.iter().find(|n| n.id == "proc-x").unwrap();
+    assert!(proc_node.parameter_context_ref.is_none());
 }
