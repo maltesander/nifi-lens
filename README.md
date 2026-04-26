@@ -41,27 +41,13 @@
 
 ## Features
 
-- **Cluster overview** — health dashboard with bulletin-rate sparkline, queue backpressure, per-node heap/GC, and noisiest components.
-  - **Per-node cluster membership** — each row carries a role/status
-    badge (`[P·]` primary, `[·C]` coordinator, `[PC]` both, `[··]`
-    connected worker, `[OFF]` offloaded, `[DIS]` disconnected,
-    `[CON]` connecting) and a heartbeat-age column.
-  - **Node detail modal** — four-quadrant layout: identity header
-    (badge + status + roles + heartbeat age + node id + join time),
-    Resources / Repositories top row (per-disk `used / total` in
-    power-of-1024 units), Events / GC bottom row. Standalone NiFi
-    servers hide the Events quadrant and let GC fill the bottom
-    row; the Nodes list also drops to a 4-column layout (no badge,
-    no heartbeat column).
-- **Bulletin tail** — live cluster-wide log with severity filters, source deduplication, per-source mute, and a full-screen detail modal with scroll + substring search.
-- **Flow browser** — component tree with per-node detail.
-  - **Cross-navigation** — detail rows whose value is a known component render a trailing `→` and jump to it on Enter. Covered surfaces: connection endpoints (FROM/TO), processor / CS property values that are component UUIDs, processor `Connections` section, process-group `Controller services` section. Controller Service and Port Identity panels resolve the parent group UUID to the PG name.
-  - **Fuzzy search** across all known components. Narrow the corpus by
-    kind with a leading prefix: `:proc kafka`, `:pg ingest`, `:cs aws`,
-    `:conn q1`, `:in`, `:out`.
+- **Cluster overview** — health dashboard with bulletin sparkline, queue backpressure, per-node heap/GC, role/status badges, and a four-quadrant node detail modal.
+- **Bulletin tail** — live cluster-wide log with severity filters, source dedup, per-source mute, and a full-screen detail modal with substring search.
+- **Flow browser** — component tree with per-node detail, cross-navigation (`→` jumps between related components), and fuzzy search (`:proc`, `:pg`, `:cs`, `:drift`, …).
+- **Version control drift** — `[STALE]` / `[MODIFIED]` / `[SYNC-ERR]` chips on versioned PGs and a full-screen modal with per-component diff against the registry.
+- **Parameter contexts** — `p` on any PG opens a full-screen modal showing the inheritance chain, resolved-flat parameters table, and reverse-lookup; `#{name}` references in property values cross-link straight to the parameter.
 - **Provenance events** — filterable cluster-wide event search cross-linked from Bulletins and Browser.
-- **Flowfile tracer** — paste a UUID to trace its full lineage with attribute diffs, an inline content preview, and…
-- **Content viewer modal** — full-screen content viewer (Input / Output / Diff tabs) that streams large flowfile bodies in 512 KiB chunks up to a configurable ceiling, renders a colored unified diff when both sides share a MIME type, and supports in-body substring search with match highlighting.
+- **Flowfile tracer** — paste a UUID for full lineage with attribute diffs and a full-screen content viewer that streams large bodies in 512 KiB chunks and renders colored unified diffs (JSON / CSV / Parquet / Avro).
 - **Multi-cluster** — kubeconfig-style contexts; one binary for every NiFi 2.x version.
 - **Read-only** — v0.x never mutates cluster state.
 
