@@ -18,8 +18,8 @@ pub mod verb;
 // touching callers.
 pub use action::{AppAction, FocusAction, GoTarget, HistoryAction, TabAction};
 pub use verb::{
-    BrowserVerb, BulletinsVerb, ContentModalVerb, EventsVerb, FilterField, Severity, TracerVerb,
-    VersionControlModalVerb, ViewVerb,
+    BrowserVerb, BulletinsVerb, ContentModalVerb, EventsVerb, FilterField,
+    ParameterContextModalVerb, Severity, TracerVerb, VersionControlModalVerb, ViewVerb,
 };
 
 // ---------------------------------------------------------------------------
@@ -232,6 +232,7 @@ impl KeyMap {
         active_view: crate::app::state::ViewId,
         content_modal_open: bool,
         version_modal_open: bool,
+        parameter_modal_open: bool,
         state: &crate::app::state::AppState,
     ) -> InputEvent {
         use crossterm::event::{KeyCode, KeyModifiers};
@@ -316,6 +317,30 @@ impl KeyMap {
             return InputEvent::Unmapped;
         }
 
+        // When the parameter-context modal is open on the Browser tab,
+        // ParameterContextModalVerb chords take absolute priority — they
+        // shadow FocusAction (Esc → Close, not Ascend). Keys not claimed
+        // by ParameterContextModalVerb return Unmapped; outer app keys are
+        // blocked while the modal is up.
+        if parameter_modal_open && active_view == ViewId::Browser {
+            // Ctrl+c / Ctrl+q / Ctrl+Q must always quit, even with the modal open.
+            if matches!(
+                key.code,
+                KeyCode::Char('c') | KeyCode::Char('q') | KeyCode::Char('Q')
+            ) && key.modifiers.contains(KeyModifiers::CONTROL)
+            {
+                return InputEvent::App(AppAction::Quit);
+            }
+
+            for &v in ParameterContextModalVerb::all() {
+                if chord_matches(v.chord(), key) {
+                    return InputEvent::View(ViewVerb::ParameterContextModal(v));
+                }
+            }
+
+            return InputEvent::Unmapped;
+        }
+
         // Reverse-lookup across framework enums (order matters: Focus
         // is highest priority so Esc/Enter always win).
         for &a in FocusAction::all() {
@@ -392,7 +417,8 @@ impl KeyMap {
     pub fn reverse_table(&self) -> Vec<(String, String)> {
         use crate::input::{
             AppAction, BrowserVerb, BulletinsVerb, ContentModalVerb, EventsVerb, FocusAction,
-            HistoryAction, TabAction, TracerVerb, Verb, VersionControlModalVerb,
+            HistoryAction, ParameterContextModalVerb, TabAction, TracerVerb, Verb,
+            VersionControlModalVerb,
         };
         let mut out: Vec<(String, String)> = Vec::new();
         for &v in FocusAction::all() {
@@ -426,6 +452,12 @@ impl KeyMap {
             out.push((
                 v.chord().display(),
                 format!("VersionControlModalVerb::{v:?}"),
+            ));
+        }
+        for &v in ParameterContextModalVerb::all() {
+            out.push((
+                v.chord().display(),
+                format!("ParameterContextModalVerb::{v:?}"),
             ));
         }
         out
@@ -512,6 +544,7 @@ mod keymap_tests {
                 ViewId::Overview,
                 false,
                 false,
+                false,
                 &dummy_state()
             ),
             InputEvent::Focus(FocusAction::Descend)
@@ -525,6 +558,7 @@ mod keymap_tests {
             km.translate(
                 press(KeyCode::Esc),
                 ViewId::Overview,
+                false,
                 false,
                 false,
                 &dummy_state()
@@ -542,6 +576,7 @@ mod keymap_tests {
                 ViewId::Overview,
                 false,
                 false,
+                false,
                 &dummy_state(),
             ),
             InputEvent::History(HistoryAction::Back)
@@ -557,6 +592,7 @@ mod keymap_tests {
                 ViewId::Overview,
                 false,
                 false,
+                false,
                 &dummy_state()
             ),
             InputEvent::Unmapped
@@ -565,6 +601,7 @@ mod keymap_tests {
             km.translate(
                 press(KeyCode::Char(']')),
                 ViewId::Overview,
+                false,
                 false,
                 false,
                 &dummy_state()
@@ -582,6 +619,7 @@ mod keymap_tests {
                 ViewId::Overview,
                 false,
                 false,
+                false,
                 &dummy_state()
             ),
             InputEvent::Focus(FocusAction::NextPane)
@@ -595,6 +633,7 @@ mod keymap_tests {
             km.translate(
                 press(KeyCode::BackTab),
                 ViewId::Overview,
+                false,
                 false,
                 false,
                 &dummy_state()
@@ -616,6 +655,7 @@ mod keymap_tests {
                 ViewId::Overview,
                 false,
                 false,
+                false,
                 &dummy_state(),
             ),
             InputEvent::Focus(FocusAction::PrevPane)
@@ -629,6 +669,7 @@ mod keymap_tests {
             km.translate(
                 press(KeyCode::F(3)),
                 ViewId::Overview,
+                false,
                 false,
                 false,
                 &dummy_state()
@@ -646,6 +687,7 @@ mod keymap_tests {
                 ViewId::Overview,
                 false,
                 false,
+                false,
                 &dummy_state()
             ),
             InputEvent::App(AppAction::Quit)
@@ -659,6 +701,7 @@ mod keymap_tests {
             km.translate(
                 press_mod(KeyCode::Char('c'), KeyModifiers::CONTROL),
                 ViewId::Overview,
+                false,
                 false,
                 false,
                 &dummy_state(),
@@ -676,6 +719,7 @@ mod keymap_tests {
                 ViewId::Overview,
                 false,
                 false,
+                false,
                 &dummy_state()
             ),
             InputEvent::App(AppAction::Goto)
@@ -691,6 +735,7 @@ mod keymap_tests {
                 ViewId::Overview,
                 false,
                 false,
+                false,
                 &dummy_state()
             ),
             InputEvent::Unmapped
@@ -699,6 +744,7 @@ mod keymap_tests {
             km.translate(
                 press(KeyCode::Char('k')),
                 ViewId::Overview,
+                false,
                 false,
                 false,
                 &dummy_state()
@@ -718,6 +764,7 @@ mod keymap_tests {
                 ViewId::Events,
                 false,
                 false,
+                false,
                 &dummy_state()
             ),
             InputEvent::View(ViewVerb::Events(EventsVerb::Refresh))
@@ -726,6 +773,7 @@ mod keymap_tests {
             km.translate(
                 press(KeyCode::Char('r')),
                 ViewId::Bulletins,
+                false,
                 false,
                 false,
                 &dummy_state()
@@ -746,6 +794,7 @@ mod keymap_tests {
                 ViewId::Events,
                 false,
                 false,
+                false,
                 &dummy_state(),
             ),
             InputEvent::View(ViewVerb::Events(EventsVerb::EditField(FilterField::Types)))
@@ -754,6 +803,7 @@ mod keymap_tests {
             km.translate(
                 press_mod(KeyCode::Char('T'), KeyModifiers::SHIFT),
                 ViewId::Bulletins,
+                false,
                 false,
                 false,
                 &dummy_state(),
@@ -873,6 +923,7 @@ mod keymap_tests {
         check::<crate::input::TracerVerb>("TracerVerb");
         check::<crate::input::ContentModalVerb>("ContentModalVerb");
         check::<crate::input::VersionControlModalVerb>("VersionControlModalVerb");
+        check::<crate::input::ParameterContextModalVerb>("ParameterContextModalVerb");
     }
 
     #[test]
@@ -890,6 +941,7 @@ mod keymap_tests {
                 ViewId::Tracer,
                 true,
                 false,
+                false,
                 &dummy_state()
             ),
             InputEvent::View(ViewVerb::ContentModal(ContentModalVerb::Copy))
@@ -901,6 +953,7 @@ mod keymap_tests {
                 ViewId::Tracer,
                 true,
                 false,
+                false,
                 &dummy_state()
             ),
             InputEvent::Unmapped
@@ -910,6 +963,7 @@ mod keymap_tests {
             km.translate(
                 press(KeyCode::Char('i')),
                 ViewId::Tracer,
+                false,
                 false,
                 false,
                 &dummy_state()
@@ -930,6 +984,7 @@ mod keymap_tests {
                 ViewId::Tracer,
                 true,
                 false,
+                false,
                 &dummy_state()
             ),
             InputEvent::View(ViewVerb::ContentModal(ContentModalVerb::Close))
@@ -944,6 +999,7 @@ mod keymap_tests {
                 press(KeyCode::Tab),
                 ViewId::Tracer,
                 true,
+                false,
                 false,
                 &dummy_state()
             ),
@@ -960,6 +1016,7 @@ mod keymap_tests {
                 ViewId::Tracer,
                 true,
                 false,
+                false,
                 &dummy_state(),
             ),
             InputEvent::App(AppAction::Quit)
@@ -969,6 +1026,7 @@ mod keymap_tests {
                 press_mod(KeyCode::Char('q'), KeyModifiers::CONTROL),
                 ViewId::Tracer,
                 true,
+                false,
                 false,
                 &dummy_state(),
             ),
@@ -986,6 +1044,7 @@ mod keymap_tests {
                 ViewId::Tracer,
                 true,
                 false,
+                false,
                 &dummy_state()
             ),
             InputEvent::Focus(FocusAction::Up)
@@ -995,6 +1054,7 @@ mod keymap_tests {
                 press(KeyCode::Down),
                 ViewId::Tracer,
                 true,
+                false,
                 false,
                 &dummy_state()
             ),
@@ -1006,6 +1066,7 @@ mod keymap_tests {
                 ViewId::Tracer,
                 true,
                 false,
+                false,
                 &dummy_state()
             ),
             InputEvent::Focus(FocusAction::PageUp)
@@ -1015,6 +1076,7 @@ mod keymap_tests {
                 press(KeyCode::PageDown),
                 ViewId::Tracer,
                 true,
+                false,
                 false,
                 &dummy_state()
             ),
@@ -1026,6 +1088,7 @@ mod keymap_tests {
                 ViewId::Tracer,
                 true,
                 false,
+                false,
                 &dummy_state()
             ),
             InputEvent::Focus(FocusAction::First)
@@ -1035,6 +1098,7 @@ mod keymap_tests {
                 press(KeyCode::End),
                 ViewId::Tracer,
                 true,
+                false,
                 false,
                 &dummy_state()
             ),

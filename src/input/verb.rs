@@ -569,6 +569,131 @@ impl Verb for VersionControlModalVerb {
     }
 }
 
+/// Verbs that are only active when the parameter-context modal is open.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum ParameterContextModalVerb {
+    Close,
+    RowUp,
+    RowDown,
+    PageUp,
+    PageDown,
+    JumpTop,
+    JumpBottom,
+    ChainFocusLeft,
+    ChainFocusRight,
+    ChainEnter,
+    ToggleByContext,
+    ToggleShadowed,
+    ToggleUsedBy,
+    Search,
+    SearchNext,
+    SearchPrev,
+    Copy,
+    Refresh,
+}
+
+impl Verb for ParameterContextModalVerb {
+    fn chord(self) -> Chord {
+        match self {
+            Self::Close => Chord::simple(KeyCode::Esc),
+            Self::RowUp => Chord::simple(KeyCode::Up),
+            Self::RowDown => Chord::simple(KeyCode::Down),
+            Self::PageUp => Chord::simple(KeyCode::PageUp),
+            Self::PageDown => Chord::simple(KeyCode::PageDown),
+            Self::JumpTop => Chord::simple(KeyCode::Home),
+            Self::JumpBottom => Chord::simple(KeyCode::End),
+            Self::ChainFocusLeft => Chord::simple(KeyCode::Left),
+            Self::ChainFocusRight => Chord::simple(KeyCode::Right),
+            Self::ChainEnter => Chord::simple(KeyCode::Enter),
+            Self::ToggleByContext => Chord::simple(KeyCode::Char('t')),
+            Self::ToggleShadowed => Chord::simple(KeyCode::Char('s')),
+            Self::ToggleUsedBy => Chord::simple(KeyCode::Char('u')),
+            Self::Search => Chord::simple(KeyCode::Char('/')),
+            Self::SearchNext => Chord::simple(KeyCode::Char('n')),
+            Self::SearchPrev => Chord::shift(KeyCode::Char('N')),
+            Self::Copy => Chord::simple(KeyCode::Char('c')),
+            Self::Refresh => Chord::simple(KeyCode::Char('r')),
+        }
+    }
+
+    fn label(self) -> &'static str {
+        match self {
+            Self::Close => "close",
+            Self::RowUp => "row up",
+            Self::RowDown => "row down",
+            Self::PageUp => "page up",
+            Self::PageDown => "page down",
+            Self::JumpTop => "top",
+            Self::JumpBottom => "bottom",
+            Self::ChainFocusLeft => "chain focus",
+            Self::ChainFocusRight => "params focus",
+            Self::ChainEnter => "select chain",
+            Self::ToggleByContext => "by context",
+            Self::ToggleShadowed => "show shadowed",
+            Self::ToggleUsedBy => "used by",
+            Self::Search => "search",
+            Self::SearchNext => "next match",
+            Self::SearchPrev => "prev match",
+            Self::Copy => "copy",
+            Self::Refresh => "refresh",
+        }
+    }
+
+    fn hint(self) -> &'static str {
+        match self {
+            Self::Close => "close",
+            Self::RowUp | Self::RowDown => "row",
+            Self::PageUp | Self::PageDown => "page",
+            Self::JumpTop => "top",
+            Self::JumpBottom => "bottom",
+            Self::ChainFocusLeft | Self::ChainFocusRight => "chain",
+            Self::ChainEnter => "select",
+            Self::ToggleByContext => "by-ctx",
+            Self::ToggleShadowed => "shadowed",
+            Self::ToggleUsedBy => "used-by",
+            Self::Search => "search",
+            Self::SearchNext => "next",
+            Self::SearchPrev => "prev",
+            Self::Copy => "copy",
+            Self::Refresh => "refresh",
+        }
+    }
+
+    fn show_in_hint_bar(self) -> bool {
+        !matches!(self, Self::SearchNext | Self::SearchPrev)
+    }
+
+    fn enabled(self, _ctx: &HintContext<'_>) -> bool {
+        // Modal is the dispatch gate — chords only fire when the
+        // keymap is in modal mode. Always return true here; dispatch
+        // suppresses outside the modal.
+        true
+    }
+
+    fn all() -> &'static [Self] {
+        &[
+            Self::Close,
+            Self::RowUp,
+            Self::RowDown,
+            Self::PageUp,
+            Self::PageDown,
+            Self::JumpTop,
+            Self::JumpBottom,
+            Self::ChainFocusLeft,
+            Self::ChainFocusRight,
+            Self::ChainEnter,
+            Self::ToggleByContext,
+            Self::ToggleShadowed,
+            Self::ToggleUsedBy,
+            Self::Search,
+            Self::SearchNext,
+            Self::SearchPrev,
+            Self::Copy,
+            Self::Refresh,
+        ]
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum ViewVerb {
     Bulletins(BulletinsVerb),
@@ -577,6 +702,7 @@ pub enum ViewVerb {
     Tracer(TracerVerb),
     ContentModal(ContentModalVerb),
     VersionControlModal(VersionControlModalVerb),
+    ParameterContextModal(ParameterContextModalVerb),
 }
 
 #[cfg(test)]
@@ -724,7 +850,8 @@ mod tests {
             .chain(EventsVerb::all().iter().map(|v| v.chord()))
             .chain(TracerVerb::all().iter().map(|v| v.chord()))
             .chain(ContentModalVerb::all().iter().map(|v| v.chord()))
-            .chain(VersionControlModalVerb::all().iter().map(|v| v.chord()));
+            .chain(VersionControlModalVerb::all().iter().map(|v| v.chord()))
+            .chain(ParameterContextModalVerb::all().iter().map(|v| v.chord()));
         for c in chords {
             assert_ne!(c.key, KeyCode::Char('j'), "no view verb may bind j");
             assert_ne!(c.key, KeyCode::Char('k'), "no view verb may bind k");
@@ -899,6 +1026,32 @@ mod tests {
             !BrowserVerb::OpenParameterContext.enabled(&ctx),
             "OpenParameterContext must be disabled when not on the Browser tab"
         );
+    }
+
+    #[test]
+    fn parameter_context_modal_verb_chords() {
+        use ParameterContextModalVerb as V;
+        assert_eq!(V::Close.chord().display(), "Esc");
+        assert_eq!(V::ToggleByContext.chord().display(), "t");
+        assert_eq!(V::ToggleShadowed.chord().display(), "s");
+        assert_eq!(V::ToggleUsedBy.chord().display(), "u");
+        assert_eq!(V::Search.chord().display(), "/");
+        assert_eq!(V::Refresh.chord().display(), "r");
+        assert_eq!(V::Copy.chord().display(), "c");
+    }
+
+    #[test]
+    fn parameter_context_modal_verb_in_all() {
+        let all = ParameterContextModalVerb::all();
+        assert!(all.contains(&ParameterContextModalVerb::Close));
+        assert!(all.contains(&ParameterContextModalVerb::ToggleByContext));
+        assert!(all.contains(&ParameterContextModalVerb::ToggleUsedBy));
+    }
+
+    #[test]
+    fn parameter_context_modal_search_next_prev_hidden_from_hint_bar() {
+        assert!(!ParameterContextModalVerb::SearchNext.show_in_hint_bar());
+        assert!(!ParameterContextModalVerb::SearchPrev.show_in_hint_bar());
     }
 
     #[test]
