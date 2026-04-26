@@ -9,6 +9,7 @@ pub mod browser;
 pub mod build;
 pub mod events;
 pub mod overview;
+pub mod parameter_context;
 pub mod status;
 pub mod tls_cert;
 pub mod tracer;
