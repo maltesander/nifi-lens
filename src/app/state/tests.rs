@@ -397,6 +397,47 @@ fn intent_error_sets_banner() {
 }
 
 #[test]
+#[tracing_test::traced_test]
+fn f12_emits_chord_dump_and_cluster_endpoint_lines() {
+    use crate::cluster::{ClusterEndpoint, SubscriberId};
+
+    let mut s = fresh_state();
+    let c = tiny_config();
+
+    // Subscribe to an endpoint so the debug dump emits cluster state logs.
+    let subscriber_id = SubscriberId(ViewId::Overview);
+    s.cluster
+        .subscribers
+        .subscribe(ClusterEndpoint::RootPgStatus, subscriber_id);
+
+    let key_event = key(KeyCode::F(12), KeyModifiers::NONE);
+    update(&mut s, key_event, &c);
+
+    // Chord dump: every entry is "{chord:12} = {source}"; the chord
+    // column is left-padded to width 12 and `=` always appears.
+    // Pick a chord we know is registered: AppAction::Quit ('q').
+    logs_assert(|lines: &[&str]| {
+        let any_chord = lines.iter().any(|l| l.contains(" = AppAction::"));
+        if any_chord {
+            Ok(())
+        } else {
+            Err("expected at least one chord-dump line".into())
+        }
+    });
+
+    // Cluster endpoint summary: the structured event's static message
+    // is "cluster endpoint state".
+    logs_assert(|lines: &[&str]| {
+        let any_endpoint = lines.iter().any(|l| l.contains("cluster endpoint state"));
+        if any_endpoint {
+            Ok(())
+        } else {
+            Err("expected at least one cluster endpoint state line".into())
+        }
+    });
+}
+
+#[test]
 fn cross_link_open_in_browser_pushes_history() {
     let (mut s, c) = seeded_browser_state();
     s.current_tab = ViewId::Bulletins;
