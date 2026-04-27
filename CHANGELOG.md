@@ -9,6 +9,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **`[polling.cluster] batch_concurrency` knob** (default `16`)
+  bounds the maximum number of concurrent in-flight HTTP requests
+  the per-PG fan-out fetchers (`version_control`,
+  `parameter_context_bindings`, `connections_by_pg`) issue per tick.
+  On a 500-PG cluster this caps in-flight from ~500 to 16 by
+  default, dramatically reducing pressure on NiFi's HTTP thread
+  pool. See [README §Configuration](README.md#configuration). Raise
+  on fast clusters; lower on overloaded ones.
+- **`init: X/11 endpoints ready` status-bar chip** displayed during
+  boot until every cluster fetcher has produced its first snapshot.
+  Replaces the "screen looks broken for 10 seconds" first-run UX
+  on slow clusters.
+- **`NO_COLOR` env var** honored alongside the existing `--no-color`
+  CLI flag, per [no-color.org](https://no-color.org/). Useful for
+  CI logs and screen readers.
+- **`Flags`** section in the README documenting `--config`,
+  `--context`, `--debug`, `--log-level`, `--no-color`, plus the
+  `NIFILENS_LOG` and `RUST_LOG` env-var fallbacks for log filtering.
+- **Logs** section in the README explaining the daily-rotated
+  `nifilens.log.YYYY-MM-DD` filename pattern and a
+  `tail-the-latest` recipe that handles midnight rollover.
+
 - **Fuzzy Find kind filter**: type `:proc`, `:pg`, `:cs`, `:conn`,
   `:in`, or `:out` at the start of the query to narrow the corpus to
   a single component kind. A chip row above the query shows the
@@ -44,6 +66,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **`--allow-writes` CLI flag is hidden from `--help`.** The flag is
+  still parsed (and still rejected at startup with a "writes not
+  implemented" error), but no longer surfaces in `--help` output —
+  removes a frequent footgun for users who think writes are
+  configurable in v0.1.
+- **AppEvent channel saturation watchdog**: a 1 Hz background task
+  emits a `tracing::warn!` whenever fewer than 16 of the channel's
+  256 slots remain free. Self-rate-limiting (silent when load
+  recovers); makes slow renders and producer surges visible without
+  any hot-path overhead.
+
 - **Config / log paths** now resolve via `directories::ProjectDirs`
   and pick the right location per OS. Linux behavior is unchanged
   (`$XDG_CONFIG_HOME` / `$XDG_STATE_HOME`, fallback to
@@ -55,6 +88,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   is not set there.
 
 ### Fixed
+
+- **Standalone NiFi 2.6.0 Nodes-panel degrade.** `nifi-rust-client`
+  0.11.0 maps the 409 response from `/controller/cluster` on
+  standalone servers to a `NotFound` variant whose debug repr
+  doesn't contain "409". The fetcher's standalone-detection
+  predicate now also matches the canonical NiFi message text
+  ("Only a node connected to a cluster"), so the Nodes panel
+  correctly degrades to the empty 4-column standalone layout
+  instead of showing a permanent `Failed` error.
+- **Clipboard read/write timeout (2 s).** `arboard::Clipboard`
+  operations could hang indefinitely on stalled X11/Wayland
+  clipboard daemons, freezing the UI. Each call now runs on a
+  worker thread behind a 2-second deadline; on timeout the user
+  sees a `clipboard: write timed out after 2s` banner and the next
+  call re-initializes a fresh handle.
+- **Parquet/Avro decoder timeout (5 s).** Pathological inputs
+  (broken offsets, huge schemas) could wedge a `spawn_blocking`
+  worker. Each decoder now runs on a worker thread with a 5-second
+  deadline; on timeout `classify_content` falls back to `Hex` via
+  the existing error path.
 
 - Tracer content viewer modal: `/`-search highlights now render on
   Input/Output rows for Parquet- and Avro-decoded tabular content. The
