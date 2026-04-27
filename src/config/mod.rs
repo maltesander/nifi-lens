@@ -24,8 +24,13 @@ pub struct Config {
     pub contexts: Vec<Context>,
 }
 
+/// Bulletins-tab configuration set via `[bulletins]` in the TOML config.
 #[derive(Debug, Clone, Deserialize, PartialEq, Eq)]
 pub struct BulletinsConfig {
+    /// Maximum number of bulletins kept in the rolling ring buffer that
+    /// feeds the Bulletins tab and the Overview sparkline.
+    /// Default 5000; valid range 100..=100_000. Larger values keep more
+    /// history at the cost of memory (~1 MiB per 5000 rows).
     #[serde(default = "default_ring_size")]
     pub ring_size: usize,
 }
@@ -51,17 +56,36 @@ pub struct UiConfig {
     pub timestamp_tz: crate::timestamp::TimestampTz,
 }
 
+/// One NiFi cluster context, set via `[[contexts]]` in the TOML config.
+/// Multiple contexts may coexist; the active one is selected via
+/// `current_context` at the top level or `--context <name>` on the CLI.
 #[derive(Debug, Clone, Deserialize, PartialEq, Eq)]
 pub struct Context {
+    /// Display name used in the UI and as the lookup key for `current_context` /
+    /// `--context`. Must be unique across all contexts in the file.
     pub name: String,
+    /// Base URL of the NiFi cluster, including scheme and port (e.g.
+    /// `https://nifi.example.com:8443`). Trailing slashes are tolerated.
     pub url: String,
+    /// Authentication mechanism for this context.
+    /// See `AuthConfig` for the supported variants (`password`, `token`, `mtls`).
     pub auth: AuthConfig,
+    /// Optional X-ProxiedEntitiesChain header value for proxied auth
+    /// scenarios (e.g. running behind Knox or a custom auth proxy).
     #[serde(default)]
     pub proxied_entities_chain: Option<String>,
+    /// How strictly to match the connected NiFi server's version against
+    /// the API surface. See `VersionStrategy`.
     #[serde(default)]
     pub version_strategy: VersionStrategy,
+    /// When `true`, accept self-signed and otherwise-invalid TLS
+    /// certificates from the NiFi server. Use only for development; never
+    /// in production. Default `false`.
     #[serde(default)]
     pub insecure_tls: bool,
+    /// Optional path to a PEM-encoded CA certificate used to validate the
+    /// NiFi server's TLS chain when the server presents a non-system-CA
+    /// certificate.
     #[serde(default)]
     pub ca_cert_path: Option<PathBuf>,
     /// Route all traffic (HTTP and HTTPS) through this proxy URL.
@@ -133,12 +157,22 @@ pub struct MtlsAuthConfig {
     pub client_identity_path: PathBuf,
 }
 
+/// Strategy for matching the connected NiFi server's version against the
+/// dynamic-client API surface. Set per-context via the `version_strategy`
+/// key.
 #[derive(Debug, Clone, Copy, Default, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "lowercase")]
 pub enum VersionStrategy {
+    /// Require an exact match with one of `nifi-rust-client`'s pinned
+    /// versions. Refuses to start otherwise. Safest; this is the default.
     #[default]
     Strict,
+    /// Pick the closest pinned version less than or equal to the
+    /// detected server version. Trades safety for compatibility with
+    /// patch-level NiFi versions the client wasn't built against.
     Closest,
+    /// Pick the latest pinned version regardless of the detected server
+    /// version. Use only when you know exactly what you're doing.
     Latest,
 }
 
@@ -276,9 +310,11 @@ password = "x"
     }
 }
 
-/// Configuration for the Tracer tab.
+/// Tracer-tab configuration set via `[tracer]` in the TOML config.
 #[derive(Debug, Clone, Default, Deserialize, PartialEq, Eq)]
 pub struct TracerConfig {
+    /// Per-content-type streaming ceilings for the content viewer modal.
+    /// See `TracerCeilingConfig`.
     #[serde(default)]
     pub ceiling: TracerCeilingConfig,
 
