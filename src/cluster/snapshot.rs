@@ -208,6 +208,46 @@ impl ClusterSnapshot {
         }
     }
 
+    /// Returns `(ready, total)` where `total = 11` (the number of
+    /// cluster fetchers owned by `ClusterStore`) and `ready` counts
+    /// those whose first fetch has completed — success or failure both
+    /// count, since both produce a signal the user can act on. Used by
+    /// the status-bar init chip to surface boot progress on slow
+    /// clusters.
+    ///
+    /// `connections_by_pg` is a fan-out endpoint: it is counted ready
+    /// once its map has been populated by the fetcher (any entry
+    /// inserted, even `Loading` or `Failed`). On a fresh cluster with
+    /// zero PGs the map stays empty until the first fetcher tick
+    /// inserts placeholders, so the chip will linger briefly even
+    /// when there are no PGs to fetch.
+    ///
+    /// `bulletins` uses `BulletinRing` rather than `EndpointState`; its
+    /// readiness is signalled by `meta.is_some()` (set on the first
+    /// fetch, success or fail).
+    pub fn ready_count(&self) -> (usize, usize) {
+        let total = 11;
+        let simple = [
+            !matches!(self.about, EndpointState::Loading),
+            !matches!(self.controller_status, EndpointState::Loading),
+            !matches!(self.root_pg_status, EndpointState::Loading),
+            !matches!(self.controller_services, EndpointState::Loading),
+            !matches!(self.cluster_nodes, EndpointState::Loading),
+            !matches!(self.tls_certs, EndpointState::Loading),
+            !matches!(self.system_diagnostics, EndpointState::Loading),
+            !matches!(self.version_control, EndpointState::Loading),
+            !matches!(self.parameter_context_bindings, EndpointState::Loading),
+        ];
+        let mut ready = simple.iter().filter(|r| **r).count();
+        if self.bulletins.meta.is_some() {
+            ready += 1;
+        }
+        if !self.connections_by_pg.is_empty() {
+            ready += 1;
+        }
+        (ready, total)
+    }
+
     /// Returns the `next_interval` from the latest `FetchMeta` for
     /// `endpoint`, or `None` if the endpoint has never been polled.
     /// Used by the F12 debug dump to surface the adaptive-cadence state.
@@ -463,5 +503,87 @@ mod tests {
             snap.next_interval_for(ClusterEndpoint::ParameterContextBindings),
             None
         );
+    }
+
+    #[test]
+    fn ready_count_starts_at_zero_of_eleven() {
+        let snap = ClusterSnapshot::default();
+        assert_eq!(snap.ready_count(), (0, 11));
+    }
+
+    #[test]
+    fn ready_count_counts_simple_ready_endpoint() {
+        let mut snap = ClusterSnapshot::default();
+        snap.about.apply(Ok(AboutSnapshot::default()), fake_meta());
+        let (ready, total) = snap.ready_count();
+        assert_eq!(total, 11);
+        assert_eq!(ready, 1);
+    }
+
+    #[test]
+    fn ready_count_failed_state_counts_as_ready() {
+        let mut snap = ClusterSnapshot::default();
+        snap.controller_status
+            .apply(Err(NifiLensError::WritesNotImplemented), fake_meta());
+        assert_eq!(snap.ready_count(), (1, 11));
+    }
+
+    #[test]
+    fn ready_count_bulletins_ready_when_meta_set() {
+        let mut snap = ClusterSnapshot::default();
+        snap.bulletins.meta = Some(fake_meta());
+        assert_eq!(snap.ready_count(), (1, 11));
+    }
+
+    #[test]
+    fn ready_count_connections_ready_when_map_non_empty() {
+        let mut snap = ClusterSnapshot::default();
+        snap.connections_by_pg
+            .insert("pg-x".into(), EndpointState::Loading);
+        assert_eq!(snap.ready_count(), (1, 11));
+    }
+
+    #[test]
+    fn ready_count_reaches_total_when_all_fetchers_reported() {
+        let mut snap = ClusterSnapshot::default();
+        snap.about.apply(Ok(AboutSnapshot::default()), fake_meta());
+        snap.controller_status
+            .apply(Ok(ControllerStatusSnapshot::default()), fake_meta());
+        snap.root_pg_status
+            .apply(Ok(RootPgStatusSnapshot::default()), fake_meta());
+        snap.controller_services
+            .apply(Ok(ControllerServicesSnapshot::default()), fake_meta());
+        snap.cluster_nodes.apply(
+            Ok(ClusterNodesSnapshot {
+                rows: vec![],
+                fetched_at: Instant::now(),
+                fetched_wall: time::OffsetDateTime::now_utc(),
+            }),
+            fake_meta(),
+        );
+        snap.tls_certs.apply(
+            Ok(TlsCertsSnapshot {
+                certs: HashMap::new(),
+                fetched_at: Instant::now(),
+                fetched_wall: time::OffsetDateTime::now_utc(),
+            }),
+            fake_meta(),
+        );
+        snap.system_diagnostics.apply(
+            Ok(SystemDiagSnapshot {
+                aggregate: crate::client::overview::SystemDiagAggregate::default(),
+                nodes: vec![],
+                fetched_at: Instant::now(),
+            }),
+            fake_meta(),
+        );
+        snap.version_control
+            .apply(Ok(VersionControlMap::default()), fake_meta());
+        snap.parameter_context_bindings
+            .apply(Ok(ParameterContextBindingsMap::default()), fake_meta());
+        snap.bulletins.meta = Some(fake_meta());
+        snap.connections_by_pg
+            .insert("pg-x".into(), EndpointState::Loading);
+        assert_eq!(snap.ready_count(), (11, 11));
     }
 }

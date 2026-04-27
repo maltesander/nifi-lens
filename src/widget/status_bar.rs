@@ -48,7 +48,21 @@ fn render_banner(frame: &mut Frame, area: Rect, state: &AppState) {
             let msg = truncate_to_width(&banner.message, area.width as usize);
             Line::from(Span::styled(msg, style))
         }
-        None => Line::from(Span::raw("")),
+        None => {
+            // While the cluster store is still in its first poll cycle,
+            // surface boot progress in the empty banner slot. Real
+            // banners (warnings, errors, info) take priority — see the
+            // `Some(banner)` arm above. Once `ready == total` the chip
+            // disappears and the slot returns to empty.
+            let (ready, total) = state.cluster.snapshot.ready_count();
+            if ready < total {
+                let chip = format!("init: {ready}/{total} endpoints ready");
+                let chip = truncate_to_width(&chip, area.width as usize);
+                Line::from(Span::styled(chip, theme::muted()))
+            } else {
+                Line::from(Span::raw(""))
+            }
+        }
     };
     frame.render_widget(Paragraph::new(line), area);
 }
@@ -170,6 +184,46 @@ mod tests {
         term.draw(|f| render(f, f.area(), &state)).unwrap();
         let out = format!("{}", term.backend());
         assert!(out.contains("query failed"));
+    }
+
+    #[test]
+    fn renders_init_chip_when_no_banner_and_endpoints_loading() {
+        let state = fresh_state();
+        // fresh_state has all endpoints in EndpointState::Loading by
+        // default — ready_count() returns (0, 11).
+        let backend = TestBackend::new(60, 1);
+        let mut term = Terminal::new(backend).unwrap();
+        term.draw(|f| render(f, f.area(), &state)).unwrap();
+        let out = format!("{}", term.backend());
+        assert!(
+            out.contains("init:"),
+            "init chip should appear when endpoints are still loading"
+        );
+        assert!(
+            out.contains("0/11"),
+            "expected 0/11 endpoints ready on fresh state"
+        );
+    }
+
+    #[test]
+    fn real_banner_overrides_init_chip() {
+        let mut state = fresh_state();
+        // fresh_state is in Loading — would show the init chip — but a
+        // real banner must take precedence.
+        state.status.banner = Some(Banner {
+            severity: BannerSeverity::Warning,
+            message: "something went wrong".to_string(),
+            detail: None,
+        });
+        let backend = TestBackend::new(60, 1);
+        let mut term = Terminal::new(backend).unwrap();
+        term.draw(|f| render(f, f.area(), &state)).unwrap();
+        let out = format!("{}", term.backend());
+        assert!(out.contains("something went wrong"));
+        assert!(
+            !out.contains("init:"),
+            "init chip must not appear when a real banner is set"
+        );
     }
 
     #[test]
