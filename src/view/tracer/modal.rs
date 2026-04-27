@@ -585,16 +585,25 @@ fn render_stream_status(
         None => String::new(),
         Some(b) if b.last_error.is_some() => format!(
             "loaded {} · fetch failed: {}",
-            bytes_ui(b.loaded.len()),
+            crate::bytes::format_bytes(b.loaded.len() as u64),
             b.last_error.clone().unwrap_or_default(),
         ),
         Some(b) if matches!(b.decoded, ContentRender::Tabular { .. }) => {
             footer_chip_text(&b.decoded, cfg, b.loaded.len())
         }
         Some(b) if b.ceiling_hit => ceiling_hit_chip(b, cfg),
-        Some(b) if b.fully_loaded => format!("loaded {} (complete)", bytes_ui(b.loaded.len())),
-        Some(b) if b.in_flight => format!("loaded {} · fetching…", bytes_ui(b.loaded.len())),
-        Some(b) => format!("loaded {}", bytes_ui(b.loaded.len())),
+        Some(b) if b.fully_loaded => format!(
+            "loaded {} (complete)",
+            crate::bytes::format_bytes(b.loaded.len() as u64)
+        ),
+        Some(b) if b.in_flight => format!(
+            "loaded {} · fetching…",
+            crate::bytes::format_bytes(b.loaded.len() as u64)
+        ),
+        Some(b) => format!(
+            "loaded {}",
+            crate::bytes::format_bytes(b.loaded.len() as u64)
+        ),
     };
     let style = match buf {
         Some(b) if b.last_error.is_some() => theme::error(),
@@ -620,7 +629,7 @@ pub fn ceiling_hit_chip(
     if parquet_truncated {
         let cap = cfg
             .tabular
-            .map(fmt_bytes)
+            .map(|c| crate::bytes::format_bytes_int(c as u64))
             .unwrap_or_else(|| "unbounded".into());
         return format!(
             "parquet truncated at {cap} — raise [tracer.ceiling] tabular or use \"s\" to save"
@@ -632,18 +641,8 @@ pub fn ceiling_hit_chip(
 fn legacy_ceiling_hit_chip(side: &crate::view::tracer::modal_state::SideBuffer) -> String {
     format!(
         "loaded {} · ceiling reached — press 's' to save full content",
-        bytes_ui(side.loaded.len()),
+        crate::bytes::format_bytes(side.loaded.len() as u64),
     )
-}
-
-fn bytes_ui(n: usize) -> String {
-    if n >= 1024 * 1024 {
-        format!("{:.1} MiB", n as f64 / 1_048_576.0)
-    } else if n >= 1024 {
-        format!("{:.1} KiB", n as f64 / 1024.0)
-    } else {
-        format!("{} B", n)
-    }
 }
 
 /// Returns the footer chip text for a content side.
@@ -670,7 +669,11 @@ pub fn footer_chip_text(
             let row_count = body.lines().count();
             let pct = match cfg.tabular {
                 Some(c) if c > 0 => {
-                    format!("{}% of {}", (fetched_bytes * 100) / c, fmt_bytes(c))
+                    format!(
+                        "{}% of {}",
+                        (fetched_bytes * 100) / c,
+                        crate::bytes::format_bytes_int(c as u64)
+                    )
                 }
                 _ => "complete".into(),
             };
@@ -685,21 +688,8 @@ pub fn footer_chip_text(
         }
         // Non-Tabular variants: return an empty string — the caller
         // (`render_stream_status`) handles these arms inline with the
-        // existing `bytes_ui`-based chip text.
+        // existing `crate::bytes::format_bytes`-based chip text.
         _ => String::new(),
-    }
-}
-
-/// Human-readable byte size using power-of-1024 units (integer, not fractional).
-fn fmt_bytes(n: usize) -> String {
-    const MIB: usize = 1024 * 1024;
-    const KIB: usize = 1024;
-    if n >= MIB {
-        format!("{} MiB", n / MIB)
-    } else if n >= KIB {
-        format!("{} KiB", n / KIB)
-    } else {
-        format!("{} B", n)
     }
 }
 
