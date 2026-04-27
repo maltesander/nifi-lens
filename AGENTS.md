@@ -90,11 +90,18 @@ Snapshot mutation is main-loop-only: the `ClusterUpdate` arm in
 `AppEvent::ClusterChanged(endpoint)`. Views observe the change by
 matching on the endpoint and invoking their `redraw_*` reducers.
 
-Five endpoints are **subscriber-gated** — they park when no view is
+Seven endpoints are **subscriber-gated** — they park when no view is
 subscribed: `root_pg_status`, `controller_services`, `connections_by_pg`,
-`version_control`, `parameter_context_bindings`. `WorkerRegistry::ensure`
-calls `cluster.subscribe(endpoint, view)` on tab entry and
-`unsubscribe(...)` on tab exit.
+`cluster_nodes`, `tls_certs`, `version_control`,
+`parameter_context_bindings`. `WorkerRegistry::ensure` calls
+`cluster.subscribe(endpoint, view)` on tab entry and `unsubscribe(...)`
+on tab exit.
+
+Per-PG fan-out fetchers (`version_control`,
+`parameter_context_bindings`, `connections_by_pg`) bound concurrent
+in-flight HTTP requests via `futures::stream::buffer_unordered(N)`.
+`N` defaults to 16 and is configurable via `[polling.cluster]
+batch_concurrency`. Setting `0` is treated as `1`.
 
 Context switch: `cluster.shutdown()` aborts every fetcher and the store
 is rebuilt with the new `NifiClient` in the main loop's
@@ -124,9 +131,14 @@ development workflow, see "Dependency on `nifi-rust-client`" below.
 
 All user actions route through a single `Intent` enum and a dispatcher.
 Write variants exist in the enum from day one so a later write-capable
-build does not require restructuring, but no key binding constructs them
-in v0.1 and the dispatcher refuses to execute them without an
-`--allow-writes` CLI flag (which v0.1 does not expose).
+build does not require restructuring, but no key binding constructs
+them in v0.1 and `IntentDispatcher::handle_pure` returns
+`NifiLensError::WriteIntentRefused` for every write variant
+unconditionally. The `--allow-writes` CLI flag is registered with
+`#[arg(hide = true)]` so it doesn't show in `--help`, and `lib.rs`
+rejects the flag at startup with a clear "writes not implemented"
+error before the runtime even spins up — the runtime guard at the
+dispatcher is defense-in-depth.
 
 ### Error handling
 
@@ -214,16 +226,41 @@ See "Visual language" for the full shared-helper catalogue.
 
 ### Logging
 
-`tracing` + `tracing-subscriber` + `tracing-appender` write a rotating
-log (5 files × 10 MB) to the platform state directory resolved via
-`directories::ProjectDirs`:
+`tracing` + `tracing-subscriber` + `tracing-appender` write a daily-rotated
+log to the platform state directory resolved via `directories::ProjectDirs`:
 
 - Linux: `$XDG_STATE_HOME/nifilens/` (or `~/.local/state/nifilens/`)
 - macOS: `~/Library/Caches/nifilens/`
 - Windows: `%LOCALAPPDATA%\nifilens\cache\`
 
-Default level `info`; `--debug` raises to `debug`. **Never** writes to
-stdout or stderr while the TUI is active.
+The on-disk filename carries a date suffix — `nifilens.log.YYYY-MM-DD`
+— per `tracing_appender::rolling::daily`. To follow the current day's
+log:
+
+```bash
+tail -f "$(ls -t ~/.local/state/nifilens/nifilens.log.* | head -1)"
+```
+
+Old day files accumulate; rotation is purely date-based (no automatic
+size pruning). The log directory is created with mode `0700` on Unix.
+
+Level resolution (highest precedence first):
+
+1. `--log-level <off|error|warn|info|debug|trace>` CLI flag.
+2. `--debug` CLI flag (equivalent to `--log-level debug`).
+3. `NIFILENS_LOG` env var (humantime / `tracing` filter directive).
+4. `RUST_LOG` env var (same shape, conventional fallback).
+5. Default `info`.
+
+The filter applies to the `nifi_lens` target; library logs from
+`nifi-rust-client` etc. require their own filter directive.
+
+**Never** writes to stdout or stderr while the TUI is active.
+
+`F12` dumps the keymap reverse table and per-endpoint subscriber state
+to the log file (one `info` line per chord, plus one structured event
+per `ClusterEndpoint`). No visible UI change. See "Input layer" for
+the user-facing intent.
 
 ### Overview Components panel
 
@@ -254,6 +291,16 @@ placeholders when the node is disconnected or offloaded. Standalone
 NiFi servers return 409 on `/controller/cluster`; the fetcher
 transparently serves an empty snapshot and the panel degrades to a
 4-column layout (no badge, no heartbeat).
+
+`error_is_standalone_409` (in `cluster/fetcher_tasks.rs`) detects this
+shape via the error's debug repr. Conservative match on three markers:
+the literal `"409"`, an explicit `NotClustered` variant from
+`nifi-rust-client`, OR the canonical NiFi message text "Only a node
+connected to a cluster". The third matcher is necessary because
+`nifi-rust-client` 0.11.0 maps NiFi 2.6.0's 409 response to a
+`NotFound` variant whose debug repr contains the message but not the
+status code. If any of the three match, the fetcher serves an empty
+snapshot; otherwise the endpoint shows as `Failed`.
 
 The detail modal (`Enter` on a node) renders a four-quadrant dashboard:
 identity header (badge + status word + roles + heartbeat age + node_id +
