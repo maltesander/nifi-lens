@@ -21,9 +21,12 @@ use super::{ContentRender, TabularFormat};
 ///    pretty-print when parseable); else → `Hex` of the first 4 KiB.
 pub fn classify_content(bytes: Vec<u8>) -> ContentRender {
     if let Some(format) = detect_tabular_format(&bytes) {
+        // Snapshot the first 4 KiB for the Hex-fallback branch BEFORE
+        // moving `bytes` into the decoder thread.
+        let head_for_hex: Vec<u8> = bytes[..bytes.len().min(4096)].to_vec();
         let result = match format {
-            TabularFormat::Parquet => decode_parquet(&bytes),
-            TabularFormat::Avro => decode_avro(&bytes),
+            TabularFormat::Parquet => decode_with_timeout("parquet", bytes, |b| decode_parquet(&b)),
+            TabularFormat::Avro => decode_with_timeout("avro", bytes, |b| decode_avro(&b)),
         };
         match result {
             Ok(render) => return render,
@@ -34,12 +37,61 @@ pub fn classify_content(bytes: Vec<u8>) -> ContentRender {
                     "tabular decoder failed, falling back to hex"
                 );
                 return ContentRender::Hex {
-                    first_4k: hex_dump(&bytes[..bytes.len().min(4096)]),
+                    first_4k: hex_dump(&head_for_hex),
                 };
             }
         }
     }
     classify_text_or_hex(bytes)
+}
+
+/// Cap on synchronous parquet/avro decoder runtime. The decoders are
+/// already bounded by `TABULAR_RECORD_LIMIT` and `TABULAR_BODY_LIMIT`,
+/// but pathological inputs (broken offsets, huge schemas) can decode
+/// slowly enough to wedge a `spawn_blocking` worker. Wall-clock cap.
+const DECODER_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(5);
+
+/// Run `f` on a worker thread, return its result, or surface a timeout
+/// error after [`DECODER_TIMEOUT`]. The worker thread is detached on
+/// timeout — its `bytes` Vec is dropped when the thread eventually
+/// finishes; no double-free risk because the bytes were moved in.
+fn decode_with_timeout<F, T>(
+    label: &'static str,
+    bytes: Vec<u8>,
+    f: F,
+) -> Result<T, Box<dyn std::error::Error + Send + Sync>>
+where
+    F: FnOnce(Vec<u8>) -> Result<T, Box<dyn std::error::Error + Send + Sync>> + Send + 'static,
+    T: Send + 'static,
+{
+    decode_with_timeout_inner(label, bytes, DECODER_TIMEOUT, f)
+}
+
+/// Inner helper parameterised on the timeout so unit tests can drive
+/// it with a sub-second deadline. Public surface always uses
+/// [`DECODER_TIMEOUT`] via [`decode_with_timeout`].
+fn decode_with_timeout_inner<F, T>(
+    label: &'static str,
+    bytes: Vec<u8>,
+    timeout: std::time::Duration,
+    f: F,
+) -> Result<T, Box<dyn std::error::Error + Send + Sync>>
+where
+    F: FnOnce(Vec<u8>) -> Result<T, Box<dyn std::error::Error + Send + Sync>> + Send + 'static,
+    T: Send + 'static,
+{
+    let (tx, rx) = std::sync::mpsc::channel();
+    // Detach: on timeout the worker thread continues until `f` returns,
+    // then drops `bytes` and the send-side of the channel. The receiver
+    // is already gone, so the send is a no-op.
+    let _detach = std::thread::spawn(move || {
+        let result = f(bytes);
+        let _ = tx.send(result);
+    });
+    match rx.recv_timeout(timeout) {
+        Ok(result) => result,
+        Err(_) => Err(format!("{label} decoder timed out after {}s", timeout.as_secs()).into()),
+    }
 }
 
 /// Today's classifier body, extracted so [`classify_content`] can call
@@ -665,5 +717,37 @@ mod tests {
     #[test]
     fn tabular_decode_respects_record_limit() {
         assert_eq!(TABULAR_RECORD_LIMIT, 50_000);
+    }
+
+    // ── Decoder-timeout wrapper ──────────────────────────────────────────────
+
+    #[test]
+    fn decode_with_timeout_returns_err_after_deadline() {
+        let result: Result<i32, _> = decode_with_timeout_inner(
+            "test",
+            Vec::new(),
+            std::time::Duration::from_millis(100),
+            |_| {
+                std::thread::sleep(std::time::Duration::from_millis(500));
+                Ok::<i32, Box<dyn std::error::Error + Send + Sync>>(42)
+            },
+        );
+        assert!(result.is_err());
+        let err = result.unwrap_err();
+        assert!(
+            err.to_string().contains("timed out"),
+            "expected timeout error, got: {err}"
+        );
+    }
+
+    #[test]
+    fn decode_with_timeout_returns_ok_when_fast() {
+        let result: Result<i32, _> = decode_with_timeout_inner(
+            "test",
+            Vec::new(),
+            std::time::Duration::from_millis(500),
+            |_| Ok::<i32, Box<dyn std::error::Error + Send + Sync>>(42),
+        );
+        assert_eq!(result.unwrap(), 42);
     }
 }
