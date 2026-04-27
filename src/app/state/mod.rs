@@ -142,6 +142,12 @@ pub struct ClusterSummary {
     pub total_nodes: Option<usize>,
 }
 
+/// Maximum time the UI thread will block waiting for an `arboard`
+/// clipboard read or write. On a stalled X11 / Wayland clipboard
+/// daemon the underlying syscall can hang indefinitely; bounding it
+/// here keeps the UI responsive.
+const CLIPBOARD_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(2);
+
 /// Wrapper around `arboard::Clipboard` so `AppState` can still derive
 /// `Debug`. The real clipboard handle has no `Debug` impl.
 pub struct ClipboardHandle(pub arboard::Clipboard);
@@ -365,6 +371,12 @@ impl AppState {
     /// `strong_count` at `MIN_OWNERS` forever, so the teardown branch
     /// in its `Drop` impl (which writes to stderr and corrupts the
     /// ratatui alt-screen grid) never runs until the TUI exits.
+    ///
+    /// The `set_text` call runs on a worker thread bounded by a
+    /// 2 second deadline (`CLIPBOARD_TIMEOUT`). On timeout the handle
+    /// is dropped (the next call re-inits a fresh one) and the worker
+    /// thread is detached — its hung syscall completes when the OS
+    /// clipboard daemon recovers.
     pub fn copy_to_clipboard(&mut self, text: String) -> Result<(), String> {
         if self.clipboard.is_none() {
             match arboard::Clipboard::new() {
@@ -374,17 +386,43 @@ impl AppState {
                 Err(err) => return Err(err.to_string()),
             }
         }
-        let handle = self
+
+        // Take the handle out so the worker thread can own it.
+        let mut handle = self
             .clipboard
-            .as_mut()
+            .take()
             .ok_or_else(|| "clipboard handle unavailable".to_string())?;
-        handle.0.set_text(text).map_err(|e| e.to_string())
+
+        let (tx, rx) = std::sync::mpsc::channel::<(Result<(), String>, ClipboardHandle)>();
+        let _detach = std::thread::spawn(move || {
+            let result = handle.0.set_text(text).map_err(|e| e.to_string());
+            // If the receiver has been dropped (timeout fired), this send is
+            // discarded and the thread exits silently.
+            let _ = tx.send((result, handle));
+        });
+
+        match rx.recv_timeout(CLIPBOARD_TIMEOUT) {
+            Ok((result, handle)) => {
+                self.clipboard = Some(handle);
+                result
+            }
+            Err(_) => {
+                // Worker hung past the 2s deadline. Detach the JoinHandle
+                // (drop without join) and leave self.clipboard = None so the
+                // next call re-inits a fresh handle.
+                Err("clipboard: write timed out after 2s".into())
+            }
+        }
     }
 
     /// Read a string from the system clipboard.
     ///
     /// Uses the same persistent `arboard` handle as `copy_to_clipboard`,
     /// lazily initializing it on first use.
+    ///
+    /// The `get_text` call runs on a worker thread bounded by a
+    /// 2 second deadline (`CLIPBOARD_TIMEOUT`). Timeout handling
+    /// matches `copy_to_clipboard`.
     pub fn get_from_clipboard(&mut self) -> Result<String, String> {
         if self.clipboard.is_none() {
             match arboard::Clipboard::new() {
@@ -394,11 +432,26 @@ impl AppState {
                 Err(err) => return Err(err.to_string()),
             }
         }
-        let handle = self
+
+        // Take the handle out so the worker thread can own it.
+        let mut handle = self
             .clipboard
-            .as_mut()
+            .take()
             .ok_or_else(|| "clipboard handle unavailable".to_string())?;
-        handle.0.get_text().map_err(|e| e.to_string())
+
+        let (tx, rx) = std::sync::mpsc::channel::<(Result<String, String>, ClipboardHandle)>();
+        let _detach = std::thread::spawn(move || {
+            let result = handle.0.get_text().map_err(|e| e.to_string());
+            let _ = tx.send((result, handle));
+        });
+
+        match rx.recv_timeout(CLIPBOARD_TIMEOUT) {
+            Ok((result, handle)) => {
+                self.clipboard = Some(handle);
+                result
+            }
+            Err(_) => Err("clipboard: read timed out after 2s".into()),
+        }
     }
 
     /// Returns true when the currently active view has a text-input field open.
