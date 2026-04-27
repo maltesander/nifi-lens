@@ -81,3 +81,65 @@ async fn about_500_surfaces_error() {
         "expected LoginFailed or AboutFailed, got {err:?}"
     );
 }
+
+#[tokio::test]
+async fn login_403_surfaces_unauthorized() {
+    let server = MockServer::start().await;
+    Mock::given(method("POST"))
+        .and(path("/nifi-api/access/token"))
+        .respond_with(ResponseTemplate::new(403).set_body_string("forbidden"))
+        .mount(&server)
+        .await;
+
+    let err = NifiClient::connect(&ctx_for(server.uri()))
+        .await
+        .expect_err("connect should fail");
+
+    // 403 on /access/token is classified as NifiUnauthorized by the
+    // library (same as 401). Pin the observable shape: a
+    // NifiUnauthorized variant carrying the context name.
+    assert!(
+        matches!(err, NifiLensError::NifiUnauthorized { .. }),
+        "expected NifiUnauthorized, got {err:?}"
+    );
+    let msg = err.to_string();
+    assert!(
+        !msg.is_empty() && msg.contains("wiremock"),
+        "expected user-readable banner with context name, got: {msg}"
+    );
+}
+
+#[tokio::test]
+async fn about_503_surfaces_failed_variant() {
+    let server = MockServer::start().await;
+
+    // login succeeds
+    Mock::given(method("POST"))
+        .and(path("/nifi-api/access/token"))
+        .respond_with(ResponseTemplate::new(200).set_body_string("stub-jwt-token"))
+        .mount(&server)
+        .await;
+
+    // Version detection happens inside login() (the library calls /flow/about
+    // automatically). So a 503 on /flow/about will surface during connect,
+    // either as LoginFailed (if the library treats version detection as part
+    // of login) or as AboutFailed (if it's a separate error path). Accept
+    // either variant.
+    Mock::given(method("GET"))
+        .and(path("/nifi-api/flow/about"))
+        .respond_with(ResponseTemplate::new(503))
+        .mount(&server)
+        .await;
+
+    let err = NifiClient::connect(&ctx_for(server.uri()))
+        .await
+        .expect_err("connect should fail");
+
+    assert!(
+        matches!(
+            err,
+            NifiLensError::LoginFailed { .. } | NifiLensError::AboutFailed { .. }
+        ),
+        "expected LoginFailed or AboutFailed, got {err:?}"
+    );
+}
