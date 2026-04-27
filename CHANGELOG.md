@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.8.0] — 2026-04-27
+
 ### Added
 
 - **`[polling.cluster] batch_concurrency` knob** (default `16`)
@@ -554,7 +556,8 @@ that landed in this tag.
   drill-in, processor thread leaderboard, and queue time-to-full
   predictions are known unshipped polish items.
 
-[Unreleased]: https://github.com/maltesander/nifi-lens/compare/v0.7.0...HEAD
+[Unreleased]: https://github.com/maltesander/nifi-lens/compare/v0.8.0...HEAD
+[0.8.0]: https://github.com/maltesander/nifi-lens/releases/tag/v0.8.0
 [0.7.0]: https://github.com/maltesander/nifi-lens/releases/tag/v0.7.0
 [0.6.0]: https://github.com/maltesander/nifi-lens/releases/tag/v0.6.0
 [0.5.0]: https://github.com/maltesander/nifi-lens/releases/tag/v0.5.0
