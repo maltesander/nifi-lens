@@ -2355,6 +2355,91 @@ fn modal_loaded_event_with_matching_pg_id_populates_diffs() {
 }
 
 #[test]
+fn modal_failed_event_with_matching_pg_id_marks_diffs_failed() {
+    use crate::view::browser::state::{VersionControlDifferenceLoad, VersionControlModalState};
+    let mut state = BrowserState::new();
+    state.version_modal = Some(VersionControlModalState::pending(
+        "pg-1".into(),
+        "ingest".into(),
+        None,
+    ));
+    state.apply_version_control_modal_failed("pg-1".into(), "diff fetch HTTP 500".into());
+
+    let modal = state.version_modal.as_ref().expect("modal still open");
+    match &modal.differences {
+        VersionControlDifferenceLoad::Failed(err) => {
+            assert_eq!(err, "diff fetch HTTP 500");
+        }
+        other => panic!("expected Failed(...), got {:?}", other),
+    }
+    // Identity is unchanged — failure path doesn't touch it.
+    // (Pending tests already cover the initial-identity-None state.)
+}
+
+#[test]
+fn modal_failed_event_with_mismatched_pg_id_is_ignored() {
+    use crate::view::browser::state::{VersionControlDifferenceLoad, VersionControlModalState};
+    let mut state = BrowserState::new();
+    state.version_modal = Some(VersionControlModalState::pending(
+        "pg-1".into(),
+        "ingest".into(),
+        None,
+    ));
+    state.apply_version_control_modal_failed("pg-OTHER".into(), "ignored failure".into());
+
+    // Mismatched pg_id: modal stays in Pending — failure was for a stale fetch.
+    assert!(matches!(
+        state.version_modal.as_ref().unwrap().differences,
+        VersionControlDifferenceLoad::Pending
+    ));
+}
+
+#[test]
+fn modal_failed_after_identity_loaded_preserves_identity() {
+    use crate::client::FlowComparisonGrouped;
+    use crate::cluster::snapshot::VersionControlSummary;
+    use crate::view::browser::state::{VersionControlDifferenceLoad, VersionControlModalState};
+    use nifi_rust_client::dynamic::types::VersionControlInformationDtoState;
+
+    let mut state = BrowserState::new();
+    state.version_modal = Some(VersionControlModalState::pending(
+        "pg-1".into(),
+        "ingest".into(),
+        None,
+    ));
+
+    // First a successful load establishes the identity.
+    let identity = VersionControlSummary {
+        state: VersionControlInformationDtoState::Stale,
+        registry_name: Some("registry".into()),
+        bucket_name: Some("bucket".into()),
+        branch: Some("main".into()),
+        flow_id: Some("flow-1".into()),
+        flow_name: Some("ingest".into()),
+        version: Some("1".into()),
+        state_explanation: None,
+    };
+    state.apply_version_control_modal_loaded(
+        "pg-1".into(),
+        Some(identity),
+        FlowComparisonGrouped::default(),
+    );
+
+    // Then a later failure event lands; identity should survive.
+    state.apply_version_control_modal_failed("pg-1".into(), "refresh failed".into());
+
+    let modal = state.version_modal.as_ref().unwrap();
+    assert!(
+        modal.identity.is_some(),
+        "identity must survive a later failure"
+    );
+    assert!(matches!(
+        modal.differences,
+        VersionControlDifferenceLoad::Failed(_)
+    ));
+}
+
+#[test]
 fn toggle_environmental_flips_flag() {
     use crate::view::browser::state::VersionControlModalState;
     let mut state = BrowserState::new();
