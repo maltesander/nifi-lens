@@ -26,6 +26,17 @@ use crate::event::AppEvent;
 use crate::intent::{Intent, IntentDispatcher};
 use crate::logging::StderrToggle;
 
+/// Total slot count of the central `AppEvent` mpsc channel. Producers
+/// across input/tick/cluster-fetcher/worker/intent paths feed into it
+/// and the single UI loop drains it. Sized for bursty cluster fanouts
+/// without backpressuring producers under healthy render cadence.
+const APP_EVENT_CHANNEL_CAPACITY: usize = 256;
+
+/// Threshold for the saturation watchdog. When fewer than this many
+/// slots remain free, the watchdog emits a `tracing::warn!` once per
+/// second until capacity recovers.
+const APP_EVENT_CHANNEL_LOW_WATER: usize = 16;
+
 pub async fn run(
     client: NifiClient,
     config: Config,
@@ -37,9 +48,14 @@ pub async fn run(
     let client = Arc::new(RwLock::new(client));
     let config = Arc::new(config);
 
-    let (tx, mut rx) = mpsc::channel::<AppEvent>(256);
+    let (tx, mut rx) = mpsc::channel::<AppEvent>(APP_EVENT_CHANNEL_CAPACITY);
     spawn_input_task(tx.clone());
     spawn_tick_task(tx.clone());
+    spawn_channel_saturation_watchdog(
+        tx.clone(),
+        APP_EVENT_CHANNEL_LOW_WATER,
+        APP_EVENT_CHANNEL_CAPACITY,
+    );
 
     stderr_toggle.suppress();
     let _terminal_guard = TerminalGuard::enter(stderr_toggle.clone())?;
@@ -416,6 +432,33 @@ fn spawn_tick_task(tx: mpsc::Sender<AppEvent>) {
     });
 }
 
+/// Watch the `AppEvent` channel's remaining capacity and warn once per
+/// second while fewer than `low_water` slots remain. Self-rate-limiting:
+/// the warn falls silent as soon as capacity recovers. Spawned alongside
+/// the input/tick tasks; aborts when the runtime shuts down.
+fn spawn_channel_saturation_watchdog(tx: mpsc::Sender<AppEvent>, low_water: usize, total: usize) {
+    tokio::task::spawn_local(async move {
+        let mut sleep = tokio::time::interval(std::time::Duration::from_secs(1));
+        sleep.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+        loop {
+            sleep.tick().await;
+            // `tx.capacity()` returns the *remaining* slots, not the
+            // total capacity. The Sender held by the watchdog stays
+            // alive for the lifetime of the runtime; no need to check
+            // for closed.
+            let remaining = tx.capacity();
+            if remaining < low_water {
+                let in_flight = total.saturating_sub(remaining);
+                tracing::warn!(
+                    in_flight,
+                    capacity = total,
+                    "AppEvent channel near saturation — slow render or producer surge"
+                );
+            }
+        }
+    });
+}
+
 struct TerminalGuard {
     stderr_toggle: StderrToggle,
 }
@@ -445,4 +488,65 @@ fn install_panic_hook(stderr_toggle: StderrToggle) {
         stderr_toggle.restore();
         previous(info);
     }));
+}
+
+#[cfg(test)]
+mod channel_saturation_tests {
+    use super::*;
+    use tokio::sync::mpsc;
+    use tracing_test::traced_test;
+
+    #[tokio::test(flavor = "current_thread", start_paused = true)]
+    #[traced_test]
+    async fn warns_when_capacity_below_low_water() {
+        let local = tokio::task::LocalSet::new();
+        local
+            .run_until(async {
+                let (tx, _rx) = mpsc::channel::<AppEvent>(20);
+                // Fill 15 of 20 slots → only 5 remaining → below low_water of 16.
+                for _ in 0..15 {
+                    tx.send(AppEvent::Tick).await.expect("channel open");
+                }
+                spawn_channel_saturation_watchdog(tx.clone(), 16, 20);
+
+                // Advance virtual time past the first 1s tick.
+                tokio::time::advance(std::time::Duration::from_millis(1100)).await;
+                tokio::task::yield_now().await;
+
+                logs_assert(|lines: &[&str]| {
+                    let any_warn = lines.iter().any(|l| l.contains("near saturation"));
+                    if any_warn {
+                        Ok(())
+                    } else {
+                        Err("expected near-saturation warn".into())
+                    }
+                });
+            })
+            .await;
+    }
+
+    #[tokio::test(flavor = "current_thread", start_paused = true)]
+    #[traced_test]
+    async fn no_warn_when_capacity_healthy() {
+        let local = tokio::task::LocalSet::new();
+        local
+            .run_until(async {
+                let (tx, _rx) = mpsc::channel::<AppEvent>(20);
+                // Empty channel → 20 remaining → above low_water of 16.
+                spawn_channel_saturation_watchdog(tx.clone(), 16, 20);
+
+                tokio::time::advance(std::time::Duration::from_millis(1100)).await;
+                tokio::task::yield_now().await;
+
+                logs_assert(|lines: &[&str]| {
+                    let any_warn = lines.iter().any(|l| l.contains("near saturation"));
+                    if !any_warn {
+                        Ok(())
+                    } else {
+                        Err("unexpected near-saturation warn".into())
+                    }
+                });
+            })
+            .await;
+    }
 }

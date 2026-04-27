@@ -58,6 +58,7 @@ insta = { version = "1", features = ["filters"] }
 rcgen = "0.14"
 tempfile = "3"
 tokio = { version = "1", features = ["full", "test-util"] }
+tracing-test = "0.2"
 wiremock = "0.6"
 
 [build-dependencies]
