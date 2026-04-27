@@ -28,7 +28,7 @@ pub struct Args {
     pub no_color: bool,
 
     /// Reserved for v2; currently errors immediately with "write mode not implemented"
-    #[arg(long, global = true)]
+    #[arg(long, global = true, hide = true)]
     pub allow_writes: bool,
 
     #[command(subcommand)]
