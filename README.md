@@ -41,6 +41,14 @@
 
 ![Browser tab](assets/screenshots/browser.png)
 
+**Browser** — Parameter-contexts: "Where does this parameter come from?"
+
+![Browser tab](assets/screenshots/browser_parameter.png)
+
+**Browser** — Versioned process-groups: "What changed in this process group?"
+
+![Browser tab](assets/screenshots/browser_version.png)
+
 **Events** — Provenance search and detail: "What just happened across the cluster?"
 
 ![Events tab](assets/screenshots/events.png)
@@ -49,7 +57,7 @@
 
 ![Tracer — attribute diff](assets/screenshots/tracer_attributes.png)
 
-**Tracer** — Content preview and diff for CSV, JSON, AVRO and PARQUET: "What changed in this flowfile?"
+**Tracer** — Content preview and diff for CSV, JSON, AVRO and PARQUET: "What changed in the flowfile content?"
 
 ![Tracer — content preview](assets/screenshots/tracer_content.png)
 
