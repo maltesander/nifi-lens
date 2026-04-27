@@ -117,7 +117,7 @@ fn render_header(frame: &mut Frame, area: Rect, row: &NodeHealthRow, now: time::
                 Span::raw(roles),
                 Span::raw("            "),
                 Span::styled("heartbeat ", theme::muted()),
-                Span::styled(hb_text, heartbeat_age_style(c.heartbeat_age)),
+                Span::styled(hb_text, super::heartbeat_age_style(c.heartbeat_age)),
                 Span::styled(" ago", theme::muted()),
             ])
         }
@@ -268,15 +268,6 @@ fn roles_label(primary: bool, coord: bool) -> String {
         (true, false) => "Primary".into(),
         (false, true) => "Coordinator".into(),
         (false, false) => String::new(),
-    }
-}
-
-fn heartbeat_age_style(age: Option<std::time::Duration>) -> Style {
-    match age {
-        None => theme::muted(),
-        Some(d) if d.as_secs() < 30 => theme::muted(),
-        Some(d) if d.as_secs() < 120 => theme::warning(),
-        Some(_) => theme::error(),
     }
 }
 

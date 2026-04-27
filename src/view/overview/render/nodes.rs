@@ -277,7 +277,7 @@ fn node_to_row(
             let age_text = crate::timestamp::format_age(c.heartbeat_age);
             Span::styled(
                 format!("  {age_text}"),
-                heartbeat_age_style(c.heartbeat_age),
+                super::heartbeat_age_style(c.heartbeat_age),
             )
         })
         .unwrap_or_else(|| Span::raw(""));
@@ -317,14 +317,4 @@ fn node_to_row(
     cells.push(load_cell);
     cells.push(cert_cell);
     Row::new(cells)
-}
-
-/// Style for the heartbeat age text appended to the address cell.
-fn heartbeat_age_style(age: Option<std::time::Duration>) -> Style {
-    match age {
-        None => theme::muted(),
-        Some(d) if d.as_secs() < 30 => theme::muted(),
-        Some(d) if d.as_secs() < 120 => theme::warning(),
-        Some(_) => theme::error(),
-    }
 }

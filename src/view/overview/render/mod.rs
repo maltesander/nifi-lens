@@ -157,5 +157,18 @@ pub(super) fn health_severity_style(s: crate::client::overview::Severity) -> Sty
     }
 }
 
+/// Style for the heartbeat age text appended to the address cell.
+///
+/// Shared helper: used by `nodes.rs` for the address cell's heartbeat-age
+/// span and by `node_detail.rs` for the detail modal's identity panel.
+pub(super) fn heartbeat_age_style(age: Option<std::time::Duration>) -> Style {
+    match age {
+        None => theme::muted(),
+        Some(d) if d.as_secs() < 30 => theme::muted(),
+        Some(d) if d.as_secs() < 120 => theme::warning(),
+        Some(_) => theme::error(),
+    }
+}
+
 #[cfg(test)]
 mod tests;
