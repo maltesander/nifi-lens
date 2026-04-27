@@ -150,21 +150,12 @@ fn render_body(frame: &mut Frame, area: Rect, modal: &mut DetailModalState) {
         && let Some(idx) = s.current
         && let Some(m) = s.matches.get(idx)
     {
-        let target = m.line_idx;
-        let rows = area.height as usize;
-        if target < modal.scroll.offset {
-            modal.scroll.offset = target;
-        } else if rows > 0 && target >= modal.scroll.offset + rows {
-            modal.scroll.offset = target + 1 - rows;
-        }
+        modal.scroll.scroll_to_visible(m.line_idx);
     }
 
     // Clamp scroll offset against estimated wrapped rows.
     let estimated_rows = estimate_wrapped_rows(&body, area.width as usize);
-    let max_offset = estimated_rows.saturating_sub(area.height as usize);
-    if modal.scroll.offset > max_offset {
-        modal.scroll.offset = max_offset;
-    }
+    modal.scroll.clamp_to_content(estimated_rows);
 
     frame.render_widget(
         Paragraph::new(styled)

@@ -47,6 +47,35 @@ impl VerticalScrollState {
     pub fn jump_bottom(&mut self, content_rows: usize) {
         self.offset = content_rows.saturating_sub(self.last_viewport_rows);
     }
+
+    /// Adjust `offset` so that `target_row` (a 0-based row index into
+    /// the content) is within the current viewport. If it's above
+    /// `offset`, scroll up to put it at the top edge. If it's below
+    /// `offset + last_viewport_rows`, scroll down so the target sits
+    /// at the bottom edge of the viewport. Otherwise, no change.
+    ///
+    /// Used by modals that auto-scroll to a search match.
+    pub fn scroll_to_visible(&mut self, target_row: usize) {
+        if self.last_viewport_rows == 0 {
+            return;
+        }
+        if target_row < self.offset {
+            self.offset = target_row;
+        } else if target_row >= self.offset + self.last_viewport_rows {
+            self.offset = target_row + 1 - self.last_viewport_rows;
+        }
+    }
+
+    /// Clamp `offset` so it never exceeds `content_rows - last_viewport_rows`.
+    /// Called by render after the content's wrapped height is known —
+    /// without this, fast paging or window resize can leave the offset
+    /// dangling past the end of the content.
+    pub fn clamp_to_content(&mut self, content_rows: usize) {
+        let max = content_rows.saturating_sub(self.last_viewport_rows);
+        if self.offset > max {
+            self.offset = max;
+        }
+    }
 }
 
 /// Vertical + horizontal scroll state used by the Tracer content
@@ -242,6 +271,78 @@ mod tests {
         };
         v.jump_bottom(usize::MAX);
         assert_eq!(v.offset, usize::MAX - 30);
+    }
+
+    #[test]
+    fn scroll_to_visible_above_viewport() {
+        let mut v = VerticalScrollState {
+            offset: 20,
+            last_viewport_rows: 10,
+        };
+        v.scroll_to_visible(5);
+        assert_eq!(v.offset, 5);
+    }
+
+    #[test]
+    fn scroll_to_visible_below_viewport() {
+        let mut v = VerticalScrollState {
+            offset: 0,
+            last_viewport_rows: 10,
+        };
+        v.scroll_to_visible(25);
+        // target=25 must be at the bottom edge → offset = 25 + 1 - 10 = 16
+        assert_eq!(v.offset, 16);
+    }
+
+    #[test]
+    fn scroll_to_visible_inside_viewport_no_change() {
+        let mut v = VerticalScrollState {
+            offset: 10,
+            last_viewport_rows: 10,
+        };
+        v.scroll_to_visible(15);
+        assert_eq!(v.offset, 10);
+    }
+
+    #[test]
+    fn scroll_to_visible_zero_viewport_is_noop() {
+        let mut v = VerticalScrollState {
+            offset: 7,
+            last_viewport_rows: 0,
+        };
+        v.scroll_to_visible(0);
+        assert_eq!(v.offset, 7);
+    }
+
+    #[test]
+    fn clamp_to_content_within_bounds_noop() {
+        let mut v = VerticalScrollState {
+            offset: 5,
+            last_viewport_rows: 10,
+        };
+        v.clamp_to_content(100);
+        assert_eq!(v.offset, 5);
+    }
+
+    #[test]
+    fn clamp_to_content_past_end_clamped() {
+        let mut v = VerticalScrollState {
+            offset: 200,
+            last_viewport_rows: 10,
+        };
+        v.clamp_to_content(100);
+        // max = 100 - 10 = 90
+        assert_eq!(v.offset, 90);
+    }
+
+    #[test]
+    fn clamp_to_content_smaller_than_viewport_clamps_to_zero() {
+        let mut v = VerticalScrollState {
+            offset: 5,
+            last_viewport_rows: 10,
+        };
+        v.clamp_to_content(3);
+        assert_eq!(v.offset, 0);
     }
 
     #[test]
