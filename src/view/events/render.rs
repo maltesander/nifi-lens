@@ -28,6 +28,7 @@ use ratatui::text::{Line, Span};
 use ratatui::widgets::Paragraph;
 use time;
 
+use crate::client::events::EventType;
 use crate::theme;
 use crate::timestamp::format_age_secs;
 use crate::view::events::state::{EventsQueryStatus, EventsState, FilterField};
@@ -260,7 +261,7 @@ fn render_results_list(
             };
             Row::new(vec![
                 Cell::from(format_event_time(&e.event_time_iso, now, cfg)),
-                Cell::from(e.event_type.clone()).style(event_type_style(&e.event_type)),
+                Cell::from(e.event_type.clone()).style(EventType::from_wire(&e.event_type).style()),
                 Cell::from(e.component_name.clone()),
                 Cell::from(short_uuid(&e.flow_file_uuid)),
                 Cell::from(
@@ -311,25 +312,6 @@ fn format_event_time(
     match crate::timestamp::parse_nifi_timestamp(iso) {
         Some(dt) => crate::timestamp::format(dt, now, cfg, false),
         None => "--:--:--".to_string(),
-    }
-}
-
-/// Colorize event types by category.
-/// - DROP / EXPIRE → error
-/// - ROUTE → accent
-/// - RECEIVE / SEND / FETCH / DOWNLOAD → success
-/// - FORK / JOIN / CREATE / CLONE / ATTRIBUTES_MODIFIED / CONTENT_MODIFIED → muted
-/// - anything else → default
-fn event_type_style(event_type: &str) -> ratatui::style::Style {
-    use ratatui::style::Style;
-    match event_type {
-        "DROP" | "EXPIRE" => theme::error().add_modifier(Modifier::BOLD),
-        "ROUTE" => theme::accent(),
-        "RECEIVE" | "SEND" | "FETCH" | "DOWNLOAD" => theme::success(),
-        "FORK" | "JOIN" | "CREATE" | "CLONE" | "ATTRIBUTES_MODIFIED" | "CONTENT_MODIFIED" => {
-            theme::muted()
-        }
-        _ => Style::default(),
     }
 }
 
@@ -389,7 +371,7 @@ fn render_detail_pane(
         return;
     };
 
-    let type_style = event_type_style(&e.event_type);
+    let type_style = EventType::from_wire(&e.event_type).style();
     let header = Line::from(vec![
         Span::styled(
             e.event_type.clone(),

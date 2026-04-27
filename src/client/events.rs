@@ -62,6 +62,79 @@ pub struct ProvenanceQueryHandle {
     pub cluster_node_id: Option<String>,
 }
 
+/// Provenance event-type classification.
+///
+/// NiFi's provenance API returns event types as wire strings (`"DROP"`,
+/// `"RECEIVE"`, etc.). This enum centralizes the closed alphabet plus the
+/// table-cell styling. The `event_type: String` field on
+/// [`crate::client::ProvenanceEventSummary`] stays as the raw wire value;
+/// callers that need styling parse to `EventType` at render time.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum EventType {
+    Drop,
+    Expire,
+    Route,
+    Receive,
+    Send,
+    Fetch,
+    Download,
+    Fork,
+    Join,
+    Create,
+    Clone,
+    AttributesModified,
+    ContentModified,
+    /// Unrecognized or null on the wire.
+    Other,
+}
+
+impl EventType {
+    /// Parse a NiFi-wire event-type string (case-insensitive).
+    /// Unrecognized values map to `Other`.
+    pub fn from_wire(s: &str) -> Self {
+        match s.to_ascii_uppercase().as_str() {
+            "DROP" => Self::Drop,
+            "EXPIRE" => Self::Expire,
+            "ROUTE" => Self::Route,
+            "RECEIVE" => Self::Receive,
+            "SEND" => Self::Send,
+            "FETCH" => Self::Fetch,
+            "DOWNLOAD" => Self::Download,
+            "FORK" => Self::Fork,
+            "JOIN" => Self::Join,
+            "CREATE" => Self::Create,
+            "CLONE" => Self::Clone,
+            "ATTRIBUTES_MODIFIED" => Self::AttributesModified,
+            "CONTENT_MODIFIED" => Self::ContentModified,
+            _ => Self::Other,
+        }
+    }
+
+    /// Style used for the event-type cell in the Events table.
+    ///
+    /// - `DROP` / `EXPIRE` → error + BOLD
+    /// - `ROUTE` → accent
+    /// - `RECEIVE` / `SEND` / `FETCH` / `DOWNLOAD` → success
+    /// - `FORK` / `JOIN` / `CREATE` / `CLONE` / `ATTRIBUTES_MODIFIED` /
+    ///   `CONTENT_MODIFIED` → muted
+    /// - anything else (`Other`) → default
+    pub fn style(self) -> ratatui::style::Style {
+        use ratatui::style::Modifier;
+        match self {
+            Self::Drop | Self::Expire => crate::theme::error().add_modifier(Modifier::BOLD),
+            Self::Route => crate::theme::accent(),
+            Self::Receive | Self::Send | Self::Fetch | Self::Download => crate::theme::success(),
+            Self::Fork
+            | Self::Join
+            | Self::Create
+            | Self::Clone
+            | Self::AttributesModified
+            | Self::ContentModified => crate::theme::muted(),
+            Self::Other => ratatui::style::Style::default(),
+        }
+    }
+}
+
 /// One poll result from [`NifiClient::poll_provenance_query`]. Mirrors
 /// NiFi's `finished` / `percentCompleted` fields.
 #[derive(Debug, Clone)]
@@ -270,5 +343,55 @@ impl NifiClient {
                     }
                 })
             })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use ratatui::style::{Modifier, Style};
+
+    #[test]
+    fn event_type_from_wire_case_insensitive() {
+        assert_eq!(EventType::from_wire("DROP"), EventType::Drop);
+        assert_eq!(EventType::from_wire("drop"), EventType::Drop);
+        assert_eq!(EventType::from_wire("Drop"), EventType::Drop);
+        assert_eq!(
+            EventType::from_wire("attributes_modified"),
+            EventType::AttributesModified,
+        );
+        assert_eq!(EventType::from_wire("UNKNOWN_THING"), EventType::Other);
+        assert_eq!(EventType::from_wire(""), EventType::Other);
+    }
+
+    #[test]
+    fn event_type_styles() {
+        // DROP / EXPIRE → error + BOLD
+        let err_bold = crate::theme::error().add_modifier(Modifier::BOLD);
+        assert_eq!(EventType::Drop.style(), err_bold);
+        assert_eq!(EventType::Expire.style(), err_bold);
+
+        // ROUTE → accent
+        assert_eq!(EventType::Route.style(), crate::theme::accent());
+
+        // RECEIVE / SEND / FETCH / DOWNLOAD → success
+        let success = crate::theme::success();
+        assert_eq!(EventType::Receive.style(), success);
+        assert_eq!(EventType::Send.style(), success);
+        assert_eq!(EventType::Fetch.style(), success);
+        assert_eq!(EventType::Download.style(), success);
+
+        // FORK / JOIN / CREATE / CLONE / ATTRIBUTES_MODIFIED /
+        // CONTENT_MODIFIED → muted
+        let muted = crate::theme::muted();
+        assert_eq!(EventType::Fork.style(), muted);
+        assert_eq!(EventType::Join.style(), muted);
+        assert_eq!(EventType::Create.style(), muted);
+        assert_eq!(EventType::Clone.style(), muted);
+        assert_eq!(EventType::AttributesModified.style(), muted);
+        assert_eq!(EventType::ContentModified.style(), muted);
+
+        // Other → default
+        assert_eq!(EventType::Other.style(), Style::default());
     }
 }
