@@ -8,7 +8,6 @@
 use ratatui::style::Style;
 
 use crate::client::Severity;
-use crate::theme;
 
 /// Uppercase severity label for the count-rendered chip.
 pub fn format_severity_label(level: &str) -> String {
@@ -22,12 +21,7 @@ pub fn format_severity_label(level: &str) -> String {
 
 /// [`Style`] for a severity label — color only, no modifiers.
 pub fn severity_style(level: &str) -> Style {
-    match Severity::parse(level) {
-        Severity::Error => theme::error(),
-        Severity::Warning => theme::warning(),
-        Severity::Info => theme::info(),
-        Severity::Unknown => theme::muted(),
-    }
+    Severity::parse(level).style()
 }
 
 #[cfg(test)]

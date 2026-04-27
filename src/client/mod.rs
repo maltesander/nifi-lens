@@ -606,6 +606,29 @@ impl Severity {
             _ => Self::Unknown,
         }
     }
+
+    /// Color style for severity labels (no modifiers).
+    pub fn style(self) -> ratatui::style::Style {
+        match self {
+            Self::Error => crate::theme::error(),
+            Self::Warning => crate::theme::warning(),
+            Self::Info => crate::theme::info(),
+            Self::Unknown => crate::theme::muted(),
+        }
+    }
+}
+
+#[cfg(test)]
+mod severity_tests {
+    use super::*;
+
+    #[test]
+    fn severity_style_branches() {
+        assert_eq!(Severity::Error.style(), crate::theme::error());
+        assert_eq!(Severity::Warning.style(), crate::theme::warning());
+        assert_eq!(Severity::Info.style(), crate::theme::info());
+        assert_eq!(Severity::Unknown.style(), crate::theme::muted());
+    }
 }
 
 /// One bulletin row as surfaced to the Overview tab.

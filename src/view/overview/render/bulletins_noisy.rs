@@ -69,9 +69,9 @@ fn render_bulletin_sparkline(frame: &mut Frame, area: Rect, buckets: &[BulletinB
     } else {
         Line::from(vec![
             Span::styled(format!("{}m  ", SPARKLINE_MINUTES), theme::muted()),
-            Span::styled("■ Err  ", severity_style(Severity::Error)),
-            Span::styled("■ Warn  ", severity_style(Severity::Warning)),
-            Span::styled("■ Info", severity_style(Severity::Info)),
+            Span::styled("■ Err  ", Severity::Error.style()),
+            Span::styled("■ Warn  ", Severity::Warning.style()),
+            Span::styled("■ Info", Severity::Info.style()),
         ])
     };
     frame.render_widget(Paragraph::new(legend), chunks[0]);
@@ -101,15 +101,15 @@ fn render_bulletin_sparkline(frame: &mut Frame, area: Rect, buckets: &[BulletinB
             BarGroup::default().bars(&[
                 Bar::default()
                     .value(b.error_count as u64)
-                    .style(severity_style(Severity::Error))
+                    .style(Severity::Error.style())
                     .text_value(""),
                 Bar::default()
                     .value(b.warning_count as u64)
-                    .style(severity_style(Severity::Warning))
+                    .style(Severity::Warning.style())
                     .text_value(""),
                 Bar::default()
                     .value(b.info_count as u64)
-                    .style(severity_style(Severity::Info))
+                    .style(Severity::Info.style())
                     .text_value(""),
             ])
         })
@@ -159,7 +159,7 @@ fn render_noisy_components(
             .take(visible_rows)
             .enumerate()
             .map(|(idx, n)| {
-                let sev_style = severity_style(n.max_severity);
+                let sev_style = n.max_severity.style();
                 let row_style = if focused && idx == window.selected_local {
                     theme::cursor_row()
                 } else {
@@ -184,14 +184,4 @@ fn render_noisy_components(
     )
     .header(Row::new(vec!["cnt", "source", "worst"]).style(theme::bold()));
     frame.render_widget(table, area);
-}
-
-/// Convert a bulletin `Severity` (Error/Warning/Info/Unknown) into a theme style.
-fn severity_style(s: Severity) -> Style {
-    match s {
-        Severity::Error => theme::error(),
-        Severity::Warning => theme::warning(),
-        Severity::Info => theme::info(),
-        Severity::Unknown => theme::muted(),
-    }
 }
