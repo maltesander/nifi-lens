@@ -1030,6 +1030,112 @@ mod parameter_context_bindings_fetcher_tests {
             })
             .await;
     }
+
+    /// Drives an actual `spawn_*` fetcher through the full subscriber-gating
+    /// lifecycle:
+    ///   1. gated with no subscribers → must park (no events).
+    ///   2. subscriber arrives (counter 0→1, `force.notify_one()`) → fires.
+    ///   3. `handle.abort()` → no further events.
+    ///
+    /// Uses real-clock with bounded timeouts (matching the
+    /// `emits_map_after_first_tick` style above). `start_paused = true`
+    /// was tried first but interacts poorly with wiremock's mock-server
+    /// task and `tokio::time::timeout` (paused time means timeouts never
+    /// fire unless every awaiter advances time in lock-step). Real-clock
+    /// gives a deterministic-enough test at the cost of a small wall-clock
+    /// budget (~250ms) — acceptable per AGENTS.md test-style guidance.
+    #[tokio::test(flavor = "current_thread")]
+    async fn gated_fetcher_parks_until_subscriber_arrives_and_aborts_cleanly() {
+        let local = tokio::task::LocalSet::new();
+        local
+            .run_until(async {
+                let server = MockServer::start().await;
+
+                Mock::given(method("GET"))
+                    .and(path("/nifi-api/process-groups/pg-1"))
+                    .respond_with(
+                        ResponseTemplate::new(200).set_body_json(serde_json::json!({"id": "pg-1"})),
+                    )
+                    .mount(&server)
+                    .await;
+
+                let client = test_client(&server).await;
+                let client = Arc::new(RwLock::new(client));
+                let (tx, mut rx) = mpsc::channel::<AppEvent>(16);
+                let (pg_ids_tx, pg_ids_rx) = watch::channel(vec!["pg-1".to_string()]);
+
+                let force = Arc::new(Notify::new());
+                let counter = Arc::new(AtomicUsize::new(0));
+                let cfg = FetchTaskConfig {
+                    base_interval: Duration::from_millis(50),
+                    max_interval: Duration::from_secs(5),
+                    jitter_percent: 0,
+                    force: force.clone(),
+                    gated: true,
+                    subscriber_counter: counter.clone(),
+                    batch_concurrency: 4,
+                };
+
+                let handle = spawn_parameter_context_bindings(client, tx, pg_ids_rx, cfg);
+
+                // Phase 1: gated, no subscribers — fetcher must park on
+                // `force.notified()`. Wait well past one base_interval and
+                // verify nothing arrives.
+                let parked = tokio::time::timeout(Duration::from_millis(150), rx.recv()).await;
+                assert!(
+                    parked.is_err(),
+                    "gated fetcher must not emit before any subscriber arrives"
+                );
+
+                // Phase 2: subscribe (0 → 1) and notify. The fetcher unparks
+                // and fires within one base_interval.
+                counter.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                force.notify_one();
+
+                let event = tokio::time::timeout(Duration::from_secs(2), rx.recv())
+                    .await
+                    .expect("fetcher should emit within 2s after subscribe")
+                    .expect("channel closed");
+                assert!(
+                    matches!(
+                        event,
+                        AppEvent::ClusterUpdate(ClusterUpdate::ParameterContextBindings(_, _))
+                    ),
+                    "unexpected event variant"
+                );
+
+                // Phase 3: abort, drain any in-flight events from the next
+                // tick that may have raced ahead, then verify the channel
+                // goes silent. With a 50ms base_interval the fetcher can
+                // emit one more event between the Phase-2 receive and the
+                // abort taking effect — drain race-buffered items, then
+                // wait past several intervals to prove no NEW events.
+                handle.abort();
+                // Yield + small wait so the abort takes effect before we
+                // drain. Then drain any synchronously-buffered events
+                // (try_recv is non-blocking so this terminates).
+                tokio::task::yield_now().await;
+                tokio::time::sleep(Duration::from_millis(100)).await;
+                while rx.try_recv().is_ok() {
+                    // drain race-buffered events from the post-Phase-2 tick
+                }
+                // Now verify the channel stays silent well past several
+                // intervals — proving the fetcher is truly gone. (After
+                // abort, the task's sender clone is dropped and `recv()`
+                // would return `Ok(None)`, so use a short timeout window.)
+                let after_abort = tokio::time::timeout(Duration::from_millis(300), rx.recv()).await;
+                // After abort the sender is dropped → `recv()` resolves to
+                // `Ok(None)`. Either timeout (Err) OR `Ok(None)` is success;
+                // any `Ok(Some(_))` means the fetcher is still alive.
+                match after_abort {
+                    Err(_) | Ok(None) => {}
+                    Ok(Some(_)) => panic!("event arrived after abort"),
+                }
+
+                drop(pg_ids_tx);
+            })
+            .await;
+    }
 }
 
 #[cfg(test)]
