@@ -30,6 +30,27 @@ use crate::client::{FolderKind, NodeKind, NodeStatusSummary};
 use crate::theme;
 use crate::view::browser::state::{BrowserState, FlowIndex, NodeDetail, PgHealth};
 
+/// Render an "Identity" Panel containing caller-built lines.
+///
+/// The helper handles the bordered Panel, computes the inner Rect,
+/// and renders the lines as a Paragraph. The caller closure receives
+/// the inner Rect (so it can size truncation against `inner.width`)
+/// and returns the lines to render.
+///
+/// Used by Processor, ControllerService, ProcessGroup, and Port
+/// detail panes; their per-pane content layouts differ so the helper
+/// only owns the panel/Paragraph wrapper.
+pub(super) fn render_identity_panel<F>(frame: &mut Frame, area: Rect, build_lines: F)
+where
+    F: FnOnce(Rect) -> Vec<Line<'static>>,
+{
+    let block = crate::widget::panel::Panel::new(" Identity ").into_block();
+    let inner = block.inner(area);
+    frame.render_widget(block, area);
+    let lines = build_lines(inner);
+    frame.render_widget(Paragraph::new(lines), inner);
+}
+
 /// Format a property value for Processor/CS detail tables. Returns
 /// `Some(Line)` when the raw value is a UUID that resolves to a known
 /// arena node (rendered as `<name> (short8…) →`), or when the raw
@@ -462,6 +483,48 @@ mod chip_tests {
             "STALE+MOD"
         );
         assert_eq!(chip_for_state(S::SyncFailure).unwrap().0, "SYNC-ERR");
+    }
+}
+
+#[cfg(test)]
+mod identity_panel_tests {
+    use crate::test_support::{TEST_BACKEND_SHORT, test_backend};
+    use ratatui::Terminal;
+    use ratatui::layout::Rect;
+    use ratatui::text::{Line, Span};
+
+    #[test]
+    fn render_identity_panel_invokes_closure_once_and_renders_panel_border() {
+        let mut terminal = Terminal::new(test_backend(TEST_BACKEND_SHORT)).unwrap();
+        let mut closure_calls = 0u32;
+        let mut observed_inner_width = 0u16;
+        let mut observed_inner_height = 0u16;
+        terminal
+            .draw(|frame| {
+                let area = Rect::new(0, 0, 40, 6);
+                super::render_identity_panel(frame, area, |inner| {
+                    closure_calls += 1;
+                    observed_inner_width = inner.width;
+                    observed_inner_height = inner.height;
+                    vec![Line::from(Span::raw("hello"))]
+                });
+            })
+            .unwrap();
+        assert_eq!(closure_calls, 1, "closure must be invoked exactly once");
+        // Panel borders consume 1 cell on each side, so inner is 40-2 by 6-2.
+        assert_eq!(observed_inner_width, 38);
+        assert_eq!(observed_inner_height, 4);
+        // Verify the " Identity " title made it into the rendered buffer.
+        let dump = format!("{}", terminal.backend());
+        assert!(
+            dump.contains("Identity"),
+            "expected rendered panel to contain 'Identity' title, got:\n{dump}"
+        );
+        // And the closure-supplied body line should be present too.
+        assert!(
+            dump.contains("hello"),
+            "expected rendered panel to contain closure-supplied body, got:\n{dump}"
+        );
     }
 }
 

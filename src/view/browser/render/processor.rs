@@ -114,24 +114,21 @@ fn run_state_style(run_status: &str) -> Style {
 }
 
 fn render_identity_panel(frame: &mut Frame, area: Rect, d: &ProcessorDetail) {
-    let block = Panel::new(" Identity ").into_block();
-    let inner = block.inner(area);
-    frame.render_widget(block, area);
-
-    let lines = vec![
-        Line::from(vec![
-            Span::styled("type   ", theme::muted()),
-            Span::raw(truncate(
-                &d.type_name,
-                inner.width.saturating_sub(7) as usize,
-            )),
-        ]),
-        Line::from(vec![
-            Span::styled("bundle ", theme::muted()),
-            Span::raw(truncate(&d.bundle, inner.width.saturating_sub(7) as usize)),
-        ]),
-    ];
-    frame.render_widget(Paragraph::new(lines), inner);
+    super::render_identity_panel(frame, area, |inner| {
+        vec![
+            Line::from(vec![
+                Span::styled("type   ", theme::muted()),
+                Span::raw(truncate(
+                    &d.type_name,
+                    inner.width.saturating_sub(7) as usize,
+                )),
+            ]),
+            Line::from(vec![
+                Span::styled("bundle ", theme::muted()),
+                Span::raw(truncate(&d.bundle, inner.width.saturating_sub(7) as usize)),
+            ]),
+        ]
+    });
 }
 
 /// Renders the Properties sub-panel and, when the processor has validation

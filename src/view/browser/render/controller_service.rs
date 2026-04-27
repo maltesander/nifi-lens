@@ -115,59 +115,56 @@ fn render_identity_panel(
     d: &ControllerServiceDetail,
     state: &BrowserState,
 ) {
-    let block = Panel::new(" Identity ").into_block();
-    let inner = block.inner(area);
-    frame.render_widget(block, area);
-
-    let parent = match d.parent_group_id.as_deref() {
-        Some(raw) => state
-            .resolve_id(raw)
-            .map(|r| r.name)
-            .unwrap_or_else(|| raw.to_string()),
-        None => "(controller)".to_string(),
-    };
-    let w = inner.width.saturating_sub(9) as usize;
-    let comments = if d.comments.is_empty() {
-        "—".to_string()
-    } else {
-        truncate(&d.comments, w)
-    };
-
-    let flag = |on: bool, label: &str| {
-        if on {
-            Span::styled(label.to_string(), theme::accent())
+    super::render_identity_panel(frame, area, |inner| {
+        let parent = match d.parent_group_id.as_deref() {
+            Some(raw) => state
+                .resolve_id(raw)
+                .map(|r| r.name)
+                .unwrap_or_else(|| raw.to_string()),
+            None => "(controller)".to_string(),
+        };
+        let w = inner.width.saturating_sub(9) as usize;
+        let comments = if d.comments.is_empty() {
+            "—".to_string()
         } else {
-            Span::styled(label.to_string(), theme::muted())
-        }
-    };
+            truncate(&d.comments, w)
+        };
 
-    let lines = vec![
-        Line::from(vec![
-            Span::styled("type     ", theme::muted()),
-            Span::raw(truncate(&d.type_name, w)),
-        ]),
-        Line::from(vec![
-            Span::styled("bundle   ", theme::muted()),
-            Span::raw(truncate(&d.bundle, w)),
-        ]),
-        Line::from(vec![
-            Span::styled("parent   ", theme::muted()),
-            Span::raw(truncate(&parent, w)),
-        ]),
-        Line::from(vec![
-            Span::styled("comments ", theme::muted()),
-            Span::raw(comments),
-        ]),
-        Line::from(vec![
-            Span::styled("flags    ", theme::muted()),
-            flag(d.restricted, "restricted"),
-            Span::styled(" · ", theme::muted()),
-            flag(d.deprecated, "deprecated"),
-            Span::styled(" · ", theme::muted()),
-            flag(d.persists_state, "persists state"),
-        ]),
-    ];
-    frame.render_widget(Paragraph::new(lines), inner);
+        let flag = |on: bool, label: &str| {
+            if on {
+                Span::styled(label.to_string(), theme::accent())
+            } else {
+                Span::styled(label.to_string(), theme::muted())
+            }
+        };
+
+        vec![
+            Line::from(vec![
+                Span::styled("type     ", theme::muted()),
+                Span::raw(truncate(&d.type_name, w)),
+            ]),
+            Line::from(vec![
+                Span::styled("bundle   ", theme::muted()),
+                Span::raw(truncate(&d.bundle, w)),
+            ]),
+            Line::from(vec![
+                Span::styled("parent   ", theme::muted()),
+                Span::raw(truncate(&parent, w)),
+            ]),
+            Line::from(vec![
+                Span::styled("comments ", theme::muted()),
+                Span::raw(comments),
+            ]),
+            Line::from(vec![
+                Span::styled("flags    ", theme::muted()),
+                flag(d.restricted, "restricted"),
+                Span::styled(" · ", theme::muted()),
+                flag(d.deprecated, "deprecated"),
+                Span::styled(" · ", theme::muted()),
+                flag(d.persists_state, "persists state"),
+            ]),
+        ]
+    });
 }
 
 fn render_validation_errors_panel(

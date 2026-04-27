@@ -6,7 +6,7 @@ use ratatui::Frame;
 use ratatui::layout::{Constraint, Direction, Layout, Rect};
 use ratatui::style::Modifier;
 use ratatui::text::{Line, Span};
-use ratatui::widgets::{Cell, Paragraph, Row, Table, TableState};
+use ratatui::widgets::{Cell, Row, Table, TableState};
 
 use crate::client::status::PortStatus;
 use crate::client::{BulletinSnapshot, NodeKind, PortDetail, PortKind};
@@ -52,45 +52,43 @@ fn build_header_title(d: &PortDetail) -> Line<'_> {
 }
 
 fn render_identity(frame: &mut Frame, area: Rect, d: &PortDetail, state: &BrowserState) {
-    let block = Panel::new(" Identity ").into_block();
-    let inner = block.inner(area);
-    frame.render_widget(block, area);
-    let parent = match d.parent_group_id.as_deref() {
-        Some(raw) => state
-            .resolve_id(raw)
-            .map(|r| r.name)
-            .unwrap_or_else(|| raw.to_string()),
-        None => "(root)".to_string(),
-    };
-    let w = inner.width.saturating_sub(18) as usize;
-    let comments = if d.comments.is_empty() {
-        "—".to_string()
-    } else {
-        truncate(&d.comments, w)
-    };
-    let lines = vec![
-        Line::from(vec![
-            Span::styled("kind            ", theme::muted()),
-            Span::raw(d.kind.label().to_string()),
-        ]),
-        Line::from(vec![
-            Span::styled("state           ", theme::muted()),
-            Span::styled(d.state.clone(), PortStatus::from_wire(&d.state).style()),
-        ]),
-        Line::from(vec![
-            Span::styled("parent group    ", theme::muted()),
-            Span::raw(parent.to_string()),
-        ]),
-        Line::from(vec![
-            Span::styled("comments        ", theme::muted()),
-            Span::raw(comments),
-        ]),
-        Line::from(vec![
-            Span::styled("concurrent tasks", theme::muted()),
-            Span::raw(format!(" {}", d.concurrent_tasks)),
-        ]),
-    ];
-    frame.render_widget(Paragraph::new(lines), inner);
+    super::render_identity_panel(frame, area, |inner| {
+        let parent = match d.parent_group_id.as_deref() {
+            Some(raw) => state
+                .resolve_id(raw)
+                .map(|r| r.name)
+                .unwrap_or_else(|| raw.to_string()),
+            None => "(root)".to_string(),
+        };
+        let w = inner.width.saturating_sub(18) as usize;
+        let comments = if d.comments.is_empty() {
+            "—".to_string()
+        } else {
+            truncate(&d.comments, w)
+        };
+        vec![
+            Line::from(vec![
+                Span::styled("kind            ", theme::muted()),
+                Span::raw(d.kind.label().to_string()),
+            ]),
+            Line::from(vec![
+                Span::styled("state           ", theme::muted()),
+                Span::styled(d.state.clone(), PortStatus::from_wire(&d.state).style()),
+            ]),
+            Line::from(vec![
+                Span::styled("parent group    ", theme::muted()),
+                Span::raw(parent.to_string()),
+            ]),
+            Line::from(vec![
+                Span::styled("comments        ", theme::muted()),
+                Span::raw(comments),
+            ]),
+            Line::from(vec![
+                Span::styled("concurrent tasks", theme::muted()),
+                Span::raw(format!(" {}", d.concurrent_tasks)),
+            ]),
+        ]
+    });
 }
 
 fn truncate(s: &str, max: usize) -> String {

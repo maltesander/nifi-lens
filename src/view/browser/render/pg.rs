@@ -97,31 +97,28 @@ fn build_header_title<'a>(
 }
 
 fn render_identity_panel(frame: &mut Frame, area: Rect, d: &ProcessGroupDetail) {
-    let block = Panel::new(" Identity ").into_block();
-    let inner = block.inner(area);
-    frame.render_widget(block, area);
-
-    let lines = vec![
-        Line::from(vec![
-            Span::styled("Processors ", theme::muted()),
-            Span::raw(format!(
-                "{} running · {} stopped · {} invalid · {} disabled",
-                d.running, d.stopped, d.invalid, d.disabled
-            )),
-        ]),
-        Line::from(vec![
-            Span::styled("Threads    ", theme::muted()),
-            Span::raw(format!("{} active", d.active_threads)),
-        ]),
-        Line::from(vec![
-            Span::styled("Queued     ", theme::muted()),
-            Span::raw(format!(
-                "{} ffiles · {}",
-                d.flow_files_queued, d.queued_display
-            )),
-        ]),
-    ];
-    frame.render_widget(Paragraph::new(lines), inner);
+    super::render_identity_panel(frame, area, |_inner| {
+        vec![
+            Line::from(vec![
+                Span::styled("Processors ", theme::muted()),
+                Span::raw(format!(
+                    "{} running · {} stopped · {} invalid · {} disabled",
+                    d.running, d.stopped, d.invalid, d.disabled
+                )),
+            ]),
+            Line::from(vec![
+                Span::styled("Threads    ", theme::muted()),
+                Span::raw(format!("{} active", d.active_threads)),
+            ]),
+            Line::from(vec![
+                Span::styled("Queued     ", theme::muted()),
+                Span::raw(format!(
+                    "{} ffiles · {}",
+                    d.flow_files_queued, d.queued_display
+                )),
+            ]),
+        ]
+    });
 }
 
 /// Focusable single-row mini-section showing the bound parameter context
