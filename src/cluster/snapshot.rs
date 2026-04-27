@@ -1,7 +1,26 @@
-//! Cluster-wide snapshot owned by `ClusterStore` and mutated only on
-//! the UI task. Each endpoint field preserves the last successful value
-//! even when the latest fetch failed, so views render with a staleness
-//! chip rather than blanking out.
+//! Cluster-wide snapshot owned by `ClusterStore` and mutated only on the
+//! UI task.
+//!
+//! # Threading model
+//!
+//! - Fetcher tasks ([`crate::cluster::fetcher_tasks`]) are pure producers:
+//!   they run on the main-thread `LocalSet`, fetch from NiFi, and emit
+//!   `AppEvent::ClusterUpdate(ClusterUpdate::*)` on the central channel.
+//! - The UI loop is the sole mutator: on receiving a `ClusterUpdate` it
+//!   calls `ClusterStore::apply_update`, which routes to the matching
+//!   `EndpointState::apply` on this snapshot.
+//! - Views never mutate the snapshot. They observe `AppEvent::ClusterChanged(endpoint)`
+//!   and re-derive their projections from `state.cluster.snapshot`.
+//!
+//! Because all mutation is on a single task, no locks or atomics guard
+//! these fields. Any new fetcher MUST funnel through `ClusterUpdate` —
+//! no shortcut writes from worker tasks.
+//!
+//! # Stale-data invariant
+//!
+//! Each `EndpointState<T>` field preserves the last successful value even
+//! when the latest fetch failed (via `EndpointState::Failed::last_ok`),
+//! so views render with a staleness chip rather than blanking out.
 
 use std::collections::{BTreeMap, HashMap, VecDeque};
 use std::time::{Duration, Instant};
@@ -182,6 +201,11 @@ pub struct ParameterContextBindingsMap {
 
 /// The cluster snapshot. Holds the raw client-level snapshot types
 /// (already normalized by `NifiClient`) — views project from these.
+///
+/// **Mutation is main-task only.** See the module-level doc for the
+/// threading model. Cloning the snapshot is fine (it's `Clone`), but
+/// callers should prefer borrowing through `state.cluster.snapshot`
+/// where possible — the snapshot can grow large on big clusters.
 #[derive(Debug, Default, Clone)]
 pub struct ClusterSnapshot {
     pub about: EndpointState<AboutSnapshot>,
