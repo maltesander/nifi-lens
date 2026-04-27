@@ -64,6 +64,24 @@ pub fn severity_by_pct(pct: f32) -> Style {
     }
 }
 
+/// Style a TLS-cert expiry display by days-until-expiry. Negative values
+/// represent already-expired certs.
+///
+/// Thresholds match the Nodes-panel chip and the node-detail expiry row:
+///   - expired (days < 0) or `<7d` → error + BOLD
+///   - 7..30d → warning (yellow)
+///   - else → muted
+pub fn cert_expiry_style(days: i64) -> Style {
+    if days < 7 {
+        // covers both expired (negative) and <7d
+        error().add_modifier(Modifier::BOLD)
+    } else if days < 30 {
+        warning()
+    } else {
+        muted()
+    }
+}
+
 /// Foreground style for an inserted line (`+`) in the content-viewer
 /// diff tab. Plain green so `+`/`-` prefixes carry the distinction for
 /// colorblind fallback.
@@ -123,5 +141,17 @@ mod tests {
     fn severity_by_pct_over_100_is_error() {
         let s = severity_by_pct(150.0);
         assert_eq!(s, error());
+    }
+
+    #[test]
+    fn cert_expiry_style_buckets() {
+        let red_bold = error().add_modifier(Modifier::BOLD);
+        assert_eq!(cert_expiry_style(-1), red_bold); // expired
+        assert_eq!(cert_expiry_style(0), red_bold); // expiring today
+        assert_eq!(cert_expiry_style(6), red_bold); // <7d
+        assert_eq!(cert_expiry_style(7), warning());
+        assert_eq!(cert_expiry_style(29), warning());
+        assert_eq!(cert_expiry_style(30), muted());
+        assert_eq!(cert_expiry_style(365), muted());
     }
 }

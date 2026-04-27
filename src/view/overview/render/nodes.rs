@@ -6,7 +6,7 @@
 
 use ratatui::Frame;
 use ratatui::layout::{Constraint, Rect};
-use ratatui::style::{Modifier, Style};
+use ratatui::style::Style;
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Cell, Paragraph, Row, Table};
 
@@ -233,19 +233,10 @@ fn cert_chip_cell_for(
     };
     let delta = earliest - now;
     if delta.is_negative() {
-        return Cell::from(Span::styled(
-            "cert expired",
-            theme::error().add_modifier(Modifier::BOLD),
-        ));
+        return Cell::from(Span::styled("cert expired", theme::cert_expiry_style(-1)));
     }
     let days = delta.whole_days();
-    let style = if days < 7 {
-        theme::error().add_modifier(Modifier::BOLD)
-    } else if days < 30 {
-        theme::warning()
-    } else {
-        theme::muted()
-    };
+    let style = theme::cert_expiry_style(days);
     let text = if days >= 365 {
         let years = days / 365;
         let months = (days % 365) / 30;

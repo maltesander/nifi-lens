@@ -222,19 +222,10 @@ fn probe_error_msg(err: &crate::client::tls_cert::TlsProbeError) -> String {
 fn days_until_style(not_after: time::OffsetDateTime, now: time::OffsetDateTime) -> (String, Style) {
     let delta = not_after - now;
     if delta.is_negative() {
-        return (
-            "EXPIRED".into(),
-            theme::error().add_modifier(Modifier::BOLD),
-        );
+        return ("EXPIRED".into(), theme::cert_expiry_style(-1));
     }
     let days = delta.whole_days();
-    let style = if days < 7 {
-        theme::error().add_modifier(Modifier::BOLD)
-    } else if days < 30 {
-        theme::warning()
-    } else {
-        theme::muted()
-    };
+    let style = theme::cert_expiry_style(days);
     let text = if days >= 365 {
         let years = days / 365;
         let months = (days % 365) / 30;
