@@ -256,7 +256,18 @@ fn snapshot_drift() {
         disabled: 0,
         invalid: 0,
     });
-    insta::assert_snapshot!("overview_drift", render_to_string(&state));
+    let out = render_to_string(&state);
+    // Per AGENTS.md, the Components panel must surface version-drift counts
+    // (stale, locally-modified, sync-failure) inline. Assert both markers exist.
+    assert!(
+        out.contains("STALE") && out.contains("1"),
+        "drift panel must surface stale count: {out}"
+    );
+    assert!(
+        out.contains("MODIFIED") && out.contains("2"),
+        "drift panel must surface locally-modified count: {out}"
+    );
+    insta::assert_snapshot!("overview_drift", out);
 }
 
 #[test]
@@ -266,7 +277,14 @@ fn snapshot_cs_unavailable() {
     seed_root_pg(&mut state, RootPgStatusSnapshot::default());
     // `state.cs_counts` is left as the default `None` to exercise
     // the "cs list unavailable" degradation path.
-    insta::assert_snapshot!("overview_cs_unavailable", render_to_string(&state));
+    let out = render_to_string(&state);
+    // Per AGENTS.md, the CS row should collapse to a "cs list unavailable" chip
+    // when the fetch fails.
+    assert!(
+        out.contains("cs list unavailable"),
+        "CS-unavailable degradation chip must render: {out}"
+    );
+    insta::assert_snapshot!("overview_cs_unavailable", out);
 }
 
 #[test]
@@ -471,7 +489,19 @@ fn snapshot_with_nodes_populated() {
         invalid: 0,
     });
 
-    insta::assert_snapshot!("overview_with_nodes", render_to_string(&state));
+    let out = render_to_string(&state);
+    // Per AGENTS.md, the Nodes panel renders seeded node addresses and health metrics.
+    // Spot-check that both node addresses survived rendering, indicating the table rows
+    // were properly populated.
+    assert!(
+        out.contains("node1:8080"),
+        "Nodes panel must render first node address: {out}"
+    );
+    assert!(
+        out.contains("node2:8080"),
+        "Nodes panel must render second node address: {out}"
+    );
+    insta::assert_snapshot!("overview_with_nodes", out);
 }
 
 #[test]
