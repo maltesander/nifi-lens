@@ -121,6 +121,129 @@ fn apply_modal_chunk_hits_ceiling() {
 }
 
 #[test]
+fn apply_modal_chunk_multi_chunk_progressive_ceiling_hit() {
+    use crate::client::ContentSide;
+    use crate::config::TracerCeilingConfig;
+
+    let mut modal = stub_modal(1, ContentModalTab::Input);
+    modal.input.in_flight = true;
+    let mut state = TracerState {
+        content_modal: Some(modal),
+        ..TracerState::default()
+    };
+
+    let cfg = TracerCeilingConfig {
+        text: Some(10),
+        tabular: Some(10),
+        diff: Some(512 * 1024),
+    };
+
+    // Chunk 1: 5 bytes — well below the 10-byte ceiling.
+    apply_modal_chunk_with_ceiling(
+        &mut state,
+        1,
+        ContentSide::Input,
+        0,
+        vec![b'a'; 5],
+        false,
+        5,
+        &cfg,
+    );
+    {
+        let buf = &state.content_modal.as_ref().unwrap().input;
+        assert_eq!(buf.loaded.len(), 5, "after first chunk, 5 bytes loaded");
+        assert!(!buf.ceiling_hit, "ceiling not yet hit");
+        assert!(!buf.fully_loaded, "not yet fully loaded");
+    }
+
+    // Chunk 2: 8 bytes appended at offset 5 — total would be 13, ceiling is 10.
+    // Reducer truncates to 10 and flips ceiling_hit + fully_loaded.
+    apply_modal_chunk_with_ceiling(
+        &mut state,
+        1,
+        ContentSide::Input,
+        5,
+        vec![b'b'; 8],
+        false,
+        8,
+        &cfg,
+    );
+    {
+        let buf = &state.content_modal.as_ref().unwrap().input;
+        assert_eq!(buf.loaded.len(), 10, "boundary chunk truncates to ceiling");
+        assert!(
+            buf.ceiling_hit,
+            "ceiling_hit must flip after boundary chunk"
+        );
+        assert!(
+            buf.fully_loaded,
+            "fully_loaded must flip alongside ceiling_hit"
+        );
+    }
+}
+
+#[test]
+fn apply_modal_chunk_after_ceiling_hit_is_dropped_via_offset_mismatch() {
+    // After ceiling_hit + truncate, buf.loaded.len() == ceiling. A late
+    // chunk arriving with the original-pre-truncation offset is dropped
+    // by the `offset != buf.loaded.len()` guard. This pins the stale-
+    // chunk behavior so a future refactor of the offset check breaks
+    // this test deterministically.
+    use crate::client::ContentSide;
+    use crate::config::TracerCeilingConfig;
+
+    let mut modal = stub_modal(1, ContentModalTab::Input);
+    modal.input.in_flight = true;
+    let mut state = TracerState {
+        content_modal: Some(modal),
+        ..TracerState::default()
+    };
+
+    let cfg = TracerCeilingConfig {
+        text: Some(10),
+        tabular: Some(10),
+        diff: Some(512 * 1024),
+    };
+
+    // First chunk overflows; ceiling_hit fires, loaded truncates to 10.
+    apply_modal_chunk_with_ceiling(
+        &mut state,
+        1,
+        ContentSide::Input,
+        0,
+        vec![b'x'; 20],
+        false,
+        20,
+        &cfg,
+    );
+    assert_eq!(state.content_modal.as_ref().unwrap().input.loaded.len(), 10);
+    assert!(state.content_modal.as_ref().unwrap().input.ceiling_hit);
+
+    // Stale chunk with offset 20 (the producer's pre-truncate position).
+    apply_modal_chunk_with_ceiling(
+        &mut state,
+        1,
+        ContentSide::Input,
+        20,
+        vec![b'y'; 5],
+        false,
+        5,
+        &cfg,
+    );
+    let buf = &state.content_modal.as_ref().unwrap().input;
+    assert_eq!(
+        buf.loaded.len(),
+        10,
+        "stale chunk with offset != loaded.len() must be dropped"
+    );
+    // No bytes from chunk 2 leaked into the buffer.
+    assert!(
+        buf.loaded.iter().all(|&b| b == b'x'),
+        "buf contains only the original 'x' bytes"
+    );
+}
+
+#[test]
 fn apply_modal_chunk_unbounded_ceiling_keeps_streaming() {
     use crate::client::ContentSide;
     use crate::config::TracerCeilingConfig;
