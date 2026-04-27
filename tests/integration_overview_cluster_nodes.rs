@@ -114,12 +114,20 @@ async fn integration_overview_cluster_nodes_409_standalone_2_6_0() {
         ),
         Err(e) => e,
     };
-    // The debug representation of the boxed source should contain the 409
-    // status code. This mirrors the detection used by
-    // `error_is_standalone_409` in the fetcher.
+    // The fetcher's `error_is_standalone_409` matches on any of three
+    // markers in the debug repr: "409", "NotClustered", or the canonical
+    // message text "Only a node connected to a cluster". The test mirrors
+    // that detection so a regression in either place fails this test.
+    //
+    // NiFi 2.6.0 with nifi-rust-client 0.11.0 surfaces the 409 response as
+    // a `NotFound { message: "Only a node connected to a cluster..." }` —
+    // the debug repr does NOT contain the literal "409".
     let debug_repr = format!("{err:?}");
     assert!(
-        debug_repr.contains("409") || debug_repr.contains("NotClustered"),
-        "expected 409 or 'NotClustered' in error debug repr; got: {debug_repr}"
+        debug_repr.contains("409")
+            || debug_repr.contains("NotClustered")
+            || debug_repr.contains("Only a node connected to a cluster"),
+        "expected 409 / 'NotClustered' / 'Only a node connected to a cluster' \
+         in error debug repr; got: {debug_repr}"
     );
 }

@@ -554,15 +554,24 @@ pub(crate) fn spawn_cluster_nodes(
     })
 }
 
-/// Detect the standalone-NiFi 409 shape on `/controller/cluster`. Matches
-/// on the debug representation of the source error (the error type is
-/// boxed via `NifiLensError::ClusterNodesFailed.source`). Conservative
+/// Detect the standalone-NiFi shape on `/controller/cluster`. NiFi
+/// emits a 409 with a body of "Only a node connected to a cluster can
+/// process the request." for non-clustered servers, but
+/// `nifi-rust-client` 0.11.0 maps that response to a `NifiError::NotFound`
+/// (the debug repr never contains the literal "409"). We match on either
+/// the explicit `NotClustered` / `409` variant — for forward compatibility
+/// with future client releases — or the canonical message text.
+///
+/// Matches on the debug representation of the source error (the error
+/// type is boxed via `NifiLensError::ClusterNodesFailed.source`). Conservative
 /// — if the shape changes across nifi-rust-client versions this falls
 /// back to the generic failure path and the endpoint shows as `Failed`,
 /// which is safe.
 fn error_is_standalone_409(err: &NifiLensError) -> bool {
     let debug_repr = format!("{err:?}");
-    debug_repr.contains("409") || debug_repr.contains("NotClustered")
+    debug_repr.contains("409")
+        || debug_repr.contains("NotClustered")
+        || debug_repr.contains("Only a node connected to a cluster")
 }
 
 /// Fan-out fetch: one `/process-groups/{id}/connections` call per PG,
