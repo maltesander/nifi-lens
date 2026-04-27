@@ -103,6 +103,24 @@ pub fn hunk_header() -> Style {
         .add_modifier(Modifier::DIM)
 }
 
+/// Style for a search match (highlighted but not focused).
+pub fn search_match() -> Style {
+    Style::default().add_modifier(Modifier::UNDERLINED)
+}
+
+/// Style for the active/focused search match — the one cycled to with
+/// `n` / `N`. Layered on top of [`search_match`] semantically; this
+/// helper returns the combined style ready to apply directly.
+pub fn search_match_active() -> Style {
+    Style::default().add_modifier(Modifier::UNDERLINED | Modifier::REVERSED | Modifier::BOLD)
+}
+
+/// Style for the input-bar cursor block (the trailing `"_"` shown
+/// while the user is typing into a search prompt).
+pub fn search_cursor() -> Style {
+    Style::default().add_modifier(Modifier::REVERSED)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -153,5 +171,24 @@ mod tests {
         assert_eq!(cert_expiry_style(29), warning());
         assert_eq!(cert_expiry_style(30), muted());
         assert_eq!(cert_expiry_style(365), muted());
+    }
+
+    #[test]
+    fn search_match_underlines() {
+        assert!(search_match().add_modifier.contains(Modifier::UNDERLINED));
+    }
+
+    #[test]
+    fn search_match_active_combines_modifiers() {
+        let s = search_match_active();
+        assert!(s.add_modifier.contains(Modifier::UNDERLINED));
+        assert!(s.add_modifier.contains(Modifier::REVERSED));
+        assert!(s.add_modifier.contains(Modifier::BOLD));
+    }
+
+    #[test]
+    fn search_cursor_reverses() {
+        assert!(search_cursor().add_modifier.contains(Modifier::REVERSED));
+        assert!(!search_cursor().add_modifier.contains(Modifier::UNDERLINED));
     }
 }

@@ -126,13 +126,11 @@ fn render_body(frame: &mut Frame, area: Rect, modal: &mut DetailModalState) {
                     spans.push(Span::raw(line_owned[cursor..m.byte_start].to_string()));
                 }
                 let hit = line_owned[m.byte_start..m.byte_end].to_string();
-                let mut style = ratatui::style::Style::default()
-                    .add_modifier(ratatui::style::Modifier::UNDERLINED);
-                if s.current == Some(global_idx) {
-                    style = style.add_modifier(
-                        ratatui::style::Modifier::REVERSED | ratatui::style::Modifier::BOLD,
-                    );
-                }
+                let style = if s.current == Some(global_idx) {
+                    theme::search_match_active()
+                } else {
+                    theme::search_match()
+                };
                 spans.push(Span::styled(hit, style));
                 cursor = m.byte_end;
             }
@@ -186,10 +184,7 @@ fn render_footer(frame: &mut Frame, area: Rect, modal: &DetailModalState) {
         lines.push(Line::from(vec![
             Span::styled("/ ".to_string(), theme::accent()),
             Span::raw(s.query.clone()),
-            Span::styled(
-                "_".to_string(),
-                ratatui::style::Style::default().add_modifier(ratatui::style::Modifier::REVERSED),
-            ),
+            Span::styled("_".to_string(), theme::search_cursor()),
         ]));
     }
 

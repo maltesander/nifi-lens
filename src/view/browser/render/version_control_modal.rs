@@ -239,10 +239,11 @@ fn apply_search_highlights(lines: &mut [Line<'static>], search: &SearchState) {
                 new_spans.push(Span::raw(plain[cursor..m.byte_start].to_string()));
             }
             let hit = plain[m.byte_start..m.byte_end].to_string();
-            let mut style = Style::default().add_modifier(Modifier::UNDERLINED);
-            if search.current == Some(global_idx) {
-                style = style.add_modifier(Modifier::REVERSED | Modifier::BOLD);
-            }
+            let style = if search.current == Some(global_idx) {
+                theme::search_match_active()
+            } else {
+                theme::search_match()
+            };
             new_spans.push(Span::styled(hit, style));
             cursor = m.byte_end;
         }
@@ -275,10 +276,7 @@ fn render_footer_status(frame: &mut Frame, area: Rect, modal: &VersionControlMod
         let line = Line::from(vec![
             Span::styled("/ ".to_string(), theme::accent()),
             Span::raw(s.query.clone()),
-            Span::styled(
-                "_".to_string(),
-                ratatui::style::Style::default().add_modifier(ratatui::style::Modifier::REVERSED),
-            ),
+            Span::styled("_".to_string(), theme::search_cursor()),
         ]);
         frame.render_widget(Paragraph::new(line), area);
         return;
