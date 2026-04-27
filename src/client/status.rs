@@ -124,6 +124,49 @@ impl ControllerServiceState {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PortStatus {
+    Running,
+    Stopped,
+    Invalid,
+    Disabled,
+    Validating,
+    Unknown,
+}
+
+impl PortStatus {
+    /// Parse a NiFi-wire port run-status string (case-insensitive).
+    /// Unrecognized values map to `Unknown`.
+    pub fn from_wire(s: &str) -> Self {
+        if s.eq_ignore_ascii_case("RUNNING") {
+            Self::Running
+        } else if s.eq_ignore_ascii_case("STOPPED") {
+            Self::Stopped
+        } else if s.eq_ignore_ascii_case("INVALID") {
+            Self::Invalid
+        } else if s.eq_ignore_ascii_case("DISABLED") {
+            Self::Disabled
+        } else if s.eq_ignore_ascii_case("VALIDATING") {
+            Self::Validating
+        } else {
+            Self::Unknown
+        }
+    }
+
+    /// Style used for port state labels in headers and identity panes.
+    /// Mirrors the legacy `port::state_style` mapping byte-for-byte:
+    /// running → success+BOLD, stopped → warning, disabled → muted,
+    /// anything else (invalid / validating / unknown) → info.
+    pub fn style(self) -> Style {
+        match self {
+            Self::Running => theme::success().add_modifier(Modifier::BOLD),
+            Self::Stopped => theme::warning(),
+            Self::Disabled => theme::muted(),
+            Self::Invalid | Self::Validating | Self::Unknown => theme::info(),
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -307,5 +350,32 @@ mod tests {
             ControllerServiceState::Unknown.referencing_style(),
             crate::theme::warning()
         );
+    }
+
+    #[test]
+    fn port_status_from_wire_case_insensitive() {
+        assert_eq!(PortStatus::from_wire("RUNNING"), PortStatus::Running);
+        assert_eq!(PortStatus::from_wire("running"), PortStatus::Running);
+        assert_eq!(PortStatus::from_wire("Stopped"), PortStatus::Stopped);
+        assert_eq!(PortStatus::from_wire("INVALID"), PortStatus::Invalid);
+        assert_eq!(PortStatus::from_wire("DISABLED"), PortStatus::Disabled);
+        assert_eq!(PortStatus::from_wire("VALIDATING"), PortStatus::Validating);
+        assert_eq!(PortStatus::from_wire(""), PortStatus::Unknown);
+        assert_eq!(PortStatus::from_wire("GARBAGE"), PortStatus::Unknown);
+    }
+
+    #[test]
+    fn port_status_styles() {
+        // Running keeps the BOLD modifier from the legacy state_style.
+        assert_eq!(
+            PortStatus::Running.style(),
+            crate::theme::success().add_modifier(Modifier::BOLD)
+        );
+        assert_eq!(PortStatus::Stopped.style(), crate::theme::warning());
+        assert_eq!(PortStatus::Disabled.style(), crate::theme::muted());
+        // Invalid / Validating / Unknown all collapse to the legacy `_` arm: info.
+        assert_eq!(PortStatus::Invalid.style(), crate::theme::info());
+        assert_eq!(PortStatus::Validating.style(), crate::theme::info());
+        assert_eq!(PortStatus::Unknown.style(), crate::theme::info());
     }
 }

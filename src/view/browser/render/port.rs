@@ -4,10 +4,11 @@ use std::collections::VecDeque;
 
 use ratatui::Frame;
 use ratatui::layout::{Constraint, Direction, Layout, Rect};
-use ratatui::style::{Modifier, Style};
+use ratatui::style::Modifier;
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Cell, Paragraph, Row, Table, TableState};
 
+use crate::client::status::PortStatus;
 use crate::client::{BulletinSnapshot, NodeKind, PortDetail, PortKind};
 use crate::theme;
 use crate::view::browser::state::{BrowserState, DetailFocus, DetailSection, DetailSections};
@@ -45,18 +46,9 @@ fn build_header_title(d: &PortDetail) -> Line<'_> {
         Span::raw(" "),
         Span::styled("·", theme::muted()),
         Span::raw(" "),
-        Span::styled(d.state.as_str(), state_style(&d.state)),
+        Span::styled(d.state.as_str(), PortStatus::from_wire(&d.state).style()),
         Span::raw(" "),
     ])
-}
-
-fn state_style(state: &str) -> Style {
-    match state {
-        "RUNNING" => theme::success().add_modifier(Modifier::BOLD),
-        "STOPPED" => theme::warning(),
-        "DISABLED" => theme::muted(),
-        _ => theme::info(),
-    }
 }
 
 fn render_identity(frame: &mut Frame, area: Rect, d: &PortDetail, state: &BrowserState) {
@@ -83,7 +75,7 @@ fn render_identity(frame: &mut Frame, area: Rect, d: &PortDetail, state: &Browse
         ]),
         Line::from(vec![
             Span::styled("state           ", theme::muted()),
-            Span::styled(d.state.clone(), state_style(&d.state)),
+            Span::styled(d.state.clone(), PortStatus::from_wire(&d.state).style()),
         ]),
         Line::from(vec![
             Span::styled("parent group    ", theme::muted()),
