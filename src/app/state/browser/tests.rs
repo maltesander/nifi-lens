@@ -2980,3 +2980,135 @@ fn esc_unfocuses_body_back_to_sidebar() {
         "Esc in Body focus must return to Sidebar"
     );
 }
+
+/// Fixture with a 3-context inheritance chain for testing sidebar navigation.
+fn state_with_pc_modal_loaded_three_contexts() -> AppState {
+    use crate::client::parameter_context::{ParameterContextNode, ParameterEntry};
+    use crate::cluster::snapshot::ParameterContextRef;
+
+    let (mut s, _c) = seeded_browser_state();
+    s.browser.nodes[0].parameter_context_ref = Some(ParameterContextRef {
+        id: "ctx-leaf".into(),
+        name: "leaf".into(),
+    });
+    s.browser
+        .open_parameter_context_modal("root".into(), "root".into(), None);
+
+    fn entry(name: &str, value: &str) -> ParameterEntry {
+        ParameterEntry {
+            name: name.into(),
+            value: Some(value.into()),
+            description: None,
+            sensitive: false,
+            provided: false,
+        }
+    }
+
+    let chain = vec![
+        ParameterContextNode {
+            id: "ctx-leaf".into(),
+            name: "leaf".into(),
+            parameters: vec![entry("a", "1")],
+            inherited_ids: vec!["ctx-mid".into()],
+            fetch_error: None,
+        },
+        ParameterContextNode {
+            id: "ctx-mid".into(),
+            name: "mid".into(),
+            parameters: vec![entry("b", "2")],
+            inherited_ids: vec!["ctx-root".into()],
+            fetch_error: None,
+        },
+        ParameterContextNode {
+            id: "ctx-root".into(),
+            name: "root".into(),
+            parameters: vec![entry("c", "3")],
+            inherited_ids: vec![],
+            fetch_error: None,
+        },
+    ];
+    s.browser
+        .apply_parameter_context_modal_loaded("root".into(), chain);
+    s
+}
+
+#[test]
+fn pcm_chain_row_down_advances_sidebar_index_with_clamp() {
+    let mut s = state_with_pc_modal_loaded_three_contexts();
+    assert_eq!(
+        s.browser.parameter_modal.as_ref().unwrap().sidebar_index,
+        0,
+        "starts at chain head"
+    );
+
+    let down = crate::input::ViewVerb::ParameterContextModal(
+        crate::input::ParameterContextModalVerb::RowDown,
+    );
+
+    BrowserHandler::handle_verb(&mut s, down);
+    assert_eq!(s.browser.parameter_modal.as_ref().unwrap().sidebar_index, 1);
+
+    BrowserHandler::handle_verb(&mut s, down);
+    assert_eq!(s.browser.parameter_modal.as_ref().unwrap().sidebar_index, 2);
+
+    // At last index — RowDown clamps.
+    BrowserHandler::handle_verb(&mut s, down);
+    assert_eq!(
+        s.browser.parameter_modal.as_ref().unwrap().sidebar_index,
+        2,
+        "RowDown at last index clamps"
+    );
+}
+
+#[test]
+fn pcm_chain_row_up_decrements_with_clamp_at_zero() {
+    let mut s = state_with_pc_modal_loaded_three_contexts();
+    let down = crate::input::ViewVerb::ParameterContextModal(
+        crate::input::ParameterContextModalVerb::RowDown,
+    );
+    BrowserHandler::handle_verb(&mut s, down);
+    BrowserHandler::handle_verb(&mut s, down);
+    assert_eq!(s.browser.parameter_modal.as_ref().unwrap().sidebar_index, 2);
+
+    let up = crate::input::ViewVerb::ParameterContextModal(
+        crate::input::ParameterContextModalVerb::RowUp,
+    );
+    BrowserHandler::handle_verb(&mut s, up);
+    assert_eq!(s.browser.parameter_modal.as_ref().unwrap().sidebar_index, 1);
+
+    BrowserHandler::handle_verb(&mut s, up);
+    assert_eq!(s.browser.parameter_modal.as_ref().unwrap().sidebar_index, 0);
+
+    // At index 0 — RowUp clamps via saturating_sub.
+    BrowserHandler::handle_verb(&mut s, up);
+    assert_eq!(
+        s.browser.parameter_modal.as_ref().unwrap().sidebar_index,
+        0,
+        "RowUp at index 0 clamps"
+    );
+}
+
+#[test]
+fn pcm_chain_page_up_jumps_to_head_page_down_to_tail() {
+    let mut s = state_with_pc_modal_loaded_three_contexts();
+
+    let page_down = crate::input::ViewVerb::ParameterContextModal(
+        crate::input::ParameterContextModalVerb::PageDown,
+    );
+    BrowserHandler::handle_verb(&mut s, page_down);
+    assert_eq!(
+        s.browser.parameter_modal.as_ref().unwrap().sidebar_index,
+        2,
+        "PageDown jumps to last index"
+    );
+
+    let page_up = crate::input::ViewVerb::ParameterContextModal(
+        crate::input::ParameterContextModalVerb::PageUp,
+    );
+    BrowserHandler::handle_verb(&mut s, page_up);
+    assert_eq!(
+        s.browser.parameter_modal.as_ref().unwrap().sidebar_index,
+        0,
+        "PageUp jumps to head"
+    );
+}
