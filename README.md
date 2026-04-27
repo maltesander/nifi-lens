@@ -41,13 +41,13 @@
 
 ![Browser tab](assets/screenshots/browser.png)
 
-**Browser** — Parameter-contexts: "Where does this parameter come from?"
-
-![Browser tab](assets/screenshots/browser_parameter.png)
-
 **Browser** — Versioned process-groups: "What changed in this process group?"
 
 ![Browser tab](assets/screenshots/browser_version.png)
+
+**Browser** — Parameter-contexts: "Where does this parameter come from?"
+
+![Browser tab](assets/screenshots/browser_parameter.png)
 
 **Events** — Provenance search and detail: "What just happened across the cluster?"
 
