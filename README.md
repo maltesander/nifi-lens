@@ -9,6 +9,20 @@
 [![License: Apache-2.0](https://img.shields.io/badge/License-Apache--2.0-blue.svg)](LICENSE)
 ![MSRV: 1.88](https://img.shields.io/badge/MSRV-1.88-blue.svg)
 
+## Contents
+
+- [Screenshots](#screenshots)
+- [Features](#features)
+- [Install](#install)
+- [Quick Start](#quick-start)
+- [Flags](#flags)
+- [Required NiFi permissions](#required-nifi-permissions)
+- [Core Components](#core-components)
+- [Keybindings](#keybindings)
+- [Configuration](#configuration)
+- [Logs](#logs)
+- [Development](#development)
+
 ## Screenshots
 
 **Overview** — Cluster health at a glance: "Is this cluster OK right now?"
@@ -546,10 +560,14 @@ test `nifi-lens` against live clusters without touching production.
 ./integration-tests/run.sh
 ```
 
-This boots `apache/nifi:2.6.0` (standalone, port 8443) and a 2-node
-`apache/nifi:2.9.0` cluster (ports 8444-8445) with ZooKeeper, seeds both
-via the `nifilens-fixture-seeder` workspace binary, runs the
-`#[ignore]`-gated integration suite, then tears the containers down.
+This boots `apache/nifi:2.6.0` (standalone, port 8443), a 2-node
+`apache/nifi:2.9.0` cluster (ports 8444-8445) with ZooKeeper, and an
+`apache/nifi-registry:2.6.0` instance (port 18080) that the
+`versioned-clean` / `versioned-modified` fixture PGs are committed to
+(so the version-control drift modal has real registry data to diff
+against). The seeder runs against both NiFi instances via the
+`nifilens-fixture-seeder` workspace binary, the `#[ignore]`-gated
+integration suite runs, and the containers tear down.
 
 For long-running live testing, skip the test step and leave the fixture
 up:
