@@ -141,14 +141,23 @@ async fn versioned_modified_local_modifications_lists_property_change() {
         );
         let log_section = log_section.unwrap();
 
-        // At least one diff should be a PROPERTY_CHANGED on Log Level.
-        // NiFi's wire format includes the property key in the description.
-        let has_log_level_change = log_section.differences.iter().any(|d| {
-            d.kind == "PROPERTY_CHANGED" && d.description.to_lowercase().contains("log level")
+        // The seeder mutates Log Level from INFO to WARN on vc-mod-LogAttribute.
+        // NiFi's `DifferenceDto` carries only `differenceType` (kind) and
+        // `difference` (description) — there's no separate property-name
+        // field. NiFi 2.6.0 returns kind="Property Value Changed" with
+        // description="From 'INFO' to 'WARN'" (no property key in either);
+        // newer versions may return enum-style "PROPERTY_CHANGED". Match
+        // either form, and pin the INFO → WARN transition via description.
+        let has_property_change = log_section.differences.iter().any(|d| {
+            let kind_lc = d.kind.to_lowercase();
+            let desc = &d.description;
+            (kind_lc.contains("property") || kind_lc == "property_changed")
+                && desc.contains("INFO")
+                && desc.contains("WARN")
         });
         assert!(
-            has_log_level_change,
-            "expected PROPERTY_CHANGED 'Log Level' diff on {version}; differences were: {:?}",
+            has_property_change,
+            "expected a property-value-changed diff on vc-mod-LogAttribute carrying INFO → WARN on {version}; differences were: {:?}",
             log_section.differences
         );
     }
