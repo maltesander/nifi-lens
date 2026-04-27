@@ -1,6 +1,5 @@
 ---
-source: src/view/tracer/modal.rs
-assertion_line: 958
+source: src/view/tracer/modal/mod.rs
 expression: terminal.backend().buffer()
 ---
 Buffer {
@@ -13,16 +12,16 @@ Buffer {
         "┃                                                                              ┃",
         "┃   Input     Output     Diff                                                  ┃",
         "┃                                                                              ┃",
-        "┃id : Int64                                                                    ┃",
-        "┃name : Utf8                                                                   ┃",
-        "┃-- schema --                                                                  ┃",
-        "┃{"id":0,"name":"a"}                                                           ┃",
-        "┃{"id":1,"name":"b"}                                                           ┃",
+        "┃<empty>                                                                       ┃",
         "┃                                                                              ┃",
         "┃                                                                              ┃",
         "┃                                                                              ┃",
         "┃                                                                              ┃",
-        "┃parquet · 2 rows · 0% of 64 MiB                                               ┃",
+        "┃                                                                              ┃",
+        "┃                                                                              ┃",
+        "┃                                                                              ┃",
+        "┃                                                                              ┃",
+        "┃loaded 0 B (complete)                                                         ┃",
         "┃                                                                              ┃",
         "┃[Tab] switch · [/] find · [c] copy · [s] save · [Esc] close                   ┃",
         "┗━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┛",
@@ -35,20 +34,16 @@ Buffer {
         x: 41, y: 2, fg: Reset, bg: Reset, underline: Reset, modifier: NONE,
         x: 1, y: 3, fg: DarkGray, bg: Reset, underline: Reset, modifier: NONE,
         x: 61, y: 3, fg: Reset, bg: Reset, underline: Reset, modifier: NONE,
-        x: 3, y: 5, fg: Cyan, bg: Reset, underline: Reset, modifier: BOLD,
+        x: 3, y: 5, fg: Reset, bg: Reset, underline: Reset, modifier: BOLD,
         x: 10, y: 5, fg: Reset, bg: Reset, underline: Reset, modifier: NONE,
-        x: 13, y: 5, fg: Reset, bg: Reset, underline: Reset, modifier: BOLD,
+        x: 13, y: 5, fg: Cyan, bg: Reset, underline: Reset, modifier: BOLD,
         x: 21, y: 5, fg: Reset, bg: Reset, underline: Reset, modifier: NONE,
         x: 24, y: 5, fg: Reset, bg: Reset, underline: Reset, modifier: BOLD,
         x: 30, y: 5, fg: Reset, bg: Reset, underline: Reset, modifier: NONE,
         x: 1, y: 7, fg: DarkGray, bg: Reset, underline: Reset, modifier: NONE,
-        x: 11, y: 7, fg: Reset, bg: Reset, underline: Reset, modifier: NONE,
-        x: 1, y: 8, fg: DarkGray, bg: Reset, underline: Reset, modifier: NONE,
-        x: 12, y: 8, fg: Reset, bg: Reset, underline: Reset, modifier: NONE,
-        x: 1, y: 9, fg: DarkGray, bg: Reset, underline: Reset, modifier: BOLD,
-        x: 13, y: 9, fg: Reset, bg: Reset, underline: Reset, modifier: NONE,
+        x: 8, y: 7, fg: Reset, bg: Reset, underline: Reset, modifier: NONE,
         x: 1, y: 16, fg: DarkGray, bg: Reset, underline: Reset, modifier: NONE,
-        x: 32, y: 16, fg: Reset, bg: Reset, underline: Reset, modifier: NONE,
+        x: 22, y: 16, fg: Reset, bg: Reset, underline: Reset, modifier: NONE,
         x: 1, y: 18, fg: DarkGray, bg: Reset, underline: Reset, modifier: NONE,
         x: 60, y: 18, fg: Reset, bg: Reset, underline: Reset, modifier: NONE,
     ]

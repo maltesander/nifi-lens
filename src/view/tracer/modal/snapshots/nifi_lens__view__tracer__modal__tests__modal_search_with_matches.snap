@@ -1,5 +1,5 @@
 ---
-source: src/view/tracer/modal.rs
+source: src/view/tracer/modal/mod.rs
 expression: terminal.backend().buffer()
 ---
 Buffer {
@@ -21,9 +21,9 @@ Buffer {
         "┃                                                                                                  ┃",
         "┃                                                                                                  ┃",
         "┃                                                                                                  ┃",
-        "┃loaded 4.0 MiB · ceiling reached — press 's' to save full content                                 ┃",
-        "┃                                                                                                  ┃",
-        "┃[Tab] switch · [/] find · [c] copy · [s] save · [Esc] close                                       ┃",
+        "┃loaded 35 B (complete)                                                                            ┃",
+        "┃/ total (1/1)                                                                                     ┃",
+        "┃[Tab] switch · [/] find · [n] match · [c] copy · [s] save · [Esc] close                           ┃",
         "┗━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┛",
     ],
     styles: [
@@ -44,9 +44,15 @@ Buffer {
         x: 8, y: 7, fg: Reset, bg: Reset, underline: Reset, modifier: NONE,
         x: 1, y: 8, fg: DarkGray, bg: Reset, underline: Reset, modifier: NONE,
         x: 8, y: 8, fg: Reset, bg: Reset, underline: Reset, modifier: NONE,
+        x: 11, y: 8, fg: Reset, bg: Reset, underline: Reset, modifier: REVERSED,
+        x: 16, y: 8, fg: Reset, bg: Reset, underline: Reset, modifier: NONE,
         x: 1, y: 16, fg: DarkGray, bg: Reset, underline: Reset, modifier: NONE,
-        x: 66, y: 16, fg: Reset, bg: Reset, underline: Reset, modifier: NONE,
+        x: 23, y: 16, fg: Reset, bg: Reset, underline: Reset, modifier: NONE,
+        x: 1, y: 17, fg: Cyan, bg: Reset, underline: Reset, modifier: BOLD,
+        x: 2, y: 17, fg: Reset, bg: Reset, underline: Reset, modifier: NONE,
+        x: 8, y: 17, fg: DarkGray, bg: Reset, underline: Reset, modifier: NONE,
+        x: 14, y: 17, fg: Reset, bg: Reset, underline: Reset, modifier: NONE,
         x: 1, y: 18, fg: DarkGray, bg: Reset, underline: Reset, modifier: NONE,
-        x: 60, y: 18, fg: Reset, bg: Reset, underline: Reset, modifier: NONE,
+        x: 72, y: 18, fg: Reset, bg: Reset, underline: Reset, modifier: NONE,
     ]
 }

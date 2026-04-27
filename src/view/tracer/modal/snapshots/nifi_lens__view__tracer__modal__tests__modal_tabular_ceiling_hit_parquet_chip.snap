@@ -1,9 +1,9 @@
 ---
-source: src/view/tracer/modal.rs
+source: src/view/tracer/modal/mod.rs
 expression: terminal.backend().buffer()
 ---
 Buffer {
-    area: Rect { x: 0, y: 0, width: 100, height: 20 },
+    area: Rect { x: 0, y: 0, width: 100, height: 24 },
     content: [
         "┏ Content · UpdateAttribute-enrich · event 8471293 · DROP ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┓",
         "┃at    2026-04-22T13:42:18.231   pg healthy-pipeline/enrich                                        ┃",
@@ -12,8 +12,7 @@ Buffer {
         "┃                                                                                                  ┃",
         "┃   Input     Output     Diff                                                                      ┃",
         "┃                                                                                                  ┃",
-        "┃   1 │ {"orderId":"A-1029",                                                                       ┃",
-        "┃   2 │   "total":299.00}                                                                          ┃",
+        "┃   1 │ 50 41 52 31 ...                                                                            ┃",
         "┃                                                                                                  ┃",
         "┃                                                                                                  ┃",
         "┃                                                                                                  ┃",
@@ -21,9 +20,14 @@ Buffer {
         "┃                                                                                                  ┃",
         "┃                                                                                                  ┃",
         "┃                                                                                                  ┃",
-        "┃loaded 35 B (complete)                                                                            ┃",
-        "┃/ total (1/1)                                                                                     ┃",
-        "┃[Tab] switch · [/] find · [n] match · [c] copy · [s] save · [Esc] close                           ┃",
+        "┃                                                                                                  ┃",
+        "┃                                                                                                  ┃",
+        "┃                                                                                                  ┃",
+        "┃                                                                                                  ┃",
+        "┃                                                                                                  ┃",
+        "┃parquet truncated at 64 MiB — raise [tracer.ceiling] tabular or use "s" to save                   ┃",
+        "┃                                                                                                  ┃",
+        "┃[Tab] switch · [/] find · [c] copy · [s] save · [Esc] close                                       ┃",
         "┗━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┛",
     ],
     styles: [
@@ -42,17 +46,9 @@ Buffer {
         x: 30, y: 5, fg: Reset, bg: Reset, underline: Reset, modifier: NONE,
         x: 1, y: 7, fg: DarkGray, bg: Reset, underline: Reset, modifier: NONE,
         x: 8, y: 7, fg: Reset, bg: Reset, underline: Reset, modifier: NONE,
-        x: 1, y: 8, fg: DarkGray, bg: Reset, underline: Reset, modifier: NONE,
-        x: 8, y: 8, fg: Reset, bg: Reset, underline: Reset, modifier: NONE,
-        x: 11, y: 8, fg: Reset, bg: Reset, underline: Reset, modifier: REVERSED,
-        x: 16, y: 8, fg: Reset, bg: Reset, underline: Reset, modifier: NONE,
-        x: 1, y: 16, fg: DarkGray, bg: Reset, underline: Reset, modifier: NONE,
-        x: 23, y: 16, fg: Reset, bg: Reset, underline: Reset, modifier: NONE,
-        x: 1, y: 17, fg: Cyan, bg: Reset, underline: Reset, modifier: BOLD,
-        x: 2, y: 17, fg: Reset, bg: Reset, underline: Reset, modifier: NONE,
-        x: 8, y: 17, fg: DarkGray, bg: Reset, underline: Reset, modifier: NONE,
-        x: 14, y: 17, fg: Reset, bg: Reset, underline: Reset, modifier: NONE,
-        x: 1, y: 18, fg: DarkGray, bg: Reset, underline: Reset, modifier: NONE,
-        x: 72, y: 18, fg: Reset, bg: Reset, underline: Reset, modifier: NONE,
+        x: 1, y: 20, fg: DarkGray, bg: Reset, underline: Reset, modifier: NONE,
+        x: 80, y: 20, fg: Reset, bg: Reset, underline: Reset, modifier: NONE,
+        x: 1, y: 22, fg: DarkGray, bg: Reset, underline: Reset, modifier: NONE,
+        x: 60, y: 22, fg: Reset, bg: Reset, underline: Reset, modifier: NONE,
     ]
 }

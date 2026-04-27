@@ -1,5 +1,5 @@
 ---
-source: src/view/tracer/modal.rs
+source: src/view/tracer/modal/mod.rs
 expression: terminal.backend().buffer()
 ---
 Buffer {
@@ -8,9 +8,9 @@ Buffer {
         "┏ Content · UpdateAttribute-enrich · event 8471293 · DROP ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┓",
         "┃at    2026-04-22T13:42:18.231   pg healthy-pipeline/enrich                                        ┃",
         "┃sizes in 2.3 KiB → out 2.7 KiB  (+400 B)                                                          ┃",
-        "┃mime  in application/json · out application/json  ⊘ size > 512 KiB                                ┃",
+        "┃mime  in application/json · out application/json  ✓ diffable                                      ┃",
         "┃                                                                                                  ┃",
-        "┃   Input     Output     Diff · size > 512 KiB                                                     ┃",
+        "┃   Input     Output     Diff                                                                      ┃",
         "┃                                                                                                  ┃",
         "┃   1 │ {"orderId":"A-1029",                                                                       ┃",
         "┃   2 │   "total":299.00}                                                                          ┃",
@@ -21,7 +21,7 @@ Buffer {
         "┃                                                                                                  ┃",
         "┃                                                                                                  ┃",
         "┃                                                                                                  ┃",
-        "┃loaded 35 B (complete)                                                                            ┃",
+        "┃loaded 4.0 MiB · ceiling reached — press 's' to save full content                                 ┃",
         "┃                                                                                                  ┃",
         "┃[Tab] switch · [/] find · [c] copy · [s] save · [Esc] close                                       ┃",
         "┗━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┛",
@@ -33,19 +33,19 @@ Buffer {
         x: 1, y: 2, fg: DarkGray, bg: Reset, underline: Reset, modifier: NONE,
         x: 41, y: 2, fg: Reset, bg: Reset, underline: Reset, modifier: NONE,
         x: 1, y: 3, fg: DarkGray, bg: Reset, underline: Reset, modifier: NONE,
-        x: 67, y: 3, fg: Reset, bg: Reset, underline: Reset, modifier: NONE,
+        x: 61, y: 3, fg: Reset, bg: Reset, underline: Reset, modifier: NONE,
         x: 3, y: 5, fg: Cyan, bg: Reset, underline: Reset, modifier: BOLD,
         x: 10, y: 5, fg: Reset, bg: Reset, underline: Reset, modifier: NONE,
         x: 13, y: 5, fg: Reset, bg: Reset, underline: Reset, modifier: BOLD,
         x: 21, y: 5, fg: Reset, bg: Reset, underline: Reset, modifier: NONE,
-        x: 24, y: 5, fg: DarkGray, bg: Reset, underline: Reset, modifier: NONE,
-        x: 47, y: 5, fg: Reset, bg: Reset, underline: Reset, modifier: NONE,
+        x: 24, y: 5, fg: Reset, bg: Reset, underline: Reset, modifier: BOLD,
+        x: 30, y: 5, fg: Reset, bg: Reset, underline: Reset, modifier: NONE,
         x: 1, y: 7, fg: DarkGray, bg: Reset, underline: Reset, modifier: NONE,
         x: 8, y: 7, fg: Reset, bg: Reset, underline: Reset, modifier: NONE,
         x: 1, y: 8, fg: DarkGray, bg: Reset, underline: Reset, modifier: NONE,
         x: 8, y: 8, fg: Reset, bg: Reset, underline: Reset, modifier: NONE,
         x: 1, y: 16, fg: DarkGray, bg: Reset, underline: Reset, modifier: NONE,
-        x: 23, y: 16, fg: Reset, bg: Reset, underline: Reset, modifier: NONE,
+        x: 66, y: 16, fg: Reset, bg: Reset, underline: Reset, modifier: NONE,
         x: 1, y: 18, fg: DarkGray, bg: Reset, underline: Reset, modifier: NONE,
         x: 60, y: 18, fg: Reset, bg: Reset, underline: Reset, modifier: NONE,
     ]
