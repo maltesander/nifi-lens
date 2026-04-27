@@ -83,6 +83,22 @@ fn find_processor_by_name_in_pg(
 /// for at least one event. Returns `None` if the cluster hasn't produced
 /// anything yet (e.g., fixture just booted) — callers skip the
 /// assertion in that case.
+/// Hex-dump the first `n` bytes of `bytes` for diagnostic panic messages.
+fn hex_dump(bytes: &[u8], n: usize) -> String {
+    use std::fmt::Write as _;
+    let mut out = String::new();
+    for (i, b) in bytes.iter().take(n).enumerate() {
+        if i > 0 {
+            out.push(' ');
+        }
+        let _ = write!(out, "{b:02x}");
+    }
+    if bytes.len() > n {
+        out.push_str("...");
+    }
+    out
+}
+
 async fn wait_for_event(
     client: &NifiClient,
     component_id: &str,
@@ -260,10 +276,20 @@ async fn diff_pipeline_events_are_diffable_against_all_fixture_versions() {
                 input, output,
                 "UpdateRecord-csv: input and output must differ (status lowercased) on {version}"
             );
-            let input_s = std::str::from_utf8(&input)
-                .unwrap_or_else(|_| panic!("UpdateRecord-csv input not UTF-8 on {version}"));
-            let output_s = std::str::from_utf8(&output)
-                .unwrap_or_else(|_| panic!("UpdateRecord-csv output not UTF-8 on {version}"));
+            let input_s = std::str::from_utf8(&input).unwrap_or_else(|e| {
+                panic!(
+                    "UpdateRecord-csv input not UTF-8 on {version}: {e}; \
+                     first 64 bytes (hex): {}",
+                    hex_dump(&input, 64)
+                )
+            });
+            let output_s = std::str::from_utf8(&output).unwrap_or_else(|e| {
+                panic!(
+                    "UpdateRecord-csv output not UTF-8 on {version}: {e}; \
+                     first 64 bytes (hex): {}",
+                    hex_dump(&output, 64)
+                )
+            });
             assert!(
                 input_s.contains(',') && input_s.contains('\n'),
                 "UpdateRecord-csv input should be CSV-shaped on {version}"
