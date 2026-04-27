@@ -89,14 +89,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
-- **Standalone NiFi 2.6.0 Nodes-panel degrade.** `nifi-rust-client`
-  0.11.0 maps the 409 response from `/controller/cluster` on
-  standalone servers to a `NotFound` variant whose debug repr
-  doesn't contain "409". The fetcher's standalone-detection
-  predicate now also matches the canonical NiFi message text
-  ("Only a node connected to a cluster"), so the Nodes panel
-  correctly degrades to the empty 4-column standalone layout
-  instead of showing a permanent `Failed` error.
 - **Clipboard read/write timeout (2 s).** `arboard::Clipboard`
   operations could hang indefinitely on stalled X11/Wayland
   clipboard daemons, freezing the UI. Each call now runs on a
