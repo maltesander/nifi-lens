@@ -117,6 +117,29 @@ nifilens
 Press `?` inside the tool for a context-aware help modal. A hint line at
 the bottom shows relevant keybindings for the current view.
 
+While cluster fetchers are still booting, the status bar shows an
+`init: X/11 endpoints ready` chip. The chip disappears once every
+endpoint has produced its first snapshot (success or graceful
+failure both count). On a slow cluster it may take 10–20 seconds.
+
+## Flags
+
+| Flag | Description |
+|------|-------------|
+| `--config <PATH>` | Override the config-file path (defaults to the platform config dir — see [Configuration](#configuration)). |
+| `--context <NAME>` | Override `current_context` from the config. |
+| `--debug` | Equivalent to `--log-level debug`. |
+| `--log-level <LEVEL>` | One of `off` / `error` / `warn` / `info` / `debug` / `trace`. Default `info`. Mutually exclusive with `--debug`. |
+| `--no-color` | Disable ANSI colors in the TUI and stderr layer. |
+
+The `NO_COLOR` env var (per [no-color.org](https://no-color.org/))
+is honored alongside `--no-color`: any non-empty value disables
+colors. Useful for CI logs and screen readers.
+
+The `NIFILENS_LOG` and `RUST_LOG` env vars set the log filter when
+no `--log-level` / `--debug` flag is given. Same syntax as the
+`tracing` filter directive (e.g. `info,nifi_lens=debug`).
+
 ## Required NiFi permissions
 
 `nifi-lens` is read-only. It issues only `GET`, idempotent `POST` for
@@ -224,9 +247,11 @@ cross-linked from Bulletins and Browser.
 
 **Tracer** — Paste a flowfile UUID to trace its full lineage. Each event
 has a tabbed detail pane (Attributes | Input | Output) with a toggleable
-All / Changed attribute diff and an inline 8 KiB content preview. A
-full-screen content viewer modal streams larger bodies on demand and
-can render a colored unified diff between input and output.
+All / Changed attribute diff and an inline 8 KiB content preview
+(hardcoded — for larger payloads, press `i` to open the full-screen
+modal). The modal streams content on demand bounded by
+`[tracer.ceiling]` and can render a colored unified diff between
+input and output.
 
 ## Keybindings
 
@@ -403,18 +428,25 @@ timestamp_tz = "utc"
 # below for the full behavior (adaptive scaling, jitter, subscriber
 # gating). Humantime format. Defaults shown.
 [polling.cluster]
-root_pg_status      = "10s"
-controller_services = "10s"
-controller_status   = "10s"
-system_diagnostics  = "30s"
-bulletins           = "5s"
-cluster_nodes       = "5s"
-connections_by_pg   = "15s"
-version_control     = "30s"
-about               = "5m"
-tls_certs           = "1h"
-max_interval        = "60s"
-jitter_percent      = 20
+root_pg_status              = "10s"
+controller_services         = "10s"
+controller_status           = "10s"
+system_diagnostics          = "30s"
+bulletins                   = "5s"
+cluster_nodes               = "5s"
+connections_by_pg           = "15s"
+version_control             = "30s"
+parameter_context_bindings  = "30s"
+about                       = "5m"
+tls_certs                   = "1h"
+max_interval                = "60s"
+jitter_percent              = 20
+
+# Max concurrent in-flight HTTP requests for per-PG fan-out fetchers
+# (version_control, parameter_context_bindings, connections_by_pg).
+# Default 16. Raise on fast clusters with many PGs; lower if NiFi's
+# HTTP thread pool struggles.
+batch_concurrency           = 16
 
 [[contexts]]
 name = "dev"
@@ -469,7 +501,33 @@ password_env = "NIFILENS_PROD_PASSWORD"
   (`version_control`) likewise park while Browser is not the active
   tab.
 - **CLI overrides:** `nifilens --context stage`, `nifilens --config ./local.toml`.
+  See [Flags](#flags) for the full list.
 - **Version strategy** maps to `nifi-rust-client`'s `VersionResolutionStrategy`.
+
+## Logs
+
+`nifi-lens` writes a daily-rotated log to the platform state directory
+(never to stdout/stderr while the TUI is running):
+
+- Linux: `~/.local/state/nifilens/` (or `$XDG_STATE_HOME/nifilens/`)
+- macOS: `~/Library/Caches/nifilens/`
+- Windows: `%LOCALAPPDATA%\nifilens\cache\`
+
+Filenames include a date suffix — `nifilens.log.YYYY-MM-DD` — so the
+file you want is the most recent one. To follow the current day's log:
+
+```bash
+# Linux / macOS — picks today's file even across midnight rollovers.
+tail -f "$(ls -t ~/.local/state/nifilens/nifilens.log.* | head -1)"
+```
+
+Old day files accumulate; rotation is purely date-based. Prune
+manually if needed.
+
+`F12` inside the TUI dumps the keymap reverse table and per-endpoint
+subscriber state to the log file (no visible UI change). Use it when
+debugging "why doesn't key X do anything" or "is fetcher Y actually
+polling".
 
 ## Development
 
