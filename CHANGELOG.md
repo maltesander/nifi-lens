@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- Windows binary build (cargo-dist) failed to compile `nifi-rust-client`
+  because the generated `#[path = "..."]` attributes embedded the OUT_DIR
+  with backslashes, which rustc parsed as invalid escape sequences
+  (`\a`, `\x86_64`, …). Fixed upstream in `nifi-rust-client` 0.11.1; this
+  release bumps the dependency to pick it up.
+
 ## [0.8.0] — 2026-04-27
 
 ### Added

@@ -2318,9 +2318,9 @@ dependencies = [
 
 [[package]]
 name = "nifi-openapi-gen"
-version = "0.11.0"
+version = "0.11.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "027dcdc3cff17602b544e89b15d9250fa43db6ea4aa96a58fa8e06f4b57ff28c"
+checksum = "fd2106d662d49c5525c5b76bb825c4373e2380c5984d159bebee3fa08b6dee16"
 dependencies = [
  "prettyplease",
  "semver",
@@ -2332,9 +2332,9 @@ dependencies = [
 
 [[package]]
 name = "nifi-rust-client"
-version = "0.11.0"
+version = "0.11.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "699eb91f0be21fe23204cc344abedf142ae60d0e006c7c13eb4d1a5da32713eb"
+checksum = "7a2cb933c9ddd0255bfd805a3b74b15983103b82279ab94591aa8ccc483c1745"
 dependencies = [
  "async-trait",
  "bytes",
