@@ -27,6 +27,8 @@ pub enum ContentSide {
 }
 
 impl ContentSide {
+    /// Wire-format spelling (`"input"` / `"output"`) used when calling
+    /// the provenance content endpoints.
     pub fn as_str(self) -> &'static str {
         match self {
             ContentSide::Input => "input",
@@ -79,6 +81,8 @@ pub struct AttributeTriple {
 }
 
 impl AttributeTriple {
+    /// Whether the attribute's value differs between the previous and
+    /// current sides of the provenance event.
     pub fn is_changed(&self) -> bool {
         self.previous != self.current
     }

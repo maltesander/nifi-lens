@@ -214,14 +214,18 @@ impl NifiClient {
         })
     }
 
+    /// The display name of this client's context, as configured under
+    /// `[[contexts]] name = "..."`.
     pub fn context_name(&self) -> &str {
         &self.context_name
     }
 
+    /// The detected NiFi server version, established at `connect` time.
     pub fn detected_version(&self) -> &Version {
         &self.detected_version
     }
 
+    /// The cluster's base URL (the value passed via `[[contexts]] url = "..."`).
     pub fn base_url(&self) -> &str {
         &self.base_url
     }
@@ -455,6 +459,7 @@ pub struct ProcessorStateCounts {
 }
 
 impl ProcessorStateCounts {
+    /// Sum of all per-state counts.
     pub fn total(&self) -> u32 {
         self.running + self.stopped + self.invalid + self.disabled
     }
@@ -598,6 +603,8 @@ pub enum Severity {
 }
 
 impl Severity {
+    /// Parse a NiFi-wire bulletin level (case-insensitive). Unrecognized
+    /// values map to `Self::Unknown`.
     pub fn parse(level: &str) -> Self {
         match level.to_ascii_uppercase().as_str() {
             "ERROR" => Self::Error,
@@ -673,6 +680,7 @@ pub struct ControllerServiceCounts {
 }
 
 impl ControllerServiceCounts {
+    /// Sum of all per-state counts.
     pub fn total(&self) -> u32 {
         self.enabled + self.disabled + self.invalid
     }

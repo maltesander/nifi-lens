@@ -743,6 +743,8 @@ pub enum PortKind {
 }
 
 impl PortKind {
+    /// Lowercase wire-format label (`"input"` / `"output"`) used in
+    /// log messages and error variants.
     pub fn label(self) -> &'static str {
         match self {
             Self::Input => "input",
@@ -763,6 +765,9 @@ pub struct PortDetail {
 }
 
 impl NifiClient {
+    /// Fetch the full port detail (identity, state, comments, concurrent
+    /// task count, parent group) for one input or output port. Used by
+    /// the Browser detail-pane worker on port selection.
     pub async fn browser_port_detail(
         &self,
         port_id: &str,
