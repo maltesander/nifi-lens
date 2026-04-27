@@ -71,11 +71,20 @@ fn make_stderr_layer(color: bool) -> DynLayer {
     )
 }
 
+/// Resolve the no-color setting from the CLI flag and the NO_COLOR env var.
+/// Per the no-color.org convention, any non-empty NO_COLOR value disables
+/// colors; an empty value is treated as unset. The CLI flag takes precedence
+/// (if set, colors are always disabled regardless of env).
+fn resolve_no_color(cli_no_color: bool, env_no_color: Option<&std::ffi::OsStr>) -> bool {
+    cli_no_color || matches!(env_no_color, Some(v) if !v.is_empty())
+}
+
 /// Initialize logging. Returns a (worker guard, stderr toggle) tuple; the
 /// guard must stay alive for the whole process lifetime or logs will be
 /// lost on shutdown.
 pub fn init(args: &Args) -> Result<(WorkerGuard, StderrToggle), NifiLensError> {
-    USE_COLOR.set(!args.no_color).ok();
+    let no_color = resolve_no_color(args.no_color, std::env::var_os("NO_COLOR").as_deref());
+    USE_COLOR.set(!no_color).ok();
 
     // 1. Resolve log directory.
     let log_dir = resolve_log_dir()?;
@@ -122,7 +131,7 @@ pub fn init(args: &Args) -> Result<(WorkerGuard, StderrToggle), NifiLensError> {
         .with_writer(non_blocking);
 
     // 5. Stderr layer wrapped in a reload handle so we can toggle it off.
-    let stderr_boxed: DynLayer = make_stderr_layer(!args.no_color);
+    let stderr_boxed: DynLayer = make_stderr_layer(!no_color);
     let (stderr_reload, stderr_handle) = reload::Layer::new(Some(stderr_boxed));
     let stderr_toggle = StderrToggle {
         inner: std::sync::Arc::new(StderrToggleInner {
@@ -192,5 +201,20 @@ mod tests {
     fn resolve_log_dir_errors_when_default_missing() {
         let err = resolve_log_dir_from(None).unwrap_err();
         assert!(matches!(err, NifiLensError::Io { .. }));
+    }
+
+    #[test]
+    fn no_color_resolution() {
+        use std::ffi::OsStr;
+        // CLI flag wins.
+        assert!(resolve_no_color(true, None));
+        assert!(resolve_no_color(true, Some(OsStr::new("1"))));
+        // Env-only.
+        assert!(resolve_no_color(false, Some(OsStr::new("1"))));
+        assert!(resolve_no_color(false, Some(OsStr::new("anything"))));
+        // Empty env value — treated as unset per no-color.org.
+        assert!(!resolve_no_color(false, Some(OsStr::new(""))));
+        // Both off.
+        assert!(!resolve_no_color(false, None));
     }
 }
