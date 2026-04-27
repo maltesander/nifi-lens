@@ -535,24 +535,20 @@ fn collect_counts(
         out.output_port_count += ports.len() as u32;
     }
     if let Some(procs) = snapshot.processor_status_snapshots.as_ref() {
+        use crate::client::status::ProcessorStatus;
         for entity in procs {
             let Some(snap) = entity.processor_status_snapshot.as_ref() else {
                 continue;
             };
-            // Normalize case — NiFi's recursive status endpoint emits title-case,
-            // but the component endpoint emits uppercase. Match codebase convention
-            // (see widget/run_icon.rs).
-            match snap
-                .run_status
-                .as_deref()
-                .map(str::to_ascii_uppercase)
-                .as_deref()
-            {
-                Some("RUNNING") => out.processors.running += 1,
-                Some("STOPPED") => out.processors.stopped += 1,
-                Some("INVALID") => out.processors.invalid += 1,
-                Some("DISABLED") => out.processors.disabled += 1,
-                _ => { /* unknown ("VALIDATING") or null — drop silently */ }
+            // `from_wire` is case-insensitive — NiFi's recursive status endpoint
+            // emits title-case while the component endpoint emits uppercase.
+            match snap.run_status.as_deref().map(ProcessorStatus::from_wire) {
+                Some(ProcessorStatus::Running) => out.processors.running += 1,
+                Some(ProcessorStatus::Stopped) => out.processors.stopped += 1,
+                Some(ProcessorStatus::Invalid) => out.processors.invalid += 1,
+                Some(ProcessorStatus::Disabled) => out.processors.disabled += 1,
+                // Validating / Unknown / None: silently drop (matches legacy behavior).
+                Some(ProcessorStatus::Validating | ProcessorStatus::Unknown) | None => {}
             }
         }
     }
@@ -662,6 +658,7 @@ impl ControllerServiceCounts {
     pub fn from_listing(
         listing: &nifi_rust_client::dynamic::types::ControllerServicesEntity,
     ) -> Self {
+        use crate::client::status::ControllerServiceState;
         let mut out = Self::default();
         let Some(items) = listing.controller_services.as_ref() else {
             return out;
@@ -670,15 +667,20 @@ impl ControllerServiceCounts {
             let Some(c) = entity.component.as_ref() else {
                 continue;
             };
-            // Match codebase convention (widget/run_icon.rs): normalize via uppercase.
-            let validation_upper = c.validation_status.as_deref().map(str::to_ascii_uppercase);
-            let state_upper = c.state.as_deref().map(str::to_ascii_uppercase);
-            if validation_upper.as_deref() == Some("INVALID") {
+            // `validation_status` has no typed enum — only "INVALID" matters here,
+            // so a case-insensitive string check is the right shape. State branch
+            // routes through the typed enum.
+            let validation_invalid = c
+                .validation_status
+                .as_deref()
+                .is_some_and(|s| s.eq_ignore_ascii_case("INVALID"));
+            let state = c.state.as_deref().map(ControllerServiceState::from_wire);
+            if validation_invalid {
                 out.invalid += 1;
-            } else if state_upper.as_deref() == Some("ENABLED") {
+            } else if matches!(state, Some(ControllerServiceState::Enabled)) {
                 out.enabled += 1;
             } else {
-                // DISABLED, ENABLING, DISABLING, missing state — all collapse here.
+                // Disabled, Enabling, Disabling, Invalid, Unknown, missing — all collapse.
                 out.disabled += 1;
             }
         }
