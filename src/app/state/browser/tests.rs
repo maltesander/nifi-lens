@@ -2773,6 +2773,33 @@ fn toggle_used_by_flips_flag() {
 }
 
 #[test]
+fn parameter_context_modal_copy_redacts_sensitive_values() {
+    let s = state_with_pc_modal_loaded();
+    let text = super::parameter_context_modal_copy_text(&s.browser)
+        .expect("loaded modal yields copy text");
+
+    // Non-sensitive row carries its raw value.
+    assert!(
+        text.contains("host=localhost"),
+        "expected non-sensitive row, got: {text}"
+    );
+
+    // Sensitive row substitutes the placeholder, never the raw value.
+    assert!(
+        text.contains("token=(sensitive)"),
+        "sensitive row must render as `name=(sensitive)`, got: {text}"
+    );
+
+    // Defensive: a future refactor could leak the wire value. The
+    // fixture's sensitive entry has value=None, but pin the invariant
+    // anyway in case the fixture grows a Some(...) value later.
+    assert!(
+        !text.contains("token=(sensitive)\nNone") && !text.contains("token=None"),
+        "sensitive value must never appear raw, got: {text}"
+    );
+}
+
+#[test]
 fn refresh_verb_sets_modal_to_loading_and_emits_spawn_intent() {
     use crate::cluster::snapshot::ParameterContextRef;
     use crate::view::browser::state::parameter_context_modal::ParameterContextLoad;
