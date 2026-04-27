@@ -89,7 +89,9 @@ async fn parameter_context_bindings_batch_reports_parameterized_pipeline_binding
             "fixture on {version} must have at least one PG"
         );
 
-        let map = client.parameter_context_bindings_batch(&all_pg_ids).await;
+        let map = client
+            .parameter_context_bindings_batch(&all_pg_ids, 4)
+            .await;
 
         // Find the parameterized-pipeline PG id.
         let pg_id = find_pg_id_by_name(&client, "parameterized-pipeline")
@@ -143,7 +145,9 @@ async fn fetch_chain_resolves_prod_base_chain_for_parameterized_pipeline() {
             .unwrap_or_else(|e| panic!("root_pg_status on {version} failed: {e:?}"));
         let all_pg_ids: Vec<String> = snap.process_group_ids.clone();
 
-        let map = client.parameter_context_bindings_batch(&all_pg_ids).await;
+        let map = client
+            .parameter_context_bindings_batch(&all_pg_ids, 4)
+            .await;
 
         let pg_id = find_pg_id_by_name(&client, "parameterized-pipeline")
             .await
@@ -237,7 +241,7 @@ async fn resolved_chain_retry_max_is_overridden_by_prod() {
             .await
             .unwrap_or_else(|e| panic!("root_pg_status on {version} failed: {e:?}"));
         let map = client
-            .parameter_context_bindings_batch(&snap.process_group_ids)
+            .parameter_context_bindings_batch(&snap.process_group_ids, 4)
             .await;
 
         let pg_id = find_pg_id_by_name(&client, "parameterized-pipeline")
@@ -313,7 +317,7 @@ async fn resolved_chain_db_password_is_sensitive_and_value_withheld() {
             .await
             .unwrap_or_else(|e| panic!("root_pg_status on {version} failed: {e:?}"));
         let map = client
-            .parameter_context_bindings_batch(&snap.process_group_ids)
+            .parameter_context_bindings_batch(&snap.process_group_ids, 4)
             .await;
 
         let pg_id = find_pg_id_by_name(&client, "parameterized-pipeline")
@@ -373,7 +377,7 @@ async fn bindings_map_inverted_shows_parameterized_pipeline_uses_pc_prod() {
             .unwrap_or_else(|e| panic!("root_pg_status on {version} failed: {e:?}"));
 
         let map = client
-            .parameter_context_bindings_batch(&snap.process_group_ids)
+            .parameter_context_bindings_batch(&snap.process_group_ids, 4)
             .await;
 
         // Build an inverted map: context_name → Vec<pg_name>

@@ -35,6 +35,9 @@ pub(crate) struct FetchTaskConfig {
     pub force: Arc<Notify>,
     pub gated: bool,
     pub subscriber_counter: Arc<std::sync::atomic::AtomicUsize>,
+    /// Concurrency cap for fanout fetchers; ignored by non-fanout
+    /// endpoints (controller_status, sysdiag, bulletins, etc.).
+    pub batch_concurrency: usize,
 }
 
 /// Spawns the controller_status fetch loop. Emits
@@ -447,7 +450,7 @@ pub(crate) fn spawn_connections_by_pg(
             }
 
             let t0 = Instant::now();
-            let results = run_parallel(&client, &pg_ids).await;
+            let results = run_parallel(&client, &pg_ids, cfg.batch_concurrency).await;
             let duration = t0.elapsed();
             // Per-PG `next_interval` mirrors the base cadence — each PG
             // fetch is cheap and independent, so we don't back off on
@@ -563,29 +566,39 @@ fn error_is_standalone_409(err: &NifiLensError) -> bool {
 }
 
 /// Fan-out fetch: one `/process-groups/{id}/connections` call per PG,
-/// executed in parallel. Returns the results keyed by PG id, preserving
-/// input order. Per-PG errors are passed through — the caller
+/// executed concurrently with at most `concurrency` in-flight requests.
+/// Per-PG errors are passed through — the caller
 /// (`spawn_connections_by_pg`) emits them as `ClusterUpdate::Connections`
-/// so `EndpointState::apply` can preserve `last_ok`.
+/// so `EndpointState::apply` can preserve `last_ok`. The downstream
+/// receiver applies updates per-PG independently, so output order
+/// (which `buffer_unordered` does not preserve) is irrelevant.
 async fn run_parallel(
     client: &Arc<RwLock<NifiClient>>,
     pg_ids: &[String],
+    concurrency: usize,
 ) -> Vec<(String, Result<ConnectionEndpoints, NifiLensError>)> {
+    use futures::stream::{self, StreamExt};
     let guard = client.read().await;
     let context = guard.context_name().to_string();
+    let concurrency = concurrency.max(1);
     // `ProcessGroups<'_>` is non-Copy and non-Clone, so we cannot move
     // a single accessor into each fan-out future. Each future borrows
     // its own accessor from the held guard — the guard outlives the
-    // `join_all`, so the borrow is sound.
-    let futs = pg_ids.iter().map(|id| {
+    // stream, so the borrow is sound.
+    let stream = stream::iter(pg_ids.iter().map(|pg_id| {
+        let pg_id = pg_id.clone();
         let pgs = guard.processgroups();
-        let ctx = &context;
+        let ctx = context.clone();
         async move {
-            let res = pgs.get_connections(id).await;
-            (id.clone(), map_res(ctx, id, res))
+            let res = pgs.get_connections(&pg_id).await;
+            let mapped = map_res(&ctx, &pg_id, res);
+            (pg_id, mapped)
         }
-    });
-    futures::future::join_all(futs).await
+    }));
+    stream
+        .buffer_unordered(concurrency)
+        .collect::<Vec<_>>()
+        .await
 }
 
 /// Collapse the raw `ConnectionsEntity` DTO into a
@@ -751,7 +764,9 @@ pub(crate) fn spawn_version_control(
             // store's "preserve last_ok on failure" contract.
             let map = {
                 let guard = client.read().await;
-                guard.version_information_batch(&pg_ids).await
+                guard
+                    .version_information_batch(&pg_ids, cfg.batch_concurrency)
+                    .await
             };
             let duration = t0.elapsed();
             next_interval = adaptive_interval(cfg.base_interval, duration, cfg.max_interval);
@@ -821,7 +836,9 @@ pub(crate) fn spawn_parameter_context_bindings(
             // cluster store's "preserve last_ok on failure" contract.
             let map = {
                 let guard = client.read().await;
-                guard.parameter_context_bindings_batch(&pg_ids).await
+                guard
+                    .parameter_context_bindings_batch(&pg_ids, cfg.batch_concurrency)
+                    .await
             };
             let duration = t0.elapsed();
             next_interval = adaptive_interval(cfg.base_interval, duration, cfg.max_interval);
@@ -937,6 +954,7 @@ mod parameter_context_bindings_fetcher_tests {
                     force: Arc::new(Notify::new()),
                     gated: false,
                     subscriber_counter: Arc::new(AtomicUsize::new(1)),
+                    batch_concurrency: 4,
                 };
 
                 let handle = spawn_parameter_context_bindings(client, tx, pg_ids_rx, cfg);
@@ -997,6 +1015,7 @@ mod parameter_context_bindings_fetcher_tests {
                     force: Arc::new(Notify::new()),
                     gated: false,
                     subscriber_counter: Arc::new(AtomicUsize::new(1)),
+                    batch_concurrency: 4,
                 };
 
                 let handle = spawn_parameter_context_bindings(client, tx, pg_ids_rx, cfg);
@@ -1035,6 +1054,7 @@ mod tls_certs_tests {
                     force: Arc::new(Notify::new()),
                     gated: false,
                     subscriber_counter: Arc::new(AtomicUsize::new(1)),
+                    batch_concurrency: 4,
                 };
                 let handle =
                     spawn_tls_certs(tx.clone(), addr_rx, "http://plain-nifi:8080".into(), cfg);

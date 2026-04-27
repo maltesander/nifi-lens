@@ -250,6 +250,7 @@ impl ClusterStore {
             force: self.notifies.get(ClusterEndpoint::ControllerStatus),
             gated: false,
             subscriber_counter: self.subscribers.counter(ClusterEndpoint::ControllerStatus),
+            batch_concurrency: self.config.batch_concurrency,
         };
         self.handles.push(spawn_controller_status(
             client.clone(),
@@ -264,6 +265,7 @@ impl ClusterStore {
             force: self.notifies.get(ClusterEndpoint::RootPgStatus),
             gated: true,
             subscriber_counter: self.subscribers.counter(ClusterEndpoint::RootPgStatus),
+            batch_concurrency: self.config.batch_concurrency,
         };
         self.handles
             .push(spawn_root_pg_status(client.clone(), tx.clone(), pg_cfg));
@@ -277,6 +279,7 @@ impl ClusterStore {
             subscriber_counter: self
                 .subscribers
                 .counter(ClusterEndpoint::ControllerServices),
+            batch_concurrency: self.config.batch_concurrency,
         };
         self.handles.push(spawn_controller_services(
             client.clone(),
@@ -291,6 +294,7 @@ impl ClusterStore {
             force: self.notifies.get(ClusterEndpoint::ConnectionsByPg),
             gated: true,
             subscriber_counter: self.subscribers.counter(ClusterEndpoint::ConnectionsByPg),
+            batch_concurrency: self.config.batch_concurrency,
         };
         self.handles.push(spawn_connections_by_pg(
             client.clone(),
@@ -306,6 +310,7 @@ impl ClusterStore {
             force: self.notifies.get(ClusterEndpoint::Bulletins),
             gated: false,
             subscriber_counter: self.subscribers.counter(ClusterEndpoint::Bulletins),
+            batch_concurrency: self.config.batch_concurrency,
         };
         // Initialize the bulletin-fetch cursor from whatever the ring
         // already observed. On fresh startup this is `None` → 0 → the
@@ -328,6 +333,7 @@ impl ClusterStore {
             force: self.notifies.get(ClusterEndpoint::SystemDiagnostics),
             gated: false,
             subscriber_counter: self.subscribers.counter(ClusterEndpoint::SystemDiagnostics),
+            batch_concurrency: self.config.batch_concurrency,
         };
         self.handles.push(spawn_system_diagnostics(
             client.clone(),
@@ -342,6 +348,7 @@ impl ClusterStore {
             force: self.notifies.get(ClusterEndpoint::About),
             gated: false,
             subscriber_counter: self.subscribers.counter(ClusterEndpoint::About),
+            batch_concurrency: self.config.batch_concurrency,
         };
         self.handles
             .push(spawn_about(client.clone(), tx.clone(), about_cfg));
@@ -353,6 +360,7 @@ impl ClusterStore {
             force: self.notifies.get(ClusterEndpoint::ClusterNodes),
             gated: true,
             subscriber_counter: self.subscribers.counter(ClusterEndpoint::ClusterNodes),
+            batch_concurrency: self.config.batch_concurrency,
         };
         self.handles.push(spawn_cluster_nodes(
             client.clone(),
@@ -367,6 +375,7 @@ impl ClusterStore {
             force: self.notifies.get(ClusterEndpoint::TlsCerts),
             gated: true,
             subscriber_counter: self.subscribers.counter(ClusterEndpoint::TlsCerts),
+            batch_concurrency: self.config.batch_concurrency,
         };
         self.handles.push(spawn_tls_certs(
             tx.clone(),
@@ -382,6 +391,7 @@ impl ClusterStore {
             force: self.notifies.get(ClusterEndpoint::VersionControl),
             gated: true,
             subscriber_counter: self.subscribers.counter(ClusterEndpoint::VersionControl),
+            batch_concurrency: self.config.batch_concurrency,
         };
         self.handles.push(spawn_version_control(
             client.clone(),
@@ -399,6 +409,7 @@ impl ClusterStore {
             subscriber_counter: self
                 .subscribers
                 .counter(ClusterEndpoint::ParameterContextBindings),
+            batch_concurrency: self.config.batch_concurrency,
         };
         self.handles.push(spawn_parameter_context_bindings(
             client.clone(),

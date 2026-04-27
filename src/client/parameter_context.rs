@@ -33,22 +33,28 @@ impl NifiClient {
     /// `parameterContext` binding (or `None` when the PG has no bound
     /// context). Per-PG failures are logged at `warn!` and the PG is
     /// omitted from the resulting map. Always succeeds at the outer level.
+    ///
+    /// `concurrency` caps the number of concurrent in-flight HTTP
+    /// requests via `futures::stream::buffer_unordered`. A value of `0`
+    /// is clamped to `1` to keep at least one request in flight.
     pub async fn parameter_context_bindings_batch(
         &self,
         pg_ids: &[String],
+        concurrency: usize,
     ) -> ParameterContextBindingsMap {
+        use futures::stream::{self, StreamExt};
         let context = self.context_name().to_string();
-        let futs = pg_ids.iter().map(|id| {
-            let pg_id = id.clone();
+        let concurrency = concurrency.max(1);
+        let mut by_pg_id = std::collections::BTreeMap::new();
+        let mut stream = stream::iter(pg_ids.iter().map(|pg_id| {
+            let pg_id = pg_id.clone();
             async move {
                 let res = self.inner.processgroups().get_process_group(&pg_id).await;
                 (pg_id, res)
             }
-        });
-        let results = join_all(futs).await;
-
-        let mut by_pg_id = std::collections::BTreeMap::new();
-        for (pg_id, res) in results {
+        }))
+        .buffer_unordered(concurrency);
+        while let Some((pg_id, res)) = stream.next().await {
             match res {
                 Ok(entity) => {
                     // `parameterContext` sits directly on `ProcessGroupEntity`,
@@ -308,7 +314,7 @@ mod parameter_context_bindings_batch_tests {
 
         let client = test_client(&server).await;
         let pg_ids = vec!["pg-with".to_string(), "pg-without".to_string()];
-        let map = client.parameter_context_bindings_batch(&pg_ids).await;
+        let map = client.parameter_context_bindings_batch(&pg_ids, 4).await;
 
         assert_eq!(map.by_pg_id.len(), 2);
         let with = map.by_pg_id.get("pg-with").expect("pg-with present");
@@ -347,7 +353,7 @@ mod parameter_context_bindings_batch_tests {
 
         let client = test_client(&server).await;
         let map = client
-            .parameter_context_bindings_batch(&["pg-good".into(), "pg-bad".into()])
+            .parameter_context_bindings_batch(&["pg-good".into(), "pg-bad".into()], 4)
             .await;
 
         assert!(map.by_pg_id.contains_key("pg-good"));

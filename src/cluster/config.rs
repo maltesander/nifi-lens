@@ -40,6 +40,13 @@ pub struct ClusterPollingConfig {
     pub max_interval: Duration,
     #[serde(default = "default_jitter_percent")]
     pub jitter_percent: u8,
+    /// Max concurrent in-flight HTTP requests for per-PG fan-out fetchers
+    /// (`version_control`, `parameter_context_bindings`, `connections_by_pg`).
+    /// Default 16. Set higher only on clusters with very fast NiFi servers
+    /// and many PGs; setting too high can exhaust the NiFi HTTP thread pool.
+    /// Setting `0` is treated as `1` to keep at least one in-flight request.
+    #[serde(default = "default_batch_concurrency")]
+    pub batch_concurrency: usize,
 }
 
 impl Default for ClusterPollingConfig {
@@ -58,6 +65,7 @@ impl Default for ClusterPollingConfig {
             about: default_about(),
             max_interval: default_max_interval(),
             jitter_percent: default_jitter_percent(),
+            batch_concurrency: default_batch_concurrency(),
         }
     }
 }
@@ -100,6 +108,9 @@ fn default_max_interval() -> Duration {
 }
 fn default_jitter_percent() -> u8 {
     20
+}
+fn default_batch_concurrency() -> usize {
+    16
 }
 
 #[cfg(test)]
@@ -185,5 +196,18 @@ mod tests {
         "#;
         let cfg: ClusterPollingConfig = toml::from_str(toml_str).unwrap();
         assert_eq!(cfg.parameter_context_bindings, Duration::from_secs(60));
+    }
+
+    #[test]
+    fn batch_concurrency_default_is_16() {
+        let cfg = ClusterPollingConfig::default();
+        assert_eq!(cfg.batch_concurrency, 16);
+    }
+
+    #[test]
+    fn batch_concurrency_parses_from_toml() {
+        let toml_str = r#"batch_concurrency = 4"#;
+        let cfg: ClusterPollingConfig = toml::from_str(toml_str).unwrap();
+        assert_eq!(cfg.batch_concurrency, 4);
     }
 }
