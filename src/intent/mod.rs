@@ -531,4 +531,31 @@ mod tests {
         );
         assert!(!Intent::RefreshLineage { uuid: "u".into() }.is_write());
     }
+
+    #[test]
+    fn handle_pure_refuses_write_intents() {
+        let cases = [
+            (Intent::StartProcessor("p1".into()), "StartProcessor"),
+            (Intent::StopProcessor("p1".into()), "StopProcessor"),
+            (
+                Intent::EnableControllerService("cs1".into()),
+                "EnableControllerService",
+            ),
+            (
+                Intent::DisableControllerService("cs1".into()),
+                "DisableControllerService",
+            ),
+            (Intent::EmptyQueue("q1".into()), "EmptyQueue"),
+        ];
+        for (intent, expected_name) in cases {
+            let result = IntentDispatcher::handle_pure(&intent)
+                .expect("write intent must be handled by handle_pure");
+            match result {
+                Err(NifiLensError::WriteIntentRefused { intent_name }) => {
+                    assert_eq!(intent_name, expected_name, "intent_name mismatch");
+                }
+                other => panic!("expected WriteIntentRefused for {expected_name}, got {other:?}"),
+            }
+        }
+    }
 }
