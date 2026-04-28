@@ -682,6 +682,35 @@ status walk (parallelized with `futures::future::join_all`), builds a
 `connection_id → (source_id, destination_id)` map, and backfills the
 arena's Connection rows. Per-PG fetch failures are logged and skipped.
 
+### Queue listing panel
+
+Connection detail panes render a flowfile listing in the lower half of
+the right pane when the connection has flowfiles queued. Backed by
+`src/client/queues.rs` which wraps NiFi's two-phase listing-request
+flow (`POST /flowfile-queues/{id}/listing-requests` → poll
+`GET /listing-requests/{request_id}` until `finished == true` →
+`DELETE` on cleanup).
+
+State lives on `BrowserState::queue_listing: Option<QueueListingState>`,
+re-spawned on every selection change to a Connection node with
+`flow_files_queued > 0`. Selection move drops the state; its
+`QueueListingHandle` Drop impl fires-and-forgets `DELETE` against the
+recorded request id so server resources are freed regardless of how
+navigation away happens. NiFi's listing-request TTL is the safety net
+if Drop misses (e.g. during process shutdown).
+
+NiFi caps the listing at 100 rows server-side. When `total > 100` the
+panel header shows a `[100 / N]` truncation chip.
+
+Modal-scoped chords (`BrowserQueueVerb`, `BrowserPeekVerb`) shadow
+outer-tab keys via the keymap shadow gate. Filter prompt and peek modal
+both reuse `widget::search::SearchState`. Polling cadence is 500 ms and
+not user-configurable; the timeout ceiling is `[browser]
+queue_listing_timeout` (default 30s) and the row-warning age threshold
+is `[browser] queue_listing_age_warning` (default 5m, `0s` disables).
+
+Read-only — no empty-queue / drop / replay actions in v0.1.
+
 ### Fuzzy Find
 
 The `Shift+F` modal searches a shared `FlowIndex` built from the

@@ -9,6 +9,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Browser queue listing panel — selecting a queued connection in the
+  Browser tab now lists up to 100 flowfiles inline, with per-row
+  chords: `i` peek attributes, `t` trace lineage in Tracer, `c` copy
+  UUID, `/` filter by filename, `r` refresh.
 - **Action history modal** opens with `a` on Browser detail rows
   (processor, PG, connection, controller service, port) to view NiFi
   flow-configuration audit events filtered by `sourceId`. Paginated

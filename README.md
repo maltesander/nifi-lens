@@ -265,6 +265,13 @@ that parameter. `##{...}` escapes are recognized and not annotated.
 The PG detail pane also shows a `Parameter context: <name> →` identity
 row; pressing Enter there opens the same modal.
 
+**Queue contents.** Selecting a connection node with flowfiles queued
+opens a listing of up to 100 flowfiles in the lower half of the right
+pane. Press `Tab` to focus the listing, `↑`/`↓` to move between rows,
+`i` to peek a flowfile's full attributes, `t` to trace its lineage in
+the Tracer tab, `c` to copy its UUID, `/` to filter by filename, and
+`r` to refresh.
+
 **Events** — Provenance search with a filter bar (time / type / source /
 flowfile UUID / attribute). Results are colored by event type and
 cross-linked from Bulletins and Browser.
