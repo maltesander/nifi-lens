@@ -1920,8 +1920,8 @@ pub(crate) fn handle_browser_payload(state: &mut AppState, payload: crate::event
             {
                 modal.error = Some(err);
                 modal.loading = false;
+                state.browser.action_history_modal_handle = None;
             }
-            state.browser.action_history_modal_handle = None;
         }
     }
 }

@@ -3340,3 +3340,46 @@ fn apply_action_history_error_sets_error_field() {
     assert_eq!(m.error.as_deref(), Some("boom"));
     assert!(!m.loading);
 }
+
+#[test]
+fn apply_action_history_error_preserves_handle_when_source_id_stale() {
+    // Regression test: a stale ActionHistoryError (for a source_id that no
+    // longer matches the open modal) MUST NOT clear the handle slot —
+    // doing so would orphan the worker for the currently-open modal.
+    use super::super::handle_browser_payload;
+    use crate::event::BrowserPayload;
+    let mut state = fresh_state();
+    state
+        .browser
+        .open_action_history_modal("proc-2".into(), "B".into());
+    // Install a pretend handle to simulate the post-spawn state.
+    let rt = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .unwrap();
+    rt.block_on(async {
+        let local = tokio::task::LocalSet::new();
+        local
+            .run_until(async {
+                let h = tokio::task::spawn_local(async {
+                    tokio::time::sleep(std::time::Duration::from_secs(60)).await;
+                });
+                state.browser.action_history_modal_handle = Some(h);
+                // Stale error from the previously-open proc-1 modal.
+                let payload = BrowserPayload::ActionHistoryError {
+                    source_id: "proc-1".into(),
+                    err: "stale".into(),
+                };
+                handle_browser_payload(&mut state, payload);
+                let m = state.browser.action_history_modal.as_ref().unwrap();
+                // Modal state untouched.
+                assert!(m.error.is_none(), "stale error must not mutate the modal");
+                // Handle preserved.
+                assert!(
+                    state.browser.action_history_modal_handle.is_some(),
+                    "stale error must not clear the handle for the active modal"
+                );
+            })
+            .await;
+    });
+}
