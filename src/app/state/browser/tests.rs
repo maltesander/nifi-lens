@@ -3270,3 +3270,73 @@ fn open_action_history_verb_noop_when_disabled() {
     assert!(state.browser.action_history_modal.is_none());
     assert!(result.intent.is_none());
 }
+
+// -----------------------------------------------------------------------
+// Task 13: reducer arms for ActionHistoryPage / ActionHistoryError
+// -----------------------------------------------------------------------
+
+#[test]
+fn apply_action_history_page_appends_actions() {
+    use super::super::handle_browser_payload;
+    use crate::event::BrowserPayload;
+    let mut state = fresh_state();
+    state
+        .browser
+        .open_action_history_modal("proc-1".into(), "X".into());
+
+    let mut action = nifi_rust_client::dynamic::types::ActionEntity::default();
+    action.id = Some(7);
+    let payload = BrowserPayload::ActionHistoryPage {
+        source_id: "proc-1".into(),
+        offset: 0,
+        actions: vec![action],
+        total: Some(1),
+    };
+    handle_browser_payload(&mut state, payload);
+
+    let m = state.browser.action_history_modal.as_ref().unwrap();
+    assert_eq!(m.actions.len(), 1);
+    assert_eq!(m.total, Some(1));
+    assert!(!m.loading);
+}
+
+#[test]
+fn apply_action_history_page_drops_stale_source_id() {
+    use super::super::handle_browser_payload;
+    use crate::event::BrowserPayload;
+    let mut state = fresh_state();
+    state
+        .browser
+        .open_action_history_modal("proc-1".into(), "X".into());
+
+    let mut action = nifi_rust_client::dynamic::types::ActionEntity::default();
+    action.id = Some(99);
+    let payload = BrowserPayload::ActionHistoryPage {
+        source_id: "OTHER".into(),
+        offset: 0,
+        actions: vec![action],
+        total: Some(1),
+    };
+    handle_browser_payload(&mut state, payload);
+
+    let m = state.browser.action_history_modal.as_ref().unwrap();
+    assert!(m.actions.is_empty());
+}
+
+#[test]
+fn apply_action_history_error_sets_error_field() {
+    use super::super::handle_browser_payload;
+    use crate::event::BrowserPayload;
+    let mut state = fresh_state();
+    state
+        .browser
+        .open_action_history_modal("proc-1".into(), "X".into());
+    let payload = BrowserPayload::ActionHistoryError {
+        source_id: "proc-1".into(),
+        err: "boom".into(),
+    };
+    handle_browser_payload(&mut state, payload);
+    let m = state.browser.action_history_modal.as_ref().unwrap();
+    assert_eq!(m.error.as_deref(), Some("boom"));
+    assert!(!m.loading);
+}

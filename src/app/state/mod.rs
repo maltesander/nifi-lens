@@ -1872,7 +1872,7 @@ fn build_goto_subject(
 // Helpers shared across sub-modules
 // ---------------------------------------------------------------------------
 
-fn handle_browser_payload(state: &mut AppState, payload: crate::event::BrowserPayload) {
+pub(crate) fn handle_browser_payload(state: &mut AppState, payload: crate::event::BrowserPayload) {
     use crate::event::BrowserPayload;
     match payload {
         BrowserPayload::Detail(detail) => {
@@ -1904,11 +1904,24 @@ fn handle_browser_payload(state: &mut AppState, payload: crate::event::BrowserPa
                 .apply_parameter_context_modal_failed(pg_id, err);
             state.browser.parameter_modal_handle = None;
         }
-        BrowserPayload::ActionHistoryPage { .. } => {
-            // Reducer arm wired in Task 13.
+        BrowserPayload::ActionHistoryPage {
+            source_id,
+            offset: _,
+            actions,
+            total,
+        } => {
+            if let Some(modal) = state.browser.action_history_modal.as_mut() {
+                modal.apply_page(&source_id, actions, total);
+            }
         }
-        BrowserPayload::ActionHistoryError { .. } => {
-            // Reducer arm wired in Task 13.
+        BrowserPayload::ActionHistoryError { source_id, err } => {
+            if let Some(modal) = state.browser.action_history_modal.as_mut()
+                && modal.source_id == source_id
+            {
+                modal.error = Some(err);
+                modal.loading = false;
+            }
+            state.browser.action_history_modal_handle = None;
         }
     }
 }
