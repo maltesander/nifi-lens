@@ -324,6 +324,7 @@ pub fn spawn_queue_listing_fetch(
         let dto = match dto {
             Ok(dto) => dto,
             Err(e) => {
+                tracing::warn!(error = ?e, queue_id = %q_id, "queue listing POST failed");
                 let _ = tx
                     .send(AppEvent::Data(ViewPayload::Browser(
                         BrowserPayload::QueueListingError {
@@ -382,6 +383,7 @@ pub fn spawn_queue_listing_fetch(
             let dto = match dto {
                 Ok(dto) => dto,
                 Err(e) => {
+                    tracing::warn!(error = ?e, queue_id = %q_id, "queue listing poll failed");
                     let _ = tx
                         .send(AppEvent::Data(ViewPayload::Browser(
                             BrowserPayload::QueueListingError {
@@ -983,7 +985,7 @@ mod tests {
             .mount(&server)
             .await;
 
-        // First GET → 30%
+        // First GET → 30% (mounted first, served first in FIFO order; exhausted after 1 use)
         Mock::given(method("GET"))
             .and(path("/nifi-api/flowfile-queues/q1/listing-requests/req-1"))
             .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
@@ -1000,7 +1002,7 @@ mod tests {
             .mount(&server)
             .await;
 
-        // Second GET → 80%
+        // Second GET → 80% (mounted second, served second; exhausted after 1 use)
         Mock::given(method("GET"))
             .and(path("/nifi-api/flowfile-queues/q1/listing-requests/req-1"))
             .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
@@ -1017,7 +1019,7 @@ mod tests {
             .mount(&server)
             .await;
 
-        // Third GET → COMPLETED with one flowfile
+        // Third GET → COMPLETED with one flowfile (mounted last, served after both progress stubs exhaust)
         Mock::given(method("GET"))
             .and(path("/nifi-api/flowfile-queues/q1/listing-requests/req-1"))
             .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
@@ -1088,7 +1090,7 @@ mod tests {
                 }
 
                 // 2. Collect payloads until QueueListingComplete.
-                let mut saw_progress = false;
+                let mut progress_count = 0u32;
                 let mut complete_payload = None;
                 for _ in 0..10 {
                     let ev = tokio::time::timeout(StdDuration::from_secs(5), rx.recv())
@@ -1099,7 +1101,7 @@ mod tests {
                         AppEvent::Data(ViewPayload::Browser(
                             BrowserPayload::QueueListingProgress { .. },
                         )) => {
-                            saw_progress = true;
+                            progress_count += 1;
                         }
                         AppEvent::Data(ViewPayload::Browser(
                             BrowserPayload::QueueListingComplete {
@@ -1120,7 +1122,10 @@ mod tests {
                         _ => panic!("unexpected payload"),
                     }
                 }
-                assert!(saw_progress, "expected at least one QueueListingProgress");
+                assert!(
+                    progress_count >= 2,
+                    "expected ≥2 Progress emits (30%, 80%); got {progress_count}"
+                );
                 assert!(complete_payload.is_some(), "expected QueueListingComplete");
 
                 // 3. Drop the handle → spawns DELETE on the LocalSet.
