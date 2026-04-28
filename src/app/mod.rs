@@ -339,8 +339,15 @@ pub async fn run(
                     );
                     state.browser.action_history_modal_handle = Some(h);
                 }
-                PendingIntent::SpawnSparklineFetchLoop { .. } => {
-                    // Wired in Task 10.
+                PendingIntent::SpawnSparklineFetchLoop { kind, id, cadence } => {
+                    let h = crate::view::browser::worker::spawn_sparkline_fetch_loop(
+                        client.clone(),
+                        tx.clone(),
+                        kind,
+                        id,
+                        cadence,
+                    );
+                    state.browser.sparkline_handle = Some(h);
                 }
                 other => {
                     let intent = match other {
