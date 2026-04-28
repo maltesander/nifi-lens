@@ -54,7 +54,7 @@ pub fn render(frame: &mut Frame, area: Rect, modal: &ActionHistoryModalState) {
 
     render_header(frame, rows[0]);
     render_body(frame, rows[1], modal);
-    render_hints(frame, rows[2]);
+    render_footer_status(frame, rows[2], modal);
 }
 
 fn progress_chip(modal: &ActionHistoryModalState) -> Span<'_> {
@@ -94,6 +94,12 @@ fn render_body(frame: &mut Frame, area: Rect, modal: &ActionHistoryModalState) {
         return;
     }
 
+    let match_line_idx: Option<usize> = modal
+        .search
+        .as_ref()
+        .filter(|s| s.committed && !s.matches.is_empty())
+        .and_then(|s| s.current.map(|c| s.matches[c].line_idx));
+
     let mut lines: Vec<Line> = Vec::with_capacity(modal.actions.len() * 2);
     for (i, a) in modal.actions.iter().enumerate() {
         let inner = a.action.as_ref();
@@ -105,8 +111,11 @@ fn render_body(frame: &mut Frame, area: Rect, modal: &ActionHistoryModalState) {
         let stype = inner.and_then(|x| x.source_type.as_deref()).unwrap_or("—");
         let sname = inner.and_then(|x| x.source_name.as_deref()).unwrap_or("—");
         let selected = i == modal.selected;
+        let is_current_match = Some(i) == match_line_idx;
         let row_style = if selected {
             Style::default().add_modifier(Modifier::REVERSED)
+        } else if is_current_match {
+            theme::accent().add_modifier(Modifier::BOLD)
         } else {
             Style::default()
         };
@@ -131,9 +140,38 @@ fn render_body(frame: &mut Frame, area: Rect, modal: &ActionHistoryModalState) {
     frame.render_widget(Paragraph::new(lines).scroll((scroll_offset, 0)), area);
 }
 
-fn render_hints(frame: &mut Frame, area: Rect) {
-    let hints = " [/ find] [n/N next] [Enter expand] [c copy] [r refresh] [Esc close]";
-    frame.render_widget(Paragraph::new(Span::styled(hints, theme::muted())), area);
+/// Bottom strip: when the user is typing a search query, show the
+/// `/ {query}_` prompt instead of the hint list.
+fn render_footer_status(frame: &mut Frame, area: Rect, modal: &ActionHistoryModalState) {
+    if let Some(s) = modal.search.as_ref()
+        && s.input_active
+    {
+        let line = Line::from(vec![
+            Span::styled("/ ".to_string(), theme::accent()),
+            Span::raw(s.query.clone()),
+            Span::styled("_".to_string(), theme::search_cursor()),
+        ]);
+        frame.render_widget(Paragraph::new(line), area);
+        return;
+    }
+    render_footer_hint(frame, area);
+}
+
+fn render_footer_hint(frame: &mut Frame, area: Rect) {
+    use crate::input::ActionHistoryModalVerb;
+    use crate::input::Verb;
+
+    let parts: Vec<String> = ActionHistoryModalVerb::all()
+        .iter()
+        .copied()
+        .filter(|v| v.show_in_hint_bar() && !v.hint().is_empty())
+        .map(|v| format!("[{}] {}", v.chord().display(), v.hint()))
+        .collect();
+    let text = parts.join(" · ");
+    frame.render_widget(
+        Paragraph::new(Line::from(Span::styled(text, theme::muted()))),
+        area,
+    );
 }
 
 #[cfg(test)]
@@ -221,6 +259,43 @@ mod tests {
         let mut term = Terminal::new(test_backend(20)).unwrap();
         let mut modal = make_modal_state(0, false);
         modal.total = Some(0);
+        term.draw(|f| {
+            render(f, f.area(), &modal);
+        })
+        .unwrap();
+        assert_snapshot!(format!("{}", term.backend()));
+    }
+
+    #[test]
+    fn snapshot_search_input_active() {
+        let mut term = Terminal::new(test_backend(20)).unwrap();
+        let mut modal = make_modal_state(5, false);
+        modal.search = Some(crate::widget::search::SearchState {
+            input_active: true,
+            query: "user2".into(),
+            ..Default::default()
+        });
+        term.draw(|f| {
+            render(f, f.area(), &modal);
+        })
+        .unwrap();
+        assert_snapshot!(format!("{}", term.backend()));
+    }
+
+    #[test]
+    fn snapshot_search_committed_with_match() {
+        let mut term = Terminal::new(test_backend(20)).unwrap();
+        let mut modal = make_modal_state(5, false);
+        let body = modal.searchable_body();
+        let matches = crate::widget::search::compute_matches(&body, "user3");
+        let s = crate::widget::search::SearchState {
+            query: "user3".into(),
+            input_active: false,
+            committed: true,
+            current: if matches.is_empty() { None } else { Some(0) },
+            matches,
+        };
+        modal.search = Some(s);
         term.draw(|f| {
             render(f, f.area(), &modal);
         })
