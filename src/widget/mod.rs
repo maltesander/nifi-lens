@@ -14,5 +14,6 @@ pub mod save_modal;
 pub mod scroll;
 pub mod search;
 pub mod severity;
+pub mod sparkline;
 pub mod status_bar;
 pub mod top_bar;
