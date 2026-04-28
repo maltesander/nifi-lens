@@ -467,6 +467,104 @@ pub fn spawn_queue_listing_fetch(
     QueueListingHandle::new(join, queue_id, request_id_slot, client)
 }
 
+/// One-shot fetch for the per-flowfile peek modal. Emits exactly one
+/// of `BrowserPayload::FlowfilePeek` (success) or
+/// `BrowserPayload::FlowfilePeekError` (HTTP failure). Returns the
+/// `JoinHandle<()>` so the modal-close path can `.abort()` if the
+/// modal closes before the fetch completes.
+///
+/// `cluster_node_id` threads through to NiFi's `?clusterNodeId=...`
+/// query param. `None` for standalone clusters; `Some(node_id)` for
+/// clustered NiFi where the flowfile lives on a specific node (each
+/// `FlowFileSummaryDto` carries the id we should pass).
+pub fn spawn_flowfile_peek_fetch(
+    client: Arc<RwLock<NifiClient>>,
+    tx: mpsc::Sender<AppEvent>,
+    queue_id: String,
+    uuid: String,
+    cluster_node_id: Option<String>,
+) -> JoinHandle<()> {
+    tokio::task::spawn_local(async move {
+        let result = {
+            let guard = client.read().await;
+            crate::client::queues::get_flowfile(
+                &guard,
+                &queue_id,
+                &uuid,
+                cluster_node_id.as_deref(),
+            )
+            .await
+        };
+
+        match result {
+            Err(e) => {
+                tracing::warn!(
+                    error = ?e,
+                    queue_id = %queue_id,
+                    uuid = %uuid,
+                    "flowfile peek failed"
+                );
+                let _ = tx
+                    .send(AppEvent::Data(ViewPayload::Browser(
+                        BrowserPayload::FlowfilePeekError {
+                            queue_id,
+                            uuid,
+                            err: e.to_string(),
+                        },
+                    )))
+                    .await;
+            }
+            Ok(dto) => {
+                let attrs: std::collections::BTreeMap<String, String> = dto
+                    .attributes
+                    .unwrap_or_default()
+                    .into_iter()
+                    .filter_map(|(k, v)| v.map(|val| (k, val)))
+                    .collect();
+
+                let content_claim = match (
+                    dto.content_claim_container,
+                    dto.content_claim_section,
+                    dto.content_claim_identifier,
+                    dto.content_claim_offset,
+                    dto.content_claim_file_size_bytes,
+                ) {
+                    (
+                        Some(container),
+                        Some(section),
+                        Some(identifier),
+                        Some(offset),
+                        Some(file_size),
+                    ) if file_size > 0 => Some(
+                        crate::view::browser::state::queue_listing::ContentClaimSummary {
+                            container,
+                            section,
+                            identifier,
+                            offset: offset.max(0) as u64,
+                            file_size: file_size.max(0) as u64,
+                        },
+                    ),
+                    _ => None,
+                };
+
+                let mime_type = dto.mime_type;
+
+                let _ = tx
+                    .send(AppEvent::Data(ViewPayload::Browser(
+                        BrowserPayload::FlowfilePeek {
+                            queue_id,
+                            uuid,
+                            attrs,
+                            content_claim,
+                            mime_type,
+                        },
+                    )))
+                    .await;
+            }
+        }
+    })
+}
+
 /// Owns the polling worker's `JoinHandle` plus the listing-request id
 /// once the worker has POSTed it. Drop aborts the worker and (if a
 /// request id is known) fires `DELETE /flowfile-queues/{q}/listing-requests/{r}`
@@ -1286,5 +1384,78 @@ mod tests {
             .await;
 
         server.verify().await;
+    }
+
+    /// `spawn_flowfile_peek_fetch` issues `GET /flowfile-queues/{queue}/flowfiles/{uuid}`
+    /// and emits `FlowfilePeek` populated with the full `FlowFileDto`'s
+    /// attribute map and content-claim summary.
+    #[tokio::test(flavor = "current_thread")]
+    async fn peek_fetch_emits_attrs_and_content_claim() {
+        use std::time::Duration as StdDuration;
+        use wiremock::matchers::{method, path};
+        use wiremock::{Mock, MockServer, ResponseTemplate};
+
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path("/nifi-api/flowfile-queues/q1/flowfiles/ff-aaaa"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "flowFile": {
+                    "uuid": "ff-aaaa",
+                    "filename": "a.parquet",
+                    "size": 1024,
+                    "mimeType": "application/x-parquet",
+                    "contentClaimContainer": "default",
+                    "contentClaimSection": "1234",
+                    "contentClaimIdentifier": "abc",
+                    "contentClaimOffset": 0,
+                    "contentClaimFileSizeBytes": 1024,
+                    "attributes": {
+                        "filename": "a.parquet",
+                        "record.count": "1000",
+                        "uuid": "ff-aaaa"
+                    }
+                }
+            })))
+            .mount(&server)
+            .await;
+
+        let local = LocalSet::new();
+        local
+            .run_until(async {
+                let client = test_client(&server).await;
+                let (tx, mut rx) = mpsc::channel::<AppEvent>(8);
+                let _handle = super::spawn_flowfile_peek_fetch(
+                    client,
+                    tx,
+                    "q1".to_string(),
+                    "ff-aaaa".to_string(),
+                    None,
+                );
+
+                let payload = tokio::time::timeout(StdDuration::from_secs(2), rx.recv())
+                    .await
+                    .expect("payload arrived")
+                    .expect("non-empty");
+                match payload {
+                    AppEvent::Data(ViewPayload::Browser(BrowserPayload::FlowfilePeek {
+                        uuid,
+                        attrs,
+                        content_claim,
+                        mime_type,
+                        ..
+                    })) => {
+                        assert_eq!(uuid, "ff-aaaa");
+                        assert_eq!(mime_type.as_deref(), Some("application/x-parquet"));
+                        assert_eq!(attrs.get("record.count").map(String::as_str), Some("1000"),);
+                        let cc = content_claim.expect("content claim populated");
+                        assert_eq!(cc.container, "default");
+                        assert_eq!(cc.section, "1234");
+                        assert_eq!(cc.identifier, "abc");
+                        assert_eq!(cc.file_size, 1024);
+                    }
+                    _ => panic!("expected FlowfilePeek"),
+                }
+            })
+            .await;
     }
 }
