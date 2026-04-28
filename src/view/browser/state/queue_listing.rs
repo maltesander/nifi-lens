@@ -8,6 +8,16 @@ use tokio::task::JoinHandle;
 use crate::widget::scroll::VerticalScrollState;
 use crate::widget::search::SearchState;
 
+/// Active when the user has pressed `/` but not yet committed (Enter)
+/// or cancelled (Esc). The renderer paints `<draft>_` in the panel
+/// header while this is `Some`. Committing calls `set_filter` to apply
+/// the trimmed/lowercased substring; cancelling discards the draft and
+/// preserves any prior committed filter.
+#[derive(Debug, Default, Clone)]
+pub struct FilterPrompt {
+    pub draft: String,
+}
+
 /// Top-level state for the connection-detail flowfile listing panel.
 /// `BrowserState::queue_listing` is `Some` exactly when the user has
 /// selected a Connection node — populated even when `flow_files_queued == 0`
@@ -23,6 +33,7 @@ pub struct QueueListingState {
     pub truncated: bool,
     pub fetched_at: Option<SystemTime>,
     pub filter: Option<String>,
+    pub filter_prompt: Option<FilterPrompt>,
     pub selected: usize,
     pub error: Option<String>,
     pub timed_out: bool,
@@ -96,6 +107,7 @@ impl QueueListingState {
             truncated: false,
             fetched_at: None,
             filter: None,
+            filter_prompt: None,
             selected: 0,
             error: None,
             timed_out: false,
@@ -173,6 +185,42 @@ impl QueueListingState {
             .map(|s| s.trim().to_lowercase())
             .filter(|s| !s.is_empty());
         self.clamp_selection();
+    }
+
+    /// Open the filter prompt with an empty draft. No-op if already open.
+    pub fn open_filter_prompt(&mut self) {
+        if self.filter_prompt.is_none() {
+            self.filter_prompt = Some(FilterPrompt::default());
+        }
+    }
+
+    /// Append a character to the active draft. No-op when no prompt is open.
+    pub fn push_filter_char(&mut self, c: char) {
+        if let Some(p) = self.filter_prompt.as_mut() {
+            p.draft.push(c);
+        }
+    }
+
+    /// Drop the last character of the active draft. No-op when no prompt
+    /// is open or draft is already empty.
+    pub fn backspace_filter_char(&mut self) {
+        if let Some(p) = self.filter_prompt.as_mut() {
+            p.draft.pop();
+        }
+    }
+
+    /// Commit the active draft as the new filter (lowercased/trimmed by
+    /// `set_filter`). Closes the prompt. No-op when no prompt is open.
+    pub fn commit_filter_prompt(&mut self) {
+        if let Some(p) = self.filter_prompt.take() {
+            self.set_filter(Some(p.draft));
+        }
+    }
+
+    /// Discard the active draft and close the prompt. The committed
+    /// `filter` field is unchanged.
+    pub fn cancel_filter_prompt(&mut self) {
+        self.filter_prompt = None;
     }
 
     /// Indices into `self.rows` matching the active filter. With no
@@ -410,5 +458,51 @@ mod tests {
         s.set_filter(Some("zzz".into()));
         assert!(s.visible_indices().is_empty());
         assert_eq!(s.selected, 0);
+    }
+
+    #[test]
+    fn open_filter_prompt_starts_capturing() {
+        let mut s = QueueListingState::pending("q1".into(), "Q1".into());
+        s.open_filter_prompt();
+        assert!(s.filter_prompt.is_some());
+        assert_eq!(s.filter_prompt.as_ref().unwrap().draft, "");
+    }
+
+    #[test]
+    fn filter_prompt_captures_chars_and_commits() {
+        let mut s = QueueListingState::pending("q1".into(), "Q1".into());
+        s.rows = vec![
+            row("ff-1", Some("alpha.txt"), 1000, false),
+            row("ff-2", Some("beta.txt"), 1000, false),
+        ];
+        s.open_filter_prompt();
+        s.push_filter_char('a');
+        s.push_filter_char('l');
+        s.push_filter_char('p');
+        assert_eq!(s.filter_prompt.as_ref().unwrap().draft, "alp");
+        s.commit_filter_prompt();
+        assert!(s.filter_prompt.is_none());
+        assert_eq!(s.filter.as_deref(), Some("alp"));
+        assert_eq!(s.visible_indices(), vec![0]);
+    }
+
+    #[test]
+    fn filter_prompt_cancel_discards_draft() {
+        let mut s = QueueListingState::pending("q1".into(), "Q1".into());
+        s.open_filter_prompt();
+        s.push_filter_char('a');
+        s.cancel_filter_prompt();
+        assert!(s.filter_prompt.is_none());
+        assert!(s.filter.is_none());
+    }
+
+    #[test]
+    fn filter_prompt_backspace_drops_last_char() {
+        let mut s = QueueListingState::pending("q1".into(), "Q1".into());
+        s.open_filter_prompt();
+        s.push_filter_char('a');
+        s.push_filter_char('b');
+        s.backspace_filter_char();
+        assert_eq!(s.filter_prompt.as_ref().unwrap().draft, "a");
     }
 }
