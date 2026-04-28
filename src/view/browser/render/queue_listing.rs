@@ -9,7 +9,7 @@ use ratatui::Frame;
 use ratatui::layout::{Constraint, Rect};
 use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
-use ratatui::widgets::{Cell, Paragraph, Row, Table};
+use ratatui::widgets::{Cell, Paragraph, Row, Table, TableState};
 
 use crate::bytes::format_bytes;
 use crate::theme;
@@ -87,19 +87,14 @@ pub fn render_queue_listing(
     let header = build_header(show_node_column);
     let rows: Vec<Row> = visible
         .iter()
-        .enumerate()
-        .map(|(disp_idx, &row_idx)| {
+        .map(|&row_idx| {
             let r = &state.rows[row_idx];
             let aged = !age_warning.is_zero() && r.queued_duration > age_warning;
-            let mut row_style = if aged {
+            let row_style = if aged {
                 theme::warning()
             } else {
                 Style::default()
             };
-            if disp_idx == state.selected {
-                // Selection style wins over age-warning for visual contrast.
-                row_style = theme::accent().add_modifier(Modifier::REVERSED);
-            }
 
             let mut cells: Vec<Cell> = vec![
                 Cell::from(format!("{}", r.position)),
@@ -134,8 +129,21 @@ pub fn render_queue_listing(
     }
     widths.push(Constraint::Length(COL_UUID));
 
-    let table = Table::new(rows, widths).header(header);
-    f.render_widget(table, inner);
+    // `TableState::select` drives the highlighted row AND lets ratatui
+    // auto-scroll the viewport when the cursor moves outside it. Mirrors
+    // the pattern in `controller_service.rs::render_*_panel` and
+    // `properties_modal.rs`. Selection style is applied via the table
+    // itself (`row_highlight_style`) rather than per-row, so the row's
+    // age-warning style remains visible on non-selected rows.
+    let table = Table::new(rows, widths)
+        .header(header)
+        .row_highlight_style(theme::accent().add_modifier(Modifier::REVERSED));
+
+    let mut ts = TableState::default();
+    if focused && !state.rows.is_empty() {
+        ts.select(Some(state.selected));
+    }
+    f.render_stateful_widget(table, inner, &mut ts);
 }
 
 fn build_right_chips(state: &QueueListingState, is_empty: bool) -> Line<'static> {

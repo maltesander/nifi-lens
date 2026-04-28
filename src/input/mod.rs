@@ -430,6 +430,16 @@ impl KeyMap {
                     return InputEvent::Focus(a);
                 }
             }
+            // Allow the cross-tab Goto chord (`g`) through so the
+            // listing-focused selection can hand off to Tracer / Events
+            // via the standard goto menu. Help (`?`) similarly stays
+            // reachable.
+            if chord_matches(AppAction::Goto.chord(), key) {
+                return InputEvent::App(AppAction::Goto);
+            }
+            if chord_matches(AppAction::Help.chord(), key) {
+                return InputEvent::App(AppAction::Help);
+            }
             return InputEvent::Unmapped;
         }
 

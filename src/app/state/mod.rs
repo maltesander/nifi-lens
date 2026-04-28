@@ -2038,6 +2038,26 @@ fn build_go_crosslink(state: &AppState, target: crate::input::GoTarget) -> Optio
             })
         }
         (ViewId::Browser, GoTarget::Events) => {
+            // Listing focused: hand off the *selected flowfile's
+            // upstream component* to Events, so the operator sees
+            // events for the connection's source. Tree focused: use
+            // the tree node id.
+            if state.browser.listing_focused {
+                let listing = state.browser.queue_listing.as_ref()?;
+                let visible = listing.visible_indices();
+                let &row_idx = visible.get(listing.selected)?;
+                listing.rows.get(row_idx)?;
+                // The connection node carries the source/dest component
+                // ids on its detail row; use the connection's source.
+                let arena_idx = *state.browser.visible.get(state.browser.selected)?;
+                let detail = state.browser.details.get(&arena_idx)?;
+                let crate::view::browser::state::NodeDetail::Connection(c) = detail else {
+                    return None;
+                };
+                return Some(CrossLink::GotoEvents {
+                    component_id: c.source_id.clone(),
+                });
+            }
             let arena_idx = *state.browser.visible.get(state.browser.selected)?;
             let node = state.browser.nodes.get(arena_idx)?;
             // Folders are a reducer-only UI construct with a synthetic id;
@@ -2048,6 +2068,21 @@ fn build_go_crosslink(state: &AppState, target: crate::input::GoTarget) -> Optio
             }
             Some(CrossLink::GotoEvents {
                 component_id: node.id.clone(),
+            })
+        }
+        (ViewId::Browser, GoTarget::Tracer) => {
+            // Tracer is only reachable from listing focus — the
+            // selected row's flowfile uuid kicks off lineage. Tree
+            // focus has no flowfile-uuid context.
+            if !state.browser.listing_focused {
+                return None;
+            }
+            let listing = state.browser.queue_listing.as_ref()?;
+            let visible = listing.visible_indices();
+            let &row_idx = visible.get(listing.selected)?;
+            let row = listing.rows.get(row_idx)?;
+            Some(CrossLink::TraceByUuid {
+                uuid: row.uuid.clone(),
             })
         }
         (ViewId::Events, GoTarget::Browser) => {
@@ -2127,6 +2162,27 @@ fn build_goto_subject(
             })
         }
         (ViewId::Browser, GoTarget::Events) => {
+            // When listing is focused, the goto-menu subject is the
+            // upstream component's events context — labelled by the
+            // selected row's filename for operator clarity.
+            if state.browser.listing_focused {
+                let listing = state.browser.queue_listing.as_ref()?;
+                let visible = listing.visible_indices();
+                let &row_idx = visible.get(listing.selected)?;
+                let row = listing.rows.get(row_idx)?;
+                let arena_idx = *state.browser.visible.get(state.browser.selected)?;
+                let detail = state.browser.details.get(&arena_idx)?;
+                let crate::view::browser::state::NodeDetail::Connection(c) = detail else {
+                    return None;
+                };
+                return Some(GotoSubject::Component {
+                    name: row
+                        .filename
+                        .clone()
+                        .unwrap_or_else(|| row.uuid.chars().take(8).collect()),
+                    id: c.source_id.clone(),
+                });
+            }
             let arena_idx = *state.browser.visible.get(state.browser.selected)?;
             let node = state.browser.nodes.get(arena_idx)?;
             // Folders are a reducer-only UI construct; no real component to jump to.
@@ -2136,6 +2192,18 @@ fn build_goto_subject(
             Some(GotoSubject::Component {
                 name: node.name.clone(),
                 id: node.id.clone(),
+            })
+        }
+        (ViewId::Browser, GoTarget::Tracer) => {
+            if !state.browser.listing_focused {
+                return None;
+            }
+            let listing = state.browser.queue_listing.as_ref()?;
+            let visible = listing.visible_indices();
+            let &row_idx = visible.get(listing.selected)?;
+            let row = listing.rows.get(row_idx)?;
+            Some(GotoSubject::Flowfile {
+                uuid: row.uuid.clone(),
             })
         }
         (ViewId::Events, GoTarget::Browser) => {
