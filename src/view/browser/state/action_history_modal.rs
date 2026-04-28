@@ -133,6 +133,25 @@ impl ActionHistoryModalState {
         };
     }
 
+    /// Flat searchable body for `/`-search. One line per action.
+    /// Columns mirror what the renderer shows so search-match line
+    /// indices align with rendered rows.
+    pub fn searchable_body(&self) -> String {
+        let mut out = String::new();
+        for a in &self.actions {
+            let inner = a.action.as_ref();
+            let timestamp = a.timestamp.as_deref().unwrap_or("");
+            let user = inner
+                .and_then(|ad| ad.user_identity.as_deref())
+                .unwrap_or("");
+            let op = inner.and_then(|ad| ad.operation.as_deref()).unwrap_or("");
+            let stype = inner.and_then(|ad| ad.source_type.as_deref()).unwrap_or("");
+            let sname = inner.and_then(|ad| ad.source_name.as_deref()).unwrap_or("");
+            out.push_str(&format!("{timestamp} {user} {op} {stype} {sname}\n"));
+        }
+        out
+    }
+
     /// Whether scrolling within `n` rows of the loaded tail should
     /// signal the worker to fetch the next page.
     pub fn should_signal_next_page(&self, viewport_bottom: usize, threshold: usize) -> bool {
@@ -235,6 +254,24 @@ mod tests {
         let mut s = ActionHistoryModalState::pending("proc-1".into(), "X".into());
         s.apply_page("proc-1", (0..5).map(entity).collect(), Some(5));
         assert!(!s.should_signal_next_page(4, 100));
+    }
+
+    #[test]
+    fn searchable_body_one_line_per_action() {
+        let mut s = ActionHistoryModalState::pending("p".into(), "X".into());
+        let mut a1 = ActionEntity::default();
+        a1.id = Some(1);
+        a1.timestamp = Some("2026-04-27T10:00:00Z".into());
+        let mut inner = nifi_rust_client::dynamic::types::ActionDto::default();
+        inner.user_identity = Some("alice".into());
+        inner.operation = Some("Configure".into());
+        a1.action = Some(inner);
+        s.apply_page("p", vec![a1], Some(1));
+        let body = s.searchable_body();
+        assert!(body.contains("2026-04-27T10:00:00Z"));
+        assert!(body.contains("alice"));
+        assert!(body.contains("Configure"));
+        assert_eq!(body.matches('\n').count(), 1, "one line per action");
     }
 
     #[test]

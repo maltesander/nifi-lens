@@ -811,6 +811,78 @@ impl BrowserState {
         });
     }
 
+    // Search reducer methods for the action-history modal. Mirror the
+    // version_modal_search_* and parameter_modal_search_* methods above;
+    // each operates against action_history_modal.search and the body from
+    // ActionHistoryModalState::searchable_body.
+
+    /// Push a character into the action-history modal's live search query
+    /// and recompute matches. No-op if no modal or no active search input.
+    pub fn action_history_modal_search_push(&mut self, ch: char) {
+        let Some(modal) = self.action_history_modal.as_mut() else {
+            return;
+        };
+        let body = modal.searchable_body();
+        let Some(search) = modal.search.as_mut() else {
+            return;
+        };
+        if !search.input_active {
+            return;
+        }
+        search.query.push(ch);
+        search.matches = crate::widget::search::compute_matches(&body, &search.query);
+        search.current = if search.matches.is_empty() {
+            None
+        } else {
+            Some(0)
+        };
+    }
+
+    /// Remove the last character from the action-history modal's live search query.
+    pub fn action_history_modal_search_pop(&mut self) {
+        let Some(modal) = self.action_history_modal.as_mut() else {
+            return;
+        };
+        let body = modal.searchable_body();
+        let Some(search) = modal.search.as_mut() else {
+            return;
+        };
+        if !search.input_active {
+            return;
+        }
+        search.query.pop();
+        search.matches = crate::widget::search::compute_matches(&body, &search.query);
+        search.current = if search.matches.is_empty() {
+            None
+        } else {
+            Some(0)
+        };
+    }
+
+    /// Commit the current query. Empty query closes search; otherwise flips
+    /// `input_active` to false and `committed` to true.
+    pub fn action_history_modal_search_commit(&mut self) {
+        let Some(modal) = self.action_history_modal.as_mut() else {
+            return;
+        };
+        let Some(search) = modal.search.as_mut() else {
+            return;
+        };
+        if search.query.is_empty() {
+            modal.search = None;
+            return;
+        }
+        search.input_active = false;
+        search.committed = true;
+    }
+
+    /// Cancel search and clear all search state from the action-history modal.
+    pub fn action_history_modal_search_cancel(&mut self) {
+        if let Some(modal) = self.action_history_modal.as_mut() {
+            modal.search = None;
+        }
+    }
+
     /// Called from every selection-changing entry point. Resets detail
     /// focus because the node under the cursor has (potentially) changed.
     fn reset_detail_focus(&mut self) {

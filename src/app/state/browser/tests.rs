@@ -3491,3 +3491,65 @@ fn action_history_modal_toggle_expand_uses_selected_row() {
         Some(3)
     );
 }
+
+#[test]
+fn action_history_modal_search_input_routes_chars_to_query() {
+    use crate::input::{ActionHistoryModalVerb, ViewVerb};
+    use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+
+    let mut state = fresh_state();
+    state
+        .browser
+        .open_action_history_modal("proc-1".into(), "X".into());
+    // Open search via the verb dispatch.
+    let _ = BrowserHandler::handle_verb(
+        &mut state,
+        ViewVerb::ActionHistoryModal(ActionHistoryModalVerb::OpenSearch),
+    );
+    // input_active should be true now.
+    assert!(
+        BrowserHandler::is_text_input_focused(&state),
+        "is_text_input_focused must return true with action-history search active"
+    );
+    // Push three characters via handle_text_input.
+    for ch in ['e', 'r', 'r'] {
+        let _ = BrowserHandler::handle_text_input(
+            &mut state,
+            KeyEvent::new(KeyCode::Char(ch), KeyModifiers::empty()),
+        );
+    }
+    let m = state.browser.action_history_modal.as_ref().unwrap();
+    let search = m.search.as_ref().expect("search active");
+    assert_eq!(search.query, "err");
+    // Backspace.
+    let _ = BrowserHandler::handle_text_input(
+        &mut state,
+        KeyEvent::new(KeyCode::Backspace, KeyModifiers::empty()),
+    );
+    assert_eq!(
+        state
+            .browser
+            .action_history_modal
+            .as_ref()
+            .unwrap()
+            .search
+            .as_ref()
+            .unwrap()
+            .query,
+        "er"
+    );
+    // Esc cancels search.
+    let _ = BrowserHandler::handle_text_input(
+        &mut state,
+        KeyEvent::new(KeyCode::Esc, KeyModifiers::empty()),
+    );
+    assert!(
+        state
+            .browser
+            .action_history_modal
+            .as_ref()
+            .unwrap()
+            .search
+            .is_none()
+    );
+}

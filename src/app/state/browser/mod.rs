@@ -751,9 +751,20 @@ impl ViewKeyHandler for BrowserHandler {
             return true;
         }
         // Parameter-context modal's search input.
-        state
+        let pc_active = state
             .browser
             .parameter_modal
+            .as_ref()
+            .and_then(|m| m.search.as_ref())
+            .map(|s| s.input_active)
+            .unwrap_or(false);
+        if pc_active {
+            return true;
+        }
+        // Action-history modal's search input.
+        state
+            .browser
+            .action_history_modal
             .as_ref()
             .and_then(|m| m.search.as_ref())
             .map(|s| s.input_active)
@@ -802,15 +813,40 @@ impl ViewKeyHandler for BrowserHandler {
             .and_then(|m| m.search.as_ref())
             .map(|s| s.input_active)
             .unwrap_or(false);
-        if !pc_active {
+        if pc_active {
+            match key.code {
+                KeyCode::Esc => state.browser.parameter_modal_search_cancel(),
+                KeyCode::Enter => state.browser.parameter_modal_search_commit(),
+                KeyCode::Backspace => state.browser.parameter_modal_search_pop(),
+                KeyCode::Char(ch) if !key.modifiers.contains(KeyModifiers::CONTROL) => {
+                    state.browser.parameter_modal_search_push(ch);
+                }
+                _ => return None,
+            }
+            return Some(UpdateResult {
+                redraw: true,
+                intent: None,
+                tracer_followup: None,
+            });
+        }
+
+        // Action-history modal's search input.
+        let ah_active = state
+            .browser
+            .action_history_modal
+            .as_ref()
+            .and_then(|m| m.search.as_ref())
+            .map(|s| s.input_active)
+            .unwrap_or(false);
+        if !ah_active {
             return None;
         }
         match key.code {
-            KeyCode::Esc => state.browser.parameter_modal_search_cancel(),
-            KeyCode::Enter => state.browser.parameter_modal_search_commit(),
-            KeyCode::Backspace => state.browser.parameter_modal_search_pop(),
+            KeyCode::Esc => state.browser.action_history_modal_search_cancel(),
+            KeyCode::Enter => state.browser.action_history_modal_search_commit(),
+            KeyCode::Backspace => state.browser.action_history_modal_search_pop(),
             KeyCode::Char(ch) if !key.modifiers.contains(KeyModifiers::CONTROL) => {
-                state.browser.parameter_modal_search_push(ch);
+                state.browser.action_history_modal_search_push(ch);
             }
             _ => return None,
         }
