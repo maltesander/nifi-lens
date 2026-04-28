@@ -16,6 +16,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   selection comes within 10 rows of the loaded tail), substring search
   (`/`, `n`/`Shift+N` cycle), copy-as-TSV (`c`), inline expansion of a
   selected row (`Enter`), and refresh from offset 0 (`r`). Read-only.
+- **Inline sparkline strip** in Browser detail identity panels for
+  processor / PG / connection rows. Three rows per pane (in flowfiles,
+  out flowfiles, task time or queued count) backed by NiFi's
+  `/flow/{type}/{id}/status/history`. Selection-scoped periodic
+  worker; default 30 s cadence configurable via
+  `[polling.cluster] status_history`. Responsive — suppressed below
+  24 cells of identity-inner width so narrow terminals keep the
+  identity panel readable.
 
 ## [0.8.1] — 2026-04-27
 

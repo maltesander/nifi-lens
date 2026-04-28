@@ -469,6 +469,48 @@ small` (matches existing modals).
 
 Read-only — no revert / replay actions in v0.1.
 
+### Sparkline strip
+
+The Browser detail identity panel for processor / PG / connection
+rows includes a 3-line inline sparkline on the right half. Backed by
+`src/client/history.rs::status_history` which dispatches to the
+generated `get_*_status_history` functions and reduces
+`StatusHistoryEntity` to a metric-keyed `StatusHistorySeries`.
+
+State lives on `BrowserState::sparkline:
+Option<SparklineState>` plus `sparkline_handle:
+Option<JoinHandle<()>>`. The state and handle are re-created on every
+selection change to a supported kind (processor / PG / connection)
+via `AppState::refresh_sparkline_for_selection`, which emits
+`PendingIntent::SpawnSparklineFetchLoop`. Selection changes to CS /
+Port / Folder rows tear down both the state and the handle.
+
+Worker (`spawn_sparkline_fetch_loop`) loops on the cadence
+`config.polling.cluster.status_history` (default `30s`); 404 from
+NiFi maps to `AppEvent::SparklineEndpointMissing` (sticky per
+selection until the user moves to another row); other errors log at
+`warn!` and continue.
+
+Reducer arms in `app::state::update_inner` apply each emit only when
+`(kind, id)` matches the active selection — defends against stale
+emits between worker abort and exit. UpdateResult carries a
+`sparkline_followup: Option<PendingIntent>` that selection-change
+paths fold in alongside the primary intent.
+
+Render via the shared `widget::sparkline::render_sparkline_row`
+helper (label + glyphs + 'peak N' suffix), iterated three times per
+kind:
+
+| Component | Row 1 | Row 2 | Row 3 |
+|---|---|---|---|
+| Processor | `in` flowfiles | `out` flowfiles | `task` time |
+| PG | `in` flowfiles | `out` flowfiles | `queue` count |
+| Connection | `in` flowfiles | `out` flowfiles | `queue` count |
+
+Below 24 cells of identity-inner width (2× `SPARKLINE_MIN_RIGHT_HALF_WIDTH`)
+the strip is suppressed and the identity panel reverts to full width
+(responsive fallback). No focus, no chord — purely periodic display.
+
 ### Tracer content viewer modal
 
 Full-screen modal opened with `i` on the Tracer Content sub-tab.
@@ -530,8 +572,11 @@ Base cadences come from `[polling.cluster]` in `config.toml` (keys:
 `root_pg_status`, `controller_services`, `controller_status`,
 `system_diagnostics`, `bulletins`, `cluster_nodes`, `tls_certs`,
 `connections_by_pg`, `version_control`, `parameter_context_bindings`,
-`about`, plus the adaptive knobs `max_interval` and `jitter_percent`).
-For scaling and subscriber-gating behavior, see "Central cluster store".
+`status_history`, `about`, plus the adaptive knobs `max_interval`
+and `jitter_percent`). For scaling and subscriber-gating behavior,
+see "Central cluster store". `status_history` is selection-scoped
+rather than cluster-wide — it cadences the per-row sparkline worker
+(see "Sparkline strip"), not a `ClusterStore` fetcher.
 
 Values use the humantime format (`"10s"`, `"750ms"`, `"2m"`). The
 loader emits a `tracing::warn!` (into the rotating log file) for values
