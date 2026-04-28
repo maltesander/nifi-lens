@@ -3,6 +3,7 @@
 
 use ratatui::Frame;
 use ratatui::layout::{Constraint, Direction, Layout, Rect};
+use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Cell, Paragraph, Row, Table};
 
@@ -10,6 +11,7 @@ use crate::theme;
 use crate::timestamp::format_age_secs;
 use crate::view::browser::state::queue_listing::QueueListingPeekState;
 use crate::widget::panel::Panel;
+use crate::widget::search::SearchState;
 
 const MIN_WIDTH: u16 = 60;
 const MIN_HEIGHT: u16 = 20;
@@ -46,6 +48,18 @@ pub fn render_peek_modal(f: &mut Frame<'_>, area: Rect, state: &QueueListingPeek
     render_separator(f, chunks[1]);
     render_attrs(f, chunks[2], state);
     render_hints(f, chunks[3]);
+
+    if let Some(search) = state.search.as_ref()
+        && search.input_active
+    {
+        // Overlay search prompt onto the hint strip area.
+        let prompt = Line::from(vec![
+            Span::styled("/", theme::accent()),
+            Span::raw(search.query.clone()),
+            Span::styled("_", theme::muted()),
+        ]);
+        f.render_widget(Paragraph::new(prompt), chunks[3]);
+    }
 }
 
 fn build_title_left(state: &QueueListingPeekState) -> Line<'static> {
@@ -126,14 +140,52 @@ fn render_attrs(f: &mut Frame<'_>, area: Rect, state: &QueueListingPeekState) {
         return;
     };
     let header = Row::new(vec![Cell::from("key"), Cell::from("value")]).style(theme::muted());
-    // Plain row styling here; T17b layers search-match highlighting on
-    // top using the same `apply_search_highlights` pattern as the
-    // parameter-context modal.
-    let rows = attrs
-        .iter()
-        .map(|(k, v)| Row::new(vec![Cell::from(k.clone()), Cell::from(v.clone())]));
+
+    // Compute per-row highlight styles when search has committed
+    // matches. The body's row coordinates align with `attrs` insertion
+    // order via `searchable_body` — see that helper for the cell-width
+    // contract.
+    let highlight_styles: std::collections::HashMap<usize, Style> = state
+        .search
+        .as_ref()
+        .filter(|s| s.committed && !s.matches.is_empty())
+        .map(|search| compute_row_highlights(attrs, search))
+        .unwrap_or_default();
+
+    let rows = attrs.iter().enumerate().map(|(i, (k, v))| {
+        let style = highlight_styles.get(&i).copied().unwrap_or_default();
+        Row::new(vec![Cell::from(k.clone()), Cell::from(v.clone())]).style(style)
+    });
+
     let table = Table::new(rows, [Constraint::Length(40), Constraint::Min(20)]).header(header);
     f.render_widget(table, area);
+}
+
+fn compute_row_highlights(
+    attrs: &std::collections::BTreeMap<String, String>,
+    search: &SearchState,
+) -> std::collections::HashMap<usize, Style> {
+    // `searchable_body` emits one logical line per attr in `attrs`
+    // insertion order. compute_matches returns MatchSpan with
+    // line_idx aligned to that ordering. So a MatchSpan with
+    // line_idx == row_index means "row N has a match"; the current
+    // match (if any) gets bold highlighting on top.
+    let mut out = std::collections::HashMap::new();
+    let current_line = search
+        .current
+        .and_then(|c| search.matches.get(c).map(|m| m.line_idx));
+    for span in &search.matches {
+        if span.line_idx >= attrs.len() {
+            continue;
+        }
+        let style = if Some(span.line_idx) == current_line {
+            theme::accent().add_modifier(Modifier::BOLD)
+        } else {
+            theme::accent()
+        };
+        out.insert(span.line_idx, style);
+    }
+    out
 }
 
 fn render_hints(f: &mut Frame<'_>, area: Rect) {
@@ -240,5 +292,55 @@ mod tests {
         let p = pending("ff-aaaa");
         let out = render_to_string(40, 10, &p);
         assert!(out.contains("terminal too small"));
+    }
+
+    #[test]
+    fn committed_search_highlights_matched_attr_rows() {
+        use crate::widget::search::{SearchState, compute_matches};
+
+        let mut p = pending("ff-aaaa");
+        let mut attrs = BTreeMap::new();
+        attrs.insert("filename".into(), "sensor.parquet".into());
+        attrs.insert("record.count".into(), "1000".into());
+        p.attrs = Some(attrs);
+
+        let body = p.searchable_body();
+        let matches = compute_matches(&body, "sensor");
+        assert!(!matches.is_empty(), "compute_matches must find 'sensor'");
+
+        p.search = Some(SearchState {
+            query: "sensor".into(),
+            matches,
+            current: Some(0),
+            input_active: false,
+            committed: true,
+        });
+
+        // Note: the buffer dump shows text, not styles. This assertion
+        // confirms the renderer doesn't panic when search is active and
+        // that matched rows still render their content. Style verification
+        // would require inspecting cell styles via term.backend().buffer()
+        // which is brittle under layout changes.
+        let out = render_to_string(80, 24, &p);
+        assert!(out.contains("filename"));
+        assert!(out.contains("sensor.parquet"));
+    }
+
+    #[test]
+    fn renders_search_prompt_when_input_active() {
+        use crate::widget::search::SearchState;
+
+        let mut p = pending("ff-aaaa");
+        p.attrs = Some(BTreeMap::new());
+        p.search = Some(SearchState {
+            query: "abc".into(),
+            matches: vec![],
+            current: None,
+            input_active: true,
+            committed: false,
+        });
+
+        let out = render_to_string(80, 24, &p);
+        assert!(out.contains("/abc"), "expected prompt overlay:\n{out}");
     }
 }

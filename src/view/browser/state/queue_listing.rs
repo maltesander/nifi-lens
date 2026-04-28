@@ -364,6 +364,27 @@ impl QueueListingPeekState {
         let attrs = self.attrs.as_ref()?;
         serde_json::to_string_pretty(attrs).ok()
     }
+
+    /// Flat-string view of the attrs table for `compute_matches`.
+    /// Format MUST match the rendered cell layout 1:1 — same column
+    /// widths, same row order — so byte offsets returned by
+    /// `compute_matches` map back onto rendered rows. The renderer's
+    /// attrs table uses `Constraint::Length(40)` for the key column
+    /// followed by `Constraint::Min(20)` for the value, matched here
+    /// by left-padding the key to 40 columns.
+    pub fn searchable_body(&self) -> String {
+        let Some(attrs) = self.attrs.as_ref() else {
+            return String::new();
+        };
+        let mut out = String::new();
+        for (k, v) in attrs {
+            // 40-wide key column + value + newline. Matches
+            // render_attrs's Constraint::Length(40) + Min(20) split.
+            // Each row is one logical line in the searchable body.
+            out.push_str(&format!("{k:<40}{v}\n"));
+        }
+        out
+    }
 }
 
 #[cfg(test)]
