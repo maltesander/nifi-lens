@@ -18,6 +18,33 @@ pub enum NifiLensError {
     ))]
     WritesNotImplemented,
 
+    /// 404 from NiFi for `/flow/{type}/{id}/status/history`. The
+    /// sparkline worker maps this onto `AppEvent::SparklineEndpointMissing`
+    /// instead of warn-logging — the endpoint is genuinely absent for
+    /// some component shapes, and the renderer shows the muted
+    /// "no history yet" state.
+    #[snafu(display("status_history endpoint missing for component {id:?} (NiFi 404): {source}"))]
+    SparklineEndpointMissing {
+        id: String,
+        source: Box<dyn std::error::Error + Send + Sync>,
+    },
+
+    /// Non-404 fetch failure for the status-history endpoint. The
+    /// worker logs at `warn!` and continues looping; this variant only
+    /// exists so the error type round-trips through the worker without
+    /// introducing a Box-dyn-Error variant of its own.
+    #[snafu(display("failed to fetch status_history for component {id:?}: {source}"))]
+    StatusHistoryFetchFailed {
+        id: String,
+        source: Box<dyn std::error::Error + Send + Sync>,
+    },
+
+    /// Component kind that has no `/status/history` endpoint
+    /// (controller services and ports). The dispatcher returns this so
+    /// callers don't have to redo the kind check before calling.
+    #[snafu(display("sparkline not available for component kind {kind}"))]
+    SparklineUnsupportedKind { kind: String },
+
     #[snafu(display("no config file at {}; run `nifilens config init` to create a template", path.display()))]
     ConfigMissing { path: PathBuf },
 
