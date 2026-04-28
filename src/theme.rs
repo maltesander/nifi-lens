@@ -121,6 +121,27 @@ pub fn search_cursor() -> Style {
     Style::default().add_modifier(Modifier::REVERSED)
 }
 
+/// Sparkline color for "in flowfiles" rows. Green to match the
+/// project's flow-direction convention (input is the "happy" side).
+pub fn spark_in() -> Style {
+    Style::default().fg(Color::Green)
+}
+
+/// Sparkline color for "out flowfiles" rows. Cyan — distinct from
+/// the green "in" color while still reading as a successful
+/// throughput signal.
+pub fn spark_out() -> Style {
+    Style::default().fg(Color::Cyan)
+}
+
+/// Sparkline color for the per-kind row 3 (queued count for PG /
+/// connection, task time for processor). Yellow — distinct from
+/// `warning()` (which carries extra modifiers) but still reading as
+/// "watch this".
+pub fn spark_queued() -> Style {
+    Style::default().fg(Color::Yellow)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -190,5 +211,15 @@ mod tests {
     fn search_cursor_reverses() {
         assert!(search_cursor().add_modifier.contains(Modifier::REVERSED));
         assert!(!search_cursor().add_modifier.contains(Modifier::UNDERLINED));
+    }
+
+    #[test]
+    fn sparkline_palette_helpers_return_distinct_colors() {
+        let i = spark_in();
+        let o = spark_out();
+        let q = spark_queued();
+        assert_ne!(format!("{i:?}"), format!("{o:?}"));
+        assert_ne!(format!("{o:?}"), format!("{q:?}"));
+        assert_ne!(format!("{i:?}"), format!("{q:?}"));
     }
 }
