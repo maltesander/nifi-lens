@@ -74,8 +74,11 @@ fn build_title_left(state: &QueueListingPeekState) -> Line<'static> {
 }
 
 fn build_title_chips(state: &QueueListingPeekState) -> Line<'static> {
-    if let Some(err) = &state.error {
-        return Line::from(Span::styled(format!("[error: {err}]"), theme::warning()));
+    if state.error.is_some() {
+        // The full NiFi error is rendered in the status-line banner
+        // (post_error with detail). Keep the modal chip terse so it
+        // doesn't bleed past the panel border on long messages.
+        return Line::from(Span::styled("[error]", theme::warning()));
     }
     if state.attrs.is_none() {
         return Line::from(Span::styled("[loading…]", theme::muted()));
@@ -287,10 +290,19 @@ mod tests {
 
     #[test]
     fn renders_error_chip() {
+        // The full NiFi error message is now surfaced via the
+        // status-line banner (`post_error` in handle_browser_payload),
+        // so the modal chip stays terse — just `[error]`. The body
+        // still shows "failed to fetch attributes — Esc to close"
+        // for in-modal context.
         let mut p = pending("ff-aaaa");
-        p.error = Some("404".into());
+        p.error = Some("404 The FlowFile is no longer in the active queue".into());
         let out = render_to_string(80, 24, &p);
-        assert!(out.contains("404"), "expected error chip:\n{out}");
+        assert!(out.contains("[error]"), "expected terse error chip:\n{out}");
+        assert!(
+            out.contains("failed to fetch attributes"),
+            "expected body fallback:\n{out}",
+        );
     }
 
     #[test]

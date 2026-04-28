@@ -2301,6 +2301,15 @@ pub(crate) fn handle_browser_payload(state: &mut AppState, payload: crate::event
             uuid,
             err,
         } => {
+            // Surface the failure as a status-line error banner so
+            // the operator sees it without having to read the modal's
+            // chip strip. The full NiFi error message is pushed into
+            // the banner detail (Enter to expand). The peek modal
+            // stays open showing the identity (uuid/filename/etc.)
+            // so the user knows which flowfile failed; Esc closes.
+            let short_uuid: String = uuid.chars().take(8).collect();
+            let banner = format!("flowfile peek {short_uuid}…: {err}");
+            state.post_error(banner, Some(err.clone()));
             if let Some(listing) = state.browser.queue_listing.as_mut()
                 && let Some(peek) = listing.peek.as_mut()
             {
