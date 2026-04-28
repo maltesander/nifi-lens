@@ -1900,4 +1900,179 @@ mod queue_listing_reducer_tests {
         assert!(s.error.is_none(), "error cleared on refresh");
         assert!(s.request_id.is_none(), "request_id cleared on refresh");
     }
+
+    #[test]
+    fn focus_listing_verb_sets_focus_when_rows_present() {
+        use crate::app::state::ViewKeyHandler;
+        use crate::input::{BrowserQueueVerb, ViewVerb};
+        use crate::view::browser::state::queue_listing::{QueueListingRow, QueueListingState};
+        use std::time::Duration;
+
+        let mut state = fresh_state();
+        let mut listing = QueueListingState::pending("q1".into(), "Q1".into());
+        listing.rows = vec![QueueListingRow {
+            uuid: "ff-1".into(),
+            filename: Some("a.txt".into()),
+            size: 1,
+            queued_duration: Duration::from_secs(0),
+            position: 1,
+            penalized: false,
+            cluster_node_id: None,
+            lineage_duration: Duration::from_secs(0),
+        }];
+        state.browser.queue_listing = Some(listing);
+
+        let _ = crate::app::state::browser::BrowserHandler::handle_verb(
+            &mut state,
+            ViewVerb::BrowserQueue(BrowserQueueVerb::FocusListing),
+        );
+        assert!(state.browser.listing_focused);
+    }
+
+    #[test]
+    fn focus_listing_verb_no_op_when_listing_empty() {
+        use crate::app::state::ViewKeyHandler;
+        use crate::input::{BrowserQueueVerb, ViewVerb};
+        use crate::view::browser::state::queue_listing::QueueListingState;
+
+        let mut state = fresh_state();
+        state.browser.queue_listing = Some(QueueListingState::pending("q1".into(), "Q1".into()));
+        // No rows — focus must not flip.
+        let _ = crate::app::state::browser::BrowserHandler::handle_verb(
+            &mut state,
+            ViewVerb::BrowserQueue(BrowserQueueVerb::FocusListing),
+        );
+        assert!(!state.browser.listing_focused);
+    }
+
+    #[test]
+    fn t_emits_trace_by_uuid_cross_link() {
+        use crate::app::state::{PendingIntent, ViewKeyHandler};
+        use crate::input::{BrowserQueueVerb, ViewVerb};
+        use crate::intent::CrossLink;
+        use crate::view::browser::state::queue_listing::{QueueListingRow, QueueListingState};
+        use std::time::Duration;
+
+        let mut state = fresh_state();
+        let mut listing = QueueListingState::pending("q1".into(), "Q1".into());
+        listing.rows = vec![QueueListingRow {
+            uuid: "ff-aaaa".into(),
+            filename: Some("a.txt".into()),
+            size: 1,
+            queued_duration: Duration::from_secs(0),
+            position: 1,
+            penalized: false,
+            cluster_node_id: None,
+            lineage_duration: Duration::from_secs(0),
+        }];
+        state.browser.queue_listing = Some(listing);
+
+        let result = crate::app::state::browser::BrowserHandler::handle_verb(
+            &mut state,
+            ViewVerb::BrowserQueue(BrowserQueueVerb::TraceLineage),
+        )
+        .expect("verb produced UpdateResult");
+        assert!(
+            matches!(
+                result.intent,
+                Some(PendingIntent::Goto(CrossLink::TraceByUuid { ref uuid })) if uuid == "ff-aaaa"
+            ),
+            "expected Goto(TraceByUuid {{ uuid: \"ff-aaaa\" }}), got: {:?}",
+            result.intent
+        );
+    }
+
+    #[test]
+    fn filter_verb_opens_prompt() {
+        use crate::app::state::ViewKeyHandler;
+        use crate::input::{BrowserQueueVerb, ViewVerb};
+        use crate::view::browser::state::queue_listing::QueueListingState;
+
+        let mut state = fresh_state();
+        state.browser.queue_listing = Some(QueueListingState::pending("q1".into(), "Q1".into()));
+        let _ = crate::app::state::browser::BrowserHandler::handle_verb(
+            &mut state,
+            ViewVerb::BrowserQueue(BrowserQueueVerb::Filter),
+        );
+        assert!(
+            state
+                .browser
+                .queue_listing
+                .as_ref()
+                .unwrap()
+                .filter_prompt
+                .is_some(),
+            "filter prompt must be open after Filter verb"
+        );
+    }
+
+    #[test]
+    fn cancel_verb_cascades_prompt_filter_focus() {
+        use crate::app::state::ViewKeyHandler;
+        use crate::input::{BrowserQueueVerb, ViewVerb};
+        use crate::view::browser::state::queue_listing::QueueListingState;
+
+        let mut state = fresh_state();
+        let mut listing = QueueListingState::pending("q1".into(), "Q1".into());
+        listing.open_filter_prompt();
+        listing.push_filter_char('a');
+        state.browser.queue_listing = Some(listing);
+        state.browser.listing_focused = true;
+
+        // 1st Cancel: closes the prompt; listing_focused stays true.
+        let _ = crate::app::state::browser::BrowserHandler::handle_verb(
+            &mut state,
+            ViewVerb::BrowserQueue(BrowserQueueVerb::Cancel),
+        );
+        assert!(
+            state
+                .browser
+                .queue_listing
+                .as_ref()
+                .unwrap()
+                .filter_prompt
+                .is_none(),
+            "filter prompt must be closed after 1st Cancel"
+        );
+        assert!(
+            state.browser.listing_focused,
+            "listing_focused must remain true after closing prompt"
+        );
+
+        // Set a committed filter; 2nd Cancel clears the filter but keeps focus.
+        state
+            .browser
+            .queue_listing
+            .as_mut()
+            .unwrap()
+            .set_filter(Some("foo".into()));
+        let _ = crate::app::state::browser::BrowserHandler::handle_verb(
+            &mut state,
+            ViewVerb::BrowserQueue(BrowserQueueVerb::Cancel),
+        );
+        assert!(
+            state
+                .browser
+                .queue_listing
+                .as_ref()
+                .unwrap()
+                .filter
+                .is_none(),
+            "committed filter must be cleared after 2nd Cancel"
+        );
+        assert!(
+            state.browser.listing_focused,
+            "listing_focused must remain true after clearing committed filter"
+        );
+
+        // 3rd Cancel: drops listing focus.
+        let _ = crate::app::state::browser::BrowserHandler::handle_verb(
+            &mut state,
+            ViewVerb::BrowserQueue(BrowserQueueVerb::Cancel),
+        );
+        assert!(
+            !state.browser.listing_focused,
+            "listing_focused must be false after 3rd Cancel"
+        );
+    }
 }

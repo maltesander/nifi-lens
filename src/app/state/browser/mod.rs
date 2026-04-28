@@ -1592,14 +1592,14 @@ fn handle_action_history_modal_verb(
 /// `ViewVerb::BrowserQueue(v)` to the Browser tab handler.  `Refresh` drops
 /// the prior listing request (triggering the `QueueListingHandle` Drop-DELETE)
 /// and emits `PendingIntent::SpawnQueueListingRefresh` so the dispatcher can
-/// post a fresh listing request.  The remaining variants are stubs filled in
-/// by T15.
+/// post a fresh listing request.
 fn handle_browser_queue_verb(
     state: &mut AppState,
     verb: crate::input::BrowserQueueVerb,
 ) -> UpdateResult {
     use crate::app::state::PendingIntent;
     use crate::input::BrowserQueueVerb;
+    use crate::intent::CrossLink;
 
     match verb {
         BrowserQueueVerb::Refresh => {
@@ -1622,13 +1622,128 @@ fn handle_browser_queue_verb(
                 ..Default::default()
             }
         }
-        // T15 will fill these in.
-        BrowserQueueVerb::FocusListing
-        | BrowserQueueVerb::PeekAttributes
-        | BrowserQueueVerb::TraceLineage
-        | BrowserQueueVerb::CopyUuid
-        | BrowserQueueVerb::Filter
-        | BrowserQueueVerb::Cancel => UpdateResult::default(),
+
+        BrowserQueueVerb::FocusListing => {
+            // Tab: move focus from the tree into the listing rows.  Only
+            // meaningful when rows are present — guard here so the keymap
+            // can fire the chord unconditionally.
+            let has_rows = state
+                .browser
+                .queue_listing
+                .as_ref()
+                .map(|s| !s.rows.is_empty())
+                .unwrap_or(false);
+            if has_rows {
+                state.browser.listing_focused = true;
+            }
+            UpdateResult {
+                redraw: true,
+                ..Default::default()
+            }
+        }
+
+        BrowserQueueVerb::PeekAttributes => {
+            // `i`: open the peek modal pre-filled with the selected row's
+            // identity, then emit the intent that spawns the GET worker
+            // for the full attribute map.
+            state.browser.open_queue_listing_peek_modal();
+            let Some(listing) = state.browser.queue_listing.as_ref() else {
+                return UpdateResult::default();
+            };
+            let Some(peek) = listing.peek.as_ref() else {
+                return UpdateResult::default();
+            };
+            UpdateResult {
+                redraw: true,
+                intent: Some(PendingIntent::SpawnFlowfilePeekFetch {
+                    queue_id: peek.queue_id.clone(),
+                    uuid: peek.uuid.clone(),
+                    cluster_node_id: peek.cluster_node_id.clone(),
+                }),
+                ..Default::default()
+            }
+        }
+
+        BrowserQueueVerb::TraceLineage => {
+            // `t`: switch to Tracer and start lineage for the selected
+            // flowfile's UUID via the existing TraceByUuid cross-link path.
+            let Some(listing) = state.browser.queue_listing.as_ref() else {
+                return UpdateResult::default();
+            };
+            let visible = listing.visible_indices();
+            let Some(&idx) = visible.get(listing.selected) else {
+                return UpdateResult::default();
+            };
+            let Some(row) = listing.rows.get(idx) else {
+                return UpdateResult::default();
+            };
+            let uuid = row.uuid.clone();
+            UpdateResult {
+                redraw: true,
+                intent: Some(PendingIntent::Goto(CrossLink::TraceByUuid { uuid })),
+                ..Default::default()
+            }
+        }
+
+        BrowserQueueVerb::CopyUuid => {
+            // `c`: copy the selected flowfile's UUID to the clipboard.
+            let uuid = {
+                let Some(listing) = state.browser.queue_listing.as_ref() else {
+                    return UpdateResult::default();
+                };
+                let visible = listing.visible_indices();
+                let Some(&idx) = visible.get(listing.selected) else {
+                    return UpdateResult::default();
+                };
+                let Some(row) = listing.rows.get(idx) else {
+                    return UpdateResult::default();
+                };
+                row.uuid.clone()
+            };
+            let preview: String = uuid.chars().take(40).collect();
+            match state.copy_to_clipboard(uuid) {
+                Ok(()) => state.post_info(format!("copied: {preview}")),
+                Err(err) => state.post_warning(format!("clipboard: {err}")),
+            }
+            UpdateResult {
+                redraw: true,
+                ..Default::default()
+            }
+        }
+
+        BrowserQueueVerb::Filter => {
+            // `/`: open the inline filter prompt for the listing panel.
+            if let Some(listing) = state.browser.queue_listing.as_mut() {
+                listing.open_filter_prompt();
+            }
+            UpdateResult {
+                redraw: true,
+                ..Default::default()
+            }
+        }
+
+        BrowserQueueVerb::Cancel => {
+            // `Esc` cascade: close filter prompt → clear committed filter
+            // → drop listing focus.  Returns a default UpdateResult when
+            // nothing changed so that Esc can fall through to the outer
+            // tree handler (Ascend / close modals).
+            let Some(listing) = state.browser.queue_listing.as_mut() else {
+                return UpdateResult::default();
+            };
+            if listing.filter_prompt.is_some() {
+                listing.cancel_filter_prompt();
+            } else if listing.filter.is_some() {
+                listing.set_filter(None);
+            } else if state.browser.listing_focused {
+                state.browser.listing_focused = false;
+            } else {
+                return UpdateResult::default();
+            }
+            UpdateResult {
+                redraw: true,
+                ..Default::default()
+            }
+        }
     }
 }
 
