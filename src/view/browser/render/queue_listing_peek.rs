@@ -53,18 +53,30 @@ pub fn render_peek_modal(f: &mut Frame<'_>, area: Rect, state: &QueueListingPeek
     render_identity(f, chunks[0], state);
     render_separator(f, chunks[1]);
     render_attrs(f, chunks[2], state);
-    render_hints(f, chunks[3]);
 
-    if let Some(search) = state.search.as_ref()
-        && search.input_active
-    {
-        // Overlay search prompt onto the hint strip area.
+    // The hint strip and the search prompt share the same bottom row.
+    // While the user is typing a query, render only the prompt — the
+    // Paragraph widget clears the row, so the hint text is fully
+    // replaced rather than partially overwritten.
+    let prompt_active = state
+        .search
+        .as_ref()
+        .map(|s| s.input_active)
+        .unwrap_or(false);
+    if prompt_active {
+        let query = state
+            .search
+            .as_ref()
+            .map(|s| s.query.clone())
+            .unwrap_or_default();
         let prompt = Line::from(vec![
             Span::styled("/", theme::accent()),
-            Span::raw(search.query.clone()),
+            Span::raw(query),
             Span::styled("_", theme::muted()),
         ]);
         f.render_widget(Paragraph::new(prompt), chunks[3]);
+    } else {
+        render_hints(f, chunks[3]);
     }
 }
 
