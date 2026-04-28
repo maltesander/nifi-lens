@@ -349,4 +349,65 @@ mod snapshots {
             format!("{}", terminal.backend())
         );
     }
+
+    fn sample_conn_series(buckets: usize) -> crate::client::history::StatusHistorySeries {
+        use crate::client::history::{Bucket, StatusHistorySeries};
+        StatusHistorySeries {
+            buckets: (0..buckets)
+                .map(|i| Bucket {
+                    timestamp: std::time::SystemTime::now(),
+                    in_count: ((i * 4) % 80) as u64,
+                    out_count: ((i * 3) % 70) as u64,
+                    queued_count: Some(((i * 6) % 40) as u64),
+                    task_time_ns: None,
+                })
+                .collect(),
+            generated_at: std::time::SystemTime::now(),
+        }
+    }
+
+    fn render_conn_with_sparkline(
+        width: u16,
+        sparkline: Option<crate::view::browser::state::sparkline::SparklineState>,
+    ) -> String {
+        let (d, mut state) = seeded();
+        state.sparkline = sparkline;
+        let mut terminal = Terminal::new(ratatui::backend::TestBackend::new(width, 30)).unwrap();
+        terminal
+            .draw(|f| render(f, f.area(), &d, &state, &DetailFocus::Tree))
+            .unwrap();
+        format!("{}", terminal.backend())
+    }
+
+    const CONN_ID: &str = "c1c1c1c1-0000-0000-0000-000000000001";
+
+    #[test]
+    fn connection_detail_sparkline_wide() {
+        use crate::client::history::ComponentKind;
+        use crate::view::browser::state::sparkline::SparklineState;
+        let mut s = SparklineState::pending(ComponentKind::Connection, CONN_ID.into());
+        s.series = Some(sample_conn_series(40));
+        let out = render_conn_with_sparkline(120, Some(s));
+        assert_snapshot!("connection_detail_sparkline_wide", out);
+    }
+
+    #[test]
+    fn connection_detail_sparkline_narrow_suppressed() {
+        use crate::client::history::ComponentKind;
+        use crate::view::browser::state::sparkline::SparklineState;
+        let mut s = SparklineState::pending(ComponentKind::Connection, CONN_ID.into());
+        s.series = Some(sample_conn_series(40));
+        let out = render_conn_with_sparkline(26, Some(s));
+        assert_snapshot!("connection_detail_sparkline_narrow_suppressed", out);
+    }
+
+    #[test]
+    fn connection_detail_sparkline_endpoint_missing() {
+        use crate::client::history::ComponentKind;
+        use crate::view::browser::state::sparkline::SparklineState;
+        let mut s = SparklineState::pending(ComponentKind::Connection, CONN_ID.into());
+        s.endpoint_missing = true;
+        let out = render_conn_with_sparkline(120, Some(s));
+        assert_snapshot!("connection_detail_sparkline_endpoint_missing", out);
+    }
 }

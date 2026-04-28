@@ -731,4 +731,67 @@ mod snapshots {
             format!("{}", term.backend())
         );
     }
+
+    fn sample_processor_series(buckets: usize) -> crate::client::history::StatusHistorySeries {
+        use crate::client::history::{Bucket, StatusHistorySeries};
+        StatusHistorySeries {
+            buckets: (0..buckets)
+                .map(|i| Bucket {
+                    timestamp: std::time::SystemTime::now(),
+                    in_count: ((i * 3) % 50) as u64,
+                    out_count: ((i * 2) % 45) as u64,
+                    queued_count: None,
+                    task_time_ns: Some(((i * 100_000) % 5_000_000) as u64),
+                })
+                .collect(),
+            generated_at: std::time::SystemTime::now(),
+        }
+    }
+
+    fn render_with_sparkline(
+        width: u16,
+        sparkline: Option<crate::view::browser::state::sparkline::SparklineState>,
+    ) -> String {
+        let (d, mut state, bulletins) = seeded_detail();
+        state.sparkline = sparkline;
+        let mut term = Terminal::new(TestBackend::new(width, 30)).unwrap();
+        term.draw(|f| {
+            render(f, f.area(), &d, &state, &bulletins, &DetailFocus::Tree);
+        })
+        .unwrap();
+        format!("{}", term.backend())
+    }
+
+    #[test]
+    fn processor_detail_sparkline_wide() {
+        use crate::client::history::ComponentKind;
+        use crate::view::browser::state::sparkline::SparklineState;
+        let mut s = SparklineState::pending(ComponentKind::Processor, "put-kafka-1".into());
+        s.series = Some(sample_processor_series(40));
+        let out = render_with_sparkline(120, Some(s));
+        assert_snapshot!("processor_detail_sparkline_wide", out);
+    }
+
+    #[test]
+    fn processor_detail_sparkline_narrow_suppressed() {
+        use crate::client::history::ComponentKind;
+        use crate::view::browser::state::sparkline::SparklineState;
+        let mut s = SparklineState::pending(ComponentKind::Processor, "put-kafka-1".into());
+        s.series = Some(sample_processor_series(40));
+        // Identity inner width must be < 24 (= 2× SPARKLINE_MIN_RIGHT_HALF_WIDTH)
+        // to suppress the strip. Outer panel's borders eat 2 + identity panel's
+        // borders eat 2, so terminal width < 28 hits the fallback path.
+        let out = render_with_sparkline(26, Some(s));
+        assert_snapshot!("processor_detail_sparkline_narrow_suppressed", out);
+    }
+
+    #[test]
+    fn processor_detail_sparkline_endpoint_missing() {
+        use crate::client::history::ComponentKind;
+        use crate::view::browser::state::sparkline::SparklineState;
+        let mut s = SparklineState::pending(ComponentKind::Processor, "put-kafka-1".into());
+        s.endpoint_missing = true;
+        let out = render_with_sparkline(120, Some(s));
+        assert_snapshot!("processor_detail_sparkline_endpoint_missing", out);
+    }
 }

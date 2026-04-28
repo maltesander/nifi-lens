@@ -875,4 +875,78 @@ mod snapshots {
             "expected context name; got:\n{out}"
         );
     }
+
+    fn sample_pg_series(buckets: usize) -> crate::client::history::StatusHistorySeries {
+        use crate::client::history::{Bucket, StatusHistorySeries};
+        StatusHistorySeries {
+            buckets: (0..buckets)
+                .map(|i| Bucket {
+                    timestamp: std::time::SystemTime::now(),
+                    in_count: ((i * 5) % 100) as u64,
+                    out_count: ((i * 4) % 90) as u64,
+                    queued_count: Some(((i * 7) % 50) as u64),
+                    task_time_ns: None,
+                })
+                .collect(),
+            generated_at: std::time::SystemTime::now(),
+        }
+    }
+
+    fn render_pg_with_sparkline(
+        width: u16,
+        height: u16,
+        sparkline: Option<crate::view::browser::state::sparkline::SparklineState>,
+    ) -> String {
+        let d = seeded_pg_detail();
+        let mut state = BrowserState::new();
+        state.sparkline = sparkline;
+        let bulletins: VecDeque<BulletinSnapshot> = VecDeque::new();
+        let snap = ClusterSnapshot::default();
+        let mut terminal =
+            Terminal::new(ratatui::backend::TestBackend::new(width, height)).unwrap();
+        terminal
+            .draw(|f| {
+                render(
+                    f,
+                    f.area(),
+                    &d,
+                    &state,
+                    &bulletins,
+                    &DetailFocus::Tree,
+                    &snap,
+                )
+            })
+            .unwrap();
+        format!("{}", terminal.backend())
+    }
+
+    #[test]
+    fn pg_detail_sparkline_wide() {
+        use crate::client::history::ComponentKind;
+        use crate::view::browser::state::sparkline::SparklineState;
+        let mut s = SparklineState::pending(ComponentKind::ProcessGroup, "ingest".into());
+        s.series = Some(sample_pg_series(40));
+        let out = render_pg_with_sparkline(120, 30, Some(s));
+        assert_snapshot!("pg_detail_sparkline_wide", out);
+    }
+
+    #[test]
+    fn pg_detail_sparkline_narrow_suppressed() {
+        use crate::client::history::ComponentKind;
+        use crate::view::browser::state::sparkline::SparklineState;
+        let mut s = SparklineState::pending(ComponentKind::ProcessGroup, "ingest".into());
+        s.series = Some(sample_pg_series(40));
+        let out = render_pg_with_sparkline(26, 30, Some(s));
+        assert_snapshot!("pg_detail_sparkline_narrow_suppressed", out);
+    }
+
+    #[test]
+    fn pg_detail_sparkline_endpoint_missing() {
+        use crate::client::history::ComponentKind;
+        use crate::view::browser::state::sparkline::SparklineState;
+        let mut s = SparklineState::pending(ComponentKind::ProcessGroup, "ingest".into());
+        s.endpoint_missing = true;
+        let out = render_pg_with_sparkline(120, 30, Some(s));
+        assert_snapshot!("pg_detail_sparkline_endpoint_missing", out);
+    }
 }
