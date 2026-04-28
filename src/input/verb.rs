@@ -714,6 +714,108 @@ impl Verb for ParameterContextModalVerb {
     }
 }
 
+/// Verbs that are only active when the action-history modal is open.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum ActionHistoryModalVerb {
+    Close,
+    ScrollUp,
+    ScrollDown,
+    PageUp,
+    PageDown,
+    JumpTop,
+    JumpBottom,
+    /// Enter — toggle inline expansion of the selected row.
+    ToggleExpand,
+    OpenSearch,
+    SearchNext,
+    SearchPrev,
+    Copy,
+    Refresh,
+}
+
+impl Verb for ActionHistoryModalVerb {
+    fn chord(self) -> Chord {
+        use crossterm::event::KeyCode;
+        match self {
+            Self::Close => Chord::simple(KeyCode::Esc),
+            Self::ScrollUp => Chord::simple(KeyCode::Up),
+            Self::ScrollDown => Chord::simple(KeyCode::Down),
+            Self::PageUp => Chord::simple(KeyCode::PageUp),
+            Self::PageDown => Chord::simple(KeyCode::PageDown),
+            Self::JumpTop => Chord::simple(KeyCode::Home),
+            Self::JumpBottom => Chord::simple(KeyCode::End),
+            Self::ToggleExpand => Chord::simple(KeyCode::Enter),
+            Self::OpenSearch => Chord::simple(KeyCode::Char('/')),
+            Self::SearchNext => Chord::simple(KeyCode::Char('n')),
+            Self::SearchPrev => Chord::shift(KeyCode::Char('N')),
+            Self::Copy => Chord::simple(KeyCode::Char('c')),
+            Self::Refresh => Chord::simple(KeyCode::Char('r')),
+        }
+    }
+    fn label(self) -> &'static str {
+        match self {
+            Self::Close => "close modal",
+            Self::ScrollUp => "scroll up",
+            Self::ScrollDown => "scroll down",
+            Self::PageUp => "page up",
+            Self::PageDown => "page down",
+            Self::JumpTop => "scroll to top",
+            Self::JumpBottom => "scroll to bottom",
+            Self::ToggleExpand => "expand / collapse selected action",
+            Self::OpenSearch => "open text search",
+            Self::SearchNext => "next match",
+            Self::SearchPrev => "previous match",
+            Self::Copy => "copy selected row as TSV",
+            Self::Refresh => "refresh from offset 0",
+        }
+    }
+    fn hint(self) -> &'static str {
+        match self {
+            Self::Close => "close",
+            Self::ToggleExpand => "expand",
+            Self::OpenSearch => "find",
+            Self::SearchNext => "next",
+            Self::SearchPrev => "prev",
+            Self::Copy => "copy",
+            Self::Refresh => "refresh",
+            _ => "",
+        }
+    }
+    fn priority(self) -> u8 {
+        50
+    }
+    fn show_in_hint_bar(self) -> bool {
+        // Hide arrow/page/jump nav and search-cycling chords; show
+        // the meaningful verbs.
+        matches!(
+            self,
+            Self::Close | Self::OpenSearch | Self::Copy | Self::Refresh | Self::ToggleExpand
+        )
+    }
+    fn enabled(self, _ctx: &HintContext<'_>) -> bool {
+        // Modal is the dispatch gate — chords only fire when the
+        // keymap is in modal mode (Task 8 wires the gate).
+        true
+    }
+    fn all() -> &'static [Self] {
+        &[
+            Self::Close,
+            Self::ScrollUp,
+            Self::ScrollDown,
+            Self::PageUp,
+            Self::PageDown,
+            Self::JumpTop,
+            Self::JumpBottom,
+            Self::ToggleExpand,
+            Self::OpenSearch,
+            Self::SearchNext,
+            Self::SearchPrev,
+            Self::Copy,
+            Self::Refresh,
+        ]
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum ViewVerb {
     Bulletins(BulletinsVerb),
@@ -723,6 +825,7 @@ pub enum ViewVerb {
     ContentModal(ContentModalVerb),
     VersionControlModal(VersionControlModalVerb),
     ParameterContextModal(ParameterContextModalVerb),
+    ActionHistoryModal(ActionHistoryModalVerb),
 }
 
 #[cfg(test)]
@@ -871,7 +974,8 @@ mod tests {
             .chain(TracerVerb::all().iter().map(|v| v.chord()))
             .chain(ContentModalVerb::all().iter().map(|v| v.chord()))
             .chain(VersionControlModalVerb::all().iter().map(|v| v.chord()))
-            .chain(ParameterContextModalVerb::all().iter().map(|v| v.chord()));
+            .chain(ParameterContextModalVerb::all().iter().map(|v| v.chord()))
+            .chain(ActionHistoryModalVerb::all().iter().map(|v| v.chord()));
         for c in chords {
             assert_ne!(c.key, KeyCode::Char('j'), "no view verb may bind j");
             assert_ne!(c.key, KeyCode::Char('k'), "no view verb may bind k");
@@ -1141,5 +1245,43 @@ mod tests {
             !BrowserVerb::OpenProperties.enabled(&ctx),
             "OpenProperties must be disabled on a PG row (chord-collision invariant)"
         );
+    }
+
+    #[test]
+    fn action_history_modal_verb_chords_complete() {
+        use crate::input::ActionHistoryModalVerb as V;
+        use crate::input::Verb;
+        // Required chords.
+        assert_eq!(V::Close.chord(), Chord::simple(KeyCode::Esc));
+        assert_eq!(V::OpenSearch.chord(), Chord::simple(KeyCode::Char('/')));
+        assert_eq!(V::SearchNext.chord(), Chord::simple(KeyCode::Char('n')));
+        assert_eq!(V::SearchPrev.chord(), Chord::shift(KeyCode::Char('N')));
+        assert_eq!(V::Copy.chord(), Chord::simple(KeyCode::Char('c')));
+        assert_eq!(V::Refresh.chord(), Chord::simple(KeyCode::Char('r')));
+        assert_eq!(V::ToggleExpand.chord(), Chord::simple(KeyCode::Enter));
+
+        // Hint-bar visibility: hide nav + search-cycling chords.
+        assert!(!V::ScrollUp.show_in_hint_bar());
+        assert!(!V::ScrollDown.show_in_hint_bar());
+        assert!(!V::SearchNext.show_in_hint_bar());
+        assert!(!V::SearchPrev.show_in_hint_bar());
+        assert!(V::Close.show_in_hint_bar());
+        assert!(V::OpenSearch.show_in_hint_bar());
+        assert!(V::Copy.show_in_hint_bar());
+        assert!(V::Refresh.show_in_hint_bar());
+
+        // all() coverage.
+        let all = V::all();
+        for v in [
+            V::Close,
+            V::OpenSearch,
+            V::SearchNext,
+            V::SearchPrev,
+            V::Copy,
+            V::Refresh,
+            V::ToggleExpand,
+        ] {
+            assert!(all.contains(&v), "missing {v:?}");
+        }
     }
 }

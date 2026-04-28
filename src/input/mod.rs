@@ -18,7 +18,7 @@ pub mod verb;
 // touching callers.
 pub use action::{AppAction, FocusAction, GoTarget, HistoryAction, TabAction};
 pub use verb::{
-    BrowserVerb, BulletinsVerb, ContentModalVerb, EventsVerb, FilterField,
+    ActionHistoryModalVerb, BrowserVerb, BulletinsVerb, ContentModalVerb, EventsVerb, FilterField,
     ParameterContextModalVerb, Severity, TracerVerb, VersionControlModalVerb, ViewVerb,
 };
 
