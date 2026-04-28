@@ -392,6 +392,43 @@ impl KeyMap {
             return InputEvent::Unmapped;
         }
 
+        // When the queue listing has focus on the Browser tab,
+        // BrowserQueueVerb chords take priority — they shadow
+        // FocusAction (Esc → Cancel, not Ascend) and BrowserVerb
+        // (`c`/`r` operate on the listing row, not the tree).
+        // Outer app keys are blocked while listing focus is active.
+        if state.browser.listing_focused && active_view == ViewId::Browser {
+            if matches!(
+                key.code,
+                KeyCode::Char('c') | KeyCode::Char('q') | KeyCode::Char('Q')
+            ) && key.modifiers.contains(KeyModifiers::CONTROL)
+            {
+                return InputEvent::App(AppAction::Quit);
+            }
+            for &v in BrowserQueueVerb::all() {
+                if chord_matches(v.chord(), key) {
+                    return InputEvent::View(ViewVerb::BrowserQueue(v));
+                }
+            }
+            return InputEvent::Unmapped;
+        }
+
+        // Tab on the Browser tab — if a non-empty listing is shown
+        // but doesn't yet have focus, dispatch FocusListing instead
+        // of falling through to the generic FocusAction::NextPane.
+        // This is the entry point that flips listing_focused = true.
+        if active_view == ViewId::Browser
+            && state
+                .browser
+                .queue_listing
+                .as_ref()
+                .map(|s| !s.rows.is_empty())
+                .unwrap_or(false)
+            && chord_matches(BrowserQueueVerb::FocusListing.chord(), key)
+        {
+            return InputEvent::View(ViewVerb::BrowserQueue(BrowserQueueVerb::FocusListing));
+        }
+
         // Reverse-lookup across framework enums (order matters: Focus
         // is highest priority so Esc/Enter always win).
         for &a in FocusAction::all() {
