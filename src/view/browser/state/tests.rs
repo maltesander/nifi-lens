@@ -2845,3 +2845,76 @@ fn open_action_history_modal_replaces_open_modal() {
     assert_eq!(m.source_id, "proc-2");
     assert_eq!(m.component_label, "B");
 }
+
+#[test]
+fn open_sparkline_for_selection_replaces_state() {
+    use crate::client::history::ComponentKind;
+    let mut s = BrowserState::default();
+    s.open_sparkline_for_selection(ComponentKind::Processor, "p-1".into());
+    let sparkline = s.sparkline.as_ref().expect("opened");
+    assert!(matches!(sparkline.kind, ComponentKind::Processor));
+    assert_eq!(sparkline.id, "p-1");
+    assert!(sparkline.series.is_none());
+
+    // Replace with a different selection.
+    s.open_sparkline_for_selection(ComponentKind::ProcessGroup, "pg-1".into());
+    let sparkline = s.sparkline.as_ref().expect("replaced");
+    assert!(matches!(sparkline.kind, ComponentKind::ProcessGroup));
+    assert_eq!(sparkline.id, "pg-1");
+}
+
+#[test]
+fn close_sparkline_clears_state_and_aborts_handle() {
+    use crate::client::history::ComponentKind;
+    let mut s = BrowserState::default();
+    s.open_sparkline_for_selection(ComponentKind::Processor, "p-1".into());
+
+    let rt = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .unwrap();
+    rt.block_on(async {
+        let local = tokio::task::LocalSet::new();
+        local
+            .run_until(async {
+                let h = tokio::task::spawn_local(async {
+                    tokio::time::sleep(std::time::Duration::from_secs(60)).await;
+                });
+                s.sparkline_handle = Some(h);
+                s.close_sparkline();
+                assert!(s.sparkline.is_none());
+                assert!(s.sparkline_handle.is_none());
+            })
+            .await;
+    });
+}
+
+#[test]
+fn open_sparkline_for_selection_aborts_previous_handle() {
+    use crate::client::history::ComponentKind;
+    let mut s = BrowserState::default();
+    let rt = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .unwrap();
+    rt.block_on(async {
+        let local = tokio::task::LocalSet::new();
+        local
+            .run_until(async {
+                s.open_sparkline_for_selection(ComponentKind::Processor, "p-1".into());
+                let h1 = tokio::task::spawn_local(async {
+                    tokio::time::sleep(std::time::Duration::from_secs(60)).await;
+                });
+                s.sparkline_handle = Some(h1);
+
+                // Open a new selection — old handle must be aborted, slot cleared.
+                s.open_sparkline_for_selection(ComponentKind::Processor, "p-2".into());
+                assert!(
+                    s.sparkline_handle.is_none(),
+                    "open replacement must abort and clear the old handle"
+                );
+                assert_eq!(s.sparkline.as_ref().unwrap().id, "p-2");
+            })
+            .await;
+    });
+}

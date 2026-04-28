@@ -539,6 +539,32 @@ impl BrowserState {
         self.action_history_modal = None;
     }
 
+    /// Install a fresh `SparklineState` for the given component. Aborts
+    /// any previous worker handle so the dispatcher can spawn a new one
+    /// without racing with the old loop. Idempotent on `(kind, id)`
+    /// match — callers should normally check `current_selection_for_sparkline`
+    /// before calling so the active worker is not torn down for a no-op.
+    pub fn open_sparkline_for_selection(
+        &mut self,
+        kind: crate::client::history::ComponentKind,
+        id: String,
+    ) {
+        if let Some(h) = self.sparkline_handle.take() {
+            h.abort();
+        }
+        self.sparkline = Some(sparkline::SparklineState::pending(kind, id));
+    }
+
+    /// Tear down sparkline state and abort the worker handle.
+    /// Idempotent. Called on selection change to a non-supported kind,
+    /// on tab switch out, and on context switch.
+    pub fn close_sparkline(&mut self) {
+        if let Some(h) = self.sparkline_handle.take() {
+            h.abort();
+        }
+        self.sparkline = None;
+    }
+
     /// Apply a successful chain fetch to the open modal. Mismatched
     /// `pg_id` is ignored (the user navigated since dispatch).
     pub fn apply_parameter_context_modal_loaded(
