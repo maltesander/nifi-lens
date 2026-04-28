@@ -735,7 +735,6 @@ pub enum ActionHistoryModalVerb {
 
 impl Verb for ActionHistoryModalVerb {
     fn chord(self) -> Chord {
-        use crossterm::event::KeyCode;
         match self {
             Self::Close => Chord::simple(KeyCode::Esc),
             Self::ScrollUp => Chord::simple(KeyCode::Up),
