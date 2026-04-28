@@ -962,12 +962,28 @@ fn update_inner(state: &mut AppState, event: AppEvent, config: &Config) -> Updat
             intent: None,
             tracer_followup: None,
         },
-        // Sparkline reducer arms — wired in Task 9. Keeping the stubs
-        // here keeps the build green between Task 4 (variants land)
-        // and Task 9 (reducer logic lands).
-        AppEvent::SparklineUpdate { .. } | AppEvent::SparklineEndpointMissing { .. } => {
+        // Sparkline reducer arms. Both delegate to SparklineState's
+        // `(kind, id)`-guarded apply methods so a stale emit between
+        // worker abort and exit can't pollute the new selection's
+        // strip. The outer `if let sparkline.as_mut()` adds defense-
+        // in-depth: if the user navigated to an unsupported kind
+        // (sparkline = None) and a stale emit arrives, drop silently.
+        AppEvent::SparklineUpdate { kind, id, series } => {
+            if let Some(sparkline) = state.browser.sparkline.as_mut() {
+                sparkline.apply_update(kind, &id, series);
+            }
             UpdateResult {
-                redraw: false,
+                redraw: state.current_tab == ViewId::Browser,
+                intent: None,
+                tracer_followup: None,
+            }
+        }
+        AppEvent::SparklineEndpointMissing { kind, id } => {
+            if let Some(sparkline) = state.browser.sparkline.as_mut() {
+                sparkline.apply_endpoint_missing(kind, &id);
+            }
+            UpdateResult {
+                redraw: state.current_tab == ViewId::Browser,
                 intent: None,
                 tracer_followup: None,
             }

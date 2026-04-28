@@ -3553,3 +3553,80 @@ fn action_history_modal_search_input_routes_chars_to_query() {
             .is_none()
     );
 }
+
+#[test]
+fn apply_sparkline_update_replaces_series_when_selection_matches() {
+    use crate::client::history::{Bucket, ComponentKind, StatusHistorySeries};
+    let mut state = fresh_state();
+    state
+        .browser
+        .open_sparkline_for_selection(ComponentKind::Processor, "p-1".into());
+    let series = StatusHistorySeries {
+        buckets: vec![Bucket {
+            timestamp: std::time::SystemTime::now(),
+            in_count: 7,
+            out_count: 6,
+            queued_count: None,
+            task_time_ns: Some(100),
+        }],
+        generated_at: std::time::SystemTime::now(),
+    };
+    let ev = AppEvent::SparklineUpdate {
+        kind: ComponentKind::Processor,
+        id: "p-1".into(),
+        series,
+    };
+    let cfg = tiny_config();
+    update(&mut state, ev, &cfg);
+    let s = state.browser.sparkline.as_ref().unwrap();
+    assert_eq!(s.series.as_ref().unwrap().buckets.len(), 1);
+    assert_eq!(s.series.as_ref().unwrap().buckets[0].in_count, 7);
+    assert!(s.last_fetched_at.is_some());
+}
+
+#[test]
+fn apply_sparkline_update_drops_stale_emit() {
+    use crate::client::history::{Bucket, ComponentKind, StatusHistorySeries};
+    let mut state = fresh_state();
+    state
+        .browser
+        .open_sparkline_for_selection(ComponentKind::Processor, "p-1".into());
+    let series = StatusHistorySeries {
+        buckets: vec![Bucket {
+            timestamp: std::time::SystemTime::now(),
+            in_count: 99,
+            out_count: 99,
+            queued_count: None,
+            task_time_ns: None,
+        }],
+        generated_at: std::time::SystemTime::now(),
+    };
+    // Stale emit — id mismatch.
+    let ev = AppEvent::SparklineUpdate {
+        kind: ComponentKind::Processor,
+        id: "OTHER".into(),
+        series,
+    };
+    let cfg = tiny_config();
+    update(&mut state, ev, &cfg);
+    assert!(
+        state.browser.sparkline.as_ref().unwrap().series.is_none(),
+        "stale id mismatch must be dropped"
+    );
+}
+
+#[test]
+fn apply_sparkline_endpoint_missing_sets_sticky_flag() {
+    use crate::client::history::ComponentKind;
+    let mut state = fresh_state();
+    state
+        .browser
+        .open_sparkline_for_selection(ComponentKind::Connection, "c-1".into());
+    let ev = AppEvent::SparklineEndpointMissing {
+        kind: ComponentKind::Connection,
+        id: "c-1".into(),
+    };
+    let cfg = tiny_config();
+    update(&mut state, ev, &cfg);
+    assert!(state.browser.sparkline.as_ref().unwrap().endpoint_missing);
+}
