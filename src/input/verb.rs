@@ -41,6 +41,7 @@ pub enum BrowserVerb {
     Copy,
     OpenProperties,
     OpenParameterContext,
+    OpenActionHistory,
     ShowVersionControl,
 }
 
@@ -170,6 +171,7 @@ impl Verb for BrowserVerb {
             Self::Copy => Chord::simple(KeyCode::Char('c')),
             Self::OpenProperties => Chord::simple(KeyCode::Char('p')),
             Self::OpenParameterContext => Chord::simple(KeyCode::Char('p')),
+            Self::OpenActionHistory => Chord::simple(KeyCode::Char('a')),
             Self::ShowVersionControl => Chord::simple(KeyCode::Char('m')),
         }
     }
@@ -179,6 +181,7 @@ impl Verb for BrowserVerb {
             Self::Copy => "copy id / row value",
             Self::OpenProperties => "open properties",
             Self::OpenParameterContext => "open parameter context",
+            Self::OpenActionHistory => "open action history",
             Self::ShowVersionControl => "show version control",
         }
     }
@@ -188,6 +191,7 @@ impl Verb for BrowserVerb {
             Self::Copy => "copy",
             Self::OpenProperties => "props",
             Self::OpenParameterContext => "param",
+            Self::OpenActionHistory => "actions",
             Self::ShowVersionControl => "version",
         }
     }
@@ -203,6 +207,10 @@ impl Verb for BrowserVerb {
                     && ctx
                         .state
                         .browser_selection_pg_has_parameter_context_binding()
+            }
+            Self::OpenActionHistory => {
+                ctx.state.current_tab == ViewId::Browser
+                    && ctx.state.browser_selection_supports_action_history()
             }
             Self::ShowVersionControl => {
                 ctx.state.current_tab == ViewId::Browser
@@ -220,6 +228,7 @@ impl Verb for BrowserVerb {
             Self::Copy,
             Self::OpenProperties,
             Self::OpenParameterContext,
+            Self::OpenActionHistory,
             Self::ShowVersionControl,
         ]
     }
@@ -967,6 +976,20 @@ mod tests {
     #[test]
     fn open_parameter_context_in_all() {
         assert!(BrowserVerb::all().contains(&BrowserVerb::OpenParameterContext));
+    }
+
+    #[test]
+    fn open_action_history_chord_is_a() {
+        assert_eq!(
+            BrowserVerb::OpenActionHistory.chord(),
+            Chord::simple(KeyCode::Char('a'))
+        );
+        assert_eq!(
+            BrowserVerb::OpenActionHistory.label(),
+            "open action history"
+        );
+        assert_eq!(BrowserVerb::OpenActionHistory.hint(), "actions");
+        assert!(BrowserVerb::all().contains(&BrowserVerb::OpenActionHistory));
     }
 
     #[test]

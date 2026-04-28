@@ -123,6 +123,10 @@ impl ViewKeyHandler for BrowserHandler {
                 // respected; kept for defensive completeness.
                 return Some(UpdateResult::default());
             }
+            BrowserVerb::OpenActionHistory => {
+                // Stub: full dispatch wired in Task 10.
+                return Some(UpdateResult::default());
+            }
             BrowserVerb::ShowVersionControl => {
                 if !state.browser_selection_is_versioned_pg() {
                     // Defensive: `enabled()` prevents dispatch for non-versioned
