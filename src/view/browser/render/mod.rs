@@ -315,6 +315,7 @@ pub(super) fn chip_for_state(
 }
 
 /// Entry point called from `app::ui`.
+#[allow(clippy::too_many_arguments)]
 pub fn render(
     frame: &mut Frame,
     area: Rect,
@@ -322,6 +323,8 @@ pub fn render(
     _flow_index: &Option<FlowIndex>,
     bulletins: &std::collections::VecDeque<crate::client::BulletinSnapshot>,
     cluster: &crate::cluster::snapshot::ClusterSnapshot,
+    age_warning: std::time::Duration,
+    show_node_column: bool,
 ) {
     let block = Block::default()
         .borders(Borders::ALL)
@@ -360,7 +363,15 @@ pub fn render(
         .border_style(theme::muted());
     frame.render_widget(sep, chunks[1]);
 
-    render_detail(frame, chunks[2], state, bulletins, cluster);
+    render_detail(
+        frame,
+        chunks[2],
+        state,
+        bulletins,
+        cluster,
+        age_warning,
+        show_node_column,
+    );
 }
 
 fn tab_title(state: &BrowserState) -> String {
@@ -524,6 +535,8 @@ fn render_detail(
     state: &BrowserState,
     bulletins: &std::collections::VecDeque<crate::client::BulletinSnapshot>,
     cluster: &crate::cluster::snapshot::ClusterSnapshot,
+    age_warning: std::time::Duration,
+    show_node_column: bool,
 ) {
     let Some(&arena_idx) = state.visible.get(state.selected) else {
         return;
@@ -576,7 +589,15 @@ fn render_detail(
             processor::render(frame, detail_area, d, state, bulletins, &state.detail_focus);
         }
         Some(NodeDetail::Connection(d)) => {
-            connection::render(frame, detail_area, d, state, &state.detail_focus);
+            connection::render(
+                frame,
+                detail_area,
+                d,
+                state,
+                &state.detail_focus,
+                age_warning,
+                show_node_column,
+            );
         }
         Some(NodeDetail::ControllerService(d)) => {
             controller_service::render(
@@ -868,7 +889,16 @@ mod snapshots {
         let mut terminal = Terminal::new(TestBackend::new(120, 30)).unwrap();
         terminal
             .draw(|f| {
-                super::render(f, f.area(), state, &None, &bulletins, &cluster);
+                super::render(
+                    f,
+                    f.area(),
+                    state,
+                    &None,
+                    &bulletins,
+                    &cluster,
+                    std::time::Duration::from_secs(5 * 60),
+                    false,
+                );
             })
             .unwrap();
         format!("{}", terminal.backend())

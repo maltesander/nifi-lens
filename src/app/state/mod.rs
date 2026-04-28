@@ -177,6 +177,7 @@ pub struct AppState {
     pub timestamp_cfg: crate::timestamp::TimestampConfig,
     pub polling: crate::config::PollingConfig,
     pub tracer_config: crate::config::TracerConfig,
+    pub browser_config: crate::config::BrowserConfig,
     pub cluster: crate::cluster::ClusterStore,
     pub error_detail: Option<String>,
     pub should_quit: bool,
@@ -223,6 +224,7 @@ impl AppState {
             },
             polling: config.polling.clone(),
             tracer_config: config.tracer.clone(),
+            browser_config: config.browser.clone(),
             cluster: crate::cluster::ClusterStore::new(
                 config.polling.cluster.clone(),
                 config.bulletins.ring_size,

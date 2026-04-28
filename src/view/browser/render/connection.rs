@@ -21,6 +21,8 @@ pub fn render(
     d: &ConnectionDetail,
     state: &BrowserState,
     detail_focus: &DetailFocus,
+    age_warning: std::time::Duration,
+    show_node_column: bool,
 ) {
     let outer = Panel::new(build_header_title(d)).into_block();
     let inner = outer.inner(area);
@@ -29,11 +31,29 @@ pub fn render(
     use ratatui::layout::{Constraint, Direction, Layout};
     let rows = Layout::default()
         .direction(Direction::Vertical)
-        .constraints([Constraint::Length(8), Constraint::Fill(1)])
+        .constraints([
+            Constraint::Length(8), // endpoints
+            Constraint::Length(7), // back-pressure (4 content lines + panel borders)
+            Constraint::Min(8),    // queue listing
+        ])
         .split(inner);
 
     render_endpoints_panel(frame, rows[0], d, state, detail_focus);
     render_back_pressure_panel(frame, rows[1], d);
+
+    if let Some(listing) = state.queue_listing.as_ref() {
+        let is_empty_queue = d.flow_files_queued == 0;
+        let focused = state.listing_focused;
+        crate::view::browser::render::queue_listing::render_queue_listing(
+            frame,
+            rows[2],
+            listing,
+            age_warning,
+            is_empty_queue,
+            show_node_column,
+            focused,
+        );
+    }
 }
 
 /// Build the outer panel title: ` <name> · connection `.
@@ -305,7 +325,17 @@ mod snapshots {
         let (d, state) = seeded();
         let mut terminal = Terminal::new(test_backend(TEST_BACKEND_SHORT)).unwrap();
         terminal
-            .draw(|f| render(f, f.area(), &d, &state, &DetailFocus::Tree))
+            .draw(|f| {
+                render(
+                    f,
+                    f.area(),
+                    &d,
+                    &state,
+                    &DetailFocus::Tree,
+                    std::time::Duration::from_secs(5 * 60),
+                    false,
+                )
+            })
             .unwrap();
         assert_snapshot!(
             "connection_detail_renders",
@@ -328,7 +358,17 @@ mod snapshots {
         };
         let mut terminal = Terminal::new(test_backend(TEST_BACKEND_SHORT)).unwrap();
         terminal
-            .draw(|f| render(f, f.area(), &d, &state, &focus))
+            .draw(|f| {
+                render(
+                    f,
+                    f.area(),
+                    &d,
+                    &state,
+                    &focus,
+                    std::time::Duration::from_secs(5 * 60),
+                    false,
+                )
+            })
             .unwrap();
         assert_snapshot!(
             "connection_detail_endpoints_focused",
@@ -342,7 +382,17 @@ mod snapshots {
         state.nodes.clear(); // nothing resolves → no markers
         let mut terminal = Terminal::new(test_backend(TEST_BACKEND_SHORT)).unwrap();
         terminal
-            .draw(|f| render(f, f.area(), &d, &state, &DetailFocus::Tree))
+            .draw(|f| {
+                render(
+                    f,
+                    f.area(),
+                    &d,
+                    &state,
+                    &DetailFocus::Tree,
+                    std::time::Duration::from_secs(5 * 60),
+                    false,
+                )
+            })
             .unwrap();
         assert_snapshot!(
             "connection_detail_endpoints_no_arrows",
@@ -374,7 +424,17 @@ mod snapshots {
         state.sparkline = sparkline;
         let mut terminal = Terminal::new(ratatui::backend::TestBackend::new(width, 30)).unwrap();
         terminal
-            .draw(|f| render(f, f.area(), &d, &state, &DetailFocus::Tree))
+            .draw(|f| {
+                render(
+                    f,
+                    f.area(),
+                    &d,
+                    &state,
+                    &DetailFocus::Tree,
+                    std::time::Duration::from_secs(5 * 60),
+                    false,
+                )
+            })
             .unwrap();
         format!("{}", terminal.backend())
     }

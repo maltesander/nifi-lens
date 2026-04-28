@@ -70,6 +70,13 @@ fn render_content(frame: &mut Frame, area: Rect, state: &mut AppState) {
             bulletins::render(frame, area, &mut state.bulletins, browser, cfg);
         }
         ViewId::Browser => {
+            let age_warning = state.browser_config.queue_listing_age_warning;
+            let show_node_column = state
+                .cluster
+                .snapshot
+                .cluster_nodes
+                .latest()
+                .is_some_and(|n| n.rows.len() > 1);
             browser::render(
                 frame,
                 area,
@@ -77,6 +84,8 @@ fn render_content(frame: &mut Frame, area: Rect, state: &mut AppState) {
                 &state.flow_index,
                 &state.bulletins.ring,
                 &state.cluster.snapshot,
+                age_warning,
+                show_node_column,
             );
             if let Some(modal) = state.browser.version_modal.as_ref() {
                 crate::view::browser::render::version_control_modal::render(frame, area, modal);
@@ -92,6 +101,16 @@ fn render_content(frame: &mut Frame, area: Rect, state: &mut AppState) {
             }
             if let Some(modal) = state.browser.action_history_modal.as_ref() {
                 crate::view::browser::render::action_history_modal::render(frame, area, modal);
+            }
+            if let Some(peek) = state
+                .browser
+                .queue_listing
+                .as_ref()
+                .and_then(|l| l.peek.as_ref())
+            {
+                crate::view::browser::render::queue_listing_peek::render_peek_modal(
+                    frame, area, peek,
+                );
             }
         }
         ViewId::Events => events::render::render(frame, area, &state.events, &state.timestamp_cfg),
