@@ -1435,6 +1435,129 @@ mod queue_listing_reducer_tests {
     use crate::event::BrowserPayload;
     use crate::view::browser::state::queue_listing::QueueListingState;
 
+    /// Helper: build a fresh AppState with `browser.nodes` and
+    /// `browser.visible` pointing at a single Connection node as
+    /// the current selection.
+    fn state_with_connection_selected(flow_files_queued: u32) -> AppState {
+        use crate::client::browser::{NodeKind, NodeStatusSummary};
+        use crate::view::browser::state::TreeNode;
+
+        let mut state = fresh_state();
+        // Synthetic arena: one Connection node.
+        state.browser.nodes = vec![TreeNode {
+            parent: None,
+            children: vec![],
+            kind: NodeKind::Connection,
+            id: "q1".into(),
+            group_id: "root".into(),
+            name: "Q1".into(),
+            status_summary: NodeStatusSummary::Connection {
+                fill_percent: 0,
+                flow_files_queued,
+                queued_display: format!("{flow_files_queued} / 0 B"),
+                source_id: String::new(),
+                source_name: String::new(),
+                destination_id: String::new(),
+                destination_name: String::new(),
+            },
+            parameter_context_ref: None,
+        }];
+        state.browser.visible = vec![0];
+        state.browser.selected = 0;
+        state
+    }
+
+    /// Helper: build a fresh AppState with `browser.nodes` and
+    /// `browser.visible` pointing at a Processor node as the current
+    /// selection.
+    fn state_with_processor_selected() -> AppState {
+        use crate::client::browser::{NodeKind, NodeStatusSummary};
+        use crate::view::browser::state::TreeNode;
+
+        let mut state = fresh_state();
+        state.browser.nodes = vec![TreeNode {
+            parent: None,
+            children: vec![],
+            kind: NodeKind::Processor,
+            id: "p1".into(),
+            group_id: "root".into(),
+            name: "P1".into(),
+            status_summary: NodeStatusSummary::Processor {
+                run_status: "Running".into(),
+            },
+            parameter_context_ref: None,
+        }];
+        state.browser.visible = vec![0];
+        state.browser.selected = 0;
+        state
+    }
+
+    #[test]
+    fn refresh_queue_listing_returns_spawn_for_connection_with_queued() {
+        use crate::app::state::PendingIntent;
+
+        let mut state = state_with_connection_selected(5);
+        let intent = state.refresh_queue_listing_for_selection();
+        assert!(
+            matches!(
+                intent,
+                Some(PendingIntent::SpawnQueueListingFetch { ref queue_id, .. })
+                    if queue_id == "q1"
+            ),
+            "expected SpawnQueueListingFetch with queue_id=q1, got: {intent:?}"
+        );
+        assert!(
+            state.browser.queue_listing.is_some(),
+            "queue_listing state must be created"
+        );
+    }
+
+    #[test]
+    fn refresh_queue_listing_returns_none_for_zero_queued() {
+        let mut state = state_with_connection_selected(0);
+        let intent = state.refresh_queue_listing_for_selection();
+        assert!(
+            intent.is_none(),
+            "zero queued must not emit SpawnQueueListingFetch"
+        );
+        assert!(
+            state.browser.queue_listing.is_some(),
+            "queue_listing state still created so renderer can show 'queue empty'"
+        );
+    }
+
+    #[test]
+    fn refresh_queue_listing_drops_listing_on_non_connection() {
+        use crate::app::state::PendingIntent;
+
+        let mut state = state_with_processor_selected();
+        // Pre-existing listing state (e.g. from a prior Connection selection).
+        state.browser.queue_listing = Some(QueueListingState::pending("q1".into(), "Q1".into()));
+        let intent = state.refresh_queue_listing_for_selection();
+        assert!(
+            matches!(intent, Some(PendingIntent::DropQueueListing)),
+            "expected DropQueueListing when moving to non-Connection"
+        );
+        assert!(
+            state.browser.queue_listing.is_none(),
+            "queue_listing must be cleared on non-Connection selection"
+        );
+    }
+
+    #[test]
+    fn refresh_queue_listing_same_connection_is_noop() {
+        let mut state = state_with_connection_selected(3);
+        // First call creates the state.
+        let _first = state.refresh_queue_listing_for_selection();
+        assert!(state.browser.queue_listing.is_some());
+        // Second call with same selection must be a no-op.
+        let second = state.refresh_queue_listing_for_selection();
+        assert!(
+            second.is_none(),
+            "repeat call with same Connection must not re-emit intent"
+        );
+    }
+
     #[test]
     fn redraw_listing_request_id_assigned_records_id() {
         let mut state = fresh_state();

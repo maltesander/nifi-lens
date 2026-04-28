@@ -122,6 +122,7 @@ impl ViewKeyHandler for BrowserHandler {
                         }),
                         tracer_followup: None,
                         sparkline_followup: None,
+                        queue_listing_followup: None,
                     });
                 }
                 // This branch is unreachable when the enabled() predicate is
@@ -159,6 +160,7 @@ impl ViewKeyHandler for BrowserHandler {
                     }),
                     tracer_followup: None,
                     sparkline_followup: None,
+                    queue_listing_followup: None,
                 });
             }
             BrowserVerb::ShowVersionControl => {
@@ -181,6 +183,7 @@ impl ViewKeyHandler for BrowserHandler {
                     intent: Some(super::PendingIntent::SpawnVersionControlModalFetch { pg_id }),
                     tracer_followup: None,
                     sparkline_followup: None,
+                    queue_listing_followup: None,
                 });
             }
         }
@@ -189,6 +192,7 @@ impl ViewKeyHandler for BrowserHandler {
             intent: None,
             tracer_followup: None,
             sparkline_followup: None,
+            queue_listing_followup: None,
         })
     }
 
@@ -219,6 +223,7 @@ impl ViewKeyHandler for BrowserHandler {
                         intent: None,
                         tracer_followup: None,
                         sparkline_followup: None,
+                        queue_listing_followup: None,
                     })
                 }
                 FocusAction::Left => {
@@ -234,6 +239,7 @@ impl ViewKeyHandler for BrowserHandler {
                         intent: None,
                         tracer_followup: None,
                         sparkline_followup: None,
+                        queue_listing_followup: None,
                     })
                 }
                 FocusAction::Right => {
@@ -249,6 +255,7 @@ impl ViewKeyHandler for BrowserHandler {
                         intent: None,
                         tracer_followup: None,
                         sparkline_followup: None,
+                        queue_listing_followup: None,
                     })
                 }
                 FocusAction::Up => {
@@ -264,6 +271,7 @@ impl ViewKeyHandler for BrowserHandler {
                         intent: None,
                         tracer_followup: None,
                         sparkline_followup: None,
+                        queue_listing_followup: None,
                     })
                 }
                 FocusAction::Down => {
@@ -287,6 +295,7 @@ impl ViewKeyHandler for BrowserHandler {
                         intent: None,
                         tracer_followup: None,
                         sparkline_followup: None,
+                        queue_listing_followup: None,
                     })
                 }
                 FocusAction::Descend => {
@@ -311,6 +320,7 @@ impl ViewKeyHandler for BrowserHandler {
                             intent: Some(intent),
                             tracer_followup: None,
                             sparkline_followup: None,
+                            queue_listing_followup: None,
                         });
                     }
                     // Properties (Processor or CS): jump when the selected
@@ -350,6 +360,7 @@ impl ViewKeyHandler for BrowserHandler {
                                     intent: Some(intent),
                                     tracer_followup: None,
                                     sparkline_followup: None,
+                                    queue_listing_followup: None,
                                 });
                             }
                             // Parameter reference cross-link.
@@ -377,6 +388,7 @@ impl ViewKeyHandler for BrowserHandler {
                                     intent: Some(intent),
                                     tracer_followup: None,
                                     sparkline_followup: None,
+                                    queue_listing_followup: None,
                                 });
                             }
                         }
@@ -404,6 +416,7 @@ impl ViewKeyHandler for BrowserHandler {
                             intent: Some(intent),
                             tracer_followup: None,
                             sparkline_followup: None,
+                            queue_listing_followup: None,
                         });
                     }
                     // Connections (Processor detail): jump to opposite endpoint.
@@ -426,6 +439,7 @@ impl ViewKeyHandler for BrowserHandler {
                             intent: Some(intent),
                             tracer_followup: None,
                             sparkline_followup: None,
+                            queue_listing_followup: None,
                         });
                     }
                     // On the ControllerServices section of a PG, emit a
@@ -451,6 +465,7 @@ impl ViewKeyHandler for BrowserHandler {
                             intent: Some(intent),
                             tracer_followup: None,
                             sparkline_followup: None,
+                            queue_listing_followup: None,
                         });
                     }
                     // On the ChildGroups section, drill into the selected child PG.
@@ -465,17 +480,22 @@ impl ViewKeyHandler for BrowserHandler {
                             return Some(UpdateResult::default());
                         };
                         let target_id = target.id.clone();
-                        let __sparkline_fu = if state.browser.drill_into_group(&target_id) {
-                            state.browser.emit_detail_request_for_current_selection();
-                            state.refresh_sparkline_for_selection()
-                        } else {
-                            None
-                        };
+                        let (__sparkline_fu, __queue_listing_fu) =
+                            if state.browser.drill_into_group(&target_id) {
+                                state.browser.emit_detail_request_for_current_selection();
+                                (
+                                    state.refresh_sparkline_for_selection(),
+                                    state.refresh_queue_listing_for_selection(),
+                                )
+                            } else {
+                                (None, None)
+                            };
                         return Some(UpdateResult {
                             redraw: true,
                             intent: None,
                             tracer_followup: None,
                             sparkline_followup: __sparkline_fu,
+                            queue_listing_followup: __queue_listing_fu,
                         });
                     }
                     // ParameterContext section: open the parameter-context modal.
@@ -497,6 +517,7 @@ impl ViewKeyHandler for BrowserHandler {
                             intent: Some(intent),
                             tracer_followup: None,
                             sparkline_followup: None,
+                            queue_listing_followup: None,
                         });
                     }
                     // Other sections: no local descent.
@@ -523,6 +544,7 @@ impl ViewKeyHandler for BrowserHandler {
                         intent: None,
                         tracer_followup: None,
                         sparkline_followup: None,
+                        queue_listing_followup: None,
                     })
                 }
                 FocusAction::PrevPane => {
@@ -544,6 +566,7 @@ impl ViewKeyHandler for BrowserHandler {
                         intent: None,
                         tracer_followup: None,
                         sparkline_followup: None,
+                        queue_listing_followup: None,
                     })
                 }
                 FocusAction::PageUp
@@ -559,66 +582,78 @@ impl ViewKeyHandler for BrowserHandler {
                 state.browser.move_up();
                 state.browser.emit_detail_request_for_current_selection();
                 let __sparkline_fu = state.refresh_sparkline_for_selection();
+                let __queue_listing_fu = state.refresh_queue_listing_for_selection();
                 Some(UpdateResult {
                     redraw: true,
                     intent: None,
                     tracer_followup: None,
                     sparkline_followup: __sparkline_fu,
+                    queue_listing_followup: __queue_listing_fu,
                 })
             }
             FocusAction::Down => {
                 state.browser.move_down();
                 state.browser.emit_detail_request_for_current_selection();
                 let __sparkline_fu = state.refresh_sparkline_for_selection();
+                let __queue_listing_fu = state.refresh_queue_listing_for_selection();
                 Some(UpdateResult {
                     redraw: true,
                     intent: None,
                     tracer_followup: None,
                     sparkline_followup: __sparkline_fu,
+                    queue_listing_followup: __queue_listing_fu,
                 })
             }
             FocusAction::PageUp => {
                 state.browser.page_up(10);
                 state.browser.emit_detail_request_for_current_selection();
                 let __sparkline_fu = state.refresh_sparkline_for_selection();
+                let __queue_listing_fu = state.refresh_queue_listing_for_selection();
                 Some(UpdateResult {
                     redraw: true,
                     intent: None,
                     tracer_followup: None,
                     sparkline_followup: __sparkline_fu,
+                    queue_listing_followup: __queue_listing_fu,
                 })
             }
             FocusAction::PageDown => {
                 state.browser.page_down(10);
                 state.browser.emit_detail_request_for_current_selection();
                 let __sparkline_fu = state.refresh_sparkline_for_selection();
+                let __queue_listing_fu = state.refresh_queue_listing_for_selection();
                 Some(UpdateResult {
                     redraw: true,
                     intent: None,
                     tracer_followup: None,
                     sparkline_followup: __sparkline_fu,
+                    queue_listing_followup: __queue_listing_fu,
                 })
             }
             FocusAction::First => {
                 state.browser.goto_first();
                 state.browser.emit_detail_request_for_current_selection();
                 let __sparkline_fu = state.refresh_sparkline_for_selection();
+                let __queue_listing_fu = state.refresh_queue_listing_for_selection();
                 Some(UpdateResult {
                     redraw: true,
                     intent: None,
                     tracer_followup: None,
                     sparkline_followup: __sparkline_fu,
+                    queue_listing_followup: __queue_listing_fu,
                 })
             }
             FocusAction::Last => {
                 state.browser.goto_last();
                 state.browser.emit_detail_request_for_current_selection();
                 let __sparkline_fu = state.refresh_sparkline_for_selection();
+                let __queue_listing_fu = state.refresh_queue_listing_for_selection();
                 Some(UpdateResult {
                     redraw: true,
                     intent: None,
                     tracer_followup: None,
                     sparkline_followup: __sparkline_fu,
+                    queue_listing_followup: __queue_listing_fu,
                 })
             }
             FocusAction::Right => {
@@ -628,23 +663,27 @@ impl ViewKeyHandler for BrowserHandler {
                 let Some(&arena_idx) = state.browser.visible.get(state.browser.selected) else {
                     return Some(UpdateResult::default());
                 };
-                let __sparkline_fu = if matches!(
+                let (__sparkline_fu, __queue_listing_fu) = if matches!(
                     state.browser.nodes[arena_idx].kind,
                     crate::client::NodeKind::Folder(_)
                 ) {
                     state.browser.expanded.insert(arena_idx);
                     crate::view::browser::state::rebuild_visible(&mut state.browser);
-                    None
+                    (None, None)
                 } else {
                     state.browser.enter_selection();
                     state.browser.emit_detail_request_for_current_selection();
-                    state.refresh_sparkline_for_selection()
+                    (
+                        state.refresh_sparkline_for_selection(),
+                        state.refresh_queue_listing_for_selection(),
+                    )
                 };
                 Some(UpdateResult {
                     redraw: true,
                     intent: None,
                     tracer_followup: None,
                     sparkline_followup: __sparkline_fu,
+                    queue_listing_followup: __queue_listing_fu,
                 })
             }
             FocusAction::Left => {
@@ -653,23 +692,27 @@ impl ViewKeyHandler for BrowserHandler {
                 let Some(&arena_idx) = state.browser.visible.get(state.browser.selected) else {
                     return Some(UpdateResult::default());
                 };
-                let __sparkline_fu = if matches!(
+                let (__sparkline_fu, __queue_listing_fu) = if matches!(
                     state.browser.nodes[arena_idx].kind,
                     crate::client::NodeKind::Folder(_)
                 ) {
                     state.browser.expanded.remove(&arena_idx);
                     crate::view::browser::state::rebuild_visible(&mut state.browser);
-                    None
+                    (None, None)
                 } else {
                     state.browser.backspace_selection();
                     state.browser.emit_detail_request_for_current_selection();
-                    state.refresh_sparkline_for_selection()
+                    (
+                        state.refresh_sparkline_for_selection(),
+                        state.refresh_queue_listing_for_selection(),
+                    )
                 };
                 Some(UpdateResult {
                     redraw: true,
                     intent: None,
                     tracer_followup: None,
                     sparkline_followup: __sparkline_fu,
+                    queue_listing_followup: __queue_listing_fu,
                 })
             }
             FocusAction::Descend => {
@@ -694,17 +737,20 @@ impl ViewKeyHandler for BrowserHandler {
                         intent: None,
                         tracer_followup: None,
                         sparkline_followup: None,
+                        queue_listing_followup: None,
                     });
                 }
                 if matches!(kind, NK::ProcessGroup) {
                     state.browser.enter_selection();
                     state.browser.emit_detail_request_for_current_selection();
                     let __sparkline_fu = state.refresh_sparkline_for_selection();
+                    let __queue_listing_fu = state.refresh_queue_listing_for_selection();
                     Some(UpdateResult {
                         redraw: true,
                         intent: None,
                         tracer_followup: None,
                         sparkline_followup: __sparkline_fu,
+                        queue_listing_followup: __queue_listing_fu,
                     })
                 } else if !sections.is_empty() {
                     // Leaf node with focusable sections — enter detail focus.
@@ -718,6 +764,7 @@ impl ViewKeyHandler for BrowserHandler {
                         intent: None,
                         tracer_followup: None,
                         sparkline_followup: None,
+                        queue_listing_followup: None,
                     })
                 } else {
                     None
@@ -729,11 +776,13 @@ impl ViewKeyHandler for BrowserHandler {
                 state.browser.backspace_selection();
                 state.browser.emit_detail_request_for_current_selection();
                 let __sparkline_fu = state.refresh_sparkline_for_selection();
+                let __queue_listing_fu = state.refresh_queue_listing_for_selection();
                 Some(UpdateResult {
                     redraw: true,
                     intent: None,
                     tracer_followup: None,
                     sparkline_followup: __sparkline_fu,
+                    queue_listing_followup: __queue_listing_fu,
                 })
             }
             FocusAction::NextPane => {
@@ -755,6 +804,7 @@ impl ViewKeyHandler for BrowserHandler {
                     intent: None,
                     tracer_followup: None,
                     sparkline_followup: None,
+                    queue_listing_followup: None,
                 })
             }
             FocusAction::PrevPane => {
@@ -776,6 +826,7 @@ impl ViewKeyHandler for BrowserHandler {
                     intent: None,
                     tracer_followup: None,
                     sparkline_followup: None,
+                    queue_listing_followup: None,
                 })
             }
         }
@@ -851,6 +902,7 @@ impl ViewKeyHandler for BrowserHandler {
                 intent: None,
                 tracer_followup: None,
                 sparkline_followup: None,
+                queue_listing_followup: None,
             });
         }
 
@@ -877,6 +929,7 @@ impl ViewKeyHandler for BrowserHandler {
                 intent: None,
                 tracer_followup: None,
                 sparkline_followup: None,
+                queue_listing_followup: None,
             });
         }
 
@@ -905,6 +958,7 @@ impl ViewKeyHandler for BrowserHandler {
             intent: None,
             tracer_followup: None,
             sparkline_followup: None,
+            queue_listing_followup: None,
         })
     }
 }
@@ -959,6 +1013,7 @@ fn handle_version_control_modal_verb(
         intent: None,
         tracer_followup: None,
         sparkline_followup: None,
+        queue_listing_followup: None,
     };
 
     match v {
@@ -1022,6 +1077,7 @@ fn handle_version_control_modal_verb(
                 intent: Some(super::PendingIntent::SpawnVersionControlModalFetch { pg_id }),
                 tracer_followup: None,
                 sparkline_followup: None,
+                queue_listing_followup: None,
             }
         }
         V::ScrollUp => {
@@ -1081,6 +1137,7 @@ fn handle_parameter_context_modal_verb(
         intent: None,
         tracer_followup: None,
         sparkline_followup: None,
+        queue_listing_followup: None,
     };
 
     use crate::view::browser::state::parameter_context_modal::ParameterContextPane;
@@ -1141,6 +1198,7 @@ fn handle_parameter_context_modal_verb(
                     }),
                     tracer_followup: None,
                     sparkline_followup: None,
+                    queue_listing_followup: None,
                 }
             } else {
                 state.browser.apply_parameter_context_modal_failed(
@@ -1380,6 +1438,7 @@ fn handle_action_history_modal_verb(
         intent: None,
         tracer_followup: None,
         sparkline_followup: None,
+        queue_listing_followup: None,
     };
 
     match v {
@@ -1418,6 +1477,7 @@ fn handle_action_history_modal_verb(
                 }),
                 tracer_followup: None,
                 sparkline_followup: None,
+                queue_listing_followup: None,
             }
         }
         V::ToggleExpand => {

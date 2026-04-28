@@ -24,6 +24,7 @@ impl ViewKeyHandler for OverviewHandler {
                 intent: None,
                 tracer_followup: None,
                 sparkline_followup: None,
+                queue_listing_followup: None,
             })
         };
 

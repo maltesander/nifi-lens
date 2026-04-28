@@ -283,6 +283,33 @@ pub async fn run(
             state.browser.sparkline_handle = Some(h);
         }
 
+        // Dispatch queue-listing followups. The reducer emits
+        // `SpawnQueueListingFetch` when the selection lands on a Connection
+        // with queued flowfiles, or `DropQueueListing` when leaving one.
+        // `DropQueueListing` is a no-op here — the reducer already cleared
+        // the field and the `QueueListingHandle` Drop fired the DELETE.
+        if let Some(PendingIntent::SpawnQueueListingFetch {
+            ref queue_id,
+            queue_name: _,
+        }) = result.queue_listing_followup
+        {
+            let queue_id = queue_id.clone();
+            let timeout = config.browser.queue_listing_timeout;
+            let handle = crate::view::browser::worker::spawn_queue_listing_fetch(
+                client.clone(),
+                tx.clone(),
+                queue_id.clone(),
+                timeout,
+            );
+            if let Some(listing) = state.browser.queue_listing.as_mut()
+                && listing.queue_id == queue_id
+            {
+                listing.handle = Some(handle);
+                // else: selection moved between intent emit and dispatch;
+                // the handle is dropped here which fires its own DELETE.
+            }
+        }
+
         if let Some(pending) = result.intent {
             match pending {
                 PendingIntent::SaveEventContent(save) => {
@@ -365,6 +392,47 @@ pub async fn run(
                     );
                     state.browser.sparkline_handle = Some(h);
                 }
+                PendingIntent::SpawnQueueListingFetch { queue_id, .. }
+                | PendingIntent::SpawnQueueListingRefresh { queue_id } => {
+                    let timeout = config.browser.queue_listing_timeout;
+                    let handle = crate::view::browser::worker::spawn_queue_listing_fetch(
+                        client.clone(),
+                        tx.clone(),
+                        queue_id.clone(),
+                        timeout,
+                    );
+                    if let Some(listing) = state.browser.queue_listing.as_mut()
+                        && listing.queue_id == queue_id
+                    {
+                        listing.handle = Some(handle);
+                        // else: selection moved between intent emit and dispatch;
+                        // the handle is dropped here and fires its own DELETE.
+                    }
+                }
+                PendingIntent::SpawnFlowfilePeekFetch {
+                    queue_id,
+                    uuid,
+                    cluster_node_id,
+                } => {
+                    let handle = crate::view::browser::worker::spawn_flowfile_peek_fetch(
+                        client.clone(),
+                        tx.clone(),
+                        queue_id.clone(),
+                        uuid.clone(),
+                        cluster_node_id,
+                    );
+                    if let Some(listing) = state.browser.queue_listing.as_mut()
+                        && listing.queue_id == queue_id
+                        && let Some(peek) = listing.peek.as_mut()
+                        && peek.uuid == uuid
+                    {
+                        peek.fetch_handle = Some(handle);
+                    }
+                }
+                PendingIntent::DropQueueListing => {
+                    // No-op: the reducer already cleared `state.browser.queue_listing`,
+                    // and the dropped `QueueListingHandle` fired its own DELETE.
+                }
                 other => {
                     let intent = match other {
                         PendingIntent::SwitchContext(name) => Some(Intent::SwitchContext(name)),
@@ -444,6 +512,31 @@ pub async fn run(
                 cadence,
             );
             state.browser.sparkline_handle = Some(h);
+        }
+
+        // Reconcile the queue-listing worker after ensure() / tab entry.
+        // `refresh_queue_listing_for_selection` is a no-op when the same
+        // Connection is still selected, so this is safe to call every
+        // iteration.
+        if state.current_tab == ViewId::Browser
+            && let Some(PendingIntent::SpawnQueueListingFetch {
+                ref queue_id,
+                queue_name: _,
+            }) = state.refresh_queue_listing_for_selection()
+        {
+            let queue_id = queue_id.clone();
+            let timeout = config.browser.queue_listing_timeout;
+            let handle = crate::view::browser::worker::spawn_queue_listing_fetch(
+                client.clone(),
+                tx.clone(),
+                queue_id.clone(),
+                timeout,
+            );
+            if let Some(listing) = state.browser.queue_listing.as_mut()
+                && listing.queue_id == queue_id
+            {
+                listing.handle = Some(handle);
+            }
         }
     }
 

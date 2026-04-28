@@ -238,6 +238,12 @@ pub struct BrowserState {
     /// other node kinds or when the Browser tab is inactive.
     /// Re-created on every selection change to a Connection row.
     pub queue_listing: Option<queue_listing::QueueListingState>,
+    /// Whether the queue-listing panel currently holds keyboard focus.
+    /// `false` on construction and reset to `false` on every
+    /// selection-change. Flipped to `true` by `BrowserQueueVerb::FocusListing`
+    /// (Tab) and back to `false` by `BrowserQueueVerb::Cancel` (Esc) — wired
+    /// in T15.
+    pub listing_focused: bool,
     /// Open sparkline state for the current Browser selection.
     /// `None` when the selection is on an unsupported kind (CS / Port /
     /// Folder), no selection, or while the Browser tab is inactive.
@@ -1093,6 +1099,24 @@ impl BrowserState {
             | NodeKind::Folder(_) => return None,
         };
         Some((kind, node.id.clone()))
+    }
+
+    /// Return `Some((queue_id, queue_name, flow_files_queued > 0))` when the
+    /// current selection is a `NodeKind::Connection`, otherwise `None`.
+    /// Used by `AppState::refresh_queue_listing_for_selection` to decide
+    /// whether to spawn or tear down the listing worker.
+    pub fn current_selection_for_queue_listing(&self) -> Option<(String, String, bool)> {
+        let arena_idx = *self.visible.get(self.selected)?;
+        let node = self.nodes.get(arena_idx)?;
+        if !matches!(node.kind, NodeKind::Connection) {
+            return None;
+        }
+        let queued_gt_zero = matches!(
+            &node.status_summary,
+            crate::client::browser::NodeStatusSummary::Connection { flow_files_queued, .. }
+                if *flow_files_queued > 0
+        );
+        Some((node.id.clone(), node.name.clone(), queued_gt_zero))
     }
 
     /// Build the breadcrumb path from root to the currently selected node.
