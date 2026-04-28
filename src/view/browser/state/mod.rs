@@ -22,6 +22,7 @@ pub mod parameter_context_modal;
 pub use parameter_context_modal::{
     ParameterContextLoad, ParameterContextModalState, ResolvedParameter, resolve,
 };
+pub mod sparkline;
 pub mod version_control_modal;
 pub use version_control_modal::{VersionControlDifferenceLoad, VersionControlModalState};
 
@@ -231,6 +232,15 @@ pub struct BrowserState {
     /// Live worker handle for the action-history modal's paginator.
     /// Aborted on close, refresh, tab switch, or selection change.
     pub action_history_modal_handle: Option<tokio::task::JoinHandle<()>>,
+    /// Open sparkline state for the current Browser selection.
+    /// `None` when the selection is on an unsupported kind (CS / Port /
+    /// Folder), no selection, or while the Browser tab is inactive.
+    /// Re-created on every selection change to a supported kind.
+    pub sparkline: Option<sparkline::SparklineState>,
+    /// Live worker handle for the per-selection sparkline fetch loop.
+    /// Aborted on selection change, tab switch, or before the dispatcher
+    /// spawns a new one.
+    pub sparkline_handle: Option<tokio::task::JoinHandle<()>>,
 }
 
 /// One segment in the breadcrumb path.
