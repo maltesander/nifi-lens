@@ -45,6 +45,23 @@ pub enum BrowserVerb {
     ShowVersionControl,
 }
 
+/// Listing-panel-scoped verbs. Active when focus is inside the
+/// connection-detail right pane's flowfile listing (post-Tab from the tree).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum BrowserQueueVerb {
+    /// Tab — focus the listing rows from tree focus. Reused on Esc to
+    /// detect when the active focus state should drop back to the tree.
+    FocusListing,
+    PeekAttributes,
+    TraceLineage,
+    CopyUuid,
+    Refresh,
+    Filter,
+    /// Esc — cascades: clears the active filter prompt, then clears
+    /// the committed filter, then drops listing focus.
+    Cancel,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum EventsVerb {
     EditField(FilterField),
@@ -230,6 +247,62 @@ impl Verb for BrowserVerb {
             Self::OpenParameterContext,
             Self::OpenActionHistory,
             Self::ShowVersionControl,
+        ]
+    }
+}
+
+impl Verb for BrowserQueueVerb {
+    fn chord(self) -> Chord {
+        match self {
+            Self::FocusListing => Chord::simple(KeyCode::Tab),
+            Self::PeekAttributes => Chord::simple(KeyCode::Char('i')),
+            Self::TraceLineage => Chord::simple(KeyCode::Char('t')),
+            Self::CopyUuid => Chord::simple(KeyCode::Char('c')),
+            Self::Refresh => Chord::simple(KeyCode::Char('r')),
+            Self::Filter => Chord::simple(KeyCode::Char('/')),
+            Self::Cancel => Chord::simple(KeyCode::Esc),
+        }
+    }
+    fn label(self) -> &'static str {
+        match self {
+            Self::FocusListing => "focus listing",
+            Self::PeekAttributes => "peek attributes",
+            Self::TraceLineage => "trace flowfile lineage",
+            Self::CopyUuid => "copy flowfile uuid",
+            Self::Refresh => "refresh listing",
+            Self::Filter => "filter by filename",
+            Self::Cancel => "cancel filter / drop listing focus",
+        }
+    }
+    fn hint(self) -> &'static str {
+        match self {
+            Self::FocusListing => "focus list",
+            Self::PeekAttributes => "peek",
+            Self::TraceLineage => "trace",
+            Self::CopyUuid => "copy",
+            Self::Refresh => "refresh",
+            Self::Filter => "filter",
+            Self::Cancel => "back",
+        }
+    }
+    fn priority(self) -> u8 {
+        50
+    }
+    fn show_in_hint_bar(self) -> bool {
+        true
+    }
+    fn enabled(self, _ctx: &HintContext<'_>) -> bool {
+        true
+    }
+    fn all() -> &'static [Self] {
+        &[
+            Self::FocusListing,
+            Self::PeekAttributes,
+            Self::TraceLineage,
+            Self::CopyUuid,
+            Self::Refresh,
+            Self::Filter,
+            Self::Cancel,
         ]
     }
 }
@@ -815,10 +888,76 @@ impl Verb for ActionHistoryModalVerb {
     }
 }
 
+/// Per-flowfile peek modal-scoped verbs. Shadows outer-tab keys via
+/// the keymap shadow gate while the modal is open (Task 9 wires the gate).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum BrowserPeekVerb {
+    /// Esc — cascades: closes search prompt first, then closes the modal.
+    Close,
+    OpenSearch,
+    SearchNext,
+    SearchPrev,
+    /// `c` — copy the loaded attributes table as pretty-printed JSON.
+    CopyAsJson,
+}
+
+impl Verb for BrowserPeekVerb {
+    fn chord(self) -> Chord {
+        match self {
+            Self::Close => Chord::simple(KeyCode::Esc),
+            Self::OpenSearch => Chord::simple(KeyCode::Char('/')),
+            Self::SearchNext => Chord::simple(KeyCode::Char('n')),
+            Self::SearchPrev => Chord::shift(KeyCode::Char('N')),
+            Self::CopyAsJson => Chord::simple(KeyCode::Char('c')),
+        }
+    }
+    fn label(self) -> &'static str {
+        match self {
+            Self::Close => "close peek modal",
+            Self::OpenSearch => "open text search",
+            Self::SearchNext => "next match",
+            Self::SearchPrev => "previous match",
+            Self::CopyAsJson => "copy attributes as JSON",
+        }
+    }
+    fn hint(self) -> &'static str {
+        match self {
+            Self::Close => "close",
+            Self::OpenSearch => "find",
+            Self::SearchNext => "next",
+            Self::SearchPrev => "prev",
+            Self::CopyAsJson => "copy",
+        }
+    }
+    fn priority(self) -> u8 {
+        50
+    }
+    fn show_in_hint_bar(self) -> bool {
+        // Show all five — the modal hint strip has room.
+        true
+    }
+    fn enabled(self, _ctx: &HintContext<'_>) -> bool {
+        // Modal is the dispatch gate — chords only fire when the
+        // keymap is in peek-modal mode (Task 9 wires the gate).
+        true
+    }
+    fn all() -> &'static [Self] {
+        &[
+            Self::Close,
+            Self::OpenSearch,
+            Self::SearchNext,
+            Self::SearchPrev,
+            Self::CopyAsJson,
+        ]
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum ViewVerb {
     Bulletins(BulletinsVerb),
     Browser(BrowserVerb),
+    BrowserQueue(BrowserQueueVerb),
+    BrowserPeek(BrowserPeekVerb),
     Events(EventsVerb),
     Tracer(TracerVerb),
     ContentModal(ContentModalVerb),
@@ -1282,5 +1421,41 @@ mod tests {
         ] {
             assert!(all.contains(&v), "missing {v:?}");
         }
+    }
+
+    #[test]
+    fn browser_queue_verb_all_returns_seven_verbs() {
+        let all = BrowserQueueVerb::all();
+        assert_eq!(all.len(), 7);
+    }
+
+    #[test]
+    fn browser_queue_verb_chord_set_matches_spec() {
+        let chords: Vec<Chord> = BrowserQueueVerb::all()
+            .iter()
+            .copied()
+            .map(Verb::chord)
+            .collect();
+        assert!(chords.contains(&Chord::simple(KeyCode::Tab)));
+        assert!(chords.contains(&Chord::simple(KeyCode::Char('i'))));
+        assert!(chords.contains(&Chord::simple(KeyCode::Char('t'))));
+        assert!(chords.contains(&Chord::simple(KeyCode::Char('c'))));
+        assert!(chords.contains(&Chord::simple(KeyCode::Char('r'))));
+        assert!(chords.contains(&Chord::simple(KeyCode::Char('/'))));
+        assert!(chords.contains(&Chord::simple(KeyCode::Esc)));
+    }
+
+    #[test]
+    fn browser_peek_verb_chord_set_matches_spec() {
+        let chords: Vec<Chord> = BrowserPeekVerb::all()
+            .iter()
+            .copied()
+            .map(Verb::chord)
+            .collect();
+        assert!(chords.contains(&Chord::simple(KeyCode::Esc)));
+        assert!(chords.contains(&Chord::simple(KeyCode::Char('/'))));
+        assert!(chords.contains(&Chord::simple(KeyCode::Char('n'))));
+        assert!(chords.contains(&Chord::shift(KeyCode::Char('N'))));
+        assert!(chords.contains(&Chord::simple(KeyCode::Char('c'))));
     }
 }
