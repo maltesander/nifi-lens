@@ -34,6 +34,14 @@ pub struct ClusterPollingConfig {
         with = "humantime_serde"
     )]
     pub parameter_context_bindings: Duration,
+    /// Cadence for the per-selection sparkline worker
+    /// (`/flow/{type}/{id}/status/history`). Selection-scoped, so the
+    /// worker is only running for the currently-selected
+    /// processor / PG / connection. Shorter cadences trade NiFi load
+    /// for faster sparkline updates; the default mirrors the other
+    /// per-PG fan-out cadences.
+    #[serde(default = "default_status_history", with = "humantime_serde")]
+    pub status_history: Duration,
     #[serde(default = "default_about", with = "humantime_serde")]
     pub about: Duration,
     #[serde(default = "default_max_interval", with = "humantime_serde")]
@@ -62,6 +70,7 @@ impl Default for ClusterPollingConfig {
             connections_by_pg: default_connections_by_pg(),
             version_control: default_version_control(),
             parameter_context_bindings: default_parameter_context_bindings(),
+            status_history: default_status_history(),
             about: default_about(),
             max_interval: default_max_interval(),
             jitter_percent: default_jitter_percent(),
@@ -98,6 +107,9 @@ fn default_version_control() -> Duration {
     Duration::from_secs(30)
 }
 fn default_parameter_context_bindings() -> Duration {
+    Duration::from_secs(30)
+}
+fn default_status_history() -> Duration {
     Duration::from_secs(30)
 }
 fn default_about() -> Duration {
@@ -196,6 +208,19 @@ mod tests {
         "#;
         let cfg: ClusterPollingConfig = toml::from_str(toml_str).unwrap();
         assert_eq!(cfg.parameter_context_bindings, Duration::from_secs(60));
+    }
+
+    #[test]
+    fn status_history_default_is_30s() {
+        let c = ClusterPollingConfig::default();
+        assert_eq!(c.status_history, Duration::from_secs(30));
+    }
+
+    #[test]
+    fn parses_status_history_override() {
+        let toml = r#"status_history = "5s""#;
+        let c: ClusterPollingConfig = toml::from_str(toml).unwrap();
+        assert_eq!(c.status_history, Duration::from_secs(5));
     }
 
     #[test]
