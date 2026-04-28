@@ -265,6 +265,31 @@ impl AppState {
         )
     }
 
+    /// True iff the Browser tab is active and the selected row is a
+    /// UUID-bearing component for which NiFi records flow-configuration
+    /// action history (processor, PG, connection, controller service,
+    /// input/output port). Folder rows return false.
+    pub fn browser_selection_supports_action_history(&self) -> bool {
+        if self.current_tab != ViewId::Browser {
+            return false;
+        }
+        let Some(&arena) = self.browser.visible.get(self.browser.selected) else {
+            return false;
+        };
+        let Some(node) = self.browser.nodes.get(arena) else {
+            return false;
+        };
+        matches!(
+            node.kind,
+            crate::client::NodeKind::Processor
+                | crate::client::NodeKind::ProcessGroup
+                | crate::client::NodeKind::Connection
+                | crate::client::NodeKind::ControllerService
+                | crate::client::NodeKind::InputPort
+                | crate::client::NodeKind::OutputPort,
+        )
+    }
+
     /// True iff the Browser tab is active and the selected node is any
     /// ProcessGroup (versioned or not, including the root PG).
     pub fn browser_selection_is_pg(&self) -> bool {

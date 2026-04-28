@@ -3112,3 +3112,97 @@ fn pcm_chain_page_up_jumps_to_head_page_down_to_tail() {
         "PageUp jumps to head"
     );
 }
+
+// ---------------------------------------------------------------------------
+// browser_selection_supports_action_history
+// ---------------------------------------------------------------------------
+
+fn make_state_with_selected_kind(kind: NodeKind) -> AppState {
+    use crate::view::browser::state::{TreeNode, rebuild_visible};
+
+    let mut s = crate::test_support::fresh_state();
+    s.current_tab = ViewId::Browser;
+
+    s.browser.nodes.clear();
+    // Root PG at arena index 0.
+    s.browser.nodes.push(TreeNode {
+        parent: None,
+        children: vec![1],
+        kind: NodeKind::ProcessGroup,
+        id: "root".into(),
+        group_id: "root".into(),
+        name: "root".into(),
+        status_summary: NodeStatusSummary::ProcessGroup {
+            running: 0,
+            stopped: 0,
+            invalid: 0,
+            disabled: 0,
+        },
+        parameter_context_ref: None,
+    });
+    // Target node at arena index 1, child of root.
+    let status_summary = match kind {
+        NodeKind::ProcessGroup => NodeStatusSummary::ProcessGroup {
+            running: 0,
+            stopped: 0,
+            invalid: 0,
+            disabled: 0,
+        },
+        NodeKind::Processor => NodeStatusSummary::Processor {
+            run_status: "RUNNING".into(),
+        },
+        NodeKind::Connection => NodeStatusSummary::Connection {
+            fill_percent: 0,
+            flow_files_queued: 0,
+            queued_display: "0".into(),
+            source_id: "src".into(),
+            source_name: "Source".into(),
+            destination_id: "dst".into(),
+            destination_name: "Dest".into(),
+        },
+        NodeKind::ControllerService => NodeStatusSummary::ControllerService {
+            state: "ENABLED".into(),
+        },
+        NodeKind::InputPort | NodeKind::OutputPort => NodeStatusSummary::Port,
+        NodeKind::Folder(_) => NodeStatusSummary::Folder { count: 0 },
+    };
+    s.browser.nodes.push(TreeNode {
+        parent: Some(0),
+        children: vec![],
+        kind,
+        id: "target".into(),
+        group_id: "root".into(),
+        name: "target".into(),
+        status_summary,
+        parameter_context_ref: None,
+    });
+    s.browser.expanded.insert(0);
+    rebuild_visible(&mut s.browser);
+    s.browser.selected = s.browser.visible.iter().position(|&i| i == 1).unwrap();
+    s
+}
+
+#[test]
+fn action_history_enabled_for_processor_pg_connection_cs_port() {
+    for kind in [
+        NodeKind::Processor,
+        NodeKind::ProcessGroup,
+        NodeKind::Connection,
+        NodeKind::ControllerService,
+        NodeKind::InputPort,
+        NodeKind::OutputPort,
+    ] {
+        let state = make_state_with_selected_kind(kind);
+        assert!(
+            state.browser_selection_supports_action_history(),
+            "expected true for {kind:?}"
+        );
+    }
+}
+
+#[test]
+fn action_history_disabled_for_folder_rows() {
+    use crate::client::FolderKind;
+    let state = make_state_with_selected_kind(NodeKind::Folder(FolderKind::Queues));
+    assert!(!state.browser_selection_supports_action_history());
+}
