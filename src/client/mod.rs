@@ -11,6 +11,7 @@ pub mod events;
 pub mod history;
 pub mod overview;
 pub mod parameter_context;
+pub mod queues;
 pub mod status;
 pub mod tls_cert;
 pub mod tracer;

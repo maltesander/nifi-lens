@@ -37,6 +37,29 @@ pub enum NifiLensError {
         source: Box<dyn std::error::Error + Send + Sync>,
     },
 
+    /// Two-phase listing request for a queue failed at submission time.
+    #[snafu(display("failed to submit listing request for queue {queue_id}: {source}"))]
+    QueueListingFailed {
+        queue_id: String,
+        source: Box<dyn std::error::Error + Send + Sync>,
+    },
+
+    /// Polling an in-flight listing request failed.
+    #[snafu(display("failed to poll listing request {request_id} for queue {queue_id}: {source}"))]
+    QueueListingPollFailed {
+        queue_id: String,
+        request_id: String,
+        source: Box<dyn std::error::Error + Send + Sync>,
+    },
+
+    /// Fetching a single flowfile's metadata from a queue failed.
+    #[snafu(display("failed to fetch flowfile {flowfile_uuid} from queue {queue_id}: {source}"))]
+    FlowfilePeekFailed {
+        queue_id: String,
+        flowfile_uuid: String,
+        source: Box<dyn std::error::Error + Send + Sync>,
+    },
+
     /// Component kind that has no `/status/history` endpoint
     /// (controller services and ports). The dispatcher returns this so
     /// callers don't have to redo the kind check before calling.
