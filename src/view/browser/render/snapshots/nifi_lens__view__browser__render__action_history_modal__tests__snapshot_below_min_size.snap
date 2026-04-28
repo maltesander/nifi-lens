@@ -1,0 +1,14 @@
+---
+source: src/view/browser/render/action_history_modal.rs
+expression: "format!(\"{}\", term.backend())"
+---
+"           terminal too small           "
+"                                        "
+"                                        "
+"                                        "
+"                                        "
+"                                        "
+"                                        "
+"                                        "
+"                                        "
+"                                        "

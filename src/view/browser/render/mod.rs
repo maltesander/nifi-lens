@@ -6,6 +6,7 @@
 //! per-kind renderer, the loading / empty states, and the properties
 //! modal overlay.
 
+pub mod action_history_modal;
 pub mod connection;
 pub mod controller_service;
 mod param_ref_scan;
