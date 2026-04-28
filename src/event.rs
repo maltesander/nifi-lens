@@ -102,6 +102,58 @@ pub enum BrowserPayload {
         source_id: String,
         err: String,
     },
+    /// Worker has POSTed a listing-request and received a request id from
+    /// NiFi. The reducer records the id on `QueueListingState` so a later
+    /// refresh chord can DELETE the right id without reaching into worker
+    /// state.
+    QueueListingRequestIdAssigned {
+        queue_id: String,
+        request_id: String,
+    },
+    /// One poll tick of an in-flight listing request — `percent` comes
+    /// from NiFi's `percent_completed` field. The reducer updates the
+    /// loading chip.
+    QueueListingProgress {
+        queue_id: String,
+        percent: u8,
+    },
+    /// Terminal success: NiFi returned `state == FINISHED` with summaries.
+    /// `total` is NiFi's `queue_size.object_count`; `truncated == true`
+    /// when `total > rows.len()` (server caps listing at 100).
+    QueueListingComplete {
+        queue_id: String,
+        rows: Vec<crate::view::browser::state::queue_listing::QueueListingRow>,
+        total: u64,
+        truncated: bool,
+    },
+    /// Terminal error: any HTTP failure during POST or polling, or NiFi
+    /// reported `state == FAILED`. The reducer renders `err` in the panel
+    /// header.
+    QueueListingError {
+        queue_id: String,
+        err: String,
+    },
+    /// Terminal timeout: 30 s elapsed without `state == FINISHED`. The
+    /// reducer renders the timeout chip; user retries via `r`.
+    QueueListingTimeout {
+        queue_id: String,
+    },
+    /// Successful per-flowfile peek fetch. Populates the modal's
+    /// attribute table and content-claim metadata.
+    FlowfilePeek {
+        queue_id: String,
+        uuid: String,
+        attrs: std::collections::BTreeMap<String, String>,
+        content_claim: Option<crate::view::browser::state::queue_listing::ContentClaimSummary>,
+        mime_type: Option<String>,
+    },
+    /// Per-flowfile peek fetch failed. Reducer renders `err` inside the
+    /// modal.
+    FlowfilePeekError {
+        queue_id: String,
+        uuid: String,
+        err: String,
+    },
 }
 
 /// Result of a successful intent dispatch.
@@ -347,5 +399,48 @@ mod tests {
             }
             _ => panic!("wrong variant"),
         }
+    }
+
+    #[test]
+    fn queue_listing_payloads_destructure() {
+        let progress = BrowserPayload::QueueListingProgress {
+            queue_id: "q1".into(),
+            percent: 42,
+        };
+        let complete = BrowserPayload::QueueListingComplete {
+            queue_id: "q1".into(),
+            rows: vec![],
+            total: 0,
+            truncated: false,
+        };
+        let error = BrowserPayload::QueueListingError {
+            queue_id: "q1".into(),
+            err: "boom".into(),
+        };
+        let timeout = BrowserPayload::QueueListingTimeout {
+            queue_id: "q1".into(),
+        };
+        let request_id = BrowserPayload::QueueListingRequestIdAssigned {
+            queue_id: "q1".into(),
+            request_id: "req-1".into(),
+        };
+        let _ = (progress, complete, error, timeout, request_id);
+    }
+
+    #[test]
+    fn flowfile_peek_payloads_destructure() {
+        let peek = BrowserPayload::FlowfilePeek {
+            queue_id: "q1".into(),
+            uuid: "ff-1".into(),
+            attrs: std::collections::BTreeMap::new(),
+            content_claim: None,
+            mime_type: None,
+        };
+        let err = BrowserPayload::FlowfilePeekError {
+            queue_id: "q1".into(),
+            uuid: "ff-1".into(),
+            err: "404".into(),
+        };
+        let _ = (peek, err);
     }
 }

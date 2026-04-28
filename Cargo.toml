@@ -30,7 +30,7 @@ crossterm = "0.29"
 directories = "6"
 futures = "0.3"
 humantime-serde = "1.1"
-nifi-rust-client = { version = "0.11.1", features = ["dynamic"] }
+nifi-rust-client = { version = "0.12", features = ["dynamic"] }
 nucleo = "0.5"
 parquet = { version = "58", default-features = false, features = ["arrow", "snap", "brotli", "lz4", "zstd"] }
 rand = "0.10"
@@ -72,5 +72,5 @@ lto = "thin"
 # Development-only override: uncomment locally when iterating against an
 # unreleased change in ../nifi-rust-client. Must remain commented on `main`
 # so CI and crates.io releases build against the published version.
-[patch.crates-io]
-nifi-rust-client = { path = "../nifi-rust-client/crates/nifi-rust-client" }
+# [patch.crates-io]
+# nifi-rust-client = { path = "../nifi-rust-client/crates/nifi-rust-client" }

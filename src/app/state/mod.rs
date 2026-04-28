@@ -2080,6 +2080,14 @@ pub(crate) fn handle_browser_payload(state: &mut AppState, payload: crate::event
                 state.browser.action_history_modal_handle = None;
             }
         }
+        // T10/T11 will replace these with real reducer arms.
+        BrowserPayload::QueueListingRequestIdAssigned { .. }
+        | BrowserPayload::QueueListingProgress { .. }
+        | BrowserPayload::QueueListingComplete { .. }
+        | BrowserPayload::QueueListingError { .. }
+        | BrowserPayload::QueueListingTimeout { .. }
+        | BrowserPayload::FlowfilePeek { .. }
+        | BrowserPayload::FlowfilePeekError { .. } => {}
     }
 }
 
