@@ -954,6 +954,16 @@ fn update_inner(state: &mut AppState, event: AppEvent, config: &Config) -> Updat
             intent: None,
             tracer_followup: None,
         },
+        // Sparkline reducer arms — wired in Task 9. Keeping the stubs
+        // here keeps the build green between Task 4 (variants land)
+        // and Task 9 (reducer logic lands).
+        AppEvent::SparklineUpdate { .. } | AppEvent::SparklineEndpointMissing { .. } => {
+            UpdateResult {
+                redraw: false,
+                intent: None,
+                tracer_followup: None,
+            }
+        }
         AppEvent::Quit => {
             state.should_quit = true;
             UpdateResult {

@@ -18,6 +18,22 @@ pub enum AppEvent {
     /// Emitted by the main loop after `ClusterUpdate` is applied, so
     /// per-view reducers can re-derive their projections.
     ClusterChanged(crate::cluster::ClusterEndpoint),
+    /// Periodic sparkline series replace from the per-selection
+    /// worker. The reducer drops it silently if `(kind, id)` no longer
+    /// matches the active selection (defends against the brief window
+    /// between worker abort and exit).
+    SparklineUpdate {
+        kind: crate::client::history::ComponentKind,
+        id: String,
+        series: crate::client::history::StatusHistorySeries,
+    },
+    /// 404 from NiFi for the status_history endpoint. Sticky per
+    /// `(kind, id)` until selection change — the reducer sets
+    /// `SparklineState::endpoint_missing = true`.
+    SparklineEndpointMissing {
+        kind: crate::client::history::ComponentKind,
+        id: String,
+    },
     /// Graceful quit request.
     Quit,
 }
@@ -285,6 +301,50 @@ mod tests {
             BrowserPayload::ActionHistoryError { source_id, err } => {
                 assert_eq!(source_id, "proc-1");
                 assert_eq!(err, "boom");
+            }
+            _ => panic!("wrong variant"),
+        }
+    }
+
+    #[test]
+    fn sparkline_update_event_destructures() {
+        use crate::client::history::{Bucket, ComponentKind, StatusHistorySeries};
+        let series = StatusHistorySeries {
+            buckets: vec![Bucket {
+                timestamp: std::time::SystemTime::now(),
+                in_count: 10,
+                out_count: 8,
+                queued_count: None,
+                task_time_ns: Some(1000),
+            }],
+            generated_at: std::time::SystemTime::now(),
+        };
+        let ev = AppEvent::SparklineUpdate {
+            kind: ComponentKind::Processor,
+            id: "proc-1".into(),
+            series,
+        };
+        match ev {
+            AppEvent::SparklineUpdate { kind, id, series } => {
+                assert!(matches!(kind, ComponentKind::Processor));
+                assert_eq!(id, "proc-1");
+                assert_eq!(series.buckets.len(), 1);
+            }
+            _ => panic!("wrong variant"),
+        }
+    }
+
+    #[test]
+    fn sparkline_endpoint_missing_event_destructures() {
+        use crate::client::history::ComponentKind;
+        let ev = AppEvent::SparklineEndpointMissing {
+            kind: ComponentKind::Connection,
+            id: "conn-1".into(),
+        };
+        match ev {
+            AppEvent::SparklineEndpointMissing { kind, id } => {
+                assert!(matches!(kind, ComponentKind::Connection));
+                assert_eq!(id, "conn-1");
             }
             _ => panic!("wrong variant"),
         }
