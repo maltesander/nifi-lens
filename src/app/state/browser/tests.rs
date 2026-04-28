@@ -3203,6 +3203,11 @@ fn action_history_enabled_for_processor_pg_connection_cs_port() {
 #[test]
 fn action_history_disabled_for_folder_rows() {
     use crate::client::FolderKind;
-    let state = make_state_with_selected_kind(NodeKind::Folder(FolderKind::Queues));
-    assert!(!state.browser_selection_supports_action_history());
+    for fk in [FolderKind::Queues, FolderKind::ControllerServices] {
+        let state = make_state_with_selected_kind(NodeKind::Folder(fk));
+        assert!(
+            !state.browser_selection_supports_action_history(),
+            "expected false for Folder({fk:?})"
+        );
+    }
 }
