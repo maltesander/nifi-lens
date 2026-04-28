@@ -5,7 +5,7 @@ use ratatui::Frame;
 use ratatui::layout::{Constraint, Direction, Layout, Rect};
 use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
-use ratatui::widgets::{Cell, Paragraph, Row, Table};
+use ratatui::widgets::{Cell, Clear, Paragraph, Row, Table};
 
 use crate::theme;
 use crate::timestamp::format_age_secs;
@@ -22,6 +22,12 @@ const MIN_HEIGHT: u16 = 20;
 /// - Attributes table renders once `state.attrs` is populated by the worker.
 /// - Error and loading chips appear in the panel's right title until data arrives.
 pub fn render_peek_modal(f: &mut Frame<'_>, area: Rect, state: &QueueListingPeekState) {
+    // Clear the underlying buffer first so the modal overlay doesn't
+    // leak the tree / detail-pane content drawn by the regular browser
+    // render below it. Mirrors the action-history / parameter-context
+    // modal pattern.
+    f.render_widget(Clear, area);
+
     if area.width < MIN_WIDTH || area.height < MIN_HEIGHT {
         let line = Line::from(Span::styled("terminal too small", theme::muted()));
         f.render_widget(Paragraph::new(line), area);

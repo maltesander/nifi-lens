@@ -394,9 +394,11 @@ impl KeyMap {
 
         // When the queue listing has focus on the Browser tab,
         // BrowserQueueVerb chords take priority — they shadow
-        // FocusAction (Esc → Cancel, not Ascend) and BrowserVerb
-        // (`c`/`r` operate on the listing row, not the tree).
-        // Outer app keys are blocked while listing focus is active.
+        // BrowserVerb (`c`/`r` operate on the listing row, not the
+        // tree). Vertical-scroll FocusAction chords pass through so
+        // handle_focus can drive the row cursor (Up/Down/PgUp/PgDn/
+        // Home/End). All other keys are blocked while listing focus
+        // is active.
         if state.browser.listing_focused && active_view == ViewId::Browser {
             if matches!(
                 key.code,
@@ -405,9 +407,27 @@ impl KeyMap {
             {
                 return InputEvent::App(AppAction::Quit);
             }
+            // BrowserQueueVerb chords first (Tab/i/t/c/r/Esc) — these
+            // own the verbs the listing reduces against.
             for &v in BrowserQueueVerb::all() {
                 if chord_matches(v.chord(), key) {
                     return InputEvent::View(ViewVerb::BrowserQueue(v));
+                }
+            }
+            // Scroll keys pass through as FocusAction — handle_focus's
+            // listing-focus arm drives the row cursor.
+            for &a in FocusAction::all() {
+                if matches!(
+                    a,
+                    FocusAction::Up
+                        | FocusAction::Down
+                        | FocusAction::PageUp
+                        | FocusAction::PageDown
+                        | FocusAction::First
+                        | FocusAction::Last
+                ) && chord_matches(a.chord(), key)
+                {
+                    return InputEvent::Focus(a);
                 }
             }
             return InputEvent::Unmapped;

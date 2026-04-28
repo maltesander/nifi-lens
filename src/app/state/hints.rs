@@ -74,6 +74,42 @@ pub fn collect_hints(state: &AppState) -> Vec<crate::widget::hint_bar::HintSpan>
             }
         }
         ViewId::Browser => {
+            // Peek modal open → BrowserPeekVerb chords shadow the
+            // outer hints. Listing focused → BrowserQueueVerb chords
+            // shadow them. Otherwise → standard BrowserVerb dispatch.
+            let peek_open = state
+                .browser
+                .queue_listing
+                .as_ref()
+                .and_then(|l| l.peek.as_ref())
+                .is_some();
+            if peek_open {
+                use crate::input::BrowserPeekVerb;
+                for &v in BrowserPeekVerb::all() {
+                    push_verb(&mut out, v, &ctx);
+                }
+                // Bare `?` and Goto trailers still apply.
+                push_verb(&mut out, AppAction::Goto, &ctx);
+                out.push(HintSpan {
+                    key: Cow::Borrowed("?"),
+                    action: Cow::Borrowed("help"),
+                    enabled: true,
+                });
+                return out;
+            }
+            if state.browser.listing_focused {
+                use crate::input::BrowserQueueVerb;
+                for &v in BrowserQueueVerb::all() {
+                    push_verb(&mut out, v, &ctx);
+                }
+                push_verb(&mut out, AppAction::Goto, &ctx);
+                out.push(HintSpan {
+                    key: Cow::Borrowed("?"),
+                    action: Cow::Borrowed("help"),
+                    enabled: true,
+                });
+                return out;
+            }
             // Multiple BrowserVerbs can share the same chord (e.g. both
             // `OpenProperties` and `OpenParameterContext` are bound to `p`).
             // The dispatcher routes correctly via `enabled()`, but the hint

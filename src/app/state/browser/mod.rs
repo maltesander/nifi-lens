@@ -210,6 +210,48 @@ impl ViewKeyHandler for BrowserHandler {
     }
 
     fn handle_focus(state: &mut AppState, action: FocusAction) -> Option<UpdateResult> {
+        // Listing-row focus: drives the row cursor inside the queue
+        // listing panel. Up/Down step one row; PgUp/PgDn step ten;
+        // Home/End jump. The keymap's listing-focus shadow gate passes
+        // these FocusAction chords through (everything else dispatches
+        // BrowserQueueVerb), so they always land here when listing
+        // focus is active.
+        if state.browser.listing_focused {
+            let Some(listing) = state.browser.queue_listing.as_mut() else {
+                return Some(UpdateResult::default());
+            };
+            let visible_count = listing.visible_indices().len();
+            if visible_count == 0 {
+                return Some(UpdateResult::default());
+            }
+            let last = visible_count - 1;
+            match action {
+                FocusAction::Up => {
+                    listing.selected = listing.selected.saturating_sub(1);
+                }
+                FocusAction::Down => {
+                    listing.selected = (listing.selected + 1).min(last);
+                }
+                FocusAction::PageUp => {
+                    listing.selected = listing.selected.saturating_sub(10);
+                }
+                FocusAction::PageDown => {
+                    listing.selected = (listing.selected + 10).min(last);
+                }
+                FocusAction::First => {
+                    listing.selected = 0;
+                }
+                FocusAction::Last => {
+                    listing.selected = last;
+                }
+                _ => return Some(UpdateResult::default()),
+            }
+            return Some(UpdateResult {
+                redraw: true,
+                ..Default::default()
+            });
+        }
+
         // Branch on whether we're in detail-section focus or tree focus.
         if let DetailFocus::Section {
             idx,
