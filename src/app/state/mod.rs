@@ -694,6 +694,14 @@ pub enum PendingIntent {
         source_id: String,
         fetch_signal: std::sync::Arc<tokio::sync::Notify>,
     },
+    /// Spawn the per-selection sparkline fetch loop. The dispatcher
+    /// owns the spawn; the handle lands on
+    /// `BrowserState.sparkline_handle` for abort-on-selection-change.
+    SpawnSparklineFetchLoop {
+        kind: crate::client::history::ComponentKind,
+        id: String,
+        cadence: std::time::Duration,
+    },
     Quit,
 }
 

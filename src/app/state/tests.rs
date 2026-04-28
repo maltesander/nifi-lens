@@ -1405,4 +1405,24 @@ mod pending_intent_tests {
             _ => panic!("wrong variant"),
         }
     }
+
+    #[test]
+    fn spawn_sparkline_fetch_loop_intent_destructures() {
+        use crate::app::state::PendingIntent;
+        use crate::client::history::ComponentKind;
+        use std::time::Duration;
+        let intent = PendingIntent::SpawnSparklineFetchLoop {
+            kind: ComponentKind::Processor,
+            id: "p-1".into(),
+            cadence: Duration::from_secs(30),
+        };
+        match intent {
+            PendingIntent::SpawnSparklineFetchLoop { kind, id, cadence } => {
+                assert!(matches!(kind, ComponentKind::Processor));
+                assert_eq!(id, "p-1");
+                assert_eq!(cadence, Duration::from_secs(30));
+            }
+            _ => panic!("wrong variant"),
+        }
+    }
 }

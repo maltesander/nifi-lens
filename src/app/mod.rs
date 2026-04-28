@@ -339,6 +339,9 @@ pub async fn run(
                     );
                     state.browser.action_history_modal_handle = Some(h);
                 }
+                PendingIntent::SpawnSparklineFetchLoop { .. } => {
+                    // Wired in Task 10.
+                }
                 other => {
                     let intent = match other {
                         PendingIntent::SwitchContext(name) => Some(Intent::SwitchContext(name)),
