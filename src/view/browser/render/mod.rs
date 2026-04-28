@@ -60,7 +60,7 @@ pub(super) const SPARKLINE_MIN_RIGHT_HALF_WIDTH: u16 = 12;
 /// Visible-column gap between the natural-width identity content on the
 /// left and the sparkline strip on the right. Two cells reads clearly
 /// while still letting the strip take meaningful space at narrow widths.
-const SPARKLINE_GAP_COLS: u16 = 2;
+pub(super) const SPARKLINE_GAP_COLS: u16 = 2;
 
 /// Render an "Identity" Panel: caller-built lines render at their
 /// **natural width** on the left; the sparkline strip is placed in

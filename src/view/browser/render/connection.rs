@@ -99,19 +99,41 @@ fn render_endpoints_panel(
     let inner = panel.inner(area);
     frame.render_widget(panel, area);
 
-    // Split horizontally — left: fill gauge + endpoints table + relations
-    // (existing content). Right: 3-line inline sparkline strip. Below
-    // 2× the min-strip width, fall back to single-half (left only).
-    let (endpoints_area, sparkline_area) =
-        if inner.width >= 2 * super::SPARKLINE_MIN_RIGHT_HALF_WIDTH {
-            let halves = Layout::default()
-                .direction(Direction::Horizontal)
-                .constraints([Constraint::Percentage(50), Constraint::Percentage(50)])
-                .split(inner);
-            (halves[0], Some(halves[1]))
-        } else {
-            (inner, None)
-        };
+    // Reserve the rightmost columns for the 3-line sparkline strip
+    // and give endpoints content (fill gauge + table + relations)
+    // everything else. Mirrors the natural-width approach
+    // `render_identity_panel_with_sparkline` uses for processor / PG
+    // identity panels — the previous 50/50 split crushed the NAME
+    // column on narrow terminals (visible as `GenerateFlowF` truncating
+    // into the sparkline).
+    //
+    // ENDPOINTS_MIN_WIDTH = 5 (DIR) + 1 + 12 (KIND) + 1 + ~25 (typical
+    // NAME + cross-link arrow) = ~44; round up to 48 for the fill
+    // gauge to stay legible.
+    const ENDPOINTS_MIN_WIDTH: u16 = 48;
+    const SPARKLINE_PREFERRED_WIDTH: u16 = 28;
+    let (endpoints_area, sparkline_area) = if inner.width
+        >= ENDPOINTS_MIN_WIDTH + super::SPARKLINE_GAP_COLS + super::SPARKLINE_MIN_RIGHT_HALF_WIDTH
+    {
+        let sparkline_width = SPARKLINE_PREFERRED_WIDTH
+            .min(
+                inner
+                    .width
+                    .saturating_sub(ENDPOINTS_MIN_WIDTH + super::SPARKLINE_GAP_COLS),
+            )
+            .max(super::SPARKLINE_MIN_RIGHT_HALF_WIDTH);
+        let chunks = Layout::default()
+            .direction(Direction::Horizontal)
+            .constraints([
+                Constraint::Min(ENDPOINTS_MIN_WIDTH),
+                Constraint::Length(super::SPARKLINE_GAP_COLS),
+                Constraint::Length(sparkline_width),
+            ])
+            .split(inner);
+        (chunks[0], Some(chunks[2]))
+    } else {
+        (inner, None)
+    };
     if let Some(spark_area) = sparkline_area {
         super::render_inline_sparkline_strip(frame, spark_area, state.sparkline.as_ref());
     }
