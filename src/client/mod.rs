@@ -663,8 +663,8 @@ pub struct BulletinSnapshot {
 }
 
 /// Bulletin-board snapshot: just the list of bulletins. The Overview reducer
-/// bins them into time buckets; the Bulletins tab (Phase 2) will consume the
-/// full payload including the `generated` cursor.
+/// bins them into time buckets; the Bulletins tab consumes the full payload
+/// including the `generated` cursor.
 #[derive(Debug, Clone, Default)]
 pub struct BulletinBoardSnapshot {
     pub bulletins: Vec<BulletinSnapshot>,

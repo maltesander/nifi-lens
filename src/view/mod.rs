@@ -1,4 +1,4 @@
-//! Per-tab view modules. Phase 0 ships placeholders.
+//! Per-tab view modules.
 
 pub mod browser;
 pub mod bulletins;
@@ -12,15 +12,15 @@ use ratatui::widgets::{Block, Borders, Paragraph};
 
 use crate::theme;
 
-/// Render a centered `"{title} — coming in {phase}"` message.
-pub fn render_placeholder(frame: &mut Frame, area: Rect, title: &str, phase: &str) {
+/// Render a centered `"{title} — coming in {version}"` message.
+pub fn render_placeholder(frame: &mut Frame, area: Rect, title: &str, version: &str) {
     let block = Block::default()
         .borders(Borders::ALL)
         .title(title.to_string());
     let inner = block.inner(area);
     frame.render_widget(block, area);
 
-    let text = format!("{title} — coming in {phase}");
+    let text = format!("{title} — coming in {version}");
     let p = Paragraph::new(text)
         .style(theme::muted())
         .alignment(Alignment::Center);

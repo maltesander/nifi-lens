@@ -1,8 +1,6 @@
-//! Browser-tab client wrappers. Phase 3 added the tree fetch and four
-//! per-node detail fetches used by the Browser tab's hybrid data flow.
-//! Task 6 of the central-cluster-store refactor retired `browser_tree`
-//! in favour of rebuilding the arena from the shared cluster snapshot,
-//! so only the per-node detail wrappers remain here.
+//! Browser-tab client wrappers: per-node detail fetches used by the
+//! Browser tab's hybrid data flow. The arena itself is rebuilt from
+//! the shared cluster snapshot rather than fetched here.
 
 use std::time::SystemTime;
 
@@ -387,7 +385,7 @@ pub struct ProcessorDetail {
     /// Minimum severity level for bulletins (e.g. `"WARN"`, `"INFO"`).
     pub bulletin_level: String,
     /// Processor properties as ordered key-value pairs. HashMap iteration
-    /// order is non-deterministic; stable display ordering is Phase 5 polish.
+    /// order is non-deterministic; stable display ordering is deferred polish.
     pub properties: Vec<(String, String)>,
     /// Validation error messages that must be resolved before the processor
     /// can be started.

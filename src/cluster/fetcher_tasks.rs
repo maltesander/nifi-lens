@@ -1087,7 +1087,7 @@ mod parameter_context_bindings_fetcher_tests {
 
                 let handle = spawn_parameter_context_bindings(client, tx, pg_ids_rx, cfg);
 
-                // Phase 1: gated, no subscribers — fetcher must park on
+                // Step 1: gated, no subscribers — fetcher must park on
                 // `force.notified()`. Wait well past one base_interval and
                 // verify nothing arrives.
                 let parked = tokio::time::timeout(Duration::from_millis(150), rx.recv()).await;
@@ -1096,7 +1096,7 @@ mod parameter_context_bindings_fetcher_tests {
                     "gated fetcher must not emit before any subscriber arrives"
                 );
 
-                // Phase 2: subscribe (0 → 1) and notify. The fetcher unparks
+                // Step 2: subscribe (0 → 1) and notify. The fetcher unparks
                 // and fires within one base_interval.
                 counter.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
                 force.notify_one();
@@ -1113,10 +1113,10 @@ mod parameter_context_bindings_fetcher_tests {
                     "unexpected event variant"
                 );
 
-                // Phase 3: abort, drain any in-flight events from the next
+                // Step 3: abort, drain any in-flight events from the next
                 // tick that may have raced ahead, then verify the channel
                 // goes silent. With a 50ms base_interval the fetcher can
-                // emit one more event between the Phase-2 receive and the
+                // emit one more event between the Step-2 receive and the
                 // abort taking effect — drain race-buffered items, then
                 // wait past several intervals to prove no NEW events.
                 handle.abort();
@@ -1126,7 +1126,7 @@ mod parameter_context_bindings_fetcher_tests {
                 tokio::task::yield_now().await;
                 tokio::time::sleep(Duration::from_millis(100)).await;
                 while rx.try_recv().is_ok() {
-                    // drain race-buffered events from the post-Phase-2 tick
+                    // drain race-buffered events from the post-Step-2 tick
                 }
                 // Now verify the channel stays silent well past several
                 // intervals — proving the fetcher is truly gone. (After

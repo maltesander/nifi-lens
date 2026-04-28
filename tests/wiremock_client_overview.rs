@@ -1,4 +1,4 @@
-//! Wiremock tests: Phase 1 overview client wrappers.
+//! Wiremock tests: overview client wrappers.
 
 use nifi_lens::client::NifiClient;
 use nifi_lens::config::{ResolvedAuth, ResolvedContext, VersionStrategy};

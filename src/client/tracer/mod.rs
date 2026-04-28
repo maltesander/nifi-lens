@@ -1,9 +1,9 @@
 //! Tracer-tab client wrappers and snapshot types.
 //!
-//! Phase 4 forensic flow: paste a flowfile UUID → submit a lineage
-//! query → poll → render the event timeline → optionally fetch per-event
-//! content. All helpers map errors via `classify_or_fallback` so the UI
-//! layer never sees a raw `NifiError`.
+//! Forensic flow: paste a flowfile UUID → submit a lineage query →
+//! poll → render the event timeline → optionally fetch per-event
+//! content. All helpers map errors via `classify_or_fallback` so the
+//! UI layer never sees a raw `NifiError`.
 
 use std::time::SystemTime;
 

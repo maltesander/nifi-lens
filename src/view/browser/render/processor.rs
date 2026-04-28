@@ -1,6 +1,6 @@
 //! Processor detail renderer.
 //!
-//! Phase 7 layout:
+//! Layout:
 //!
 //! ```text
 //! ┌ <name> · processor · <state> ──────────┐

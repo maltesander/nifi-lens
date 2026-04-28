@@ -1,8 +1,8 @@
 //! Rich JSON payload for healthy-pipeline/ingest GenerateFlowFile.
 //!
 //! ~600 bytes, multi-line, nested. Every flowfile is unique (two
-//! `UUID()` calls plus millisecond timestamp) so provenance search and
-//! content-preview views in Phase 4 have genuinely distinct data.
+//! `UUID()` calls plus millisecond timestamp) so provenance search
+//! and content-preview views have genuinely distinct data.
 
 /// NiFi Expression Language is evaluated by GenerateFlowFile because we
 /// also set the property `Custom Text Length` → empty and use Custom Text
@@ -16,7 +16,7 @@ pub const HEALTHY_INGEST_CUSTOM_TEXT: &str = r#"{
     "pg": "healthy-pipeline/ingest"
   },
   "severity": "INFO",
-  "tags": ["synthetic", "fixture", "phase-4-tracer"],
+  "tags": ["synthetic", "fixture", "tracer"],
   "metrics": {
     "latency_ms": 42,
     "bytes_processed": 1024,

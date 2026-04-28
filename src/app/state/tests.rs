@@ -936,8 +936,8 @@ fn g_from_bulletins_opens_goto_menu_then_enter_gotos_to_browser() {
 
 #[test]
 fn handle_verb_toggles_error_filter_after_port() {
-    // After the Bulletins port (Phase 3 Task 12), handle_verb dispatches
-    // directly — ToggleSeverity(Error) flips show_error immediately.
+    // After the Bulletins port, handle_verb dispatches directly —
+    // ToggleSeverity(Error) flips show_error immediately.
     use crate::input::{Severity, ViewVerb};
 
     let mut s = fresh_state();

@@ -110,7 +110,7 @@ pub struct OverviewState {
     /// across polls. The reducer keeps this updated whenever a poll arrives.
     pub last_bulletin_id: Option<i64>,
 
-    // New in Phase 3 — populated by the SystemDiag payload variant.
+    // Populated by the SystemDiag payload variant.
     pub nodes: crate::client::overview::NodesState,
     pub repositories_summary: RepositoriesSummary,
     pub last_pg_refresh: Option<std::time::Instant>,
@@ -125,8 +125,8 @@ pub struct OverviewState {
 }
 
 /// Cluster-aggregate repository fill bars shown in the Overview "Nodes"
-/// zone. Phase 3 displays only the aggregate; per-node breakdown was
-/// part of the old Health detail pane and is not in scope for Overview.
+/// zone. Displays only the aggregate; per-node breakdown was part of the
+/// old Health detail pane and is not in scope for Overview.
 #[derive(Debug, Clone, Default)]
 pub struct RepositoriesSummary {
     pub content_percent: u32,

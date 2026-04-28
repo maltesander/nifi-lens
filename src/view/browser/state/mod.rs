@@ -204,8 +204,8 @@ pub struct BrowserState {
     /// spawned. Cleared back to `None` on tab-switch-out so reducer
     /// pushes become no-ops. Task 13 wires this.
     pub detail_tx: Option<mpsc::UnboundedSender<DetailRequest>>,
-    /// Phase 7: which focusable sub-section (if any) holds input focus.
-    /// Always reset to `Tree` by `reset_detail_focus`, called from every
+    /// Which focusable sub-section (if any) holds input focus. Always
+    /// reset to `Tree` by `reset_detail_focus`, called from every
     /// selection-mutating method on `BrowserState`.
     pub detail_focus: DetailFocus,
     /// Open version-control modal state, if any. `None` while the

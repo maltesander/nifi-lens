@@ -198,13 +198,11 @@ async fn create_invalid_json_writer(client: &DynamicClient, parent_pg_id: &str) 
 
     // Poll for any terminal state. The CS name is already correct — if
     // validation doesn't populate errors in 15s, we log the state and
-    // continue rather than failing the whole seed. Phase 3 rendering
-    // tolerates either state; Phase 1 gets its "invalid" bucket from
-    // invalid-pipeline's processor.
-    // Poll for any terminal state. If the CS ends up valid, that's fine —
-    // Phase 3 rendering tolerates either state; Phase 1 gets its "invalid"
-    // bucket from invalid-pipeline's processor. If the poll times out
-    // we swallow the error and log: the CS exists, which is what we need.
+    // continue rather than failing the whole seed. Browser rendering
+    // tolerates either state; the Overview "invalid" bucket gets
+    // populated from invalid-pipeline's processor. If the poll times
+    // out we swallow the error and log: the CS exists, which is what
+    // we need.
     let id_poll = id.clone();
     let poll_result: Result<String> = poll_until(
         "fixture-broken-writer",

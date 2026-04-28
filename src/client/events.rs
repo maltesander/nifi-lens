@@ -2,11 +2,11 @@
 //! + `DELETE /provenance/{id}`.
 //!
 //! This module wraps NiFi's provenance-search endpoint (distinct from the
-//! lineage endpoint used by Tracer). Phase 6 introduces the Events tab as
-//! a cluster-wide provenance search with filters for component, flowfile
-//! UUID, and time range. All helpers map errors via `classify_or_fallback`
-//! so the UI layer only ever sees typed `NifiLensError` variants — matching
-//! the pattern established by `src/client/tracer.rs`.
+//! lineage endpoint used by Tracer). The Events tab is a cluster-wide
+//! provenance search with filters for component, flowfile UUID, and
+//! time range. All helpers map errors via `classify_or_fallback` so the
+//! UI layer only ever sees typed `NifiLensError` variants — matching the
+//! pattern established by `src/client/tracer.rs`.
 
 use std::collections::HashMap;
 use std::time::SystemTime;

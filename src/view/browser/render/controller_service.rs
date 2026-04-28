@@ -1,6 +1,6 @@
 //! Controller Service detail renderer.
 //!
-//! Phase 7 layout:
+//! Layout:
 //!
 //! ```text
 //! ┌ <name> · controller service · <state> ─┐

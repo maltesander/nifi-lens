@@ -8,7 +8,7 @@ pub enum AppEvent {
     Input(crossterm::event::Event),
     /// Periodic tick for time-based UI updates (status bar).
     Tick,
-    /// Per-view data from a worker task. Declared for Phase 1+; unused in Phase 0.
+    /// Per-view data from a worker task.
     Data(ViewPayload),
     /// Result of an intent dispatch, folded back into AppState by the UI task.
     IntentOutcome(Result<IntentOutcome, NifiLensError>),
@@ -116,32 +116,31 @@ pub enum IntentOutcome {
         view: crate::app::state::ViewId,
     },
     Quitting,
-    /// The intent is valid but its target phase hasn't landed yet.
-    /// The banner shows `"{intent_name}: not yet wired (Phase {phase})"`.
-    NotImplementedInPhase {
+    /// The intent is valid but its handler is not implemented yet.
+    /// The banner shows `"{intent_name}: not yet implemented"`.
+    NotImplemented {
         intent_name: &'static str,
-        phase: u8,
     },
-    /// Phase 3: the user asked to goto a component in Browser.
-    /// The reducer switches tabs, expands ancestors, and sets selection.
+    /// The user asked to goto a component in Browser. The reducer
+    /// switches tabs, expands ancestors, and sets selection.
     OpenInBrowserTarget {
         component_id: String,
         group_id: String,
     },
-    /// Phase 4: cross-link from Bulletins tab navigates Tracer to latest-events view.
+    /// Cross-link from Bulletins tab navigates Tracer to latest-events view.
     TracerLandingOn {
         component_id: String,
     },
-    /// Phase 4: a lineage query has been submitted; holds the abort handle.
+    /// A lineage query has been submitted; holds the abort handle.
     TracerLineageStarted {
         uuid: String,
         abort: tokio::task::AbortHandle,
     },
-    /// Phase 4: user submitted input that is not a valid UUID.
+    /// User submitted input that is not a valid UUID.
     TracerInputInvalid {
         raw: String,
     },
-    /// Phase 6: cross-link from Bulletins/Browser `t` lands on Events
+    /// Cross-link from Bulletins/Browser `t` lands on Events
     /// pre-filled with the component and a 15-minute time window. The
     /// reducer switches tabs, seeds `filters.source`, and kicks off a
     /// query submission.

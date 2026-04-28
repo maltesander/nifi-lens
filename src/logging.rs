@@ -55,7 +55,7 @@ impl StderrToggle {
 
 /// Global color setting, captured at `init()` time from `args.no_color`.
 /// `StderrToggle::restore()` reads this value when rebuilding the stderr
-/// layer; there is no mid-session color override mechanism in Phase 0.
+/// layer; there is no mid-session color override mechanism.
 static USE_COLOR: OnceLock<bool> = OnceLock::new();
 
 fn use_color() -> bool {
@@ -100,7 +100,7 @@ pub fn init(args: &Args) -> Result<(WorkerGuard, StderrToggle), NifiLensError> {
     }
 
     // 2. Rotating appender. Daily rotation keeps the implementation simple.
-    //    A later phase can add a startup pruning pass to keep only the 5
+    //    A later revision can add a startup pruning pass to keep only the 5
     //    most recent files if size-based rotation is still unavailable in
     //    the installed `tracing-appender` version.
     let file_appender = rolling::daily(&log_dir, "nifilens.log");

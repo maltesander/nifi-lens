@@ -1,13 +1,10 @@
 //! WorkerRegistry: owns the one currently-running view worker task and
 //! swaps it on tab change.
 //!
-//! Phase 1 shipped the Overview worker (10s cadence) and Phase 2 added
-//! the Bulletins worker (5s cadence). Phase 3's Browser worker and
-//! Phase 4's Tracer worker plug into the same pattern. Task 7 retired
-//! the Bulletins worker — Bulletins now subscribes to the cluster-owned
-//! `BulletinRing` and has no per-view task. Task 8 retired the Overview
-//! worker the same way: Overview subscribes to eight cluster endpoints
-//! and projects them into `OverviewState` via the `redraw_*` reducers.
+//! Browser and Tracer use view-local workers spawned here. Overview and
+//! Bulletins are store-only consumers — they subscribe to cluster-owned
+//! endpoints (Bulletins to `BulletinRing`; Overview to eight endpoints)
+//! and project them via `redraw_*` reducers, with no per-view task.
 
 use std::sync::Arc;
 

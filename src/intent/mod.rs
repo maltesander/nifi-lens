@@ -12,21 +12,19 @@ use crate::event::{AppEvent, IntentOutcome};
 
 #[derive(Debug, Clone)]
 pub enum Intent {
-    // Wired in Phase 0.
     SwitchContext(String),
     RefreshView(ViewId),
     Quit,
 
-    // Declared for Phase 1+; dispatcher returns NotImplementedInPhase.
     OpenProcessGroup(String),
-    TraceFlowfile(String), // UUID as string — Phase 4 introduces `uuid::Uuid`
+    TraceFlowfile(String),
     FetchEventContent {
         event_id: i64,
         side: ContentSide,
     },
     Goto(CrossLink),
 
-    // Phase 4 intents.
+    // Tracer intents.
     CancelLineageQuery,
     DeleteLineageQuery {
         query_id: String,
@@ -42,12 +40,12 @@ pub enum Intent {
         uuid: String,
     },
 
-    // Phase 6 events intent.
+    // Events intent.
     RunProvenanceQuery {
         query: crate::client::ProvenanceQuery,
     },
 
-    // Write intents — declared; dispatcher refuses unconditionally in Phase 0.
+    // Write intents — declared; dispatcher refuses unconditionally.
     StartProcessor(String),
     StopProcessor(String),
     EnableControllerService(String),
@@ -64,21 +62,18 @@ pub enum ContentSide {
 #[derive(Debug, Clone)]
 pub enum CrossLink {
     /// From Bulletins `Enter`: open Browser on the selected bulletin's
-    /// component. Phase 3 wires this.
+    /// component.
     OpenInBrowser {
         component_id: String,
         group_id: String,
     },
-    /// From Bulletins/Browser `t` (pre-Phase 6): Tracer latest-events
-    /// landing with a component-filtered query.
-    ///
-    /// Phase 6 retargets Bulletins/Browser `t` to
-    /// [`CrossLink::GotoEvents`] instead. This variant is retained
-    /// for backwards compatibility and is still wired through the
-    /// dispatcher; future phases may prune it.
+    /// Tracer latest-events landing with a component-filtered query.
+    /// Superseded by [`CrossLink::GotoEvents`] for the Bulletins/Browser
+    /// `t` chord; retained for backwards compatibility and still wired
+    /// through the dispatcher.
     TraceComponent { component_id: String },
-    /// From Bulletins/Browser `t` (Phase 6+): open Events pre-filled
-    /// with a component-sourced query and a 15-minute time window.
+    /// From Bulletins/Browser `t`: open Events pre-filled with a
+    /// component-sourced query and a 15-minute time window.
     GotoEvents { component_id: String },
     /// From Events result row `t`: open Tracer and auto-run a lineage
     /// query on the selected event's flowfile uuid.
@@ -189,7 +184,7 @@ impl IntentDispatcher {
         match intent {
             Intent::SwitchContext(name) => self.switch_context(name).await,
 
-            // --- Phase 4 tracer intents ---
+            // --- Tracer intents ---
             Intent::Goto(CrossLink::TraceComponent { component_id }) => {
                 crate::view::tracer::worker::spawn_latest_events(
                     self.client.clone(),
@@ -283,7 +278,7 @@ impl IntentDispatcher {
                 view: ViewId::Tracer,
             }),
 
-            // --- Phase 6 events intent ---
+            // --- Events intent ---
             Intent::RunProvenanceQuery { query } => {
                 let _handle = crate::view::events::worker::spawn_query(
                     self.client.clone(),
@@ -296,9 +291,8 @@ impl IntentDispatcher {
                 })
             }
 
-            other => Ok(IntentOutcome::NotImplementedInPhase {
+            other => Ok(IntentOutcome::NotImplemented {
                 intent_name: other.name(),
-                phase: 0,
             }),
         }
     }

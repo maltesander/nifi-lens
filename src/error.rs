@@ -13,9 +13,7 @@ use snafu::Snafu;
 #[derive(Debug, Snafu)]
 #[snafu(visibility(pub))]
 pub enum NifiLensError {
-    #[snafu(display(
-        "write mode is not implemented in Phase 0; --allow-writes is reserved for v2"
-    ))]
+    #[snafu(display("write mode is not implemented; --allow-writes is reserved for v2"))]
     WritesNotImplemented,
 
     /// 404 from NiFi for `/flow/{type}/{id}/status/history`. The
@@ -134,10 +132,10 @@ pub enum NifiLensError {
     ))]
     NifiUnauthorized { context: String },
 
-    /// `nifi-rust-client` 0.5.0's error type is not yet audited (see Phase 0
-    /// Task 7). We box the source as a trait object so this variant compiles
-    /// before that audit, at the cost of losing snafu's automatic `From`
-    /// conversion — call sites must box the source explicitly.
+    /// `nifi-rust-client` 0.5.0's error type is not yet audited. We box
+    /// the source as a trait object so this variant compiles before that
+    /// audit, at the cost of losing snafu's automatic `From` conversion —
+    /// call sites must box the source explicitly.
     #[snafu(display("failed to build nifi-rust-client for context {context:?}: {source}"))]
     ClientBuildFailed {
         context: String,
@@ -415,7 +413,7 @@ pub enum NifiLensError {
         source: Box<dyn std::error::Error + Send + Sync>,
     },
 
-    #[snafu(display("write intents are disabled in Phase 0 (intent: {intent_name})"))]
+    #[snafu(display("write intents are disabled (intent: {intent_name})"))]
     WriteIntentRefused { intent_name: &'static str },
 
     #[snafu(display("failed to initialize the terminal: {source}"))]

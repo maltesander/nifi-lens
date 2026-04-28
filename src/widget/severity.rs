@@ -2,8 +2,8 @@
 //!
 //! Three render leaves (`view::browser::render::pg`,
 //! `view::browser::render::processor`, `view::bulletins::render`)
-//! previously carried identical copies of these two helpers.
-//! Phase 7 folds them here.
+//! previously carried identical copies of these two helpers; this
+//! module consolidates them.
 
 use ratatui::style::Style;
 

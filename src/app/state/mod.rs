@@ -134,8 +134,9 @@ impl ViewId {
 
 /// Cluster-wide summary shown in the top-bar identity strip.
 ///
-/// Populated by the Overview worker in Phase 3. In Phase 1 the fields
-/// stay `None` and the top-bar renders `nodes ?/?` as a muted placeholder.
+/// Populated by the cluster store. Until the first cluster-nodes update
+/// arrives the fields stay `None` and the top-bar renders `nodes ?/?`
+/// as a muted placeholder.
 #[derive(Debug, Default, Clone)]
 pub struct ClusterSummary {
     pub connected_nodes: Option<usize>,
@@ -2148,8 +2149,8 @@ fn handle_intent_outcome(
                 sparkline_followup: None,
             }
         }
-        Ok(IntentOutcome::NotImplementedInPhase { intent_name, phase }) => {
-            state.post_info(format!("{intent_name}: not yet wired (Phase {phase})"));
+        Ok(IntentOutcome::NotImplemented { intent_name }) => {
+            state.post_info(format!("{intent_name}: not yet implemented"));
             UpdateResult {
                 redraw: true,
                 intent: None,

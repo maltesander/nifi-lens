@@ -1,4 +1,4 @@
-//! Wiremock tests: Phase 3 browser client wrappers.
+//! Wiremock tests: browser client wrappers.
 
 use nifi_lens::client::{
     ConnectionDetail, ControllerServiceDetail, NifiClient, NodeKind, ProcessGroupDetail,

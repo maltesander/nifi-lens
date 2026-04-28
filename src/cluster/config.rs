@@ -1,9 +1,6 @@
 //! Polling cadences for cluster-wide endpoints. Deserialized from the
 //! `[polling.cluster]` section of `config.toml`. Duration fields use the
 //! humantime format (`"10s"`, `"30s"`, `"5m"`).
-//!
-//! Phase rollout note: in Task 1 the struct lives alongside the existing
-//! per-view polling sections. Task 11 removes the per-view sections.
 
 use std::time::Duration;
 

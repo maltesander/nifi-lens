@@ -1,4 +1,4 @@
-//! Wiremock tests: Phase 4 tracer client wrappers.
+//! Wiremock tests: tracer client wrappers.
 
 use nifi_lens::client::NifiClient;
 use nifi_lens::client::tracer::{ContentRender, ContentSide};

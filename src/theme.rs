@@ -1,4 +1,4 @@
-//! Color and style constants. No runtime theming in Phase 0.
+//! Color and style constants. No runtime theming.
 
 use ratatui::style::{Color, Modifier, Style};
 
@@ -45,8 +45,7 @@ pub fn highlight() -> Style {
 }
 
 /// Dim color used for unfocused section borders and separator rules.
-/// Matches the existing `muted()` hue so pre-Phase 7 borders read
-/// identically; future tuning can split them apart.
+/// Currently aliases `muted()`; future tuning can split them apart.
 pub fn border_dim() -> Style {
     muted()
 }
