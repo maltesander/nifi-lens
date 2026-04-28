@@ -2798,3 +2798,50 @@ fn apply_parameter_context_bindings_does_not_touch_non_pg_nodes() {
     let proc_node = state.nodes.iter().find(|n| n.id == "proc-x").unwrap();
     assert!(proc_node.parameter_context_ref.is_none());
 }
+
+#[test]
+fn open_action_history_modal_sets_pending_state() {
+    let mut state = BrowserState::default();
+    state.open_action_history_modal("proc-1".into(), "FetchKafka".into());
+    let m = state.action_history_modal.as_ref().expect("modal opened");
+    assert_eq!(m.source_id, "proc-1");
+    assert_eq!(m.component_label, "FetchKafka");
+    assert!(m.loading);
+    assert!(m.actions.is_empty());
+}
+
+#[test]
+fn close_action_history_modal_clears_state_and_aborts_handle() {
+    let mut state = BrowserState::default();
+    state.open_action_history_modal("proc-1".into(), "X".into());
+    // Simulate a worker handle by spawning a no-op task on a
+    // current-thread runtime.
+    let rt = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .unwrap();
+    rt.block_on(async {
+        let local = tokio::task::LocalSet::new();
+        local
+            .run_until(async {
+                let h = tokio::task::spawn_local(async {
+                    tokio::time::sleep(std::time::Duration::from_secs(60)).await;
+                });
+                state.action_history_modal_handle = Some(h);
+                state.close_action_history_modal();
+                assert!(state.action_history_modal.is_none());
+                assert!(state.action_history_modal_handle.is_none());
+            })
+            .await;
+    });
+}
+
+#[test]
+fn open_action_history_modal_replaces_open_modal() {
+    let mut state = BrowserState::default();
+    state.open_action_history_modal("proc-1".into(), "A".into());
+    state.open_action_history_modal("proc-2".into(), "B".into());
+    let m = state.action_history_modal.as_ref().unwrap();
+    assert_eq!(m.source_id, "proc-2");
+    assert_eq!(m.component_label, "B");
+}

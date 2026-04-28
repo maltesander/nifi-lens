@@ -508,6 +508,27 @@ impl BrowserState {
         self.parameter_modal = None;
     }
 
+    /// Open the action-history modal scoped to `(source_id, label)`.
+    /// Replaces any previously-open action-history modal. Aborts the
+    /// previous worker handle if present.
+    pub fn open_action_history_modal(&mut self, source_id: String, component_label: String) {
+        if let Some(h) = self.action_history_modal_handle.take() {
+            h.abort();
+        }
+        self.action_history_modal = Some(action_history_modal::ActionHistoryModalState::pending(
+            source_id,
+            component_label,
+        ));
+    }
+
+    /// Close the action-history modal and abort any in-flight worker.
+    pub fn close_action_history_modal(&mut self) {
+        if let Some(h) = self.action_history_modal_handle.take() {
+            h.abort();
+        }
+        self.action_history_modal = None;
+    }
+
     /// Apply a successful chain fetch to the open modal. Mismatched
     /// `pg_id` is ignored (the user navigated since dispatch).
     pub fn apply_parameter_context_modal_loaded(
