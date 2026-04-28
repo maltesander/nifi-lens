@@ -61,7 +61,7 @@ pub fn render(
         ])
         .split(inner);
 
-    render_identity_panel(frame, rows[0], d);
+    render_identity_panel(frame, rows[0], d, state);
     if let Some(pc) = pc_ref {
         render_parameter_context_panel(frame, rows[1], d, pc, detail_focus, &sections);
     }
@@ -96,8 +96,13 @@ fn build_header_title<'a>(
     Line::from(spans)
 }
 
-fn render_identity_panel(frame: &mut Frame, area: Rect, d: &ProcessGroupDetail) {
-    super::render_identity_panel(frame, area, |_inner| {
+fn render_identity_panel(
+    frame: &mut Frame,
+    area: Rect,
+    d: &ProcessGroupDetail,
+    state: &BrowserState,
+) {
+    super::render_identity_panel_with_sparkline(frame, area, state.sparkline.as_ref(), |_inner| {
         vec![
             Line::from(vec![
                 Span::styled("Processors ", theme::muted()),

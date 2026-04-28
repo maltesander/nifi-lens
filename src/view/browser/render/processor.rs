@@ -79,14 +79,20 @@ pub fn render(
     let rows = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
-            Constraint::Length(4),
+            // Identity grew from 4 → 5 to fit the 3-line inline
+            // sparkline strip on the right half. Eats one row from
+            // Properties+Validation's `Min` budget; the budget already
+            // tolerates that — the smallest value at this point is
+            // 5 (chrome+2 data rows) which still leaves Properties
+            // visible on a 24-row terminal.
+            Constraint::Length(5),
             Constraint::Min(props_plus_validation_min),
             Constraint::Length(6),
             Constraint::Length(6),
         ])
         .split(inner);
 
-    render_identity_panel(frame, rows[0], d);
+    render_identity_panel(frame, rows[0], d, state);
     render_properties_and_validation(frame, rows[1], d, state, detail_focus);
     render_connections_panel(frame, rows[2], d, state, detail_focus);
     render_recent_bulletins_panel(frame, rows[3], d, bulletins, detail_focus);
@@ -113,8 +119,8 @@ fn run_state_style(run_status: &str) -> Style {
     ProcessorStatus::from_wire(run_status).style()
 }
 
-fn render_identity_panel(frame: &mut Frame, area: Rect, d: &ProcessorDetail) {
-    super::render_identity_panel(frame, area, |inner| {
+fn render_identity_panel(frame: &mut Frame, area: Rect, d: &ProcessorDetail, state: &BrowserState) {
+    super::render_identity_panel_with_sparkline(frame, area, state.sparkline.as_ref(), |inner| {
         vec![
             Line::from(vec![
                 Span::styled("type   ", theme::muted()),

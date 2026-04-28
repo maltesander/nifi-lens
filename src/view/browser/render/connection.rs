@@ -79,6 +79,23 @@ fn render_endpoints_panel(
     let inner = panel.inner(area);
     frame.render_widget(panel, area);
 
+    // Split horizontally — left: fill gauge + endpoints table + relations
+    // (existing content). Right: 3-line inline sparkline strip. Below
+    // 2× the min-strip width, fall back to single-half (left only).
+    let (endpoints_area, sparkline_area) =
+        if inner.width >= 2 * super::SPARKLINE_MIN_RIGHT_HALF_WIDTH {
+            let halves = Layout::default()
+                .direction(Direction::Horizontal)
+                .constraints([Constraint::Percentage(50), Constraint::Percentage(50)])
+                .split(inner);
+            (halves[0], Some(halves[1]))
+        } else {
+            (inner, None)
+        };
+    if let Some(spark_area) = sparkline_area {
+        super::render_inline_sparkline_strip(frame, spark_area, state.sparkline.as_ref());
+    }
+
     // Fill header (line 0), mini-table (lines 1..=3), relations (line 4).
     let rows = Layout::default()
         .direction(Direction::Vertical)
@@ -87,7 +104,7 @@ fn render_endpoints_panel(
             Constraint::Length(3), // header + 2 rows
             Constraint::Length(1), // relations
         ])
-        .split(inner);
+        .split(endpoints_area);
 
     // Fill gauge.
     let gauge_width: u16 = rows[0].width.saturating_sub(12).clamp(8, 40);

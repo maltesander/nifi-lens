@@ -4,7 +4,7 @@ expression: "format!(\"{}\", terminal.backend())"
 ---
 "┌ enrich → publish · connection ───────────────────────────────────────────────────────────────────┐"
 "│┏ Endpoints ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┓│"
-"│┃Fill ██████████████████████░░░░░░░░░░░░░░░░░░  55% (5500 ff / 5,500 / 50 MB)                    ┃│"
+"│┃Fill ███████████████████░░░░░░░░░░░░░░░░░  55% (loading…                                        ┃│"
 "│┃DIR   KIND         NAME                                                                         ┃│"
 "│┃FROM  PROCESSOR    EnrichAttribute  →                                                           ┃│"
 "│┃TO    PROCESSOR    PublishKafka  →                                                              ┃│"

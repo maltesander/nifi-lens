@@ -52,6 +52,159 @@ where
     frame.render_widget(Paragraph::new(lines), inner);
 }
 
+/// Width of the right half (sparkline strip) below which the strip is
+/// suppressed and the identity panel falls back to full width.
+pub(super) const SPARKLINE_MIN_RIGHT_HALF_WIDTH: u16 = 12;
+
+/// Render an "Identity" Panel split horizontally: caller-built lines on
+/// the left, an inline sparkline strip on the right (when supported).
+///
+/// The right-half width must be at least `SPARKLINE_MIN_RIGHT_HALF_WIDTH`
+/// for the strip to render — below that the panel falls back to the
+/// full-width single-half layout (left only). When `sparkline` is `None`,
+/// the right half stays blank but the layout split is unchanged so the
+/// identity rows don't reflow on every selection change.
+pub(super) fn render_identity_panel_with_sparkline<F>(
+    frame: &mut Frame,
+    area: Rect,
+    sparkline: Option<&crate::view::browser::state::sparkline::SparklineState>,
+    build_lines: F,
+) where
+    F: FnOnce(Rect) -> Vec<Line<'static>>,
+{
+    let block = crate::widget::panel::Panel::new(" Identity ").into_block();
+    let inner = block.inner(area);
+    frame.render_widget(block, area);
+
+    // If inner is too narrow to support a meaningful right-half strip,
+    // render lines at full width and skip the sparkline.
+    if inner.width < 2 * SPARKLINE_MIN_RIGHT_HALF_WIDTH {
+        let lines = build_lines(inner);
+        frame.render_widget(Paragraph::new(lines), inner);
+        return;
+    }
+
+    let halves = Layout::default()
+        .direction(Direction::Horizontal)
+        .constraints([Constraint::Percentage(50), Constraint::Percentage(50)])
+        .split(inner);
+
+    let lines = build_lines(halves[0]);
+    frame.render_widget(Paragraph::new(lines), halves[0]);
+    render_inline_sparkline_strip(frame, halves[1], sparkline);
+}
+
+/// Render the 3-line inline sparkline strip into `area`. When `area.width`
+/// is below `SPARKLINE_MIN_RIGHT_HALF_WIDTH`, `sparkline` is `None`,
+/// `endpoint_missing` is set, or the series is empty, renders a
+/// single-line muted placeholder instead. Pure rendering — no allocation
+/// beyond the returned `Line`s.
+pub(super) fn render_inline_sparkline_strip(
+    frame: &mut Frame,
+    area: Rect,
+    sparkline: Option<&crate::view::browser::state::sparkline::SparklineState>,
+) {
+    use crate::client::history::ComponentKind;
+    use crate::widget::sparkline::{count_formatter, render_sparkline_row, task_time_formatter};
+
+    if area.width < SPARKLINE_MIN_RIGHT_HALF_WIDTH {
+        return;
+    }
+
+    let Some(sparkline) = sparkline else {
+        frame.render_widget(
+            Paragraph::new(Line::from(Span::styled("loading…", theme::muted()))),
+            area,
+        );
+        return;
+    };
+
+    if sparkline.endpoint_missing {
+        frame.render_widget(
+            Paragraph::new(Line::from(Span::styled("no history yet", theme::muted()))),
+            area,
+        );
+        return;
+    }
+
+    let Some(series) = sparkline.series.as_ref() else {
+        frame.render_widget(
+            Paragraph::new(Line::from(Span::styled("loading…", theme::muted()))),
+            area,
+        );
+        return;
+    };
+
+    let rows = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([
+            Constraint::Length(1),
+            Constraint::Length(1),
+            Constraint::Length(1),
+        ])
+        .split(area);
+
+    let in_values: Vec<u64> = series.buckets.iter().map(|b| b.in_count).collect();
+    let out_values: Vec<u64> = series.buckets.iter().map(|b| b.out_count).collect();
+
+    let (row3_label, row3_values, row3_formatter): (&str, Vec<u64>, fn(u64) -> String) =
+        match sparkline.kind {
+            ComponentKind::Processor => (
+                "task",
+                series
+                    .buckets
+                    .iter()
+                    .filter_map(|b| b.task_time_ns)
+                    .collect(),
+                task_time_formatter as fn(u64) -> String,
+            ),
+            ComponentKind::ProcessGroup | ComponentKind::Connection => (
+                "queue",
+                series
+                    .buckets
+                    .iter()
+                    .filter_map(|b| b.queued_count)
+                    .collect(),
+                count_formatter as fn(u64) -> String,
+            ),
+            ComponentKind::ControllerService | ComponentKind::Port => return,
+        };
+
+    frame.render_widget(
+        Paragraph::new(render_sparkline_row(
+            "in",
+            5,
+            &in_values,
+            theme::spark_in(),
+            count_formatter,
+            area.width,
+        )),
+        rows[0],
+    );
+    frame.render_widget(
+        Paragraph::new(render_sparkline_row(
+            "out",
+            5,
+            &out_values,
+            theme::spark_out(),
+            count_formatter,
+            area.width,
+        )),
+        rows[1],
+    );
+    frame.render_widget(
+        Paragraph::new(render_sparkline_row(
+            row3_label,
+            5,
+            &row3_values,
+            theme::spark_queued(),
+            row3_formatter,
+            area.width,
+        )),
+        rows[2],
+    );
+}
+
 /// Format a property value for Processor/CS detail tables. Returns
 /// `Some(Line)` when the raw value is a UUID that resolves to a known
 /// arena node (rendered as `<name> (short8…) →`), or when the raw
