@@ -949,4 +949,14 @@ mod snapshots {
         let out = render_pg_with_sparkline(120, 30, Some(s));
         assert_snapshot!("pg_detail_sparkline_endpoint_missing", out);
     }
+
+    #[test]
+    fn pg_detail_sparkline_empty_buckets_renders_placeholder() {
+        use crate::client::history::ComponentKind;
+        use crate::view::browser::state::sparkline::SparklineState;
+        let mut s = SparklineState::pending(ComponentKind::ProcessGroup, "ingest".into());
+        s.series = Some(sample_pg_series(0));
+        let out = render_pg_with_sparkline(120, 30, Some(s));
+        assert_snapshot!("pg_detail_sparkline_empty_buckets", out);
+    }
 }

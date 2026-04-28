@@ -491,6 +491,16 @@ NiFi maps to `AppEvent::SparklineEndpointMissing` (sticky per
 selection until the user moves to another row); other errors log at
 `warn!` and continue.
 
+`reduce_status_history` in `src/client/history.rs` reads
+`statusHistory.aggregateSnapshots` first; when that array is empty
+(NiFi clustered mode often returns `aggregateSnapshots: []` and ships
+the per-node series under `nodeSnapshots` without recomputing the
+cluster aggregate), the reducer sums `nodeSnapshots[*].statusSnapshots`
+across nodes per timestamp and uses the result as buckets. The
+fallback path emits one `tracing::debug!` line per fetch so the log
+distinguishes "NiFi gave us aggregates" from "we summed nodewise
+ourselves".
+
 Reducer arms in `app::state::update_inner` apply each emit only when
 `(kind, id)` matches the active selection — defends against stale
 emits between worker abort and exit. UpdateResult carries a
@@ -507,9 +517,16 @@ kind:
 | PG | `in` flowfiles | `out` flowfiles | `queue` count |
 | Connection | `in` flowfiles | `out` flowfiles | `queue` count |
 
-Below 24 cells of identity-inner width (2× `SPARKLINE_MIN_RIGHT_HALF_WIDTH`)
-the strip is suppressed and the identity panel reverts to full width
-(responsive fallback). No focus, no chord — purely periodic display.
+Layout is content-driven, not percentage-driven: the renderer measures
+the natural rendered width of the identity lines, places them on the
+left at exactly that width, leaves a 2-cell gap (`SPARKLINE_GAP_COLS`),
+and gives the remaining columns to the strip. The strip is suppressed
+entirely — left content fills the full inner width — when the
+remainder is below `SPARKLINE_MIN_RIGHT_HALF_WIDTH` (12 cells).
+Sizing the left side to actual content is what prevents the
+mid-truncation overlap (`5 iloading…`) the percentage split produced
+when identity content was longer than half the inner area. No focus,
+no chord — purely periodic display.
 
 ### Tracer content viewer modal
 

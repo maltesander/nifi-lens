@@ -153,18 +153,65 @@ fn reduce_status_history(
     kind: ComponentKind,
 ) -> StatusHistorySeries {
     let dto = entity.status_history.unwrap_or_default();
-    let snapshots = dto.aggregate_snapshots.unwrap_or_default();
+
+    // Cluster-mode fallback: NiFi's `/status/history` response on a
+    // clustered instance often returns an empty `aggregateSnapshots`
+    // (the controlling node ships its own per-node series under
+    // `nodeSnapshots` without recomputing the cluster aggregate). When
+    // that happens, sum the per-node snapshots ourselves so the
+    // sparkline still has data.
+    let aggregate = dto.aggregate_snapshots.unwrap_or_default();
+    let snapshots = if aggregate.is_empty() {
+        let summed = dto
+            .node_snapshots
+            .as_deref()
+            .map(aggregate_node_snapshots)
+            .unwrap_or_default();
+        if !summed.is_empty() {
+            tracing::debug!(
+                node_count = dto.node_snapshots.as_deref().map(<[_]>::len).unwrap_or(0),
+                bucket_count = summed.len(),
+                "status_history aggregateSnapshots empty; summed nodeSnapshots fallback"
+            );
+        }
+        summed
+    } else {
+        aggregate
+    };
+
+    // Log the metric keys present in the first bucket once per fetch
+    // so future drift between NiFi versions is easy to diagnose. The
+    // status-history repository uses different keys than the snapshot
+    // DTO (e.g. PG-level is `queuedCount` in history but
+    // `flowFilesQueued` in snapshot), so callers that match on the
+    // snapshot key set silently lose data.
+    if let Some(first) = snapshots.first()
+        && let Some(metrics) = first.status_metrics.as_ref()
+    {
+        let mut keys: Vec<&str> = metrics.keys().map(String::as_str).collect();
+        keys.sort_unstable();
+        tracing::debug!(?kind, ?keys, "status_history metric keys");
+    }
+
     let buckets = snapshots
         .into_iter()
         .map(|snap| {
             let metrics = snap.status_metrics.unwrap_or_default();
-            let in_count = pick_metric(&metrics, "flowFilesIn").unwrap_or(0);
-            let out_count = pick_metric(&metrics, "flowFilesOut").unwrap_or(0);
+            // NiFi history-repo metric keys differ from the snapshot
+            // DTO. PG uses `flowFilesIn` / `flowFilesOut` /
+            // `queuedCount` (not `flowFilesQueued`); Connection uses
+            // `inputCount` / `outputCount` / `queuedCount`. Try the
+            // PG-style keys first (more common surface), then fall
+            // back to the connection-style aliases.
+            let in_count = pick_first_metric(&metrics, &["flowFilesIn", "inputCount"]).unwrap_or(0);
+            let out_count =
+                pick_first_metric(&metrics, &["flowFilesOut", "outputCount"]).unwrap_or(0);
             let (queued_count, task_time_ns) = match kind {
                 ComponentKind::Processor => (None, pick_metric(&metrics, "taskNanos")),
-                ComponentKind::ProcessGroup | ComponentKind::Connection => {
-                    (pick_metric(&metrics, "flowFilesQueued"), None)
-                }
+                ComponentKind::ProcessGroup | ComponentKind::Connection => (
+                    pick_first_metric(&metrics, &["queuedCount", "flowFilesQueued"]),
+                    None,
+                ),
                 ComponentKind::ControllerService | ComponentKind::Port => (None, None),
             };
             let timestamp = snap
@@ -192,11 +239,62 @@ fn reduce_status_history(
     }
 }
 
+/// Sum NiFi's per-node `StatusSnapshotDto` lists into one aggregate
+/// list, grouping by timestamp string (NiFi emits identical timestamps
+/// across nodes for the same bucket). Metric values are summed across
+/// nodes; missing metrics on a node contribute 0.
+fn aggregate_node_snapshots(
+    nodes: &[nifi_rust_client::dynamic::types::NodeStatusSnapshotsDto],
+) -> Vec<nifi_rust_client::dynamic::types::StatusSnapshotDto> {
+    use nifi_rust_client::dynamic::types::StatusSnapshotDto;
+    use std::collections::BTreeMap;
+
+    let mut by_ts: BTreeMap<String, std::collections::HashMap<String, i64>> = BTreeMap::new();
+    for node in nodes {
+        let Some(snaps) = node.status_snapshots.as_ref() else {
+            continue;
+        };
+        for snap in snaps {
+            let Some(ts) = snap.timestamp.as_ref() else {
+                continue;
+            };
+            let entry = by_ts.entry(ts.to_string()).or_default();
+            if let Some(metrics) = snap.status_metrics.as_ref() {
+                for (k, v) in metrics {
+                    if let Some(v) = v {
+                        *entry.entry(k.clone()).or_insert(0) += *v;
+                    }
+                }
+            }
+        }
+    }
+    by_ts
+        .into_iter()
+        .map(|(ts, metrics)| {
+            let mut snap = StatusSnapshotDto::default();
+            snap.timestamp = Some(nifi_rust_client::FlexibleString(ts));
+            snap.status_metrics = Some(metrics.into_iter().map(|(k, v)| (k, Some(v))).collect());
+            snap
+        })
+        .collect()
+}
+
 fn pick_metric(metrics: &std::collections::HashMap<String, Option<i64>>, key: &str) -> Option<u64> {
     metrics
         .get(key)
         .and_then(|v| v.as_ref())
         .map(|v| (*v).max(0) as u64)
+}
+
+/// Try several metric keys in order, return the first match. NiFi's
+/// status-history metric naming drifts between component types and
+/// versions (PG-level uses `queuedCount`; some endpoints use
+/// `flowFilesQueued`); listing both lets one extractor handle both.
+fn pick_first_metric(
+    metrics: &std::collections::HashMap<String, Option<i64>>,
+    keys: &[&str],
+) -> Option<u64> {
+    keys.iter().find_map(|k| pick_metric(metrics, k))
 }
 
 fn parse_nifi_timestamp_to_systemtime(raw: &str) -> Option<SystemTime> {
@@ -368,6 +466,39 @@ mod tests {
     }
 
     #[tokio::test(flavor = "current_thread")]
+    async fn status_history_process_group_uses_queued_count_alias() {
+        // Live NiFi 2.x emits `queuedCount` (history-repo metric name)
+        // rather than `flowFilesQueued` (snapshot DTO field name) for
+        // the queued metric on PG status history. Verify the alias
+        // fallback finds it.
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path("/nifi-api/flow/process-groups/pg-1/status/history"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "statusHistory": {
+                    "aggregateSnapshots": [
+                        {"timestamp": "04/27/2026 10:00:00 UTC",
+                         "statusMetrics": {"flowFilesIn": 0, "flowFilesOut": 0, "queuedCount": 20}}
+                    ]
+                }
+            })))
+            .mount(&server)
+            .await;
+
+        let client = test_client(&server).await;
+        let guard = client.read().await;
+        let series = status_history(&guard, ComponentKind::ProcessGroup, "pg-1")
+            .await
+            .expect("series");
+        assert_eq!(series.buckets.len(), 1);
+        assert_eq!(
+            series.buckets[0].queued_count,
+            Some(20),
+            "must read queuedCount alias"
+        );
+    }
+
+    #[tokio::test(flavor = "current_thread")]
     async fn status_history_connection_returns_queued_series() {
         let server = MockServer::start().await;
         Mock::given(method("GET"))
@@ -390,6 +521,69 @@ mod tests {
             .expect("series");
         assert_eq!(series.buckets.len(), 1);
         assert_eq!(series.buckets[0].queued_count, Some(1));
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn status_history_falls_back_to_node_snapshots_when_aggregate_empty() {
+        // Cluster-mode quirk: NiFi can return `aggregateSnapshots: []` (or
+        // omit it) while populating per-node snapshots under
+        // `nodeSnapshots`. The reducer must sum per-node values per
+        // timestamp so the sparkline still has buckets.
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path("/nifi-api/flow/process-groups/pg-1/status/history"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "statusHistory": {
+                    "aggregateSnapshots": [],
+                    "nodeSnapshots": [
+                        {
+                            "nodeId": "node-a",
+                            "statusSnapshots": [
+                                {"timestamp": "04/27/2026 10:00:00 UTC",
+                                 "statusMetrics": {"flowFilesIn": 10, "flowFilesOut": 9, "flowFilesQueued": 3}},
+                                {"timestamp": "04/27/2026 10:05:00 UTC",
+                                 "statusMetrics": {"flowFilesIn": 12, "flowFilesOut": 11, "flowFilesQueued": 4}}
+                            ]
+                        },
+                        {
+                            "nodeId": "node-b",
+                            "statusSnapshots": [
+                                {"timestamp": "04/27/2026 10:00:00 UTC",
+                                 "statusMetrics": {"flowFilesIn": 5, "flowFilesOut": 4, "flowFilesQueued": 1}},
+                                {"timestamp": "04/27/2026 10:05:00 UTC",
+                                 "statusMetrics": {"flowFilesIn": 7, "flowFilesOut": 6, "flowFilesQueued": 2}}
+                            ]
+                        }
+                    ]
+                }
+            })))
+            .mount(&server)
+            .await;
+
+        let client = test_client(&server).await;
+        let guard = client.read().await;
+        let series = status_history(&guard, ComponentKind::ProcessGroup, "pg-1")
+            .await
+            .expect("series");
+        assert_eq!(
+            series.buckets.len(),
+            2,
+            "two distinct timestamps → two buckets"
+        );
+        // Bucket order is timestamp-ascending (BTreeMap by string key).
+        assert_eq!(series.buckets[0].in_count, 15, "10 + 5 across nodes");
+        assert_eq!(series.buckets[0].out_count, 13, "9 + 4 across nodes");
+        assert_eq!(
+            series.buckets[0].queued_count,
+            Some(4),
+            "3 + 1 across nodes"
+        );
+        assert_eq!(series.buckets[1].in_count, 19, "12 + 7 across nodes");
+        assert_eq!(
+            series.buckets[1].queued_count,
+            Some(6),
+            "4 + 2 across nodes"
+        );
     }
 
     #[tokio::test(flavor = "current_thread")]

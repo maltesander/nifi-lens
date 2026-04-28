@@ -410,4 +410,14 @@ mod snapshots {
         let out = render_conn_with_sparkline(120, Some(s));
         assert_snapshot!("connection_detail_sparkline_endpoint_missing", out);
     }
+
+    #[test]
+    fn connection_detail_sparkline_empty_buckets_renders_placeholder() {
+        use crate::client::history::ComponentKind;
+        use crate::view::browser::state::sparkline::SparklineState;
+        let mut s = SparklineState::pending(ComponentKind::Connection, CONN_ID.into());
+        s.series = Some(sample_conn_series(0));
+        let out = render_conn_with_sparkline(120, Some(s));
+        assert_snapshot!("connection_detail_sparkline_empty_buckets", out);
+    }
 }

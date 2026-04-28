@@ -1,10 +1,11 @@
 ---
 source: src/view/browser/render/processor.rs
+assertion_line: 729
 expression: "format!(\"{}\", term.backend())"
 ---
 "┌ EnrichAttribute · processor · RUNNING ───────────────────────────────────────────────────────────────────────────────┐"
 "│┌ Identity ──────────────────────────────────────────────────────────────────────────────────────────────────────────┐│"
-"││type   org.apache.nifi.processors.attributes.EnrichAttrib…loading…                                                  ││"
+"││type   org.apache.nifi.processors.attributes.EnrichAttribute  loading…                                              ││"
 "││bundle org.apache.nifi:nifi-standard-nar:2.8.0                                                                      ││"
 "││                                                                                                                    ││"
 "│└────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┘│"

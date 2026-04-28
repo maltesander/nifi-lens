@@ -52,18 +52,26 @@ where
     frame.render_widget(Paragraph::new(lines), inner);
 }
 
-/// Width of the right half (sparkline strip) below which the strip is
-/// suppressed and the identity panel falls back to full width.
+/// Width below which the sparkline strip is suppressed.
 pub(super) const SPARKLINE_MIN_RIGHT_HALF_WIDTH: u16 = 12;
 
-/// Render an "Identity" Panel split horizontally: caller-built lines on
-/// the left, an inline sparkline strip on the right (when supported).
+/// Visible-column gap between the natural-width identity content on the
+/// left and the sparkline strip on the right. Two cells reads clearly
+/// while still letting the strip take meaningful space at narrow widths.
+const SPARKLINE_GAP_COLS: u16 = 2;
+
+/// Render an "Identity" Panel: caller-built lines render at their
+/// **natural width** on the left; the sparkline strip is placed in
+/// the remaining columns separated by `SPARKLINE_GAP_COLS`. The strip
+/// is suppressed entirely when the remainder is narrower than
+/// `SPARKLINE_MIN_RIGHT_HALF_WIDTH`, so left-half content never gets
+/// truncated mid-word into the strip.
 ///
-/// The right-half width must be at least `SPARKLINE_MIN_RIGHT_HALF_WIDTH`
-/// for the strip to render — below that the panel falls back to the
-/// full-width single-half layout (left only). When `sparkline` is `None`,
-/// the right half stays blank but the layout split is unchanged so the
-/// identity rows don't reflow on every selection change.
+/// This used to do a fixed 50/50 horizontal split which produced visual
+/// overlap (`5 iloading…`) whenever the identity text was wider than
+/// half of the inner area. Sizing the left side to the actual content
+/// width — not a percentage — is what makes the gap reliable at every
+/// terminal size.
 pub(super) fn render_identity_panel_with_sparkline<F>(
     frame: &mut Frame,
     area: Rect,
@@ -76,22 +84,39 @@ pub(super) fn render_identity_panel_with_sparkline<F>(
     let inner = block.inner(area);
     frame.render_widget(block, area);
 
-    // If inner is too narrow to support a meaningful right-half strip,
-    // render lines at full width and skip the sparkline.
-    if inner.width < 2 * SPARKLINE_MIN_RIGHT_HALF_WIDTH {
-        let lines = build_lines(inner);
+    let lines = build_lines(inner);
+    let max_left_width: u16 = lines
+        .iter()
+        .map(|l| u16::try_from(l.width()).unwrap_or(u16::MAX))
+        .max()
+        .unwrap_or(0);
+
+    // Decide whether the strip fits next to the content. If the natural
+    // identity width plus a 2-col gap plus the strip's minimum doesn't
+    // fit in `inner`, render lines at full width and skip the strip.
+    let needed = max_left_width
+        .saturating_add(SPARKLINE_GAP_COLS)
+        .saturating_add(SPARKLINE_MIN_RIGHT_HALF_WIDTH);
+    if inner.width < needed {
         frame.render_widget(Paragraph::new(lines), inner);
         return;
     }
 
-    let halves = Layout::default()
-        .direction(Direction::Horizontal)
-        .constraints([Constraint::Percentage(50), Constraint::Percentage(50)])
-        .split(inner);
+    let left_area = Rect {
+        x: inner.x,
+        y: inner.y,
+        width: max_left_width,
+        height: inner.height,
+    };
+    frame.render_widget(Paragraph::new(lines), left_area);
 
-    let lines = build_lines(halves[0]);
-    frame.render_widget(Paragraph::new(lines), halves[0]);
-    render_inline_sparkline_strip(frame, halves[1], sparkline);
+    let strip_area = Rect {
+        x: inner.x + max_left_width + SPARKLINE_GAP_COLS,
+        y: inner.y,
+        width: inner.width - max_left_width - SPARKLINE_GAP_COLS,
+        height: inner.height,
+    };
+    render_inline_sparkline_strip(frame, strip_area, sparkline);
 }
 
 /// Render the 3-line inline sparkline strip into `area`. When `area.width`
@@ -135,6 +160,19 @@ pub(super) fn render_inline_sparkline_strip(
         return;
     };
 
+    // NiFi can return a successful status-history response with no
+    // aggregate snapshots (idle / freshly-created components before its
+    // compactor catches up). Falling through would render rows like
+    // `in     peak 0` with no glyphs — a broken-looking strip. Surface
+    // the same muted placeholder the 404 branch uses instead.
+    if series.buckets.is_empty() {
+        frame.render_widget(
+            Paragraph::new(Line::from(Span::styled("no history yet", theme::muted()))),
+            area,
+        );
+        return;
+    }
+
     let rows = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
@@ -147,6 +185,12 @@ pub(super) fn render_inline_sparkline_strip(
     let in_values: Vec<u64> = series.buckets.iter().map(|b| b.in_count).collect();
     let out_values: Vec<u64> = series.buckets.iter().map(|b| b.out_count).collect();
 
+    // Use `map(unwrap_or(0))` rather than `filter_map`: when the metric
+    // is missing for some buckets (or the key didn't match in the
+    // reducer), we still want the row to render with the same length as
+    // `in`/`out` — a row that vanishes whenever a metric is partially
+    // absent is more confusing than zeros. `peak` reflects the actual
+    // recorded values, so all-zeros still surface as `peak 0`.
     let (row3_label, row3_values, row3_formatter): (&str, Vec<u64>, fn(u64) -> String) =
         match sparkline.kind {
             ComponentKind::Processor => (
@@ -154,7 +198,7 @@ pub(super) fn render_inline_sparkline_strip(
                 series
                     .buckets
                     .iter()
-                    .filter_map(|b| b.task_time_ns)
+                    .map(|b| b.task_time_ns.unwrap_or(0))
                     .collect(),
                 task_time_formatter as fn(u64) -> String,
             ),
@@ -163,7 +207,7 @@ pub(super) fn render_inline_sparkline_strip(
                 series
                     .buckets
                     .iter()
-                    .filter_map(|b| b.queued_count)
+                    .map(|b| b.queued_count.unwrap_or(0))
                     .collect(),
                 count_formatter as fn(u64) -> String,
             ),

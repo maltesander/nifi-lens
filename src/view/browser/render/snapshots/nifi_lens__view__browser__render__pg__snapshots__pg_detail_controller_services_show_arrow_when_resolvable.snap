@@ -1,10 +1,11 @@
 ---
 source: src/view/browser/render/pg.rs
+assertion_line: 624
 expression: out
 ---
 "┌ ingest · process group ──────────────────────────────────────────────────────────────────────────┐"
 "│┌ Identity ──────────────────────────────────────────────────────────────────────────────────────┐│"
-"││Processors 3 running · 1 stopped · 0 invalid · 0loading…                                        ││"
+"││Processors 3 running · 1 stopped · 0 invalid · 0 disabled  loading…                             ││"
 "││Threads    1 active                                                                             ││"
 "││Queued     4 ffiles · 4 / 2 KB                                                                  ││"
 "│└────────────────────────────────────────────────────────────────────────────────────────────────┘│"

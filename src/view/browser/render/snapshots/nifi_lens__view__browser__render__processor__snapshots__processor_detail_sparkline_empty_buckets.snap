@@ -1,6 +1,6 @@
 ---
 source: src/view/browser/render/processor.rs
-assertion_line: 795
+assertion_line: 805
 expression: out
 ---
 "┌ PutKafka · processor · RUNNING ──────────────────────────────────────────────────────────────────────────────────────┐"

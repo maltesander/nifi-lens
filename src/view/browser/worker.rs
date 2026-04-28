@@ -209,17 +209,26 @@ pub fn spawn_sparkline_fetch_loop(
     cadence: std::time::Duration,
 ) -> JoinHandle<()> {
     tokio::task::spawn_local(async move {
+        tracing::debug!(?kind, %id, ?cadence, "sparkline worker started");
         loop {
             let res = {
                 let guard = client.read().await;
                 crate::client::history::status_history(&guard, kind, &id).await
             };
             let event = match res {
-                Ok(series) => AppEvent::SparklineUpdate {
-                    kind,
-                    id: id.clone(),
-                    series,
-                },
+                Ok(series) => {
+                    tracing::debug!(
+                        ?kind,
+                        %id,
+                        bucket_count = series.buckets.len(),
+                        "status_history fetch ok"
+                    );
+                    AppEvent::SparklineUpdate {
+                        kind,
+                        id: id.clone(),
+                        series,
+                    }
+                }
                 Err(err) if crate::client::history::is_status_history_endpoint_missing(&err) => {
                     AppEvent::SparklineEndpointMissing {
                         kind,

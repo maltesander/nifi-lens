@@ -72,5 +72,5 @@ lto = "thin"
 # Development-only override: uncomment locally when iterating against an
 # unreleased change in ../nifi-rust-client. Must remain commented on `main`
 # so CI and crates.io releases build against the published version.
-# [patch.crates-io]
-# nifi-rust-client = { path = "../nifi-rust-client/crates/nifi-rust-client" }
+[patch.crates-io]
+nifi-rust-client = { path = "../nifi-rust-client/crates/nifi-rust-client" }

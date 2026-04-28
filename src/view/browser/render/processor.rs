@@ -794,4 +794,14 @@ mod snapshots {
         let out = render_with_sparkline(120, Some(s));
         assert_snapshot!("processor_detail_sparkline_endpoint_missing", out);
     }
+
+    #[test]
+    fn processor_detail_sparkline_empty_buckets_renders_placeholder() {
+        use crate::client::history::ComponentKind;
+        use crate::view::browser::state::sparkline::SparklineState;
+        let mut s = SparklineState::pending(ComponentKind::Processor, "put-kafka-1".into());
+        s.series = Some(sample_processor_series(0));
+        let out = render_with_sparkline(120, Some(s));
+        assert_snapshot!("processor_detail_sparkline_empty_buckets", out);
+    }
 }

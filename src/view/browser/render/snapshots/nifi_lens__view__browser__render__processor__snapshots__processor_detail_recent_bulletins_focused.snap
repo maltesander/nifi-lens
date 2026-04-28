@@ -1,10 +1,11 @@
 ---
 source: src/view/browser/render/processor.rs
+assertion_line: 556
 expression: out
 ---
 "┌ PutKafka · processor · RUNNING ──────────────────────────────────────────────────────────────────────────────────────┐"
 "│┌ Identity ──────────────────────────────────────────────────────────────────────────────────────────────────────────┐│"
-"││type   org.apache.nifi.processors.kafka.pubsub.PublishKaf…loading…                                                  ││"
+"││type   org.apache.nifi.processors.kafka.pubsub.PublishKafka_2_6  loading…                                           ││"
 "││bundle org.apache.nifi:nifi-kafka-2-6-nar:2.8.0                                                                     ││"
 "││                                                                                                                    ││"
 "│└────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┘│"
