@@ -10,7 +10,7 @@
 //! Runs under the main-thread `LocalSet` (see `lib::run_inner`) because
 //! `nifi-rust-client`'s dynamic dispatch traits return `!Send` futures.
 
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 
 use tokio::sync::{RwLock, mpsc};
 use tokio::task::JoinHandle;
@@ -281,6 +281,99 @@ pub fn spawn_version_control_modal_fetch(
         };
         let _ = tx.send(AppEvent::Data(ViewPayload::Browser(payload))).await;
     })
+}
+
+/// Owns the polling worker's `JoinHandle` plus the listing-request id
+/// once the worker has POSTed it. Drop aborts the worker and (if a
+/// request id is known) fires `DELETE /flowfile-queues/{q}/listing-requests/{r}`
+/// best-effort on the same `LocalSet` we're already on.
+///
+/// Constructed by `spawn_queue_listing_fetch` (Task 6); the
+/// `new_for_test` constructor exists to exercise Drop semantics
+/// without spinning up the full polling worker.
+pub struct QueueListingHandle {
+    join: Option<JoinHandle<()>>,
+    queue_id: String,
+    request_id: Arc<Mutex<Option<String>>>,
+    client: Arc<RwLock<NifiClient>>,
+}
+
+impl std::fmt::Debug for QueueListingHandle {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let request_id = self.request_id.lock().ok().and_then(|g| g.clone());
+        f.debug_struct("QueueListingHandle")
+            .field("queue_id", &self.queue_id)
+            .field("request_id", &request_id)
+            .field("join_active", &self.join.is_some())
+            .finish()
+    }
+}
+
+impl QueueListingHandle {
+    /// Constructor for the polling worker. Wired up in Task 6 by
+    /// `spawn_queue_listing_fetch`; suppress the dead-code warning
+    /// until then.
+    #[allow(dead_code)]
+    pub(crate) fn new(
+        join: JoinHandle<()>,
+        queue_id: String,
+        request_id: Arc<Mutex<Option<String>>>,
+        client: Arc<RwLock<NifiClient>>,
+    ) -> Self {
+        Self {
+            join: Some(join),
+            queue_id,
+            request_id,
+            client,
+        }
+    }
+
+    /// Test-only constructor that skips the worker spawn. Drop behavior
+    /// is identical so the inline tests can verify DELETE semantics in
+    /// isolation from the polling logic.
+    #[doc(hidden)]
+    pub fn new_for_test(
+        queue_id: String,
+        request_id: Arc<Mutex<Option<String>>>,
+        client: Arc<RwLock<NifiClient>>,
+    ) -> Self {
+        Self {
+            join: None,
+            queue_id,
+            request_id,
+            client,
+        }
+    }
+}
+
+impl Drop for QueueListingHandle {
+    fn drop(&mut self) {
+        if let Some(join) = self.join.take() {
+            join.abort();
+        }
+        let request_id = match self.request_id.lock() {
+            Ok(g) => g.clone(),
+            Err(p) => p.into_inner().clone(),
+        };
+        let Some(request_id) = request_id else { return };
+        let client = self.client.clone();
+        let queue_id = self.queue_id.clone();
+        // Drop runs on the main UI task, which lives on the LocalSet —
+        // spawn_local is the right primitive here.
+        tokio::task::spawn_local(async move {
+            let guard = client.read().await;
+            if let Err(e) =
+                crate::client::queues::cancel_listing_request(&guard, &queue_id, &request_id).await
+            {
+                tracing::warn!(
+                    error = ?e,
+                    queue_id,
+                    request_id,
+                    "failed to delete listing request",
+                );
+            }
+        });
+    }
 }
 
 #[cfg(test)]
@@ -634,10 +727,90 @@ mod tests {
             _ => panic!("expected ParameterContextModalFailed"),
         }
     }
-}
 
-/// Placeholder — replaced in Task 5 with the full Drop-DELETE wrapper.
-#[derive(Debug)]
-pub struct QueueListingHandle {
-    _opaque: (),
+    /// `QueueListingHandle::drop` aborts the worker and fires
+    /// `DELETE /flowfile-queues/{id}/listing-requests/{request_id}` on
+    /// the same `LocalSet`, so cleanup happens uniformly across
+    /// selection-move, tab-switch, and app-shutdown.
+    #[tokio::test(flavor = "current_thread")]
+    async fn drop_fires_delete_when_request_id_known() {
+        use std::sync::Mutex as StdMutex;
+        use std::time::Duration as StdDuration;
+
+        use wiremock::matchers::{method, path};
+        use wiremock::{Mock, MockServer, ResponseTemplate};
+
+        let server = MockServer::start().await;
+        Mock::given(method("DELETE"))
+            .and(path("/nifi-api/flowfile-queues/q1/listing-requests/req-42"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!(
+                {"listingRequest": {"id": "req-42", "state": "CANCELLED", "finished": true}}
+            )))
+            .expect(1)
+            .mount(&server)
+            .await;
+
+        let local = LocalSet::new();
+        local
+            .run_until(async {
+                let client = test_client(&server).await;
+                let request_id = Arc::new(StdMutex::new(Some("req-42".to_string())));
+
+                let handle =
+                    super::QueueListingHandle::new_for_test("q1".to_string(), request_id, client);
+                drop(handle);
+
+                // Give the spawn_local cleanup task time to run + complete
+                // the HTTP request. wiremock's `expect(1)` checked at
+                // server.verify() catches under-fire, but we want to give
+                // the spawned future a fair chance first.
+                for _ in 0..30 {
+                    tokio::task::yield_now().await;
+                    tokio::time::sleep(StdDuration::from_millis(20)).await;
+                }
+            })
+            .await;
+
+        server.verify().await;
+    }
+
+    /// When the worker hasn't recorded a request id yet (POST hasn't
+    /// returned), Drop must NOT fire DELETE — there's nothing to delete.
+    #[tokio::test(flavor = "current_thread")]
+    async fn drop_skips_delete_before_post_returns() {
+        use std::sync::Mutex as StdMutex;
+        use std::time::Duration as StdDuration;
+
+        use wiremock::matchers::{method, path};
+        use wiremock::{Mock, MockServer, ResponseTemplate};
+
+        let server = MockServer::start().await;
+        Mock::given(method("DELETE"))
+            .and(path(
+                "/nifi-api/flowfile-queues/q1/listing-requests/anything",
+            ))
+            .respond_with(ResponseTemplate::new(200))
+            .expect(0)
+            .mount(&server)
+            .await;
+
+        let local = LocalSet::new();
+        local
+            .run_until(async {
+                let client = test_client(&server).await;
+                let request_id = Arc::new(StdMutex::new(None));
+
+                let handle =
+                    super::QueueListingHandle::new_for_test("q1".to_string(), request_id, client);
+                drop(handle);
+
+                for _ in 0..10 {
+                    tokio::task::yield_now().await;
+                    tokio::time::sleep(StdDuration::from_millis(20)).await;
+                }
+            })
+            .await;
+
+        server.verify().await;
+    }
 }
