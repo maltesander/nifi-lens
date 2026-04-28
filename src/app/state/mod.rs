@@ -1009,12 +1009,16 @@ fn handle_key(state: &mut AppState, key: KeyEvent, config: &Config) -> UpdateRes
     let parameter_modal_open = state.current_tab == crate::app::state::ViewId::Browser
         && state.browser.parameter_modal.is_some()
         && state.modal.is_none();
+    let action_history_modal_open = state.current_tab == crate::app::state::ViewId::Browser
+        && state.browser.action_history_modal.is_some()
+        && state.modal.is_none();
     let input_event = state.keymap.translate(
         key,
         state.current_tab,
         content_modal_open,
         version_modal_open,
         parameter_modal_open,
+        action_history_modal_open,
         state,
     );
 
