@@ -310,6 +310,60 @@ impl QueueListingPeekState {
         self.error = Some(err);
         true
     }
+
+    /// Open the search prompt with input mode active (typing into the
+    /// query field). The renderer paints `/<query>_` while
+    /// `input_active == true`.
+    pub fn open_search(&mut self) {
+        self.search = Some(crate::widget::search::SearchState {
+            query: String::new(),
+            input_active: true,
+            committed: false,
+            matches: Vec::new(),
+            current: None,
+        });
+    }
+
+    /// Discard the search prompt entirely.
+    pub fn close_search(&mut self) {
+        self.search = None;
+    }
+
+    /// Cycle to the next match (wraps to 0 at end). No-op when no
+    /// matches are present.
+    pub fn cycle_search_next(&mut self) {
+        if let Some(search) = self.search.as_mut() {
+            if search.matches.is_empty() {
+                return;
+            }
+            let next = match search.current {
+                Some(i) => (i + 1) % search.matches.len(),
+                None => 0,
+            };
+            search.current = Some(next);
+        }
+    }
+
+    /// Cycle to the previous match (wraps to len-1 at 0).
+    pub fn cycle_search_prev(&mut self) {
+        if let Some(search) = self.search.as_mut() {
+            if search.matches.is_empty() {
+                return;
+            }
+            let prev = match search.current {
+                Some(0) | None => search.matches.len() - 1,
+                Some(i) => i - 1,
+            };
+            search.current = Some(prev);
+        }
+    }
+
+    /// Pretty-printed JSON of the loaded attribute map. Returns `None`
+    /// when attrs are still loading or fetch failed.
+    pub fn attrs_as_json(&self) -> Option<String> {
+        let attrs = self.attrs.as_ref()?;
+        serde_json::to_string_pretty(attrs).ok()
+    }
 }
 
 #[cfg(test)]

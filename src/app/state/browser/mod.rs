@@ -33,6 +33,12 @@ impl ViewKeyHandler for BrowserHandler {
         if let ViewVerb::BrowserQueue(v) = verb {
             return Some(handle_browser_queue_verb(state, v));
         }
+        // BrowserPeek verbs take priority when the peek modal is open. The
+        // keymap shadow gate (T9) routes to BrowserPeekVerb only when
+        // peek_modal_open == true, so reaching here implies the modal is open.
+        if let ViewVerb::BrowserPeek(v) = verb {
+            return Some(handle_browser_peek_verb(state, v));
+        }
         let bv = match verb {
             ViewVerb::Browser(v) => v,
             _ => return None,
@@ -1738,6 +1744,103 @@ fn handle_browser_queue_verb(
                 state.browser.listing_focused = false;
             } else {
                 return UpdateResult::default();
+            }
+            UpdateResult {
+                redraw: true,
+                ..Default::default()
+            }
+        }
+    }
+}
+
+fn handle_browser_peek_verb(
+    state: &mut AppState,
+    verb: crate::input::BrowserPeekVerb,
+) -> UpdateResult {
+    use crate::input::BrowserPeekVerb;
+
+    match verb {
+        BrowserPeekVerb::Close => {
+            // Cascade: close search prompt → close modal.
+            let close_modal = match state
+                .browser
+                .queue_listing
+                .as_mut()
+                .and_then(|l| l.peek.as_mut())
+            {
+                Some(peek) => {
+                    if peek.search.is_some() {
+                        peek.close_search();
+                        false
+                    } else {
+                        true
+                    }
+                }
+                None => false,
+            };
+            if close_modal {
+                state.browser.close_queue_listing_peek_modal();
+            }
+            UpdateResult {
+                redraw: true,
+                ..Default::default()
+            }
+        }
+        BrowserPeekVerb::OpenSearch => {
+            if let Some(peek) = state
+                .browser
+                .queue_listing
+                .as_mut()
+                .and_then(|l| l.peek.as_mut())
+            {
+                peek.open_search();
+            }
+            UpdateResult {
+                redraw: true,
+                ..Default::default()
+            }
+        }
+        BrowserPeekVerb::SearchNext => {
+            if let Some(peek) = state
+                .browser
+                .queue_listing
+                .as_mut()
+                .and_then(|l| l.peek.as_mut())
+            {
+                peek.cycle_search_next();
+            }
+            UpdateResult {
+                redraw: true,
+                ..Default::default()
+            }
+        }
+        BrowserPeekVerb::SearchPrev => {
+            if let Some(peek) = state
+                .browser
+                .queue_listing
+                .as_mut()
+                .and_then(|l| l.peek.as_mut())
+            {
+                peek.cycle_search_prev();
+            }
+            UpdateResult {
+                redraw: true,
+                ..Default::default()
+            }
+        }
+        BrowserPeekVerb::CopyAsJson => {
+            let json = state
+                .browser
+                .queue_listing
+                .as_ref()
+                .and_then(|l| l.peek.as_ref())
+                .and_then(|p| p.attrs_as_json());
+            if let Some(json) = json {
+                let preview: String = json.chars().take(40).collect();
+                match state.copy_to_clipboard(json) {
+                    Ok(()) => state.post_info(format!("copied: {preview}")),
+                    Err(err) => state.post_warning(format!("clipboard: {err}")),
+                }
             }
             UpdateResult {
                 redraw: true,

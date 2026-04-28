@@ -2075,4 +2075,187 @@ mod queue_listing_reducer_tests {
             "listing_focused must be false after 3rd Cancel"
         );
     }
+
+    #[test]
+    fn peek_close_clears_modal() {
+        use crate::app::state::ViewKeyHandler;
+        use crate::input::{BrowserPeekVerb, ViewVerb};
+        use crate::view::browser::state::queue_listing::{QueueListingRow, QueueListingState};
+        use std::time::Duration;
+
+        let mut state = fresh_state();
+        let mut listing = QueueListingState::pending("q1".into(), "Q1".into());
+        listing.rows = vec![QueueListingRow {
+            uuid: "ff-1".into(),
+            filename: Some("a.txt".into()),
+            size: 1,
+            queued_duration: Duration::from_secs(0),
+            position: 1,
+            penalized: false,
+            cluster_node_id: None,
+            lineage_duration: Duration::from_secs(0),
+        }];
+        listing.selected = 0;
+        state.browser.queue_listing = Some(listing);
+        state.browser.open_queue_listing_peek_modal();
+
+        let _ = crate::app::state::browser::BrowserHandler::handle_verb(
+            &mut state,
+            ViewVerb::BrowserPeek(BrowserPeekVerb::Close),
+        );
+        assert!(state.browser.queue_listing.as_ref().unwrap().peek.is_none());
+    }
+
+    #[test]
+    fn peek_search_opens_search_state() {
+        use crate::app::state::ViewKeyHandler;
+        use crate::input::{BrowserPeekVerb, ViewVerb};
+        use crate::view::browser::state::queue_listing::{QueueListingRow, QueueListingState};
+        use std::time::Duration;
+
+        let mut state = fresh_state();
+        let mut listing = QueueListingState::pending("q1".into(), "Q1".into());
+        listing.rows = vec![QueueListingRow {
+            uuid: "ff-1".into(),
+            filename: Some("a.txt".into()),
+            size: 1,
+            queued_duration: Duration::from_secs(0),
+            position: 1,
+            penalized: false,
+            cluster_node_id: None,
+            lineage_duration: Duration::from_secs(0),
+        }];
+        listing.selected = 0;
+        state.browser.queue_listing = Some(listing);
+        state.browser.open_queue_listing_peek_modal();
+        let _ = crate::app::state::browser::BrowserHandler::handle_verb(
+            &mut state,
+            ViewVerb::BrowserPeek(BrowserPeekVerb::OpenSearch),
+        );
+        assert!(
+            state
+                .browser
+                .queue_listing
+                .as_ref()
+                .unwrap()
+                .peek
+                .as_ref()
+                .unwrap()
+                .search
+                .is_some()
+        );
+    }
+
+    #[test]
+    fn peek_close_with_active_search_closes_search_first() {
+        use crate::app::state::ViewKeyHandler;
+        use crate::input::{BrowserPeekVerb, ViewVerb};
+        use crate::view::browser::state::queue_listing::{QueueListingRow, QueueListingState};
+        use std::time::Duration;
+
+        let mut state = fresh_state();
+        let mut listing = QueueListingState::pending("q1".into(), "Q1".into());
+        listing.rows = vec![QueueListingRow {
+            uuid: "ff-1".into(),
+            filename: Some("a.txt".into()),
+            size: 1,
+            queued_duration: Duration::from_secs(0),
+            position: 1,
+            penalized: false,
+            cluster_node_id: None,
+            lineage_duration: Duration::from_secs(0),
+        }];
+        listing.selected = 0;
+        state.browser.queue_listing = Some(listing);
+        state.browser.open_queue_listing_peek_modal();
+        state
+            .browser
+            .queue_listing
+            .as_mut()
+            .unwrap()
+            .peek
+            .as_mut()
+            .unwrap()
+            .open_search();
+
+        let _ = crate::app::state::browser::BrowserHandler::handle_verb(
+            &mut state,
+            ViewVerb::BrowserPeek(BrowserPeekVerb::Close),
+        );
+        let peek = state
+            .browser
+            .queue_listing
+            .as_ref()
+            .unwrap()
+            .peek
+            .as_ref()
+            .unwrap();
+        assert!(peek.search.is_none(), "search closed first");
+
+        let _ = crate::app::state::browser::BrowserHandler::handle_verb(
+            &mut state,
+            ViewVerb::BrowserPeek(BrowserPeekVerb::Close),
+        );
+        assert!(state.browser.queue_listing.as_ref().unwrap().peek.is_none());
+    }
+
+    #[test]
+    fn peek_attrs_as_json_returns_none_until_attrs_loaded() {
+        use crate::view::browser::state::queue_listing::{QueueListingRow, QueueListingState};
+        use std::collections::BTreeMap;
+        use std::time::Duration;
+
+        let mut state = fresh_state();
+        let mut listing = QueueListingState::pending("q1".into(), "Q1".into());
+        listing.rows = vec![QueueListingRow {
+            uuid: "ff-1".into(),
+            filename: Some("a.txt".into()),
+            size: 1,
+            queued_duration: Duration::from_secs(0),
+            position: 1,
+            penalized: false,
+            cluster_node_id: None,
+            lineage_duration: Duration::from_secs(0),
+        }];
+        listing.selected = 0;
+        state.browser.queue_listing = Some(listing);
+        state.browser.open_queue_listing_peek_modal();
+
+        {
+            let peek = state
+                .browser
+                .queue_listing
+                .as_ref()
+                .unwrap()
+                .peek
+                .as_ref()
+                .unwrap();
+            assert!(peek.attrs_as_json().is_none());
+        }
+
+        let mut attrs = BTreeMap::new();
+        attrs.insert("filename".into(), "a.txt".into());
+        state
+            .browser
+            .queue_listing
+            .as_mut()
+            .unwrap()
+            .peek
+            .as_mut()
+            .unwrap()
+            .attrs = Some(attrs);
+
+        let json = state
+            .browser
+            .queue_listing
+            .as_ref()
+            .unwrap()
+            .peek
+            .as_ref()
+            .unwrap()
+            .attrs_as_json()
+            .expect("json available");
+        let parsed: serde_json::Value = serde_json::from_str(&json).expect("valid JSON");
+        assert_eq!(parsed["filename"], "a.txt");
+    }
 }
