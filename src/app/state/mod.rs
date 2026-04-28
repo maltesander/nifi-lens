@@ -1865,6 +1865,12 @@ fn handle_browser_payload(state: &mut AppState, payload: crate::event::BrowserPa
                 .apply_parameter_context_modal_failed(pg_id, err);
             state.browser.parameter_modal_handle = None;
         }
+        BrowserPayload::ActionHistoryPage { .. } => {
+            // Reducer arm wired in Task 13.
+        }
+        BrowserPayload::ActionHistoryError { .. } => {
+            // Reducer arm wired in Task 13.
+        }
     }
 }
 
