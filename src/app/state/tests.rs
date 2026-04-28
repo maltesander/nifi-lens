@@ -1427,3 +1427,113 @@ mod pending_intent_tests {
         }
     }
 }
+
+#[cfg(test)]
+mod queue_listing_reducer_tests {
+    use super::*;
+    use crate::app::state::handle_browser_payload;
+    use crate::event::BrowserPayload;
+    use crate::view::browser::state::queue_listing::QueueListingState;
+
+    #[test]
+    fn redraw_listing_request_id_assigned_records_id() {
+        let mut state = fresh_state();
+        state.browser.queue_listing = Some(QueueListingState::pending("q1".into(), "Q1".into()));
+        handle_browser_payload(
+            &mut state,
+            BrowserPayload::QueueListingRequestIdAssigned {
+                queue_id: "q1".into(),
+                request_id: "req-1".into(),
+            },
+        );
+        assert_eq!(
+            state
+                .browser
+                .queue_listing
+                .as_ref()
+                .unwrap()
+                .request_id
+                .as_deref(),
+            Some("req-1"),
+        );
+    }
+
+    #[test]
+    fn redraw_listing_progress_updates_percent() {
+        let mut state = fresh_state();
+        state.browser.queue_listing = Some(QueueListingState::pending("q1".into(), "Q1".into()));
+        handle_browser_payload(
+            &mut state,
+            BrowserPayload::QueueListingProgress {
+                queue_id: "q1".into(),
+                percent: 70,
+            },
+        );
+        assert_eq!(state.browser.queue_listing.as_ref().unwrap().percent, 70);
+    }
+
+    #[test]
+    fn redraw_listing_complete_populates_rows() {
+        use crate::view::browser::state::queue_listing::QueueListingRow;
+        use std::time::Duration;
+
+        let row = QueueListingRow {
+            uuid: "ff-1".into(),
+            filename: Some("a.txt".into()),
+            size: 1024,
+            queued_duration: Duration::from_secs(1),
+            position: 1,
+            penalized: false,
+            cluster_node_id: None,
+            lineage_duration: Duration::from_secs(2),
+        };
+        let mut state = fresh_state();
+        state.browser.queue_listing = Some(QueueListingState::pending("q1".into(), "Q1".into()));
+        handle_browser_payload(
+            &mut state,
+            BrowserPayload::QueueListingComplete {
+                queue_id: "q1".into(),
+                rows: vec![row],
+                total: 1,
+                truncated: false,
+            },
+        );
+        let s = state.browser.queue_listing.as_ref().unwrap();
+        assert_eq!(s.rows.len(), 1);
+        assert_eq!(s.percent, 100);
+    }
+
+    #[test]
+    fn redraw_listing_payload_for_other_queue_is_ignored() {
+        let mut state = fresh_state();
+        state.browser.queue_listing = Some(QueueListingState::pending("q1".into(), "Q1".into()));
+        handle_browser_payload(
+            &mut state,
+            BrowserPayload::QueueListingComplete {
+                queue_id: "q2".into(),
+                rows: vec![],
+                total: 0,
+                truncated: false,
+            },
+        );
+        let s = state.browser.queue_listing.as_ref().unwrap();
+        assert!(s.rows.is_empty());
+        assert_eq!(s.percent, 0); // unchanged from pending
+    }
+
+    #[test]
+    fn redraw_listing_payload_when_state_is_none_is_noop() {
+        let mut state = fresh_state();
+        state.browser.queue_listing = None;
+        handle_browser_payload(
+            &mut state,
+            BrowserPayload::QueueListingComplete {
+                queue_id: "q1".into(),
+                rows: vec![],
+                total: 0,
+                truncated: false,
+            },
+        );
+        assert!(state.browser.queue_listing.is_none());
+    }
+}

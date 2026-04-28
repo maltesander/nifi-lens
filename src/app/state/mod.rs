@@ -2089,14 +2089,43 @@ pub(crate) fn handle_browser_payload(state: &mut AppState, payload: crate::event
                 state.browser.action_history_modal_handle = None;
             }
         }
-        // T10/T11 will replace these with real reducer arms.
-        BrowserPayload::QueueListingRequestIdAssigned { .. }
-        | BrowserPayload::QueueListingProgress { .. }
-        | BrowserPayload::QueueListingComplete { .. }
-        | BrowserPayload::QueueListingError { .. }
-        | BrowserPayload::QueueListingTimeout { .. }
-        | BrowserPayload::FlowfilePeek { .. }
-        | BrowserPayload::FlowfilePeekError { .. } => {}
+        BrowserPayload::QueueListingRequestIdAssigned {
+            queue_id,
+            request_id,
+        } => {
+            if let Some(s) = state.browser.queue_listing.as_mut()
+                && s.queue_id == queue_id
+            {
+                s.request_id = Some(request_id);
+            }
+        }
+        BrowserPayload::QueueListingProgress { queue_id, percent } => {
+            if let Some(s) = state.browser.queue_listing.as_mut() {
+                s.apply_progress(&queue_id, percent);
+            }
+        }
+        BrowserPayload::QueueListingComplete {
+            queue_id,
+            rows,
+            total,
+            truncated,
+        } => {
+            if let Some(s) = state.browser.queue_listing.as_mut() {
+                s.apply_complete(&queue_id, rows, total, truncated);
+            }
+        }
+        BrowserPayload::QueueListingError { queue_id, err } => {
+            if let Some(s) = state.browser.queue_listing.as_mut() {
+                s.apply_error(&queue_id, err);
+            }
+        }
+        BrowserPayload::QueueListingTimeout { queue_id } => {
+            if let Some(s) = state.browser.queue_listing.as_mut() {
+                s.apply_timeout(&queue_id);
+            }
+        }
+        // T11 will replace these with real peek-payload reducer arms.
+        BrowserPayload::FlowfilePeek { .. } | BrowserPayload::FlowfilePeekError { .. } => {}
     }
 }
 
