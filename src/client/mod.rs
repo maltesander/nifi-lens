@@ -8,6 +8,7 @@
 pub mod browser;
 pub mod build;
 pub mod events;
+pub mod history;
 pub mod overview;
 pub mod parameter_context;
 pub mod status;

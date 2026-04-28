@@ -1381,3 +1381,28 @@ mod goto_subject_tests {
         assert!(build_goto_subject(&s, GoTarget::Browser).is_none());
     }
 }
+
+#[cfg(test)]
+mod pending_intent_tests {
+    #[test]
+    fn spawn_action_history_modal_fetch_intent_destructures() {
+        use crate::app::state::PendingIntent;
+        use std::sync::Arc;
+        use tokio::sync::Notify;
+        let signal = Arc::new(Notify::new());
+        let intent = PendingIntent::SpawnActionHistoryModalFetch {
+            source_id: "proc-1".into(),
+            fetch_signal: signal.clone(),
+        };
+        match intent {
+            PendingIntent::SpawnActionHistoryModalFetch {
+                source_id,
+                fetch_signal,
+            } => {
+                assert_eq!(source_id, "proc-1");
+                assert!(Arc::ptr_eq(&fetch_signal, &signal));
+            }
+            _ => panic!("wrong variant"),
+        }
+    }
+}

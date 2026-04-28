@@ -265,6 +265,31 @@ impl AppState {
         )
     }
 
+    /// True iff the Browser tab is active and the selected row is a
+    /// UUID-bearing component for which NiFi records flow-configuration
+    /// action history (processor, PG, connection, controller service,
+    /// input/output port). Folder rows return false.
+    pub fn browser_selection_supports_action_history(&self) -> bool {
+        if self.current_tab != ViewId::Browser {
+            return false;
+        }
+        let Some(&arena) = self.browser.visible.get(self.browser.selected) else {
+            return false;
+        };
+        let Some(node) = self.browser.nodes.get(arena) else {
+            return false;
+        };
+        matches!(
+            node.kind,
+            crate::client::NodeKind::Processor
+                | crate::client::NodeKind::ProcessGroup
+                | crate::client::NodeKind::Connection
+                | crate::client::NodeKind::ControllerService
+                | crate::client::NodeKind::InputPort
+                | crate::client::NodeKind::OutputPort,
+        )
+    }
+
     /// True iff the Browser tab is active and the selected node is any
     /// ProcessGroup (versioned or not, including the root PG).
     pub fn browser_selection_is_pg(&self) -> bool {
@@ -659,6 +684,16 @@ pub enum PendingIntent {
         pg_id: String,
         bound_context_id: String,
     },
+    /// Spawn the Browser action-history modal's paginator worker.
+    /// The handle is stored on `BrowserState.action_history_modal_handle`
+    /// and aborted on close / refresh / tab switch / selection change.
+    /// `fetch_signal` is the modal's `Notify` — the worker awaits on
+    /// `notified()` to fetch the next page after the reducer fires
+    /// `notify_one()` on scroll-near-tail.
+    SpawnActionHistoryModalFetch {
+        source_id: String,
+        fetch_signal: std::sync::Arc<tokio::sync::Notify>,
+    },
     Quit,
 }
 
@@ -984,12 +1019,16 @@ fn handle_key(state: &mut AppState, key: KeyEvent, config: &Config) -> UpdateRes
     let parameter_modal_open = state.current_tab == crate::app::state::ViewId::Browser
         && state.browser.parameter_modal.is_some()
         && state.modal.is_none();
+    let action_history_modal_open = state.current_tab == crate::app::state::ViewId::Browser
+        && state.browser.action_history_modal.is_some()
+        && state.modal.is_none();
     let input_event = state.keymap.translate(
         key,
         state.current_tab,
         content_modal_open,
         version_modal_open,
         parameter_modal_open,
+        action_history_modal_open,
         state,
     );
 
@@ -1833,7 +1872,7 @@ fn build_goto_subject(
 // Helpers shared across sub-modules
 // ---------------------------------------------------------------------------
 
-fn handle_browser_payload(state: &mut AppState, payload: crate::event::BrowserPayload) {
+pub(crate) fn handle_browser_payload(state: &mut AppState, payload: crate::event::BrowserPayload) {
     use crate::event::BrowserPayload;
     match payload {
         BrowserPayload::Detail(detail) => {
@@ -1864,6 +1903,25 @@ fn handle_browser_payload(state: &mut AppState, payload: crate::event::BrowserPa
                 .browser
                 .apply_parameter_context_modal_failed(pg_id, err);
             state.browser.parameter_modal_handle = None;
+        }
+        BrowserPayload::ActionHistoryPage {
+            source_id,
+            offset: _,
+            actions,
+            total,
+        } => {
+            if let Some(modal) = state.browser.action_history_modal.as_mut() {
+                modal.apply_page(&source_id, actions, total);
+            }
+        }
+        BrowserPayload::ActionHistoryError { source_id, err } => {
+            if let Some(modal) = state.browser.action_history_modal.as_mut()
+                && modal.source_id == source_id
+            {
+                modal.error = Some(err);
+                modal.loading = false;
+                state.browser.action_history_modal_handle = None;
+            }
         }
     }
 }

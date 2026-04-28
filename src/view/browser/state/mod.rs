@@ -17,6 +17,7 @@ use crate::client::browser::{
 };
 use crate::client::status::{ControllerServiceState, ProcessorStatus};
 
+pub mod action_history_modal;
 pub mod parameter_context_modal;
 pub use parameter_context_modal::{
     ParameterContextLoad, ParameterContextModalState, ResolvedParameter, resolve,
@@ -223,6 +224,13 @@ pub struct BrowserState {
     /// Aborted on `Close` and on `Refresh` (which spawns a new one).
     /// Cleared by the loaded / failed event handlers.
     pub parameter_modal_handle: Option<tokio::task::JoinHandle<()>>,
+    /// Open action-history modal state, if any. `None` when the modal
+    /// is closed. Captured at open time, populated asynchronously by
+    /// the view-local worker (Task 11).
+    pub action_history_modal: Option<action_history_modal::ActionHistoryModalState>,
+    /// Live worker handle for the action-history modal's paginator.
+    /// Aborted on close, refresh, tab switch, or selection change.
+    pub action_history_modal_handle: Option<tokio::task::JoinHandle<()>>,
 }
 
 /// One segment in the breadcrumb path.
@@ -498,6 +506,27 @@ impl BrowserState {
             h.abort();
         }
         self.parameter_modal = None;
+    }
+
+    /// Open the action-history modal scoped to `(source_id, label)`.
+    /// Replaces any previously-open action-history modal. Aborts the
+    /// previous worker handle if present.
+    pub fn open_action_history_modal(&mut self, source_id: String, component_label: String) {
+        if let Some(h) = self.action_history_modal_handle.take() {
+            h.abort();
+        }
+        self.action_history_modal = Some(action_history_modal::ActionHistoryModalState::pending(
+            source_id,
+            component_label,
+        ));
+    }
+
+    /// Close the action-history modal and abort any in-flight worker.
+    pub fn close_action_history_modal(&mut self) {
+        if let Some(h) = self.action_history_modal_handle.take() {
+            h.abort();
+        }
+        self.action_history_modal = None;
     }
 
     /// Apply a successful chain fetch to the open modal. Mismatched
@@ -780,6 +809,78 @@ impl BrowserState {
         } else {
             cur - 1
         });
+    }
+
+    // Search reducer methods for the action-history modal. Mirror the
+    // version_modal_search_* and parameter_modal_search_* methods above;
+    // each operates against action_history_modal.search and the body from
+    // ActionHistoryModalState::searchable_body.
+
+    /// Push a character into the action-history modal's live search query
+    /// and recompute matches. No-op if no modal or no active search input.
+    pub fn action_history_modal_search_push(&mut self, ch: char) {
+        let Some(modal) = self.action_history_modal.as_mut() else {
+            return;
+        };
+        let body = modal.searchable_body();
+        let Some(search) = modal.search.as_mut() else {
+            return;
+        };
+        if !search.input_active {
+            return;
+        }
+        search.query.push(ch);
+        search.matches = crate::widget::search::compute_matches(&body, &search.query);
+        search.current = if search.matches.is_empty() {
+            None
+        } else {
+            Some(0)
+        };
+    }
+
+    /// Remove the last character from the action-history modal's live search query.
+    pub fn action_history_modal_search_pop(&mut self) {
+        let Some(modal) = self.action_history_modal.as_mut() else {
+            return;
+        };
+        let body = modal.searchable_body();
+        let Some(search) = modal.search.as_mut() else {
+            return;
+        };
+        if !search.input_active {
+            return;
+        }
+        search.query.pop();
+        search.matches = crate::widget::search::compute_matches(&body, &search.query);
+        search.current = if search.matches.is_empty() {
+            None
+        } else {
+            Some(0)
+        };
+    }
+
+    /// Commit the current query. Empty query closes search; otherwise flips
+    /// `input_active` to false and `committed` to true.
+    pub fn action_history_modal_search_commit(&mut self) {
+        let Some(modal) = self.action_history_modal.as_mut() else {
+            return;
+        };
+        let Some(search) = modal.search.as_mut() else {
+            return;
+        };
+        if search.query.is_empty() {
+            modal.search = None;
+            return;
+        }
+        search.input_active = false;
+        search.committed = true;
+    }
+
+    /// Cancel search and clear all search state from the action-history modal.
+    pub fn action_history_modal_search_cancel(&mut self) {
+        if let Some(modal) = self.action_history_modal.as_mut() {
+            modal.search = None;
+        }
     }
 
     /// Called from every selection-changing entry point. Resets detail

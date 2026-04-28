@@ -70,6 +70,22 @@ pub enum BrowserPayload {
         pg_id: String,
         err: String,
     },
+    /// One page of action-history results for an open action-history
+    /// modal. The reducer appends `actions` to the modal's buffer (de-
+    /// duplicating by `ActionEntity::id`), updates `total`, and clears
+    /// the loading flag.
+    ActionHistoryPage {
+        source_id: String,
+        offset: u32,
+        actions: Vec<nifi_rust_client::dynamic::types::ActionEntity>,
+        total: Option<u32>,
+    },
+    /// Action-history fetch failed. Reducer renders `err` inside the
+    /// modal and stops auto-loading.
+    ActionHistoryError {
+        source_id: String,
+        err: String,
+    },
 }
 
 /// Result of a successful intent dispatch.
@@ -229,4 +245,48 @@ pub enum EventsPayload {
         query_id: Option<String>,
         error: String,
     },
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn action_history_page_payload_destructures() {
+        let ev = BrowserPayload::ActionHistoryPage {
+            source_id: "proc-1".into(),
+            offset: 0,
+            actions: vec![],
+            total: Some(3),
+        };
+        match ev {
+            BrowserPayload::ActionHistoryPage {
+                source_id,
+                offset,
+                actions,
+                total,
+            } => {
+                assert_eq!(source_id, "proc-1");
+                assert_eq!(offset, 0);
+                assert!(actions.is_empty());
+                assert_eq!(total, Some(3));
+            }
+            _ => panic!("wrong variant"),
+        }
+    }
+
+    #[test]
+    fn action_history_error_payload_destructures() {
+        let ev = BrowserPayload::ActionHistoryError {
+            source_id: "proc-1".into(),
+            err: "boom".into(),
+        };
+        match ev {
+            BrowserPayload::ActionHistoryError { source_id, err } => {
+                assert_eq!(source_id, "proc-1");
+                assert_eq!(err, "boom");
+            }
+            _ => panic!("wrong variant"),
+        }
+    }
 }

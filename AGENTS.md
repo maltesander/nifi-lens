@@ -431,6 +431,44 @@ the main tab instead). The modal lives as `BulletinsState::detail_modal`
 `GroupKey` + `GroupDetails` so subsequent ring mutations don't disturb
 the open modal.
 
+### Action history modal
+
+Pressing `a` on a Browser row whose component has a UUID
+(processor / PG / connection / CS / port) opens the **action history
+modal** — a full-screen overlay listing NiFi flow-configuration audit
+events filtered by `sourceId`. Backed by a paginator over
+`/flow/history` (the worker calls `client.flow().query_history`
+directly so it can surface `total` for auto-load gating; the
+`flow_actions_paginator` helper in `client::history` wraps
+`pagination::flow_history_dynamic` from `nifi-rust-client` and is
+reused by the integration test). Rows are paginated 100 at a time and
+auto-load when scrolling brings the viewport within 10 rows of the
+loaded tail.
+
+State lives on `BrowserState::action_history_modal:
+Option<ActionHistoryModalState>`. The state carries a separate
+`selected: usize` cursor (the `widget::scroll::VerticalScrollState`
+holds only viewport offset, no row selection). The view-local worker
+(`spawn_action_history_modal_fetch`) eagerly fetches the first page
+then sleeps on a `tokio::sync::Notify` until the reducer wakes it for
+the next page.
+
+Modal-scoped chords use a separate `ActionHistoryModalVerb` enum that
+shadows outer-tab keys via the keymap shadow gate (mirroring
+version-control / parameter-context modals): `Esc` close (cascades
+through search → expanded → close), `↑`/`↓`/`PgUp`/`PgDn`/`Home`/
+`End` scroll, `Enter` expand selected, `/` search, `n`/`Shift+N`
+next/prev match, `c` copy selected row as TSV, `r` refresh from
+offset 0. Search shares the `widget::search::SearchState` primitive;
+the renderer swaps the hint strip for a `/<query>_` prompt while
+input is active and styles the current-match row with
+`theme::accent()` + bold.
+
+Below 60×20 the modal degrades to a single muted line `terminal too
+small` (matches existing modals).
+
+Read-only — no revert / replay actions in v0.1.
+
 ### Tracer content viewer modal
 
 Full-screen modal opened with `i` on the Tracer Content sub-tab.

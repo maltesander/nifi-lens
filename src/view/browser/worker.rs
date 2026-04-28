@@ -114,6 +114,86 @@ pub fn spawn_parameter_context_modal_fetch(
     })
 }
 
+/// Action-history modal worker. Eagerly fetches the first page (100
+/// actions), emits `ActionHistoryPage`, then sleeps on `signal` until
+/// the reducer wakes it for the next page. Exits when the paginator
+/// is exhausted, on first error (after emitting `ActionHistoryError`),
+/// or when aborted by the modal-close path.
+pub fn spawn_action_history_modal_fetch(
+    client: Arc<RwLock<NifiClient>>,
+    tx: mpsc::Sender<AppEvent>,
+    source_id: String,
+    signal: std::sync::Arc<tokio::sync::Notify>,
+) -> JoinHandle<()> {
+    const PAGE_SIZE: u32 = 100;
+    tokio::task::spawn_local(async move {
+        let mut offset: u32 = 0;
+        loop {
+            let res = {
+                let guard = client.read().await;
+                let offset_s = offset.to_string();
+                let count_s = PAGE_SIZE.to_string();
+                guard
+                    .flow()
+                    .query_history(
+                        &offset_s,
+                        &count_s,
+                        None,
+                        None,
+                        None,
+                        None,
+                        None,
+                        Some(&source_id),
+                    )
+                    .await
+            };
+            match res {
+                Ok(dto) => {
+                    let total = dto.total.map(|t| t.max(0) as u32);
+                    let actions = dto.actions.unwrap_or_default();
+                    let returned = actions.len() as u32;
+                    let payload = BrowserPayload::ActionHistoryPage {
+                        source_id: source_id.clone(),
+                        offset,
+                        actions,
+                        total,
+                    };
+                    if tx
+                        .send(AppEvent::Data(ViewPayload::Browser(payload)))
+                        .await
+                        .is_err()
+                    {
+                        return; // channel closed
+                    }
+                    // Exhaustion: short page or offset reaches total.
+                    let exhausted = match total {
+                        Some(t) => {
+                            returned == 0
+                                || returned < PAGE_SIZE
+                                || offset.saturating_add(returned) >= t
+                        }
+                        None => returned == 0 || returned < PAGE_SIZE,
+                    };
+                    if exhausted {
+                        return;
+                    }
+                    offset = offset.saturating_add(returned);
+                }
+                Err(err) => {
+                    let payload = BrowserPayload::ActionHistoryError {
+                        source_id: source_id.clone(),
+                        err: err.to_string(),
+                    };
+                    let _ = tx.send(AppEvent::Data(ViewPayload::Browser(payload))).await;
+                    return;
+                }
+            }
+            // Wait for the reducer to signal next-page.
+            signal.notified().await;
+        }
+    })
+}
+
 /// Fetch identity + diff for a single PG and emit
 /// `BrowserPayload::VersionControlModalLoaded` (or `…Failed`). One-shot;
 /// no polling. Uses `futures::future::try_join` to issue both calls in
@@ -237,6 +317,115 @@ mod tests {
             }
             _ => panic!("expected ParameterContextModalLoaded"),
         }
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn action_history_worker_emits_first_page_eagerly() {
+        use std::sync::Arc;
+        use tokio::sync::Notify;
+        use wiremock::matchers::{method, path, query_param};
+        use wiremock::{Mock, MockServer, ResponseTemplate};
+
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path("/nifi-api/flow/history"))
+            .and(query_param("offset", "0"))
+            .and(query_param("count", "100"))
+            .and(query_param("sourceId", "proc-1"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "history": {
+                    "total": 1,
+                    "actions": [{
+                        "id": 42, "sourceId": "proc-1", "timestamp": "2026-04-27T10:00:00Z",
+                        "action": {"id": 42, "operation": "Configure", "sourceId": "proc-1",
+                                   "sourceName": "p", "sourceType": "Processor",
+                                   "userIdentity": "alice"}
+                    }]
+                }
+            })))
+            .mount(&server)
+            .await;
+
+        let client = test_client(&server).await;
+        let (tx, mut rx) = mpsc::channel::<AppEvent>(8);
+        let signal = Arc::new(Notify::new());
+        let local = tokio::task::LocalSet::new();
+
+        local
+            .run_until(async {
+                let h = super::spawn_action_history_modal_fetch(
+                    client,
+                    tx,
+                    "proc-1".into(),
+                    signal.clone(),
+                );
+                let ev = tokio::time::timeout(std::time::Duration::from_secs(2), rx.recv())
+                    .await
+                    .expect("event received in time")
+                    .expect("event present");
+                match ev {
+                    AppEvent::Data(ViewPayload::Browser(BrowserPayload::ActionHistoryPage {
+                        source_id,
+                        offset,
+                        actions,
+                        total,
+                    })) => {
+                        assert_eq!(source_id, "proc-1");
+                        assert_eq!(offset, 0);
+                        assert_eq!(actions.len(), 1);
+                        assert_eq!(actions[0].id, Some(42));
+                        assert_eq!(total, Some(1));
+                    }
+                    _ => panic!("expected ActionHistoryPage"),
+                }
+                // Worker exits because the paginator is exhausted; aborting is harmless.
+                h.abort();
+            })
+            .await;
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn action_history_worker_emits_error_on_500() {
+        use std::sync::Arc;
+        use tokio::sync::Notify;
+        use wiremock::matchers::{method, path};
+        use wiremock::{Mock, MockServer, ResponseTemplate};
+
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path("/nifi-api/flow/history"))
+            .respond_with(ResponseTemplate::new(500))
+            .mount(&server)
+            .await;
+
+        let client = test_client(&server).await;
+        let (tx, mut rx) = mpsc::channel::<AppEvent>(8);
+        let signal = Arc::new(Notify::new());
+        let local = tokio::task::LocalSet::new();
+        local
+            .run_until(async {
+                let _h = super::spawn_action_history_modal_fetch(
+                    client,
+                    tx,
+                    "proc-1".into(),
+                    signal.clone(),
+                );
+                let ev = tokio::time::timeout(std::time::Duration::from_secs(2), rx.recv())
+                    .await
+                    .expect("event received")
+                    .expect("event present");
+                match ev {
+                    AppEvent::Data(ViewPayload::Browser(BrowserPayload::ActionHistoryError {
+                        source_id,
+                        err,
+                    })) => {
+                        assert_eq!(source_id, "proc-1");
+                        assert!(!err.is_empty());
+                    }
+                    _ => panic!("expected ActionHistoryError"),
+                }
+            })
+            .await;
     }
 
     /// Verify the worker emits `ParameterContextModalFailed` when the

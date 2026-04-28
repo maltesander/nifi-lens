@@ -90,6 +90,9 @@ fn render_content(frame: &mut Frame, area: Rect, state: &mut AppState) {
                     &state.cluster.snapshot,
                 );
             }
+            if let Some(modal) = state.browser.action_history_modal.as_ref() {
+                crate::view::browser::render::action_history_modal::render(frame, area, modal);
+            }
         }
         ViewId::Events => events::render::render(frame, area, &state.events, &state.timestamp_cfg),
         ViewId::Tracer => {

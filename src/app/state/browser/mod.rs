@@ -22,6 +22,10 @@ impl ViewKeyHandler for BrowserHandler {
         if let ViewVerb::ParameterContextModal(v) = verb {
             return Some(handle_parameter_context_modal_verb(state, v));
         }
+        // ActionHistoryModal verbs take priority when the modal is open.
+        if let ViewVerb::ActionHistoryModal(v) = verb {
+            return Some(handle_action_history_modal_verb(state, v));
+        }
         let bv = match verb {
             ViewVerb::Browser(v) => v,
             _ => return None,
@@ -122,6 +126,38 @@ impl ViewKeyHandler for BrowserHandler {
                 // This branch is unreachable when the enabled() predicate is
                 // respected; kept for defensive completeness.
                 return Some(UpdateResult::default());
+            }
+            BrowserVerb::OpenActionHistory => {
+                // Defensive: enabled() gates this verb to UUID-bearing rows.
+                // Belt-and-suspenders mirroring the ShowVersionControl pattern.
+                if !state.browser_selection_supports_action_history() {
+                    return Some(UpdateResult::default());
+                }
+                let Some(&arena_idx) = state.browser.visible.get(state.browser.selected) else {
+                    return Some(UpdateResult::default());
+                };
+                let node = &state.browser.nodes[arena_idx];
+                let source_id = node.id.clone();
+                let component_label = node.name.clone();
+                state
+                    .browser
+                    .open_action_history_modal(source_id.clone(), component_label);
+                let Some(fetch_signal) = state
+                    .browser
+                    .action_history_modal
+                    .as_ref()
+                    .map(|m| m.fetch_signal.clone())
+                else {
+                    return Some(UpdateResult::default());
+                };
+                return Some(UpdateResult {
+                    redraw: true,
+                    intent: Some(super::PendingIntent::SpawnActionHistoryModalFetch {
+                        source_id,
+                        fetch_signal,
+                    }),
+                    tracer_followup: None,
+                });
             }
             BrowserVerb::ShowVersionControl => {
                 if !state.browser_selection_is_versioned_pg() {
@@ -715,9 +751,20 @@ impl ViewKeyHandler for BrowserHandler {
             return true;
         }
         // Parameter-context modal's search input.
-        state
+        let pc_active = state
             .browser
             .parameter_modal
+            .as_ref()
+            .and_then(|m| m.search.as_ref())
+            .map(|s| s.input_active)
+            .unwrap_or(false);
+        if pc_active {
+            return true;
+        }
+        // Action-history modal's search input.
+        state
+            .browser
+            .action_history_modal
             .as_ref()
             .and_then(|m| m.search.as_ref())
             .map(|s| s.input_active)
@@ -766,15 +813,40 @@ impl ViewKeyHandler for BrowserHandler {
             .and_then(|m| m.search.as_ref())
             .map(|s| s.input_active)
             .unwrap_or(false);
-        if !pc_active {
+        if pc_active {
+            match key.code {
+                KeyCode::Esc => state.browser.parameter_modal_search_cancel(),
+                KeyCode::Enter => state.browser.parameter_modal_search_commit(),
+                KeyCode::Backspace => state.browser.parameter_modal_search_pop(),
+                KeyCode::Char(ch) if !key.modifiers.contains(KeyModifiers::CONTROL) => {
+                    state.browser.parameter_modal_search_push(ch);
+                }
+                _ => return None,
+            }
+            return Some(UpdateResult {
+                redraw: true,
+                intent: None,
+                tracer_followup: None,
+            });
+        }
+
+        // Action-history modal's search input.
+        let ah_active = state
+            .browser
+            .action_history_modal
+            .as_ref()
+            .and_then(|m| m.search.as_ref())
+            .map(|s| s.input_active)
+            .unwrap_or(false);
+        if !ah_active {
             return None;
         }
         match key.code {
-            KeyCode::Esc => state.browser.parameter_modal_search_cancel(),
-            KeyCode::Enter => state.browser.parameter_modal_search_commit(),
-            KeyCode::Backspace => state.browser.parameter_modal_search_pop(),
+            KeyCode::Esc => state.browser.action_history_modal_search_cancel(),
+            KeyCode::Enter => state.browser.action_history_modal_search_commit(),
+            KeyCode::Backspace => state.browser.action_history_modal_search_pop(),
             KeyCode::Char(ch) if !key.modifiers.contains(KeyModifiers::CONTROL) => {
-                state.browser.parameter_modal_search_push(ch);
+                state.browser.action_history_modal_search_push(ch);
             }
             _ => return None,
         }
@@ -1237,6 +1309,182 @@ fn version_control_modal_copy_text(
         }
     }
     if out.is_empty() { None } else { Some(out) }
+}
+
+/// Dispatch an `ActionHistoryModalVerb` action. Called when the
+/// action-history modal is open and the keymap has routed
+/// `ViewVerb::ActionHistoryModal(v)` here.
+fn handle_action_history_modal_verb(
+    state: &mut AppState,
+    v: crate::input::ActionHistoryModalVerb,
+) -> UpdateResult {
+    use crate::input::ActionHistoryModalVerb as V;
+
+    let redraw = || UpdateResult {
+        redraw: true,
+        intent: None,
+        tracer_followup: None,
+    };
+
+    match v {
+        V::Close => {
+            // Priority cascade: cancel search → collapse expanded → close modal.
+            let Some(modal) = state.browser.action_history_modal.as_mut() else {
+                return UpdateResult::default();
+            };
+            if modal.search.is_some() {
+                modal.search = None;
+                return redraw();
+            }
+            if modal.expanded_index.is_some() {
+                modal.expanded_index = None;
+                return redraw();
+            }
+            state.browser.close_action_history_modal();
+            redraw()
+        }
+        V::Refresh => {
+            let Some(modal) = state.browser.action_history_modal.as_mut() else {
+                return UpdateResult::default();
+            };
+            let source_id = modal.source_id.clone();
+            modal.reset_for_refresh();
+            let fetch_signal = modal.fetch_signal.clone();
+            // Abort the current worker; the dispatcher spawns a fresh one.
+            if let Some(h) = state.browser.action_history_modal_handle.take() {
+                h.abort();
+            }
+            UpdateResult {
+                redraw: true,
+                intent: Some(super::PendingIntent::SpawnActionHistoryModalFetch {
+                    source_id,
+                    fetch_signal,
+                }),
+                tracer_followup: None,
+            }
+        }
+        V::ToggleExpand => {
+            if let Some(modal) = state.browser.action_history_modal.as_mut() {
+                let selected = modal.selected;
+                modal.toggle_expanded(selected);
+            }
+            redraw()
+        }
+        V::ScrollUp => {
+            if let Some(modal) = state.browser.action_history_modal.as_mut() {
+                modal.move_selection_up();
+            }
+            redraw()
+        }
+        V::ScrollDown => {
+            if let Some(modal) = state.browser.action_history_modal.as_mut() {
+                modal.move_selection_down();
+                action_history_check_signal_next_page(modal);
+            }
+            redraw()
+        }
+        V::PageUp => {
+            if let Some(modal) = state.browser.action_history_modal.as_mut() {
+                modal.scroll.page_up();
+                let viewport = modal.scroll.last_viewport_rows.max(1);
+                modal.selected = modal.selected.saturating_sub(viewport);
+            }
+            redraw()
+        }
+        V::PageDown => {
+            if let Some(modal) = state.browser.action_history_modal.as_mut() {
+                let len = modal.actions.len();
+                modal.scroll.page_down(len);
+                let viewport = modal.scroll.last_viewport_rows.max(1);
+                modal.selected = (modal.selected + viewport).min(len.saturating_sub(1));
+                action_history_check_signal_next_page(modal);
+            }
+            redraw()
+        }
+        V::JumpTop => {
+            if let Some(modal) = state.browser.action_history_modal.as_mut() {
+                modal.scroll.jump_top();
+                modal.selected = 0;
+            }
+            redraw()
+        }
+        V::JumpBottom => {
+            if let Some(modal) = state.browser.action_history_modal.as_mut() {
+                let len = modal.actions.len();
+                modal.scroll.jump_bottom(len);
+                modal.selected = len.saturating_sub(1);
+                action_history_check_signal_next_page(modal);
+            }
+            redraw()
+        }
+        V::OpenSearch => {
+            if let Some(modal) = state.browser.action_history_modal.as_mut() {
+                modal.search = Some(crate::widget::search::SearchState {
+                    input_active: true,
+                    ..Default::default()
+                });
+            }
+            redraw()
+        }
+        V::SearchNext => {
+            if let Some(modal) = state.browser.action_history_modal.as_mut()
+                && let Some(s) = modal.search.as_mut()
+                && !s.matches.is_empty()
+            {
+                s.current = Some(s.current.map_or(0, |c| (c + 1) % s.matches.len()));
+            }
+            redraw()
+        }
+        V::SearchPrev => {
+            if let Some(modal) = state.browser.action_history_modal.as_mut()
+                && let Some(s) = modal.search.as_mut()
+                && !s.matches.is_empty()
+            {
+                let len = s.matches.len();
+                s.current = Some(s.current.map_or(len - 1, |c| (c + len - 1) % len));
+            }
+            redraw()
+        }
+        V::Copy => {
+            // Capture the TSV before borrowing state mutably for
+            // copy_to_clipboard (two borrows of state at once).
+            let tsv = state
+                .browser
+                .action_history_modal
+                .as_ref()
+                .and_then(|m| m.actions.get(m.selected))
+                .map(format_action_tsv);
+            if let Some(tsv) = tsv
+                && let Err(err) = state.copy_to_clipboard(tsv)
+            {
+                state.post_warning(format!("clipboard: {err}"));
+            }
+            redraw()
+        }
+    }
+}
+
+fn action_history_check_signal_next_page(
+    modal: &mut crate::view::browser::state::action_history_modal::ActionHistoryModalState,
+) {
+    let viewport_bottom = modal
+        .scroll
+        .offset
+        .saturating_add(modal.scroll.last_viewport_rows);
+    if modal.should_signal_next_page(viewport_bottom, 10) {
+        modal.loading = true;
+        modal.fetch_signal.notify_one();
+    }
+}
+
+fn format_action_tsv(action: &nifi_rust_client::dynamic::types::ActionEntity) -> String {
+    let inner = action.action.as_ref();
+    let timestamp = action.timestamp.as_deref().unwrap_or("");
+    let user = inner.and_then(|a| a.user_identity.as_deref()).unwrap_or("");
+    let op = inner.and_then(|a| a.operation.as_deref()).unwrap_or("");
+    let stype = inner.and_then(|a| a.source_type.as_deref()).unwrap_or("");
+    let sname = inner.and_then(|a| a.source_name.as_deref()).unwrap_or("");
+    format!("{timestamp}\t{user}\t{op}\t{stype}\t{sname}")
 }
 
 #[cfg(test)]

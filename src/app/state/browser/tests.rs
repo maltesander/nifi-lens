@@ -3112,3 +3112,444 @@ fn pcm_chain_page_up_jumps_to_head_page_down_to_tail() {
         "PageUp jumps to head"
     );
 }
+
+// ---------------------------------------------------------------------------
+// browser_selection_supports_action_history
+// ---------------------------------------------------------------------------
+
+fn make_state_with_selected_kind(kind: NodeKind) -> AppState {
+    use crate::view::browser::state::{TreeNode, rebuild_visible};
+
+    let mut s = crate::test_support::fresh_state();
+    s.current_tab = ViewId::Browser;
+
+    s.browser.nodes.clear();
+    // Root PG at arena index 0.
+    s.browser.nodes.push(TreeNode {
+        parent: None,
+        children: vec![1],
+        kind: NodeKind::ProcessGroup,
+        id: "root".into(),
+        group_id: "root".into(),
+        name: "root".into(),
+        status_summary: NodeStatusSummary::ProcessGroup {
+            running: 0,
+            stopped: 0,
+            invalid: 0,
+            disabled: 0,
+        },
+        parameter_context_ref: None,
+    });
+    // Target node at arena index 1, child of root.
+    let status_summary = match kind {
+        NodeKind::ProcessGroup => NodeStatusSummary::ProcessGroup {
+            running: 0,
+            stopped: 0,
+            invalid: 0,
+            disabled: 0,
+        },
+        NodeKind::Processor => NodeStatusSummary::Processor {
+            run_status: "RUNNING".into(),
+        },
+        NodeKind::Connection => NodeStatusSummary::Connection {
+            fill_percent: 0,
+            flow_files_queued: 0,
+            queued_display: "0".into(),
+            source_id: "src".into(),
+            source_name: "Source".into(),
+            destination_id: "dst".into(),
+            destination_name: "Dest".into(),
+        },
+        NodeKind::ControllerService => NodeStatusSummary::ControllerService {
+            state: "ENABLED".into(),
+        },
+        NodeKind::InputPort | NodeKind::OutputPort => NodeStatusSummary::Port,
+        NodeKind::Folder(_) => NodeStatusSummary::Folder { count: 0 },
+    };
+    s.browser.nodes.push(TreeNode {
+        parent: Some(0),
+        children: vec![],
+        kind,
+        id: "target".into(),
+        group_id: "root".into(),
+        name: "target".into(),
+        status_summary,
+        parameter_context_ref: None,
+    });
+    s.browser.expanded.insert(0);
+    rebuild_visible(&mut s.browser);
+    s.browser.selected = s.browser.visible.iter().position(|&i| i == 1).unwrap();
+    s
+}
+
+#[test]
+fn action_history_enabled_for_processor_pg_connection_cs_port() {
+    for kind in [
+        NodeKind::Processor,
+        NodeKind::ProcessGroup,
+        NodeKind::Connection,
+        NodeKind::ControllerService,
+        NodeKind::InputPort,
+        NodeKind::OutputPort,
+    ] {
+        let state = make_state_with_selected_kind(kind);
+        assert!(
+            state.browser_selection_supports_action_history(),
+            "expected true for {kind:?}"
+        );
+    }
+}
+
+#[test]
+fn action_history_disabled_for_folder_rows() {
+    use crate::client::FolderKind;
+    for fk in [FolderKind::Queues, FolderKind::ControllerServices] {
+        let state = make_state_with_selected_kind(NodeKind::Folder(fk));
+        assert!(
+            !state.browser_selection_supports_action_history(),
+            "expected false for Folder({fk:?})"
+        );
+    }
+}
+
+// ---------------------------------------------------------------------------
+// OpenActionHistory dispatch arm
+// ---------------------------------------------------------------------------
+
+fn make_state_with_processor_selected(id: &str, name: &str) -> AppState {
+    let mut s = make_state_with_selected_kind(NodeKind::Processor);
+    let arena_idx = s.browser.visible[s.browser.selected];
+    s.browser.nodes[arena_idx].id = id.to_string();
+    s.browser.nodes[arena_idx].name = name.to_string();
+    s
+}
+
+fn make_state_with_folder_selected() -> AppState {
+    use crate::client::FolderKind;
+    make_state_with_selected_kind(NodeKind::Folder(FolderKind::Queues))
+}
+
+#[test]
+fn open_action_history_verb_opens_modal_and_emits_intent() {
+    use crate::app::state::PendingIntent;
+    use crate::input::{BrowserVerb, ViewVerb};
+
+    let mut state = make_state_with_processor_selected("proc-1", "FetchKafka");
+    let result = BrowserHandler::handle_verb(
+        &mut state,
+        ViewVerb::Browser(BrowserVerb::OpenActionHistory),
+    )
+    .expect("handled");
+    assert!(result.redraw);
+    let intent = result.intent.expect("intent emitted");
+    match intent {
+        PendingIntent::SpawnActionHistoryModalFetch { source_id, .. } => {
+            assert_eq!(source_id, "proc-1");
+        }
+        other => panic!("wrong intent: {other:?}"),
+    }
+    let m = state
+        .browser
+        .action_history_modal
+        .as_ref()
+        .expect("modal opened");
+    assert_eq!(m.source_id, "proc-1");
+    assert_eq!(m.component_label, "FetchKafka");
+}
+
+#[test]
+fn open_action_history_verb_noop_when_disabled() {
+    use crate::input::{BrowserVerb, ViewVerb};
+    // Folder rows: enabled() returns false → arm guards a noop.
+    let mut state = make_state_with_folder_selected();
+    let result = BrowserHandler::handle_verb(
+        &mut state,
+        ViewVerb::Browser(BrowserVerb::OpenActionHistory),
+    )
+    .expect("handled");
+    assert!(state.browser.action_history_modal.is_none());
+    assert!(result.intent.is_none());
+}
+
+// -----------------------------------------------------------------------
+// Task 13: reducer arms for ActionHistoryPage / ActionHistoryError
+// -----------------------------------------------------------------------
+
+#[test]
+fn apply_action_history_page_appends_actions() {
+    use super::super::handle_browser_payload;
+    use crate::event::BrowserPayload;
+    let mut state = fresh_state();
+    state
+        .browser
+        .open_action_history_modal("proc-1".into(), "X".into());
+
+    let mut action = nifi_rust_client::dynamic::types::ActionEntity::default();
+    action.id = Some(7);
+    let payload = BrowserPayload::ActionHistoryPage {
+        source_id: "proc-1".into(),
+        offset: 0,
+        actions: vec![action],
+        total: Some(1),
+    };
+    handle_browser_payload(&mut state, payload);
+
+    let m = state.browser.action_history_modal.as_ref().unwrap();
+    assert_eq!(m.actions.len(), 1);
+    assert_eq!(m.total, Some(1));
+    assert!(!m.loading);
+}
+
+#[test]
+fn apply_action_history_page_drops_stale_source_id() {
+    use super::super::handle_browser_payload;
+    use crate::event::BrowserPayload;
+    let mut state = fresh_state();
+    state
+        .browser
+        .open_action_history_modal("proc-1".into(), "X".into());
+
+    let mut action = nifi_rust_client::dynamic::types::ActionEntity::default();
+    action.id = Some(99);
+    let payload = BrowserPayload::ActionHistoryPage {
+        source_id: "OTHER".into(),
+        offset: 0,
+        actions: vec![action],
+        total: Some(1),
+    };
+    handle_browser_payload(&mut state, payload);
+
+    let m = state.browser.action_history_modal.as_ref().unwrap();
+    assert!(m.actions.is_empty());
+}
+
+#[test]
+fn apply_action_history_error_sets_error_field() {
+    use super::super::handle_browser_payload;
+    use crate::event::BrowserPayload;
+    let mut state = fresh_state();
+    state
+        .browser
+        .open_action_history_modal("proc-1".into(), "X".into());
+    let payload = BrowserPayload::ActionHistoryError {
+        source_id: "proc-1".into(),
+        err: "boom".into(),
+    };
+    handle_browser_payload(&mut state, payload);
+    let m = state.browser.action_history_modal.as_ref().unwrap();
+    assert_eq!(m.error.as_deref(), Some("boom"));
+    assert!(!m.loading);
+}
+
+#[test]
+fn apply_action_history_error_preserves_handle_when_source_id_stale() {
+    // Regression test: a stale ActionHistoryError (for a source_id that no
+    // longer matches the open modal) MUST NOT clear the handle slot —
+    // doing so would orphan the worker for the currently-open modal.
+    use super::super::handle_browser_payload;
+    use crate::event::BrowserPayload;
+    let mut state = fresh_state();
+    state
+        .browser
+        .open_action_history_modal("proc-2".into(), "B".into());
+    // Install a pretend handle to simulate the post-spawn state.
+    let rt = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .unwrap();
+    rt.block_on(async {
+        let local = tokio::task::LocalSet::new();
+        local
+            .run_until(async {
+                let h = tokio::task::spawn_local(async {
+                    tokio::time::sleep(std::time::Duration::from_secs(60)).await;
+                });
+                state.browser.action_history_modal_handle = Some(h);
+                // Stale error from the previously-open proc-1 modal.
+                let payload = BrowserPayload::ActionHistoryError {
+                    source_id: "proc-1".into(),
+                    err: "stale".into(),
+                };
+                handle_browser_payload(&mut state, payload);
+                let m = state.browser.action_history_modal.as_ref().unwrap();
+                // Modal state untouched.
+                assert!(m.error.is_none(), "stale error must not mutate the modal");
+                // Handle preserved.
+                assert!(
+                    state.browser.action_history_modal_handle.is_some(),
+                    "stale error must not clear the handle for the active modal"
+                );
+            })
+            .await;
+    });
+}
+
+#[test]
+fn action_history_modal_close_clears_modal() {
+    use crate::input::{ActionHistoryModalVerb, ViewVerb};
+    let mut state = fresh_state();
+    state
+        .browser
+        .open_action_history_modal("proc-1".into(), "X".into());
+    let _ = BrowserHandler::handle_verb(
+        &mut state,
+        ViewVerb::ActionHistoryModal(ActionHistoryModalVerb::Close),
+    );
+    assert!(state.browser.action_history_modal.is_none());
+}
+
+#[test]
+fn action_history_modal_close_cancels_search_first() {
+    use crate::input::{ActionHistoryModalVerb, ViewVerb};
+    let mut state = fresh_state();
+    state
+        .browser
+        .open_action_history_modal("proc-1".into(), "X".into());
+    let modal = state.browser.action_history_modal.as_mut().unwrap();
+    modal.search = Some(crate::widget::search::SearchState::default());
+    let _ = BrowserHandler::handle_verb(
+        &mut state,
+        ViewVerb::ActionHistoryModal(ActionHistoryModalVerb::Close),
+    );
+    // First Close cancels search; modal stays open.
+    assert!(state.browser.action_history_modal.is_some());
+    assert!(
+        state
+            .browser
+            .action_history_modal
+            .as_ref()
+            .unwrap()
+            .search
+            .is_none()
+    );
+    // Second Close closes the modal.
+    let _ = BrowserHandler::handle_verb(
+        &mut state,
+        ViewVerb::ActionHistoryModal(ActionHistoryModalVerb::Close),
+    );
+    assert!(state.browser.action_history_modal.is_none());
+}
+
+#[test]
+fn action_history_modal_refresh_resets_state_and_emits_intent() {
+    use crate::input::{ActionHistoryModalVerb, ViewVerb};
+    let mut state = fresh_state();
+    state
+        .browser
+        .open_action_history_modal("proc-1".into(), "FetchKafka".into());
+    // Pre-populate with one action.
+    let mut action = nifi_rust_client::dynamic::types::ActionEntity::default();
+    action.id = Some(1);
+    state
+        .browser
+        .action_history_modal
+        .as_mut()
+        .unwrap()
+        .apply_page("proc-1", vec![action], Some(1));
+    let result = BrowserHandler::handle_verb(
+        &mut state,
+        ViewVerb::ActionHistoryModal(ActionHistoryModalVerb::Refresh),
+    )
+    .unwrap();
+    assert!(
+        matches!(
+            result.intent,
+            Some(PendingIntent::SpawnActionHistoryModalFetch { .. })
+        ),
+        "Refresh must emit SpawnActionHistoryModalFetch intent"
+    );
+    let m = state.browser.action_history_modal.as_ref().unwrap();
+    assert!(m.actions.is_empty(), "actions must be cleared on refresh");
+    assert!(m.loading, "loading must be set on refresh");
+}
+
+#[test]
+fn action_history_modal_toggle_expand_uses_selected_row() {
+    use crate::input::{ActionHistoryModalVerb, ViewVerb};
+    let mut state = fresh_state();
+    state
+        .browser
+        .open_action_history_modal("proc-1".into(), "X".into());
+    // Set selection to row 3.
+    state
+        .browser
+        .action_history_modal
+        .as_mut()
+        .unwrap()
+        .selected = 3;
+    let _ = BrowserHandler::handle_verb(
+        &mut state,
+        ViewVerb::ActionHistoryModal(ActionHistoryModalVerb::ToggleExpand),
+    );
+    assert_eq!(
+        state
+            .browser
+            .action_history_modal
+            .as_ref()
+            .unwrap()
+            .expanded_index,
+        Some(3)
+    );
+}
+
+#[test]
+fn action_history_modal_search_input_routes_chars_to_query() {
+    use crate::input::{ActionHistoryModalVerb, ViewVerb};
+    use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+
+    let mut state = fresh_state();
+    state
+        .browser
+        .open_action_history_modal("proc-1".into(), "X".into());
+    // Open search via the verb dispatch.
+    let _ = BrowserHandler::handle_verb(
+        &mut state,
+        ViewVerb::ActionHistoryModal(ActionHistoryModalVerb::OpenSearch),
+    );
+    // input_active should be true now.
+    assert!(
+        BrowserHandler::is_text_input_focused(&state),
+        "is_text_input_focused must return true with action-history search active"
+    );
+    // Push three characters via handle_text_input.
+    for ch in ['e', 'r', 'r'] {
+        let _ = BrowserHandler::handle_text_input(
+            &mut state,
+            KeyEvent::new(KeyCode::Char(ch), KeyModifiers::empty()),
+        );
+    }
+    let m = state.browser.action_history_modal.as_ref().unwrap();
+    let search = m.search.as_ref().expect("search active");
+    assert_eq!(search.query, "err");
+    // Backspace.
+    let _ = BrowserHandler::handle_text_input(
+        &mut state,
+        KeyEvent::new(KeyCode::Backspace, KeyModifiers::empty()),
+    );
+    assert_eq!(
+        state
+            .browser
+            .action_history_modal
+            .as_ref()
+            .unwrap()
+            .search
+            .as_ref()
+            .unwrap()
+            .query,
+        "er"
+    );
+    // Esc cancels search.
+    let _ = BrowserHandler::handle_text_input(
+        &mut state,
+        KeyEvent::new(KeyCode::Esc, KeyModifiers::empty()),
+    );
+    assert!(
+        state
+            .browser
+            .action_history_modal
+            .as_ref()
+            .unwrap()
+            .search
+            .is_none()
+    );
+}
