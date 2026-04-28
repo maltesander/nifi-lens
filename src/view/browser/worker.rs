@@ -194,6 +194,52 @@ pub fn spawn_action_history_modal_fetch(
     })
 }
 
+/// Per-selection sparkline fetch loop. Eagerly fetches the first
+/// `status_history` series, emits `AppEvent::SparklineUpdate`, then
+/// sleeps `cadence` and repeats. On 404 emits
+/// `SparklineEndpointMissing` once and continues looping (the next
+/// tick may still 404 — emits are idempotent at the reducer level).
+/// Other errors log at `warn!` and continue. Exits when aborted by
+/// the selection-change path or when the channel closes.
+pub fn spawn_sparkline_fetch_loop(
+    client: Arc<RwLock<NifiClient>>,
+    tx: mpsc::Sender<AppEvent>,
+    kind: crate::client::history::ComponentKind,
+    id: String,
+    cadence: std::time::Duration,
+) -> JoinHandle<()> {
+    tokio::task::spawn_local(async move {
+        loop {
+            let res = {
+                let guard = client.read().await;
+                crate::client::history::status_history(&guard, kind, &id).await
+            };
+            let event = match res {
+                Ok(series) => AppEvent::SparklineUpdate {
+                    kind,
+                    id: id.clone(),
+                    series,
+                },
+                Err(err) if crate::client::history::is_status_history_endpoint_missing(&err) => {
+                    AppEvent::SparklineEndpointMissing {
+                        kind,
+                        id: id.clone(),
+                    }
+                }
+                Err(err) => {
+                    tracing::warn!(?err, %id, "status_history fetch failed; will retry");
+                    tokio::time::sleep(cadence).await;
+                    continue;
+                }
+            };
+            if tx.send(event).await.is_err() {
+                return;
+            }
+            tokio::time::sleep(cadence).await;
+        }
+    })
+}
+
 /// Fetch identity + diff for a single PG and emit
 /// `BrowserPayload::VersionControlModalLoaded` (or `…Failed`). One-shot;
 /// no polling. Uses `futures::future::try_join` to issue both calls in
@@ -423,6 +469,114 @@ mod tests {
                         assert!(!err.is_empty());
                     }
                     _ => panic!("expected ActionHistoryError"),
+                }
+            })
+            .await;
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn sparkline_worker_emits_first_series_then_loops() {
+        use crate::client::history::ComponentKind;
+        use std::sync::Arc;
+        use std::sync::atomic::{AtomicUsize, Ordering};
+        use wiremock::matchers::{method, path};
+        use wiremock::{Mock, MockServer, ResponseTemplate};
+
+        let server = MockServer::start().await;
+        let counter = Arc::new(AtomicUsize::new(0));
+        let counter_for_resp = counter.clone();
+        Mock::given(method("GET"))
+            .and(path("/nifi-api/flow/processors/p-1/status/history"))
+            .respond_with(move |_: &wiremock::Request| {
+                let n = counter_for_resp.fetch_add(1, Ordering::SeqCst);
+                ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                    "statusHistory": {
+                        "aggregateSnapshots": [{
+                            "timestamp": "04/27/2026 10:00:00 UTC",
+                            "statusMetrics": {"flowFilesIn": (n as i64) * 10}
+                        }]
+                    }
+                }))
+            })
+            .mount(&server)
+            .await;
+
+        let client = test_client(&server).await;
+        let (tx, mut rx) = mpsc::channel::<AppEvent>(16);
+        let local = LocalSet::new();
+        local
+            .run_until(async {
+                let _h = super::spawn_sparkline_fetch_loop(
+                    client,
+                    tx,
+                    ComponentKind::Processor,
+                    "p-1".into(),
+                    std::time::Duration::from_millis(50),
+                );
+                let ev = tokio::time::timeout(std::time::Duration::from_secs(2), rx.recv())
+                    .await
+                    .expect("first event")
+                    .expect("event present");
+                match ev {
+                    AppEvent::SparklineUpdate { kind, id, series } => {
+                        assert!(matches!(kind, ComponentKind::Processor));
+                        assert_eq!(id, "p-1");
+                        assert_eq!(series.buckets[0].in_count, 0);
+                    }
+                    _ => panic!("expected SparklineUpdate"),
+                }
+                let ev = tokio::time::timeout(std::time::Duration::from_secs(2), rx.recv())
+                    .await
+                    .expect("second event")
+                    .expect("event present");
+                match ev {
+                    AppEvent::SparklineUpdate { series, .. } => {
+                        assert_eq!(
+                            series.buckets[0].in_count, 10,
+                            "second tick must reflect updated mock counter"
+                        );
+                    }
+                    _ => panic!("expected SparklineUpdate"),
+                }
+            })
+            .await;
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn sparkline_worker_emits_endpoint_missing_on_404() {
+        use crate::client::history::ComponentKind;
+        use wiremock::matchers::{method, path};
+        use wiremock::{Mock, MockServer, ResponseTemplate};
+
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path("/nifi-api/flow/processors/missing/status/history"))
+            .respond_with(ResponseTemplate::new(404))
+            .mount(&server)
+            .await;
+
+        let client = test_client(&server).await;
+        let (tx, mut rx) = mpsc::channel::<AppEvent>(8);
+        let local = LocalSet::new();
+        local
+            .run_until(async {
+                let _h = super::spawn_sparkline_fetch_loop(
+                    client,
+                    tx,
+                    ComponentKind::Processor,
+                    "missing".into(),
+                    std::time::Duration::from_millis(50),
+                );
+                let ev = tokio::time::timeout(std::time::Duration::from_secs(2), rx.recv())
+                    .await
+                    .expect("event")
+                    .expect("event present");
+                match ev {
+                    AppEvent::SparklineEndpointMissing { kind, id } => {
+                        assert!(matches!(kind, ComponentKind::Processor));
+                        assert_eq!(id, "missing");
+                    }
+                    _ => panic!("expected SparklineEndpointMissing"),
                 }
             })
             .await;
