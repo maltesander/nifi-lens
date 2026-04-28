@@ -635,3 +635,9 @@ mod tests {
         }
     }
 }
+
+/// Placeholder — replaced in Task 5 with the full Drop-DELETE wrapper.
+#[derive(Debug)]
+pub struct QueueListingHandle {
+    _opaque: (),
+}

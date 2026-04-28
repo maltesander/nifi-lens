@@ -22,6 +22,7 @@ pub mod parameter_context_modal;
 pub use parameter_context_modal::{
     ParameterContextLoad, ParameterContextModalState, ResolvedParameter, resolve,
 };
+pub mod queue_listing;
 pub mod sparkline;
 pub mod version_control_modal;
 pub use version_control_modal::{VersionControlDifferenceLoad, VersionControlModalState};
@@ -232,6 +233,11 @@ pub struct BrowserState {
     /// Live worker handle for the action-history modal's paginator.
     /// Aborted on close, refresh, tab switch, or selection change.
     pub action_history_modal_handle: Option<tokio::task::JoinHandle<()>>,
+    /// Queue listing state for the currently-selected Connection node.
+    /// `Some` exactly when the selection is a Connection; `None` for all
+    /// other node kinds or when the Browser tab is inactive.
+    /// Re-created on every selection change to a Connection row.
+    pub queue_listing: Option<queue_listing::QueueListingState>,
     /// Open sparkline state for the current Browser selection.
     /// `None` when the selection is on an unsupported kind (CS / Port /
     /// Folder), no selection, or while the Browser tab is inactive.
