@@ -16,6 +16,7 @@ pub(super) fn fresh_state() -> AppState {
 pub(super) fn tiny_config() -> Config {
     Config {
         current_context: "dev".into(),
+        browser: Default::default(),
         bulletins: Default::default(),
         ui: Default::default(),
         polling: Default::default(),

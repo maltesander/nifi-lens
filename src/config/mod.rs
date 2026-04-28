@@ -13,6 +13,8 @@ use serde::Deserialize;
 pub struct Config {
     pub current_context: String,
     #[serde(default)]
+    pub browser: BrowserConfig,
+    #[serde(default)]
     pub bulletins: BulletinsConfig,
     #[serde(default)]
     pub ui: UiConfig,
@@ -22,6 +24,44 @@ pub struct Config {
     pub tracer: TracerConfig,
     #[serde(default)]
     pub contexts: Vec<Context>,
+}
+
+/// Browser-tab configuration set via `[browser]` in the TOML config.
+#[derive(Debug, Clone, Deserialize, PartialEq, Eq)]
+pub struct BrowserConfig {
+    /// Initial-fetch ceiling for the queue listing two-phase async flow.
+    /// If NiFi has not transitioned the request to `state == FINISHED`
+    /// within this interval, the panel surfaces a timeout chip and the
+    /// user retries via `r`. 30 s is comfortable for healthy clusters
+    /// and tight enough to flag degraded ones.
+    #[serde(default = "default_queue_listing_timeout", with = "humantime_serde")]
+    pub queue_listing_timeout: std::time::Duration,
+
+    /// Listing rows whose `queued_duration` exceeds this value render
+    /// the entire row in `theme::warning()`. `0s` disables age-based
+    /// highlighting (the `PEN` chip on penalized rows is unaffected).
+    #[serde(
+        default = "default_queue_listing_age_warning",
+        with = "humantime_serde"
+    )]
+    pub queue_listing_age_warning: std::time::Duration,
+}
+
+impl Default for BrowserConfig {
+    fn default() -> Self {
+        Self {
+            queue_listing_timeout: default_queue_listing_timeout(),
+            queue_listing_age_warning: default_queue_listing_age_warning(),
+        }
+    }
+}
+
+fn default_queue_listing_timeout() -> std::time::Duration {
+    std::time::Duration::from_secs(30)
+}
+
+fn default_queue_listing_age_warning() -> std::time::Duration {
+    std::time::Duration::from_secs(5 * 60)
 }
 
 /// Bulletins-tab configuration set via `[bulletins]` in the TOML config.
@@ -862,5 +902,53 @@ mod tests {
         assert_eq!(cfg.ceiling.tabular, None);
         // Other keys keep defaults.
         assert_eq!(cfg.ceiling.text, Some(4 * 1024 * 1024));
+    }
+
+    #[test]
+    fn browser_section_defaults_match_spec() {
+        let cfg: BrowserConfig = toml::from_str("").expect("empty config parses with defaults");
+        assert_eq!(
+            cfg.queue_listing_timeout,
+            std::time::Duration::from_secs(30)
+        );
+        assert_eq!(
+            cfg.queue_listing_age_warning,
+            std::time::Duration::from_secs(5 * 60)
+        );
+    }
+
+    #[test]
+    fn browser_section_overrides_defaults() {
+        let toml = r#"
+            queue_listing_timeout = "10s"
+            queue_listing_age_warning = "30s"
+        "#;
+        let cfg: BrowserConfig = toml::from_str(toml).expect("parses");
+        assert_eq!(
+            cfg.queue_listing_timeout,
+            std::time::Duration::from_secs(10)
+        );
+        assert_eq!(
+            cfg.queue_listing_age_warning,
+            std::time::Duration::from_secs(30)
+        );
+    }
+
+    #[test]
+    fn browser_age_warning_zero_disables() {
+        let toml = r#"
+            queue_listing_age_warning = "0s"
+        "#;
+        let cfg: BrowserConfig = toml::from_str(toml).expect("parses");
+        assert_eq!(cfg.queue_listing_age_warning, std::time::Duration::ZERO);
+    }
+
+    #[test]
+    fn browser_default_matches_serde_empty() {
+        // Guard against drift between hand-written `Default` impl and the
+        // `#[serde(default = "...")]` helpers.
+        let from_default = BrowserConfig::default();
+        let from_serde: BrowserConfig = toml::from_str("").expect("empty table parses as default");
+        assert_eq!(from_default, from_serde);
     }
 }
