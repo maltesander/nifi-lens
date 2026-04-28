@@ -18,8 +18,9 @@ pub mod verb;
 // touching callers.
 pub use action::{AppAction, FocusAction, GoTarget, HistoryAction, TabAction};
 pub use verb::{
-    ActionHistoryModalVerb, BrowserVerb, BulletinsVerb, ContentModalVerb, EventsVerb, FilterField,
-    ParameterContextModalVerb, Severity, TracerVerb, VersionControlModalVerb, ViewVerb,
+    ActionHistoryModalVerb, BrowserPeekVerb, BrowserQueueVerb, BrowserVerb, BulletinsVerb,
+    ContentModalVerb, EventsVerb, FilterField, ParameterContextModalVerb, Severity, TracerVerb,
+    VersionControlModalVerb, ViewVerb,
 };
 
 // ---------------------------------------------------------------------------
@@ -235,6 +236,7 @@ impl KeyMap {
         version_modal_open: bool,
         parameter_modal_open: bool,
         action_history_modal_open: bool,
+        peek_modal_open: bool,
         state: &crate::app::state::AppState,
     ) -> InputEvent {
         use crossterm::event::{KeyCode, KeyModifiers};
@@ -361,6 +363,29 @@ impl KeyMap {
             for &v in ActionHistoryModalVerb::all() {
                 if chord_matches(v.chord(), key) {
                     return InputEvent::View(ViewVerb::ActionHistoryModal(v));
+                }
+            }
+
+            return InputEvent::Unmapped;
+        }
+
+        // When the peek modal is open on the Browser tab, BrowserPeekVerb
+        // chords take absolute priority — they shadow FocusAction
+        // (Esc → Close, not Ascend). Keys not claimed by BrowserPeekVerb
+        // return Unmapped; outer app keys are blocked while the modal is up.
+        if peek_modal_open && active_view == ViewId::Browser {
+            // Ctrl+c / Ctrl+q / Ctrl+Q must always quit, even with the modal open.
+            if matches!(
+                key.code,
+                KeyCode::Char('c') | KeyCode::Char('q') | KeyCode::Char('Q')
+            ) && key.modifiers.contains(KeyModifiers::CONTROL)
+            {
+                return InputEvent::App(AppAction::Quit);
+            }
+
+            for &v in BrowserPeekVerb::all() {
+                if chord_matches(v.chord(), key) {
+                    return InputEvent::View(ViewVerb::BrowserPeek(v));
                 }
             }
 
@@ -572,6 +597,7 @@ mod keymap_tests {
                 false,
                 false,
                 false,
+                false,
                 &dummy_state()
             ),
             InputEvent::Focus(FocusAction::Descend)
@@ -585,6 +611,7 @@ mod keymap_tests {
             km.translate(
                 press(KeyCode::Esc),
                 ViewId::Overview,
+                false,
                 false,
                 false,
                 false,
@@ -606,6 +633,7 @@ mod keymap_tests {
                 false,
                 false,
                 false,
+                false,
                 &dummy_state(),
             ),
             InputEvent::History(HistoryAction::Back)
@@ -623,6 +651,7 @@ mod keymap_tests {
                 false,
                 false,
                 false,
+                false,
                 &dummy_state()
             ),
             InputEvent::Unmapped
@@ -631,6 +660,7 @@ mod keymap_tests {
             km.translate(
                 press(KeyCode::Char(']')),
                 ViewId::Overview,
+                false,
                 false,
                 false,
                 false,
@@ -652,6 +682,7 @@ mod keymap_tests {
                 false,
                 false,
                 false,
+                false,
                 &dummy_state()
             ),
             InputEvent::Focus(FocusAction::NextPane)
@@ -665,6 +696,7 @@ mod keymap_tests {
             km.translate(
                 press(KeyCode::BackTab),
                 ViewId::Overview,
+                false,
                 false,
                 false,
                 false,
@@ -690,6 +722,7 @@ mod keymap_tests {
                 false,
                 false,
                 false,
+                false,
                 &dummy_state(),
             ),
             InputEvent::Focus(FocusAction::PrevPane)
@@ -703,6 +736,7 @@ mod keymap_tests {
             km.translate(
                 press(KeyCode::F(3)),
                 ViewId::Overview,
+                false,
                 false,
                 false,
                 false,
@@ -724,6 +758,7 @@ mod keymap_tests {
                 false,
                 false,
                 false,
+                false,
                 &dummy_state()
             ),
             InputEvent::App(AppAction::Quit)
@@ -737,6 +772,7 @@ mod keymap_tests {
             km.translate(
                 press_mod(KeyCode::Char('c'), KeyModifiers::CONTROL),
                 ViewId::Overview,
+                false,
                 false,
                 false,
                 false,
@@ -758,6 +794,7 @@ mod keymap_tests {
                 false,
                 false,
                 false,
+                false,
                 &dummy_state()
             ),
             InputEvent::App(AppAction::Goto)
@@ -775,6 +812,7 @@ mod keymap_tests {
                 false,
                 false,
                 false,
+                false,
                 &dummy_state()
             ),
             InputEvent::Unmapped
@@ -783,6 +821,7 @@ mod keymap_tests {
             km.translate(
                 press(KeyCode::Char('k')),
                 ViewId::Overview,
+                false,
                 false,
                 false,
                 false,
@@ -806,6 +845,7 @@ mod keymap_tests {
                 false,
                 false,
                 false,
+                false,
                 &dummy_state()
             ),
             InputEvent::View(ViewVerb::Events(EventsVerb::Refresh))
@@ -814,6 +854,7 @@ mod keymap_tests {
             km.translate(
                 press(KeyCode::Char('r')),
                 ViewId::Bulletins,
+                false,
                 false,
                 false,
                 false,
@@ -838,6 +879,7 @@ mod keymap_tests {
                 false,
                 false,
                 false,
+                false,
                 &dummy_state(),
             ),
             InputEvent::View(ViewVerb::Events(EventsVerb::EditField(FilterField::Types)))
@@ -846,6 +888,7 @@ mod keymap_tests {
             km.translate(
                 press_mod(KeyCode::Char('T'), KeyModifiers::SHIFT),
                 ViewId::Bulletins,
+                false,
                 false,
                 false,
                 false,
@@ -987,6 +1030,7 @@ mod keymap_tests {
                 false,
                 false,
                 false,
+                false,
                 &dummy_state()
             ),
             InputEvent::View(ViewVerb::ContentModal(ContentModalVerb::Copy))
@@ -1000,6 +1044,7 @@ mod keymap_tests {
                 false,
                 false,
                 false,
+                false,
                 &dummy_state()
             ),
             InputEvent::Unmapped
@@ -1009,6 +1054,7 @@ mod keymap_tests {
             km.translate(
                 press(KeyCode::Char('i')),
                 ViewId::Tracer,
+                false,
                 false,
                 false,
                 false,
@@ -1033,6 +1079,7 @@ mod keymap_tests {
                 false,
                 false,
                 false,
+                false,
                 &dummy_state()
             ),
             InputEvent::View(ViewVerb::ContentModal(ContentModalVerb::Close))
@@ -1047,6 +1094,7 @@ mod keymap_tests {
                 press(KeyCode::Tab),
                 ViewId::Tracer,
                 true,
+                false,
                 false,
                 false,
                 false,
@@ -1067,6 +1115,7 @@ mod keymap_tests {
                 false,
                 false,
                 false,
+                false,
                 &dummy_state(),
             ),
             InputEvent::App(AppAction::Quit)
@@ -1076,6 +1125,7 @@ mod keymap_tests {
                 press_mod(KeyCode::Char('q'), KeyModifiers::CONTROL),
                 ViewId::Tracer,
                 true,
+                false,
                 false,
                 false,
                 false,
@@ -1097,6 +1147,7 @@ mod keymap_tests {
                 false,
                 false,
                 false,
+                false,
                 &dummy_state()
             ),
             InputEvent::Focus(FocusAction::Up)
@@ -1106,6 +1157,7 @@ mod keymap_tests {
                 press(KeyCode::Down),
                 ViewId::Tracer,
                 true,
+                false,
                 false,
                 false,
                 false,
@@ -1121,6 +1173,7 @@ mod keymap_tests {
                 false,
                 false,
                 false,
+                false,
                 &dummy_state()
             ),
             InputEvent::Focus(FocusAction::PageUp)
@@ -1130,6 +1183,7 @@ mod keymap_tests {
                 press(KeyCode::PageDown),
                 ViewId::Tracer,
                 true,
+                false,
                 false,
                 false,
                 false,
@@ -1145,6 +1199,7 @@ mod keymap_tests {
                 false,
                 false,
                 false,
+                false,
                 &dummy_state()
             ),
             InputEvent::Focus(FocusAction::First)
@@ -1154,6 +1209,7 @@ mod keymap_tests {
                 press(KeyCode::End),
                 ViewId::Tracer,
                 true,
+                false,
                 false,
                 false,
                 false,
@@ -1181,6 +1237,7 @@ mod keymap_tests {
             /* version_modal_open */ false,
             /* parameter_modal_open */ false,
             /* action_history_modal_open */ true,
+            false,
             &state,
         );
         assert!(matches!(
@@ -1197,6 +1254,7 @@ mod keymap_tests {
             false,
             false,
             true,
+            false,
             &state,
         );
         assert!(matches!(
@@ -1212,6 +1270,7 @@ mod keymap_tests {
             false,
             false,
             true,
+            false,
             &state,
         );
         assert!(matches!(ev, InputEvent::App(crate::input::AppAction::Quit)));
@@ -1230,6 +1289,91 @@ mod keymap_tests {
         let ev = km.translate(
             KeyEvent::new(KeyCode::Esc, KeyModifiers::empty()),
             ViewId::Tracer,
+            false,
+            false,
+            false,
+            true,
+            false,
+            &state,
+        );
+        // Esc on a non-Browser tab routes through FocusAction::Ascend.
+        assert!(matches!(
+            ev,
+            InputEvent::Focus(crate::input::FocusAction::Ascend)
+        ));
+    }
+
+    #[test]
+    fn peek_modal_open_shadows_browser_verb() {
+        use crate::app::state::ViewId;
+        use crate::input::{BrowserPeekVerb, InputEvent, KeyMap, ViewVerb};
+        use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+
+        let km = KeyMap::default();
+        let state = dummy_state();
+
+        // 'c' inside the peek modal must route to BrowserPeekVerb::CopyAsJson
+        // (not BrowserVerb::Copy).
+        let ev = km.translate(
+            KeyEvent::new(KeyCode::Char('c'), KeyModifiers::empty()),
+            ViewId::Browser,
+            /* content_modal_open */ false,
+            /* version_modal_open */ false,
+            /* parameter_modal_open */ false,
+            /* action_history_modal_open */ false,
+            /* peek_modal_open */ true,
+            &state,
+        );
+        assert!(matches!(
+            ev,
+            InputEvent::View(ViewVerb::BrowserPeek(BrowserPeekVerb::CopyAsJson))
+        ));
+
+        // Esc inside the peek modal routes to BrowserPeekVerb::Close
+        // (not FocusAction::Ascend).
+        let ev = km.translate(
+            KeyEvent::new(KeyCode::Esc, KeyModifiers::empty()),
+            ViewId::Browser,
+            false,
+            false,
+            false,
+            false,
+            true,
+            &state,
+        );
+        assert!(matches!(
+            ev,
+            InputEvent::View(ViewVerb::BrowserPeek(BrowserPeekVerb::Close))
+        ));
+
+        // Ctrl+C must always quit even with the peek modal open.
+        let ev = km.translate(
+            KeyEvent::new(KeyCode::Char('c'), KeyModifiers::CONTROL),
+            ViewId::Browser,
+            false,
+            false,
+            false,
+            false,
+            true,
+            &state,
+        );
+        assert!(matches!(ev, InputEvent::App(crate::input::AppAction::Quit)));
+    }
+
+    #[test]
+    fn peek_modal_only_shadows_on_browser_tab() {
+        use crate::app::state::ViewId;
+        use crate::input::{InputEvent, KeyMap};
+        use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+
+        let km = KeyMap::default();
+        let state = dummy_state();
+
+        // peek_modal_open flag set but tab is Tracer → don't shadow.
+        let ev = km.translate(
+            KeyEvent::new(KeyCode::Esc, KeyModifiers::empty()),
+            ViewId::Tracer,
+            false,
             false,
             false,
             false,
