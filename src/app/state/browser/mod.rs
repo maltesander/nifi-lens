@@ -537,14 +537,28 @@ impl ViewKeyHandler for BrowserHandler {
                     None
                 }
                 FocusAction::NextPane => {
-                    // Advance to the next section, wrapping back to Tree.
+                    // Advance to the next section. If at the last
+                    // section and a non-empty queue listing is
+                    // present, hop into listing focus before wrapping
+                    // back to Tree on the next press.
                     let section_count = sections.len();
                     if section_count == 0 {
                         return Some(UpdateResult::default());
                     }
                     let new_idx = idx + 1;
                     if new_idx >= section_count {
-                        state.browser.detail_focus = DetailFocus::Tree;
+                        let listing_has_rows = state
+                            .browser
+                            .queue_listing
+                            .as_ref()
+                            .map(|s| !s.rows.is_empty())
+                            .unwrap_or(false);
+                        if listing_has_rows {
+                            state.browser.detail_focus = DetailFocus::Tree;
+                            state.browser.listing_focused = true;
+                        } else {
+                            state.browser.detail_focus = DetailFocus::Tree;
+                        }
                     } else {
                         state.browser.detail_focus = DetailFocus::Section {
                             idx: new_idx,
@@ -874,13 +888,23 @@ impl ViewKeyHandler for BrowserHandler {
             return true;
         }
         // Action-history modal's search input.
-        state
+        let ah_active = state
             .browser
             .action_history_modal
             .as_ref()
             .and_then(|m| m.search.as_ref())
             .map(|s| s.input_active)
-            .unwrap_or(false)
+            .unwrap_or(false);
+        if ah_active {
+            return true;
+        }
+        // Queue-listing filter prompt.
+        state
+            .browser
+            .queue_listing
+            .as_ref()
+            .and_then(|l| l.filter_prompt.as_ref())
+            .is_some()
     }
 
     fn blocks_app_shortcuts(state: &AppState) -> bool {
@@ -954,15 +978,42 @@ impl ViewKeyHandler for BrowserHandler {
             .and_then(|m| m.search.as_ref())
             .map(|s| s.input_active)
             .unwrap_or(false);
-        if !ah_active {
+        if ah_active {
+            match key.code {
+                KeyCode::Esc => state.browser.action_history_modal_search_cancel(),
+                KeyCode::Enter => state.browser.action_history_modal_search_commit(),
+                KeyCode::Backspace => state.browser.action_history_modal_search_pop(),
+                KeyCode::Char(ch) if !key.modifiers.contains(KeyModifiers::CONTROL) => {
+                    state.browser.action_history_modal_search_push(ch);
+                }
+                _ => return None,
+            }
+            return Some(UpdateResult {
+                redraw: true,
+                intent: None,
+                tracer_followup: None,
+                sparkline_followup: None,
+                queue_listing_followup: None,
+            });
+        }
+
+        // Queue-listing filter prompt.
+        let filter_active = state
+            .browser
+            .queue_listing
+            .as_ref()
+            .and_then(|l| l.filter_prompt.as_ref())
+            .is_some();
+        if !filter_active {
             return None;
         }
+        let listing = state.browser.queue_listing.as_mut()?;
         match key.code {
-            KeyCode::Esc => state.browser.action_history_modal_search_cancel(),
-            KeyCode::Enter => state.browser.action_history_modal_search_commit(),
-            KeyCode::Backspace => state.browser.action_history_modal_search_pop(),
+            KeyCode::Esc => listing.cancel_filter_prompt(),
+            KeyCode::Enter => listing.commit_filter_prompt(),
+            KeyCode::Backspace => listing.backspace_filter_char(),
             KeyCode::Char(ch) if !key.modifiers.contains(KeyModifiers::CONTROL) => {
-                state.browser.action_history_modal_search_push(ch);
+                listing.push_filter_char(ch);
             }
             _ => return None,
         }
@@ -1630,17 +1681,14 @@ fn handle_browser_queue_verb(
         }
 
         BrowserQueueVerb::FocusListing => {
-            // Tab: move focus from the tree into the listing rows.  Only
-            // meaningful when rows are present — guard here so the keymap
-            // can fire the chord unconditionally.
-            let has_rows = state
-                .browser
-                .queue_listing
-                .as_ref()
-                .map(|s| !s.rows.is_empty())
-                .unwrap_or(false);
-            if has_rows {
-                state.browser.listing_focused = true;
+            // Tab while listing is focused → drop focus back to Tree
+            // (continuing the rotation Endpoints → Listing → Tree). The
+            // keymap shadow gate routes Tab here only when listing is
+            // already focused; the entry into listing focus happens via
+            // FocusAction::NextPane wrapping past the last detail
+            // section.
+            if state.browser.listing_focused {
+                state.browser.listing_focused = false;
             }
             UpdateResult {
                 redraw: true,

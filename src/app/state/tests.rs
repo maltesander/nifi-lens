@@ -1902,12 +1902,17 @@ mod queue_listing_reducer_tests {
     }
 
     #[test]
-    fn focus_listing_verb_sets_focus_when_rows_present() {
+    fn focus_listing_verb_drops_focus_when_already_set() {
         use crate::app::state::ViewKeyHandler;
         use crate::input::{BrowserQueueVerb, ViewVerb};
         use crate::view::browser::state::queue_listing::{QueueListingRow, QueueListingState};
         use std::time::Duration;
 
+        // Listing focus is entered via FocusAction::NextPane wrapping
+        // past the last detail section (see browser/mod.rs). The
+        // FocusListing verb is then dispatched by the keymap's
+        // listing-focus shadow gate to drop focus back to the tree —
+        // continuing the rotation Endpoints → Listing → Tree.
         let mut state = fresh_state();
         let mut listing = QueueListingState::pending("q1".into(), "Q1".into());
         listing.rows = vec![QueueListingRow {
@@ -1921,23 +1926,25 @@ mod queue_listing_reducer_tests {
             lineage_duration: Duration::from_secs(0),
         }];
         state.browser.queue_listing = Some(listing);
+        state.browser.listing_focused = true;
 
         let _ = crate::app::state::browser::BrowserHandler::handle_verb(
             &mut state,
             ViewVerb::BrowserQueue(BrowserQueueVerb::FocusListing),
         );
-        assert!(state.browser.listing_focused);
+        assert!(!state.browser.listing_focused);
     }
 
     #[test]
-    fn focus_listing_verb_no_op_when_listing_empty() {
+    fn focus_listing_verb_no_op_when_not_focused() {
         use crate::app::state::ViewKeyHandler;
         use crate::input::{BrowserQueueVerb, ViewVerb};
         use crate::view::browser::state::queue_listing::QueueListingState;
 
         let mut state = fresh_state();
         state.browser.queue_listing = Some(QueueListingState::pending("q1".into(), "Q1".into()));
-        // No rows — focus must not flip.
+        // Not yet focused; the verb is a no-op (entry path is
+        // FocusAction::NextPane wrapping past the last section).
         let _ = crate::app::state::browser::BrowserHandler::handle_verb(
             &mut state,
             ViewVerb::BrowserQueue(BrowserQueueVerb::FocusListing),

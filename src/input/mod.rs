@@ -413,22 +413,6 @@ impl KeyMap {
             return InputEvent::Unmapped;
         }
 
-        // Tab on the Browser tab — if a non-empty listing is shown
-        // but doesn't yet have focus, dispatch FocusListing instead
-        // of falling through to the generic FocusAction::NextPane.
-        // This is the entry point that flips listing_focused = true.
-        if active_view == ViewId::Browser
-            && state
-                .browser
-                .queue_listing
-                .as_ref()
-                .map(|s| !s.rows.is_empty())
-                .unwrap_or(false)
-            && chord_matches(BrowserQueueVerb::FocusListing.chord(), key)
-        {
-            return InputEvent::View(ViewVerb::BrowserQueue(BrowserQueueVerb::FocusListing));
-        }
-
         // Reverse-lookup across framework enums (order matters: Focus
         // is highest priority so Esc/Enter always win).
         for &a in FocusAction::all() {
