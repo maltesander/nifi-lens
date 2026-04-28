@@ -17,6 +17,7 @@ use crate::client::browser::{
 };
 use crate::client::status::{ControllerServiceState, ProcessorStatus};
 
+pub mod action_history_modal;
 pub mod parameter_context_modal;
 pub use parameter_context_modal::{
     ParameterContextLoad, ParameterContextModalState, ResolvedParameter, resolve,
@@ -223,6 +224,13 @@ pub struct BrowserState {
     /// Aborted on `Close` and on `Refresh` (which spawns a new one).
     /// Cleared by the loaded / failed event handlers.
     pub parameter_modal_handle: Option<tokio::task::JoinHandle<()>>,
+    /// Open action-history modal state, if any. `None` when the modal
+    /// is closed. Captured at open time, populated asynchronously by
+    /// the view-local worker (Task 11).
+    pub action_history_modal: Option<action_history_modal::ActionHistoryModalState>,
+    /// Live worker handle for the action-history modal's paginator.
+    /// Aborted on close, refresh, tab switch, or selection change.
+    pub action_history_modal_handle: Option<tokio::task::JoinHandle<()>>,
 }
 
 /// One segment in the breadcrumb path.
