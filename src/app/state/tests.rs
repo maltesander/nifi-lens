@@ -1536,4 +1536,199 @@ mod queue_listing_reducer_tests {
         );
         assert!(state.browser.queue_listing.is_none());
     }
+
+    #[test]
+    fn open_peek_modal_pre_fills_identity_from_row() {
+        use crate::view::browser::state::queue_listing::{QueueListingRow, QueueListingState};
+        use std::time::Duration;
+
+        let mut state = fresh_state();
+        let mut listing = QueueListingState::pending("q1".into(), "Q1".into());
+        listing.rows = vec![QueueListingRow {
+            uuid: "ff-1".into(),
+            filename: Some("a.parquet".into()),
+            size: 2048,
+            queued_duration: Duration::from_secs(5),
+            position: 1,
+            penalized: false,
+            cluster_node_id: None,
+            lineage_duration: Duration::from_secs(60),
+        }];
+        listing.selected = 0;
+        state.browser.queue_listing = Some(listing);
+        state.browser.open_queue_listing_peek_modal();
+        let peek = state
+            .browser
+            .queue_listing
+            .as_ref()
+            .unwrap()
+            .peek
+            .as_ref()
+            .unwrap();
+        assert_eq!(peek.uuid, "ff-1");
+        assert_eq!(peek.identity.filename.as_deref(), Some("a.parquet"));
+        assert!(peek.attrs.is_none());
+        assert!(peek.error.is_none());
+    }
+
+    #[test]
+    fn close_peek_modal_clears_state() {
+        use crate::view::browser::state::queue_listing::{QueueListingRow, QueueListingState};
+        use std::time::Duration;
+
+        let mut state = fresh_state();
+        let mut listing = QueueListingState::pending("q1".into(), "Q1".into());
+        listing.rows = vec![QueueListingRow {
+            uuid: "ff-1".into(),
+            filename: Some("a.parquet".into()),
+            size: 2048,
+            queued_duration: Duration::from_secs(5),
+            position: 1,
+            penalized: false,
+            cluster_node_id: None,
+            lineage_duration: Duration::from_secs(60),
+        }];
+        listing.selected = 0;
+        state.browser.queue_listing = Some(listing);
+        state.browser.open_queue_listing_peek_modal();
+        state.browser.close_queue_listing_peek_modal();
+        assert!(state.browser.queue_listing.as_ref().unwrap().peek.is_none());
+    }
+
+    #[test]
+    fn flowfile_peek_payload_populates_attrs() {
+        use crate::event::BrowserPayload;
+        use crate::view::browser::state::queue_listing::{QueueListingRow, QueueListingState};
+        use std::collections::BTreeMap;
+        use std::time::Duration;
+
+        let mut state = fresh_state();
+        let mut listing = QueueListingState::pending("q1".into(), "Q1".into());
+        listing.rows = vec![QueueListingRow {
+            uuid: "ff-1".into(),
+            filename: Some("a.parquet".into()),
+            size: 2048,
+            queued_duration: Duration::from_secs(5),
+            position: 1,
+            penalized: false,
+            cluster_node_id: None,
+            lineage_duration: Duration::from_secs(60),
+        }];
+        listing.selected = 0;
+        state.browser.queue_listing = Some(listing);
+        state.browser.open_queue_listing_peek_modal();
+
+        let mut attrs = BTreeMap::new();
+        attrs.insert("record.count".into(), "1000".into());
+        handle_browser_payload(
+            &mut state,
+            BrowserPayload::FlowfilePeek {
+                queue_id: "q1".into(),
+                uuid: "ff-1".into(),
+                attrs,
+                content_claim: None,
+                mime_type: Some("application/x-parquet".into()),
+            },
+        );
+        let peek = state
+            .browser
+            .queue_listing
+            .as_ref()
+            .unwrap()
+            .peek
+            .as_ref()
+            .unwrap();
+        let attrs = peek.attrs.as_ref().unwrap();
+        assert_eq!(attrs.get("record.count").map(String::as_str), Some("1000"));
+        assert_eq!(
+            peek.identity.mime_type.as_deref(),
+            Some("application/x-parquet")
+        );
+    }
+
+    #[test]
+    fn flowfile_peek_payload_for_other_uuid_ignored() {
+        use crate::event::BrowserPayload;
+        use crate::view::browser::state::queue_listing::{QueueListingRow, QueueListingState};
+        use std::time::Duration;
+
+        let mut state = fresh_state();
+        let mut listing = QueueListingState::pending("q1".into(), "Q1".into());
+        listing.rows = vec![QueueListingRow {
+            uuid: "ff-1".into(),
+            filename: Some("a.parquet".into()),
+            size: 2048,
+            queued_duration: Duration::from_secs(5),
+            position: 1,
+            penalized: false,
+            cluster_node_id: None,
+            lineage_duration: Duration::from_secs(60),
+        }];
+        listing.selected = 0;
+        state.browser.queue_listing = Some(listing);
+        state.browser.open_queue_listing_peek_modal();
+
+        handle_browser_payload(
+            &mut state,
+            BrowserPayload::FlowfilePeek {
+                queue_id: "q1".into(),
+                uuid: "ff-OTHER".into(),
+                attrs: Default::default(),
+                content_claim: None,
+                mime_type: None,
+            },
+        );
+        let peek = state
+            .browser
+            .queue_listing
+            .as_ref()
+            .unwrap()
+            .peek
+            .as_ref()
+            .unwrap();
+        assert!(
+            peek.attrs.is_none(),
+            "ignored payload must not mutate state"
+        );
+    }
+
+    #[test]
+    fn flowfile_peek_error_populates_chip() {
+        use crate::event::BrowserPayload;
+        use crate::view::browser::state::queue_listing::{QueueListingRow, QueueListingState};
+        use std::time::Duration;
+
+        let mut state = fresh_state();
+        let mut listing = QueueListingState::pending("q1".into(), "Q1".into());
+        listing.rows = vec![QueueListingRow {
+            uuid: "ff-1".into(),
+            filename: Some("a.parquet".into()),
+            size: 2048,
+            queued_duration: Duration::from_secs(5),
+            position: 1,
+            penalized: false,
+            cluster_node_id: None,
+            lineage_duration: Duration::from_secs(60),
+        }];
+        listing.selected = 0;
+        state.browser.queue_listing = Some(listing);
+        state.browser.open_queue_listing_peek_modal();
+        handle_browser_payload(
+            &mut state,
+            BrowserPayload::FlowfilePeekError {
+                queue_id: "q1".into(),
+                uuid: "ff-1".into(),
+                err: "404".into(),
+            },
+        );
+        let peek = state
+            .browser
+            .queue_listing
+            .as_ref()
+            .unwrap()
+            .peek
+            .as_ref()
+            .unwrap();
+        assert_eq!(peek.error.as_deref(), Some("404"));
+    }
 }

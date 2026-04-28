@@ -2124,8 +2124,30 @@ pub(crate) fn handle_browser_payload(state: &mut AppState, payload: crate::event
                 s.apply_timeout(&queue_id);
             }
         }
-        // T11 will replace these with real peek-payload reducer arms.
-        BrowserPayload::FlowfilePeek { .. } | BrowserPayload::FlowfilePeekError { .. } => {}
+        BrowserPayload::FlowfilePeek {
+            queue_id,
+            uuid,
+            attrs,
+            content_claim,
+            mime_type,
+        } => {
+            if let Some(listing) = state.browser.queue_listing.as_mut()
+                && let Some(peek) = listing.peek.as_mut()
+            {
+                peek.apply_peek(&queue_id, &uuid, attrs, content_claim, mime_type);
+            }
+        }
+        BrowserPayload::FlowfilePeekError {
+            queue_id,
+            uuid,
+            err,
+        } => {
+            if let Some(listing) = state.browser.queue_listing.as_mut()
+                && let Some(peek) = listing.peek.as_mut()
+            {
+                peek.apply_error(&queue_id, &uuid, err);
+            }
+        }
     }
 }
 

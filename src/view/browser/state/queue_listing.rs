@@ -206,6 +206,64 @@ impl QueueListingState {
     }
 }
 
+impl QueueListingPeekState {
+    /// Construct from the row that was selected when `i` was pressed.
+    /// Identity fields populate immediately so the modal renders
+    /// something useful before the GET completes.
+    pub fn from_row(queue_id: String, row: &QueueListingRow) -> Self {
+        Self {
+            uuid: row.uuid.clone(),
+            queue_id,
+            cluster_node_id: row.cluster_node_id.clone(),
+            identity: PeekIdentity {
+                uuid: row.uuid.clone(),
+                filename: row.filename.clone(),
+                size: row.size,
+                mime_type: None,
+                content_claim: None,
+                cluster_node_id: row.cluster_node_id.clone(),
+                lineage_duration: row.lineage_duration,
+                penalized: row.penalized,
+            },
+            attrs: None,
+            error: None,
+            scroll: VerticalScrollState::default(),
+            search: None,
+            fetch_handle: None,
+        }
+    }
+
+    /// Apply a `BrowserPayload::FlowfilePeek` payload. Returns `true`
+    /// when `(queue_id, uuid)` matches and state mutated.
+    pub fn apply_peek(
+        &mut self,
+        queue_id: &str,
+        uuid: &str,
+        attrs: BTreeMap<String, String>,
+        content_claim: Option<ContentClaimSummary>,
+        mime_type: Option<String>,
+    ) -> bool {
+        if self.queue_id != queue_id || self.uuid != uuid {
+            return false;
+        }
+        self.attrs = Some(attrs);
+        self.identity.content_claim = content_claim;
+        self.identity.mime_type = mime_type;
+        self.error = None;
+        true
+    }
+
+    /// Apply a `BrowserPayload::FlowfilePeekError` payload. Sets the
+    /// error chip; preserves any prior loaded attrs.
+    pub fn apply_error(&mut self, queue_id: &str, uuid: &str, err: String) -> bool {
+        if self.queue_id != queue_id || self.uuid != uuid {
+            return false;
+        }
+        self.error = Some(err);
+        true
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

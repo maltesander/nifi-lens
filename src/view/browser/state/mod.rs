@@ -1461,6 +1461,40 @@ impl BrowserState {
         }
         edges
     }
+
+    /// Open the per-flowfile peek modal for the currently-selected
+    /// listing row. No-op when no listing is active or no row is
+    /// selected. The actual GET fetch is spawned by T15's verb
+    /// dispatch — this method only sets up modal state.
+    pub fn open_queue_listing_peek_modal(&mut self) {
+        let Some(listing) = self.queue_listing.as_mut() else {
+            return;
+        };
+        let visible = listing.visible_indices();
+        let Some(&idx) = visible.get(listing.selected) else {
+            return;
+        };
+        let Some(row) = listing.rows.get(idx) else {
+            return;
+        };
+        listing.peek = Some(queue_listing::QueueListingPeekState::from_row(
+            listing.queue_id.clone(),
+            row,
+        ));
+    }
+
+    /// Close the peek modal. Aborts the in-flight peek fetch handle
+    /// (if any) — the handle's drop on `JoinHandle<()>` from
+    /// `spawn_local` does NOT abort the task, so the explicit `.abort()`
+    /// is needed to stop a pending GET if the user closes mid-fetch.
+    pub fn close_queue_listing_peek_modal(&mut self) {
+        if let Some(listing) = self.queue_listing.as_mut()
+            && let Some(mut peek) = listing.peek.take()
+            && let Some(h) = peek.fetch_handle.take()
+        {
+            h.abort();
+        }
+    }
 }
 
 impl ListNavigation for BrowserState {
