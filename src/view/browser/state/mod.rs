@@ -859,6 +859,92 @@ impl BrowserState {
         });
     }
 
+    // Search reducer methods for the queue-listing peek modal. Mirror
+    // the version_modal_search_* / parameter_modal_search_* methods
+    // above; each operates against
+    // queue_listing.peek.search and the body from
+    // QueueListingPeekState::searchable_body.
+
+    /// Push a character into the peek modal's live search query and
+    /// recompute matches. No-op if no peek modal or no active search input.
+    pub fn peek_search_push(&mut self, ch: char) {
+        let Some(listing) = self.queue_listing.as_mut() else {
+            return;
+        };
+        let Some(peek) = listing.peek.as_mut() else {
+            return;
+        };
+        let body = peek.searchable_body();
+        let Some(search) = peek.search.as_mut() else {
+            return;
+        };
+        if !search.input_active {
+            return;
+        }
+        search.query.push(ch);
+        search.matches = crate::widget::search::compute_matches(&body, &search.query);
+        search.current = if search.matches.is_empty() {
+            None
+        } else {
+            Some(0)
+        };
+    }
+
+    /// Remove the last character from the peek modal's live search query
+    /// and recompute matches. No-op if no peek modal or no active search.
+    pub fn peek_search_pop(&mut self) {
+        let Some(listing) = self.queue_listing.as_mut() else {
+            return;
+        };
+        let Some(peek) = listing.peek.as_mut() else {
+            return;
+        };
+        let body = peek.searchable_body();
+        let Some(search) = peek.search.as_mut() else {
+            return;
+        };
+        if !search.input_active {
+            return;
+        }
+        search.query.pop();
+        search.matches = crate::widget::search::compute_matches(&body, &search.query);
+        search.current = if search.matches.is_empty() {
+            None
+        } else {
+            Some(0)
+        };
+    }
+
+    /// Commit the peek modal's current search query. Empty query closes
+    /// search; otherwise flips `input_active` to false and `committed`
+    /// to true so `n`/`N` can cycle.
+    pub fn peek_search_commit(&mut self) {
+        let Some(listing) = self.queue_listing.as_mut() else {
+            return;
+        };
+        let Some(peek) = listing.peek.as_mut() else {
+            return;
+        };
+        let Some(search) = peek.search.as_mut() else {
+            return;
+        };
+        if search.query.is_empty() {
+            peek.search = None;
+            return;
+        }
+        search.input_active = false;
+        search.committed = true;
+    }
+
+    /// Cancel search and clear all peek-modal search state.
+    pub fn peek_search_cancel(&mut self) {
+        if let Some(listing) = self.queue_listing.as_mut()
+            && let Some(peek) = listing.peek.as_mut()
+        {
+            peek.search = None;
+        }
+    }
+
     // Search reducer methods for the action-history modal. Mirror the
     // version_modal_search_* and parameter_modal_search_* methods above;
     // each operates against action_history_modal.search and the body from

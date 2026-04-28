@@ -940,6 +940,18 @@ impl ViewKeyHandler for BrowserHandler {
         if ah_active {
             return true;
         }
+        // Queue-listing peek-modal search input.
+        let peek_search_active = state
+            .browser
+            .queue_listing
+            .as_ref()
+            .and_then(|l| l.peek.as_ref())
+            .and_then(|p| p.search.as_ref())
+            .map(|s| s.input_active)
+            .unwrap_or(false);
+        if peek_search_active {
+            return true;
+        }
         // Queue-listing filter prompt.
         state
             .browser
@@ -1027,6 +1039,34 @@ impl ViewKeyHandler for BrowserHandler {
                 KeyCode::Backspace => state.browser.action_history_modal_search_pop(),
                 KeyCode::Char(ch) if !key.modifiers.contains(KeyModifiers::CONTROL) => {
                     state.browser.action_history_modal_search_push(ch);
+                }
+                _ => return None,
+            }
+            return Some(UpdateResult {
+                redraw: true,
+                intent: None,
+                tracer_followup: None,
+                sparkline_followup: None,
+                queue_listing_followup: None,
+            });
+        }
+
+        // Queue-listing peek-modal search input.
+        let peek_search_active = state
+            .browser
+            .queue_listing
+            .as_ref()
+            .and_then(|l| l.peek.as_ref())
+            .and_then(|p| p.search.as_ref())
+            .map(|s| s.input_active)
+            .unwrap_or(false);
+        if peek_search_active {
+            match key.code {
+                KeyCode::Esc => state.browser.peek_search_cancel(),
+                KeyCode::Enter => state.browser.peek_search_commit(),
+                KeyCode::Backspace => state.browser.peek_search_pop(),
+                KeyCode::Char(ch) if !key.modifiers.contains(KeyModifiers::CONTROL) => {
+                    state.browser.peek_search_push(ch);
                 }
                 _ => return None,
             }
