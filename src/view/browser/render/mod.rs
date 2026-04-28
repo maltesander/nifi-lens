@@ -15,6 +15,7 @@ pub mod pg;
 pub mod port;
 pub mod processor;
 mod properties_modal;
+pub mod queue_listing;
 pub mod version_control_modal;
 pub use param_ref_scan::{ParamRefScan, scan as scan_param_refs};
 pub use properties_modal::render_properties_modal;
