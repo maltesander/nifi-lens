@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **Action history modal** opens with `a` on Browser detail rows
+  (processor, PG, connection, controller service, port) to view NiFi
+  flow-configuration audit events filtered by `sourceId`. Paginated
+  with auto-load on scroll (100 rows per page; loads next when the
+  selection comes within 10 rows of the loaded tail), substring search
+  (`/`, `n`/`Shift+N` cycle), copy-as-TSV (`c`), inline expansion of a
+  selected row (`Enter`), and refresh from offset 0 (`r`). Read-only.
+
 ## [0.8.1] — 2026-04-27
 
 ### Fixed

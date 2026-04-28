@@ -68,6 +68,7 @@
 - **Flow browser** — component tree with per-node detail, cross-navigation (`→` jumps between related components), and fuzzy search (`:proc`, `:pg`, `:cs`, `:drift`, …).
 - **Version control drift** — `[STALE]` / `[MODIFIED]` / `[SYNC-ERR]` chips on versioned PGs and a full-screen modal with per-component diff against the registry.
 - **Parameter contexts** — `p` on any PG opens a full-screen modal showing the inheritance chain, resolved-flat parameters table, and reverse-lookup; `#{name}` references in property values cross-link straight to the parameter.
+- **Action history** — `a` on any UUID-bearing Browser row (processor, PG, connection, controller service, port) opens a full-screen audit log of NiFi flow-configuration changes for that component. Paginated with auto-load on scroll, substring search (`/`), and copy-as-TSV (`c`).
 - **Provenance events** — filterable cluster-wide event search cross-linked from Bulletins and Browser.
 - **Flowfile tracer** — paste a UUID for full lineage with attribute diffs and a full-screen content viewer that streams large bodies in 512 KiB chunks and renders colored unified diffs (JSON / CSV / Parquet / Avro).
 - **Multi-cluster** — kubeconfig-style contexts; one binary for every NiFi 2.x version.
