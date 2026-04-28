@@ -1854,4 +1854,50 @@ mod queue_listing_reducer_tests {
             .unwrap();
         assert_eq!(peek.error.as_deref(), Some("404"));
     }
+
+    #[test]
+    fn refresh_verb_emits_listing_fetch_intent() {
+        use crate::app::state::PendingIntent;
+        use crate::app::state::ViewKeyHandler;
+        use crate::input::BrowserQueueVerb;
+        use crate::input::ViewVerb;
+        use crate::view::browser::state::queue_listing::{QueueListingRow, QueueListingState};
+        use std::time::Duration;
+
+        let mut state = fresh_state();
+        let mut listing = QueueListingState::pending("q1".into(), "Q1".into());
+        listing.request_id = Some("req-1".into());
+        listing.rows = vec![QueueListingRow {
+            uuid: "ff-1".into(),
+            filename: Some("a.txt".into()),
+            size: 1024,
+            queued_duration: Duration::from_secs(1),
+            position: 1,
+            penalized: false,
+            cluster_node_id: None,
+            lineage_duration: Duration::from_secs(2),
+        }];
+        listing.percent = 100;
+        listing.total = 1;
+        state.browser.queue_listing = Some(listing);
+
+        let result = crate::app::state::browser::BrowserHandler::handle_verb(
+            &mut state,
+            ViewVerb::BrowserQueue(BrowserQueueVerb::Refresh),
+        );
+        let result = result.expect("BrowserQueue verb produced an UpdateResult");
+        assert!(
+            matches!(
+                result.intent,
+                Some(PendingIntent::SpawnQueueListingRefresh { ref queue_id }) if queue_id == "q1"
+            ),
+            "expected SpawnQueueListingRefresh with queue_id=q1, got: {:?}",
+            result.intent
+        );
+        let s = state.browser.queue_listing.as_ref().unwrap();
+        assert!(s.rows.is_empty(), "rows cleared on refresh");
+        assert_eq!(s.percent, 0, "percent reset to 0");
+        assert!(s.error.is_none(), "error cleared on refresh");
+        assert!(s.request_id.is_none(), "request_id cleared on refresh");
+    }
 }

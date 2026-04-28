@@ -26,6 +26,13 @@ impl ViewKeyHandler for BrowserHandler {
         if let ViewVerb::ActionHistoryModal(v) = verb {
             return Some(handle_action_history_modal_verb(state, v));
         }
+        // BrowserQueueVerb chords are dispatched when the listing panel
+        // has focus or the chord doesn't conflict with the tree-focus chord
+        // set. The shadow gate inside the keymap (T9) ensures these only
+        // fire on the Browser tab.
+        if let ViewVerb::BrowserQueue(v) = verb {
+            return Some(handle_browser_queue_verb(state, v));
+        }
         let bv = match verb {
             ViewVerb::Browser(v) => v,
             _ => return None,
@@ -1578,6 +1585,50 @@ fn handle_action_history_modal_verb(
             }
             redraw()
         }
+    }
+}
+
+/// Dispatch a `BrowserQueueVerb` action.  Called when the keymap routes
+/// `ViewVerb::BrowserQueue(v)` to the Browser tab handler.  `Refresh` drops
+/// the prior listing request (triggering the `QueueListingHandle` Drop-DELETE)
+/// and emits `PendingIntent::SpawnQueueListingRefresh` so the dispatcher can
+/// post a fresh listing request.  The remaining variants are stubs filled in
+/// by T15.
+fn handle_browser_queue_verb(
+    state: &mut AppState,
+    verb: crate::input::BrowserQueueVerb,
+) -> UpdateResult {
+    use crate::app::state::PendingIntent;
+    use crate::input::BrowserQueueVerb;
+
+    match verb {
+        BrowserQueueVerb::Refresh => {
+            let Some(listing) = state.browser.queue_listing.as_mut() else {
+                return UpdateResult::default();
+            };
+            // Drop the prior handle so its Drop fires DELETE for the old request.
+            listing.handle = None;
+            listing.request_id = None;
+            listing.rows.clear();
+            listing.total = 0;
+            listing.truncated = false;
+            listing.percent = 0;
+            listing.error = None;
+            listing.timed_out = false;
+            let queue_id = listing.queue_id.clone();
+            UpdateResult {
+                redraw: true,
+                intent: Some(PendingIntent::SpawnQueueListingRefresh { queue_id }),
+                ..Default::default()
+            }
+        }
+        // T15 will fill these in.
+        BrowserQueueVerb::FocusListing
+        | BrowserQueueVerb::PeekAttributes
+        | BrowserQueueVerb::TraceLineage
+        | BrowserQueueVerb::CopyUuid
+        | BrowserQueueVerb::Filter
+        | BrowserQueueVerb::Cancel => UpdateResult::default(),
     }
 }
 
