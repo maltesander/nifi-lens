@@ -3630,3 +3630,78 @@ fn apply_sparkline_endpoint_missing_sets_sticky_flag() {
     update(&mut state, ev, &cfg);
     assert!(state.browser.sparkline.as_ref().unwrap().endpoint_missing);
 }
+
+#[test]
+fn refresh_sparkline_no_selection_returns_none() {
+    let mut state = fresh_state();
+    let intent = state.refresh_sparkline_for_selection();
+    assert!(intent.is_none());
+    assert!(state.browser.sparkline.is_none());
+}
+
+#[test]
+fn refresh_sparkline_processor_selection_emits_intent_and_opens_state() {
+    use crate::client::history::ComponentKind;
+    let (mut state, _c) = seeded_browser_state();
+    // seeded_browser_state has nodes; expand root and select the processor "gen".
+    let root_idx = state
+        .browser
+        .nodes
+        .iter()
+        .position(|n| n.id == "root")
+        .unwrap();
+    state.browser.expanded.insert(root_idx);
+    crate::view::browser::state::rebuild_visible(&mut state.browser);
+    let gen_pos = state
+        .browser
+        .visible
+        .iter()
+        .position(|&i| state.browser.nodes[i].id == "gen")
+        .unwrap();
+    state.browser.selected = gen_pos;
+
+    let intent = state
+        .refresh_sparkline_for_selection()
+        .expect("intent emitted");
+    match intent {
+        PendingIntent::SpawnSparklineFetchLoop {
+            kind,
+            id,
+            cadence: _,
+        } => {
+            assert!(matches!(kind, ComponentKind::Processor));
+            assert_eq!(id, "gen");
+        }
+        _ => panic!("wrong intent"),
+    }
+    let sparkline = state.browser.sparkline.as_ref().expect("opened");
+    assert!(matches!(sparkline.kind, ComponentKind::Processor));
+}
+
+#[test]
+fn refresh_sparkline_same_selection_is_noop() {
+    let (mut state, _c) = seeded_browser_state();
+    let root_idx = state
+        .browser
+        .nodes
+        .iter()
+        .position(|n| n.id == "root")
+        .unwrap();
+    state.browser.expanded.insert(root_idx);
+    crate::view::browser::state::rebuild_visible(&mut state.browser);
+    let gen_pos = state
+        .browser
+        .visible
+        .iter()
+        .position(|&i| state.browser.nodes[i].id == "gen")
+        .unwrap();
+    state.browser.selected = gen_pos;
+    let _first = state
+        .refresh_sparkline_for_selection()
+        .expect("first intent");
+    let second = state.refresh_sparkline_for_selection();
+    assert!(
+        second.is_none(),
+        "calling refresh again with same selection must not respawn the worker"
+    );
+}

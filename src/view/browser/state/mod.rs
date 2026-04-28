@@ -1065,6 +1065,30 @@ impl BrowserState {
         }
     }
 
+    /// Compute the `(kind, id)` pair for the currently-selected row IF
+    /// it's a processor / PG / connection (the only kinds with a
+    /// `/status/history` endpoint). Returns `None` for other kinds —
+    /// folders, controller services, ports — and when there is no
+    /// selection. The orchestrator uses this to decide whether to
+    /// install / replace / tear down `BrowserState.sparkline`.
+    pub fn current_selection_for_sparkline(
+        &self,
+    ) -> Option<(crate::client::history::ComponentKind, String)> {
+        use crate::client::history::ComponentKind;
+        let arena_idx = *self.visible.get(self.selected)?;
+        let node = self.nodes.get(arena_idx)?;
+        let kind = match node.kind {
+            NodeKind::Processor => ComponentKind::Processor,
+            NodeKind::ProcessGroup => ComponentKind::ProcessGroup,
+            NodeKind::Connection => ComponentKind::Connection,
+            NodeKind::ControllerService
+            | NodeKind::InputPort
+            | NodeKind::OutputPort
+            | NodeKind::Folder(_) => return None,
+        };
+        Some((kind, node.id.clone()))
+    }
+
     /// Build the breadcrumb path from root to the currently selected node.
     /// Returns an empty vec if no node is selected.
     pub fn breadcrumb_segments(&self) -> Vec<BreadcrumbSegment> {

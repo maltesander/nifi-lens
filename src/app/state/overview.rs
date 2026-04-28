@@ -23,6 +23,7 @@ impl ViewKeyHandler for OverviewHandler {
                 redraw: true,
                 intent: None,
                 tracer_followup: None,
+                sparkline_followup: None,
             })
         };
 

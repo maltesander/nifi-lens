@@ -32,6 +32,7 @@ impl ViewKeyHandler for TracerHandler {
                             crate::intent::Intent::RefreshLineage { uuid },
                         )),
                         tracer_followup: None,
+                        sparkline_followup: None,
                     });
                 }
                 TracerMode::LatestEvents(view) => {
@@ -42,6 +43,7 @@ impl ViewKeyHandler for TracerHandler {
                             crate::intent::Intent::RefreshLatestEvents { component_id },
                         )),
                         tracer_followup: None,
+                        sparkline_followup: None,
                     });
                 }
                 _ => {}
@@ -96,6 +98,7 @@ impl ViewKeyHandler for TracerHandler {
                         redraw: true,
                         intent: None,
                         tracer_followup: None,
+                        sparkline_followup: None,
                     });
                 }
                 // No-op when Attributes tab is active or content not shown.
@@ -111,6 +114,7 @@ impl ViewKeyHandler for TracerHandler {
                         redraw: true,
                         intent: None,
                         tracer_followup: None,
+                        sparkline_followup: None,
                     });
                 }
                 return Some(UpdateResult::default());
@@ -145,6 +149,7 @@ impl ViewKeyHandler for TracerHandler {
                         redraw: true,
                         intent: Some(PendingIntent::SpawnModalChunks(fired)),
                         tracer_followup: None,
+                        sparkline_followup: None,
                     });
                 }
                 return Some(UpdateResult::default());
@@ -155,6 +160,7 @@ impl ViewKeyHandler for TracerHandler {
             redraw: true,
             intent: None,
             tracer_followup: None,
+            sparkline_followup: None,
         })
     }
 
@@ -231,6 +237,7 @@ impl ViewKeyHandler for TracerHandler {
                     Some(PendingIntent::SpawnModalChunks(fired))
                 },
                 tracer_followup: None,
+                sparkline_followup: None,
             });
         }
 
@@ -242,12 +249,14 @@ impl ViewKeyHandler for TracerHandler {
                             redraw: true,
                             intent: Some(PendingIntent::Dispatch(Intent::TraceFlowfile(uuid))),
                             tracer_followup: None,
+                            sparkline_followup: None,
                         })
                     } else {
                         Some(UpdateResult {
                             redraw: true,
                             intent: None,
                             tracer_followup: None,
+                            sparkline_followup: None,
                         })
                     }
                 }
@@ -257,6 +266,7 @@ impl ViewKeyHandler for TracerHandler {
                         redraw: true,
                         intent: None,
                         tracer_followup: None,
+                        sparkline_followup: None,
                     })
                 }
                 _ => None,
@@ -268,6 +278,7 @@ impl ViewKeyHandler for TracerHandler {
                         redraw: true,
                         intent: None,
                         tracer_followup: None,
+                        sparkline_followup: None,
                     })
                 }
                 FocusAction::Down => {
@@ -276,6 +287,7 @@ impl ViewKeyHandler for TracerHandler {
                         redraw: true,
                         intent: None,
                         tracer_followup: None,
+                        sparkline_followup: None,
                     })
                 }
                 FocusAction::Descend => {
@@ -284,6 +296,7 @@ impl ViewKeyHandler for TracerHandler {
                             redraw: true,
                             intent: Some(PendingIntent::Dispatch(Intent::TraceFlowfile(uuid))),
                             tracer_followup: None,
+                            sparkline_followup: None,
                         })
                     } else {
                         Some(UpdateResult::default())
@@ -295,6 +308,7 @@ impl ViewKeyHandler for TracerHandler {
                         redraw: true,
                         intent: None,
                         tracer_followup: None,
+                        sparkline_followup: None,
                     })
                 }
                 _ => None,
@@ -306,6 +320,7 @@ impl ViewKeyHandler for TracerHandler {
                         redraw: true,
                         intent: None,
                         tracer_followup: followup,
+                        sparkline_followup: None,
                     })
                 }
                 _ => Some(UpdateResult::default()),
@@ -322,6 +337,7 @@ impl ViewKeyHandler for TracerHandler {
                                 redraw: true,
                                 intent,
                                 tracer_followup: None,
+                                sparkline_followup: None,
                             })
                         }
                         FocusAction::Down => {
@@ -331,6 +347,7 @@ impl ViewKeyHandler for TracerHandler {
                                 redraw: true,
                                 intent,
                                 tracer_followup: None,
+                                sparkline_followup: None,
                             })
                         }
                         FocusAction::PageUp => {
@@ -342,6 +359,7 @@ impl ViewKeyHandler for TracerHandler {
                                 redraw: true,
                                 intent,
                                 tracer_followup: None,
+                                sparkline_followup: None,
                             })
                         }
                         FocusAction::PageDown => {
@@ -353,6 +371,7 @@ impl ViewKeyHandler for TracerHandler {
                                 redraw: true,
                                 intent,
                                 tracer_followup: None,
+                                sparkline_followup: None,
                             })
                         }
                         FocusAction::First => {
@@ -369,6 +388,7 @@ impl ViewKeyHandler for TracerHandler {
                                 redraw: true,
                                 intent,
                                 tracer_followup: None,
+                                sparkline_followup: None,
                             })
                         }
                         FocusAction::Last => {
@@ -386,6 +406,7 @@ impl ViewKeyHandler for TracerHandler {
                                 redraw: true,
                                 intent,
                                 tracer_followup: None,
+                                sparkline_followup: None,
                             })
                         }
                         FocusAction::Descend => {
@@ -421,6 +442,7 @@ impl ViewKeyHandler for TracerHandler {
                                     redraw: true,
                                     intent,
                                     tracer_followup: None,
+                                    sparkline_followup: None,
                                 })
                             } else {
                                 Some(UpdateResult::default())
@@ -432,6 +454,7 @@ impl ViewKeyHandler for TracerHandler {
                                 redraw: true,
                                 intent: None,
                                 tracer_followup: None,
+                                sparkline_followup: None,
                             })
                         }
                         FocusAction::NextPane => {
@@ -463,6 +486,7 @@ impl ViewKeyHandler for TracerHandler {
                                     redraw: true,
                                     intent,
                                     tracer_followup: None,
+                                    sparkline_followup: None,
                                 })
                             } else {
                                 Some(UpdateResult::default())
@@ -489,6 +513,7 @@ impl ViewKeyHandler for TracerHandler {
                                     redraw: true,
                                     intent: None,
                                     tracer_followup: None,
+                                    sparkline_followup: None,
                                 })
                             }
                             FocusAction::Down => {
@@ -504,6 +529,7 @@ impl ViewKeyHandler for TracerHandler {
                                     redraw: true,
                                     intent: None,
                                     tracer_followup: None,
+                                    sparkline_followup: None,
                                 })
                             }
                             FocusAction::PageUp => {
@@ -521,6 +547,7 @@ impl ViewKeyHandler for TracerHandler {
                                     redraw: true,
                                     intent: None,
                                     tracer_followup: None,
+                                    sparkline_followup: None,
                                 })
                             }
                             FocusAction::PageDown => {
@@ -538,6 +565,7 @@ impl ViewKeyHandler for TracerHandler {
                                     redraw: true,
                                     intent: None,
                                     tracer_followup: None,
+                                    sparkline_followup: None,
                                 })
                             }
                             FocusAction::First => {
@@ -558,6 +586,7 @@ impl ViewKeyHandler for TracerHandler {
                                     redraw: true,
                                     intent: None,
                                     tracer_followup: None,
+                                    sparkline_followup: None,
                                 })
                             }
                             FocusAction::Last => {
@@ -578,6 +607,7 @@ impl ViewKeyHandler for TracerHandler {
                                     redraw: true,
                                     intent: None,
                                     tracer_followup: None,
+                                    sparkline_followup: None,
                                 })
                             }
                             FocusAction::Right => {
@@ -588,6 +618,7 @@ impl ViewKeyHandler for TracerHandler {
                                     redraw: true,
                                     intent,
                                     tracer_followup: None,
+                                    sparkline_followup: None,
                                 })
                             }
                             FocusAction::Left => {
@@ -598,6 +629,7 @@ impl ViewKeyHandler for TracerHandler {
                                     redraw: true,
                                     intent,
                                     tracer_followup: None,
+                                    sparkline_followup: None,
                                 })
                             }
                             FocusAction::Descend => None,
@@ -607,6 +639,7 @@ impl ViewKeyHandler for TracerHandler {
                                     redraw: true,
                                     intent: None,
                                     tracer_followup: None,
+                                    sparkline_followup: None,
                                 })
                             }
                             FocusAction::NextPane => {
@@ -618,6 +651,7 @@ impl ViewKeyHandler for TracerHandler {
                                     redraw: true,
                                     intent,
                                     tracer_followup: None,
+                                    sparkline_followup: None,
                                 })
                             }
                             FocusAction::PrevPane => {
@@ -627,6 +661,7 @@ impl ViewKeyHandler for TracerHandler {
                                     redraw: true,
                                     intent: None,
                                     tracer_followup: None,
+                                    sparkline_followup: None,
                                 })
                             }
                         }
@@ -688,6 +723,7 @@ impl ViewKeyHandler for TracerHandler {
                     redraw: true,
                     intent: None,
                     tracer_followup: None,
+                    sparkline_followup: None,
                 })
             }
             (KeyCode::Char('x'), KeyModifiers::NONE) => {
@@ -700,6 +736,7 @@ impl ViewKeyHandler for TracerHandler {
                     redraw: true,
                     intent: None,
                     tracer_followup: None,
+                    sparkline_followup: None,
                 })
             }
             (KeyCode::Char(ch), KeyModifiers::NONE) | (KeyCode::Char(ch), KeyModifiers::SHIFT) => {
@@ -708,6 +745,7 @@ impl ViewKeyHandler for TracerHandler {
                     redraw: true,
                     intent: None,
                     tracer_followup: None,
+                    sparkline_followup: None,
                 })
             }
             (KeyCode::Backspace, KeyModifiers::NONE) => {
@@ -716,6 +754,7 @@ impl ViewKeyHandler for TracerHandler {
                     redraw: true,
                     intent: None,
                     tracer_followup: None,
+                    sparkline_followup: None,
                 })
             }
             (KeyCode::Char('u'), KeyModifiers::CONTROL) | (KeyCode::Esc, _) => {
@@ -724,6 +763,7 @@ impl ViewKeyHandler for TracerHandler {
                     redraw: true,
                     intent: None,
                     tracer_followup: None,
+                    sparkline_followup: None,
                 })
             }
             (KeyCode::Enter, _) => {
@@ -732,12 +772,14 @@ impl ViewKeyHandler for TracerHandler {
                         redraw: true,
                         intent: Some(PendingIntent::Dispatch(Intent::TraceFlowfile(uuid))),
                         tracer_followup: None,
+                        sparkline_followup: None,
                     })
                 } else {
                     Some(UpdateResult {
                         redraw: true,
                         intent: None,
                         tracer_followup: None,
+                        sparkline_followup: None,
                     })
                 }
             }
@@ -895,6 +937,7 @@ fn handle_content_modal_search_input(state: &mut AppState, key: KeyEvent) -> Opt
                     redraw: true,
                     intent: Some(PendingIntent::SpawnModalChunks(fired)),
                     tracer_followup: None,
+                    sparkline_followup: None,
                 });
             }
         }
@@ -906,6 +949,7 @@ fn handle_content_modal_search_input(state: &mut AppState, key: KeyEvent) -> Opt
         redraw: true,
         intent: None,
         tracer_followup: None,
+        sparkline_followup: None,
     })
 }
 
@@ -943,6 +987,7 @@ fn handle_content_modal_verb(
                 redraw: true,
                 intent: None,
                 tracer_followup: None,
+                sparkline_followup: None,
             }
         }
 
@@ -954,6 +999,7 @@ fn handle_content_modal_verb(
                 redraw: true,
                 intent: None,
                 tracer_followup: None,
+                sparkline_followup: None,
             }
         }
 
@@ -990,6 +1036,7 @@ fn handle_content_modal_verb(
                     Some(PendingIntent::SpawnModalChunks(fired))
                 },
                 tracer_followup: None,
+                sparkline_followup: None,
             }
         }
 
@@ -1026,6 +1073,7 @@ fn handle_content_modal_verb(
                     Some(PendingIntent::SpawnModalChunks(fired))
                 },
                 tracer_followup: None,
+                sparkline_followup: None,
             }
         }
 
@@ -1040,6 +1088,7 @@ fn handle_content_modal_verb(
                     Some(PendingIntent::SpawnModalChunks(fired))
                 },
                 tracer_followup: None,
+                sparkline_followup: None,
             }
         }
 
@@ -1054,6 +1103,7 @@ fn handle_content_modal_verb(
                     Some(PendingIntent::SpawnModalChunks(fired))
                 },
                 tracer_followup: None,
+                sparkline_followup: None,
             }
         }
 
@@ -1078,6 +1128,7 @@ fn handle_content_modal_verb(
                     Some(PendingIntent::SpawnModalChunks(fired))
                 },
                 tracer_followup: None,
+                sparkline_followup: None,
             }
         }
 
@@ -1087,6 +1138,7 @@ fn handle_content_modal_verb(
                 redraw: true,
                 intent: None,
                 tracer_followup: None,
+                sparkline_followup: None,
             }
         }
 
@@ -1096,6 +1148,7 @@ fn handle_content_modal_verb(
                 redraw: true,
                 intent: None,
                 tracer_followup: None,
+                sparkline_followup: None,
             }
         }
 
@@ -1111,6 +1164,7 @@ fn handle_content_modal_verb(
                 redraw: true,
                 intent: None,
                 tracer_followup: None,
+                sparkline_followup: None,
             }
         }
         ContentModalVerb::SearchNext => {
@@ -1132,6 +1186,7 @@ fn handle_content_modal_verb(
                     Some(PendingIntent::SpawnModalChunks(fired))
                 },
                 tracer_followup: None,
+                sparkline_followup: None,
             }
         }
         ContentModalVerb::SearchPrev => {
@@ -1154,6 +1209,7 @@ fn handle_content_modal_verb(
                     Some(PendingIntent::SpawnModalChunks(fired))
                 },
                 tracer_followup: None,
+                sparkline_followup: None,
             }
         }
         ContentModalVerb::Save => {
@@ -1177,6 +1233,7 @@ fn handle_content_modal_verb(
                     redraw: true,
                     intent: None,
                     tracer_followup: None,
+                    sparkline_followup: None,
                 }
             } else {
                 UpdateResult::default()

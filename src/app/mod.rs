@@ -267,6 +267,22 @@ pub async fn run(
             }
         }
 
+        // Dispatch sparkline followups. The reducer never emits anything
+        // other than `SpawnSparklineFetchLoop` here — the orchestrator
+        // (`AppState::refresh_sparkline_for_selection`) owns construction.
+        if let Some(PendingIntent::SpawnSparklineFetchLoop { kind, id, cadence }) =
+            result.sparkline_followup
+        {
+            let h = crate::view::browser::worker::spawn_sparkline_fetch_loop(
+                client.clone(),
+                tx.clone(),
+                kind,
+                id,
+                cadence,
+            );
+            state.browser.sparkline_handle = Some(h);
+        }
+
         if let Some(pending) = result.intent {
             match pending {
                 PendingIntent::SaveEventContent(save) => {
@@ -409,6 +425,25 @@ pub async fn run(
         // — e.g. when a cross-link lands on Browser from another tab.
         if state.browser.pending_detail_unsent && state.browser.detail_tx.is_some() {
             state.browser.emit_detail_request_for_current_selection();
+        }
+
+        // After ensure() — and after any Browser tab entry / cluster
+        // snapshot rebuild — reconcile the sparkline worker with the
+        // active selection. `refresh_sparkline_for_selection` is a no-op
+        // when the selection is unchanged, so this is safe to call every
+        // iteration.
+        if state.current_tab == ViewId::Browser
+            && let Some(PendingIntent::SpawnSparklineFetchLoop { kind, id, cadence }) =
+                state.refresh_sparkline_for_selection()
+        {
+            let h = crate::view::browser::worker::spawn_sparkline_fetch_loop(
+                client.clone(),
+                tx.clone(),
+                kind,
+                id,
+                cadence,
+            );
+            state.browser.sparkline_handle = Some(h);
         }
     }
 

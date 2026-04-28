@@ -164,6 +164,10 @@ impl WorkerRegistry {
                 if let Some(h) = browser.parameter_modal_handle.take() {
                     h.abort();
                 }
+                // Tear down the sparkline strip's worker + state so a
+                // stale series doesn't render briefly on Browser
+                // re-entry before the next periodic tick repopulates.
+                browser.close_sparkline();
                 // The five cluster endpoints that feed the Browser
                 // arena are all released here — while Browser is
                 // inactive the store gates the connections fan-out so
