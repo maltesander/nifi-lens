@@ -283,6 +283,188 @@ pub fn spawn_version_control_modal_fetch(
     })
 }
 
+/// Two-phase queue-listing worker.
+///
+/// **Phase 1 — POST:** calls [`crate::client::queues::submit_listing_request`]
+/// to create a NiFi listing-request. On success, writes the returned
+/// `request_id` into the shared `Arc<Mutex<Option<String>>>` slot (so the
+/// returned [`QueueListingHandle`]'s `Drop` impl can DELETE it on cleanup),
+/// then emits [`BrowserPayload::QueueListingRequestIdAssigned`].
+///
+/// **Phase 2 — poll:** loops on 500 ms ticks calling
+/// [`crate::client::queues::poll_listing_request`]. Each tick emits
+/// [`BrowserPayload::QueueListingProgress`]. On `finished == true` emits
+/// [`BrowserPayload::QueueListingComplete`] and returns. On
+/// `state == "FAILED"` emits [`BrowserPayload::QueueListingError`] and
+/// returns. On HTTP error emits [`BrowserPayload::QueueListingError`] and
+/// returns. If `timeout` elapses before `finished`, emits
+/// [`BrowserPayload::QueueListingTimeout`] and returns.
+///
+/// Emit ordering guarantee: `RequestIdAssigned` → one or more `Progress` →
+/// exactly one terminal (`Complete` | `Error` | `Timeout`).
+pub fn spawn_queue_listing_fetch(
+    client: Arc<RwLock<NifiClient>>,
+    tx: mpsc::Sender<AppEvent>,
+    queue_id: String,
+    timeout: std::time::Duration,
+) -> QueueListingHandle {
+    let request_id_slot: Arc<Mutex<Option<String>>> = Arc::new(Mutex::new(None));
+    let request_id_writer = request_id_slot.clone();
+    let q_id = queue_id.clone();
+    let client_for_worker = client.clone();
+
+    let join = tokio::task::spawn_local(async move {
+        let started = std::time::Instant::now();
+
+        // Phase 1: POST listing request.
+        let dto = {
+            let guard = client_for_worker.read().await;
+            crate::client::queues::submit_listing_request(&guard, &q_id).await
+        };
+        let dto = match dto {
+            Ok(dto) => dto,
+            Err(e) => {
+                let _ = tx
+                    .send(AppEvent::Data(ViewPayload::Browser(
+                        BrowserPayload::QueueListingError {
+                            queue_id: q_id,
+                            err: e.to_string(),
+                        },
+                    )))
+                    .await;
+                return;
+            }
+        };
+        let request_id = match dto.id.clone() {
+            Some(id) => id,
+            None => {
+                let _ = tx
+                    .send(AppEvent::Data(ViewPayload::Browser(
+                        BrowserPayload::QueueListingError {
+                            queue_id: q_id,
+                            err: "NiFi response missing listing request id".to_string(),
+                        },
+                    )))
+                    .await;
+                return;
+            }
+        };
+        // Write id so Drop can DELETE it even if we exit before completing.
+        if let Ok(mut g) = request_id_writer.lock() {
+            *g = Some(request_id.clone());
+        }
+        let _ = tx
+            .send(AppEvent::Data(ViewPayload::Browser(
+                BrowserPayload::QueueListingRequestIdAssigned {
+                    queue_id: q_id.clone(),
+                    request_id: request_id.clone(),
+                },
+            )))
+            .await;
+
+        // Phase 2: poll until finished, failed, error, or timeout.
+        loop {
+            tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+
+            if started.elapsed() > timeout {
+                let _ = tx
+                    .send(AppEvent::Data(ViewPayload::Browser(
+                        BrowserPayload::QueueListingTimeout { queue_id: q_id },
+                    )))
+                    .await;
+                return;
+            }
+
+            let dto = {
+                let guard = client_for_worker.read().await;
+                crate::client::queues::poll_listing_request(&guard, &q_id, &request_id).await
+            };
+            let dto = match dto {
+                Ok(dto) => dto,
+                Err(e) => {
+                    let _ = tx
+                        .send(AppEvent::Data(ViewPayload::Browser(
+                            BrowserPayload::QueueListingError {
+                                queue_id: q_id,
+                                err: e.to_string(),
+                            },
+                        )))
+                        .await;
+                    return;
+                }
+            };
+
+            let percent = dto.percent_completed.unwrap_or(0).clamp(0, 100) as u8;
+            let _ = tx
+                .send(AppEvent::Data(ViewPayload::Browser(
+                    BrowserPayload::QueueListingProgress {
+                        queue_id: q_id.clone(),
+                        percent,
+                    },
+                )))
+                .await;
+
+            if dto.finished.unwrap_or(false) {
+                let total = dto
+                    .queue_size
+                    .as_ref()
+                    .and_then(|q| q.object_count)
+                    .unwrap_or(0)
+                    .max(0) as u64;
+                let summaries = dto.flow_file_summaries.unwrap_or_default();
+                let rows: Vec<crate::view::browser::state::queue_listing::QueueListingRow> =
+                    summaries
+                        .into_iter()
+                        .map(
+                            |s| crate::view::browser::state::queue_listing::QueueListingRow {
+                                uuid: s.uuid.unwrap_or_default(),
+                                filename: s.filename,
+                                size: s.size.unwrap_or(0).max(0) as u64,
+                                queued_duration: crate::client::queues::ms_to_duration(
+                                    s.queued_duration,
+                                ),
+                                position: s.position.unwrap_or(0).max(0) as u64,
+                                penalized: s.penalized.unwrap_or(false),
+                                cluster_node_id: s.cluster_node_id,
+                                lineage_duration: crate::client::queues::ms_to_duration(
+                                    s.lineage_duration,
+                                ),
+                            },
+                        )
+                        .collect();
+                let truncated = total > rows.len() as u64;
+                let _ = tx
+                    .send(AppEvent::Data(ViewPayload::Browser(
+                        BrowserPayload::QueueListingComplete {
+                            queue_id: q_id,
+                            rows,
+                            total,
+                            truncated,
+                        },
+                    )))
+                    .await;
+                return;
+            }
+
+            if dto.state.as_deref() == Some("FAILED") {
+                let _ = tx
+                    .send(AppEvent::Data(ViewPayload::Browser(
+                        BrowserPayload::QueueListingError {
+                            queue_id: q_id,
+                            err: dto
+                                .failure_reason
+                                .unwrap_or_else(|| "listing failed".to_string()),
+                        },
+                    )))
+                    .await;
+                return;
+            }
+        }
+    });
+
+    QueueListingHandle::new(join, queue_id, request_id_slot, client)
+}
+
 /// Owns the polling worker's `JoinHandle` plus the listing-request id
 /// once the worker has POSTed it. Drop aborts the worker and (if a
 /// request id is known) fires `DELETE /flowfile-queues/{q}/listing-requests/{r}`
@@ -310,10 +492,9 @@ impl std::fmt::Debug for QueueListingHandle {
 }
 
 impl QueueListingHandle {
-    /// Constructor for the polling worker. Wired up in Task 6 by
-    /// `spawn_queue_listing_fetch`; suppress the dead-code warning
-    /// until then.
-    #[allow(dead_code)]
+    /// Constructor for the polling worker. Called by
+    /// `spawn_queue_listing_fetch` to bind the worker handle to its
+    /// cleanup state.
     pub(crate) fn new(
         join: JoinHandle<()>,
         queue_id: String,
@@ -772,6 +953,294 @@ mod tests {
             .await;
 
         server.verify().await;
+    }
+
+    /// `spawn_queue_listing_fetch` progresses through WAITING → GENERATING
+    /// → GENERATING → COMPLETED and emits the expected sequence of payloads.
+    /// Drop fires DELETE once exactly.
+    #[tokio::test(flavor = "current_thread")]
+    async fn polling_progresses_then_completes() {
+        use std::time::Duration as StdDuration;
+
+        use wiremock::matchers::{method, path};
+        use wiremock::{Mock, MockServer, ResponseTemplate};
+
+        let server = MockServer::start().await;
+
+        // POST → WAITING
+        Mock::given(method("POST"))
+            .and(path("/nifi-api/flowfile-queues/q1/listing-requests"))
+            .respond_with(ResponseTemplate::new(202).set_body_json(serde_json::json!({
+                "listingRequest": {
+                    "id": "req-1",
+                    "state": "WAITING",
+                    "percentCompleted": 0,
+                    "finished": false,
+                    "flowFileSummaries": [],
+                    "queueSize": {"objectCount": 0, "byteCount": 0}
+                }
+            })))
+            .mount(&server)
+            .await;
+
+        // First GET → 30%
+        Mock::given(method("GET"))
+            .and(path("/nifi-api/flowfile-queues/q1/listing-requests/req-1"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "listingRequest": {
+                    "id": "req-1",
+                    "state": "GENERATING",
+                    "percentCompleted": 30,
+                    "finished": false,
+                    "flowFileSummaries": [],
+                    "queueSize": {"objectCount": 0, "byteCount": 0}
+                }
+            })))
+            .up_to_n_times(1)
+            .mount(&server)
+            .await;
+
+        // Second GET → 80%
+        Mock::given(method("GET"))
+            .and(path("/nifi-api/flowfile-queues/q1/listing-requests/req-1"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "listingRequest": {
+                    "id": "req-1",
+                    "state": "GENERATING",
+                    "percentCompleted": 80,
+                    "finished": false,
+                    "flowFileSummaries": [],
+                    "queueSize": {"objectCount": 0, "byteCount": 0}
+                }
+            })))
+            .up_to_n_times(1)
+            .mount(&server)
+            .await;
+
+        // Third GET → COMPLETED with one flowfile
+        Mock::given(method("GET"))
+            .and(path("/nifi-api/flowfile-queues/q1/listing-requests/req-1"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "listingRequest": {
+                    "id": "req-1",
+                    "state": "COMPLETED",
+                    "percentCompleted": 100,
+                    "finished": true,
+                    "flowFileSummaries": [{
+                        "uuid": "ff-aaaa",
+                        "filename": "a.parquet",
+                        "size": 2048,
+                        "position": 1,
+                        "penalized": false,
+                        "queuedDuration": 5000,
+                        "lineageDuration": 60000,
+                        "clusterNodeId": null
+                    }],
+                    "queueSize": {"objectCount": 1, "byteCount": 2048}
+                }
+            })))
+            .mount(&server)
+            .await;
+
+        // DELETE → 200 (Drop will fire this exactly once)
+        Mock::given(method("DELETE"))
+            .and(path("/nifi-api/flowfile-queues/q1/listing-requests/req-1"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "listingRequest": {
+                    "id": "req-1",
+                    "state": "CANCELLED",
+                    "finished": true
+                }
+            })))
+            .expect(1)
+            .mount(&server)
+            .await;
+
+        let local = LocalSet::new();
+        local
+            .run_until(async {
+                let client = test_client(&server).await;
+                let (tx, mut rx) = mpsc::channel::<AppEvent>(64);
+
+                let handle = super::spawn_queue_listing_fetch(
+                    client,
+                    tx,
+                    "q1".to_string(),
+                    StdDuration::from_secs(10),
+                );
+
+                // 1. RequestIdAssigned must arrive first.
+                let ev = tokio::time::timeout(StdDuration::from_secs(5), rx.recv())
+                    .await
+                    .expect("timeout waiting for RequestIdAssigned")
+                    .expect("channel closed");
+                match ev {
+                    AppEvent::Data(ViewPayload::Browser(
+                        BrowserPayload::QueueListingRequestIdAssigned {
+                            queue_id,
+                            request_id,
+                        },
+                    )) => {
+                        assert_eq!(queue_id, "q1");
+                        assert_eq!(request_id, "req-1");
+                    }
+                    _ => panic!("expected QueueListingRequestIdAssigned"),
+                }
+
+                // 2. Collect payloads until QueueListingComplete.
+                let mut saw_progress = false;
+                let mut complete_payload = None;
+                for _ in 0..10 {
+                    let ev = tokio::time::timeout(StdDuration::from_secs(5), rx.recv())
+                        .await
+                        .expect("timeout waiting for progress/complete")
+                        .expect("channel closed");
+                    match ev {
+                        AppEvent::Data(ViewPayload::Browser(
+                            BrowserPayload::QueueListingProgress { .. },
+                        )) => {
+                            saw_progress = true;
+                        }
+                        AppEvent::Data(ViewPayload::Browser(
+                            BrowserPayload::QueueListingComplete {
+                                queue_id,
+                                rows,
+                                total,
+                                truncated,
+                            },
+                        )) => {
+                            assert_eq!(queue_id, "q1");
+                            assert_eq!(rows.len(), 1, "expected 1 row");
+                            assert_eq!(rows[0].uuid, "ff-aaaa");
+                            assert_eq!(total, 1);
+                            assert!(!truncated);
+                            complete_payload = Some(());
+                            break;
+                        }
+                        _ => panic!("unexpected payload"),
+                    }
+                }
+                assert!(saw_progress, "expected at least one QueueListingProgress");
+                assert!(complete_payload.is_some(), "expected QueueListingComplete");
+
+                // 3. Drop the handle → spawns DELETE on the LocalSet.
+                drop(handle);
+                for _ in 0..30 {
+                    tokio::task::yield_now().await;
+                    tokio::time::sleep(StdDuration::from_millis(20)).await;
+                }
+            })
+            .await;
+
+        server.verify().await;
+    }
+
+    /// `spawn_queue_listing_fetch` emits `QueueListingTimeout` when NiFi
+    /// never returns `finished == true` within the configured timeout.
+    #[tokio::test(flavor = "current_thread")]
+    async fn timeout_emits_when_finished_never_arrives() {
+        use std::time::Duration as StdDuration;
+
+        use wiremock::matchers::{method, path};
+        use wiremock::{Mock, MockServer, ResponseTemplate};
+
+        let server = MockServer::start().await;
+
+        // POST → WAITING
+        Mock::given(method("POST"))
+            .and(path("/nifi-api/flowfile-queues/q1/listing-requests"))
+            .respond_with(ResponseTemplate::new(202).set_body_json(serde_json::json!({
+                "listingRequest": {
+                    "id": "req-timeout",
+                    "state": "WAITING",
+                    "percentCompleted": 0,
+                    "finished": false,
+                    "flowFileSummaries": [],
+                    "queueSize": {"objectCount": 0, "byteCount": 0}
+                }
+            })))
+            .mount(&server)
+            .await;
+
+        // GET always returns WAITING — never finishes.
+        Mock::given(method("GET"))
+            .and(path(
+                "/nifi-api/flowfile-queues/q1/listing-requests/req-timeout",
+            ))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "listingRequest": {
+                    "id": "req-timeout",
+                    "state": "WAITING",
+                    "percentCompleted": 0,
+                    "finished": false,
+                    "flowFileSummaries": [],
+                    "queueSize": {"objectCount": 0, "byteCount": 0}
+                }
+            })))
+            .mount(&server)
+            .await;
+
+        // DELETE — Drop fires it; no expect() cap.
+        Mock::given(method("DELETE"))
+            .and(path(
+                "/nifi-api/flowfile-queues/q1/listing-requests/req-timeout",
+            ))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "listingRequest": {
+                    "id": "req-timeout",
+                    "state": "CANCELLED",
+                    "finished": true
+                }
+            })))
+            .mount(&server)
+            .await;
+
+        let local = LocalSet::new();
+        local
+            .run_until(async {
+                let client = test_client(&server).await;
+                let (tx, mut rx) = mpsc::channel::<AppEvent>(64);
+
+                let handle = super::spawn_queue_listing_fetch(
+                    client,
+                    tx,
+                    "q1".to_string(),
+                    StdDuration::from_secs(1), // short timeout
+                );
+
+                // Skip RequestIdAssigned and any Progress emits; hunt for Timeout.
+                let mut saw_timeout = false;
+                for _ in 0..20 {
+                    let ev = tokio::time::timeout(StdDuration::from_secs(5), rx.recv())
+                        .await
+                        .expect("timeout waiting for payload")
+                        .expect("channel closed");
+                    match ev {
+                        AppEvent::Data(ViewPayload::Browser(
+                            BrowserPayload::QueueListingTimeout { queue_id },
+                        )) => {
+                            assert_eq!(queue_id, "q1");
+                            saw_timeout = true;
+                            break;
+                        }
+                        AppEvent::Data(ViewPayload::Browser(
+                            BrowserPayload::QueueListingRequestIdAssigned { .. }
+                            | BrowserPayload::QueueListingProgress { .. },
+                        )) => {
+                            // These are expected before the timeout fires.
+                        }
+                        _ => panic!("unexpected payload"),
+                    }
+                }
+                assert!(saw_timeout, "expected QueueListingTimeout to be emitted");
+
+                drop(handle);
+                for _ in 0..10 {
+                    tokio::task::yield_now().await;
+                    tokio::time::sleep(StdDuration::from_millis(20)).await;
+                }
+            })
+            .await;
     }
 
     /// When the worker hasn't recorded a request id yet (POST hasn't
