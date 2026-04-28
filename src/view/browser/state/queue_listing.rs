@@ -115,6 +115,10 @@ impl QueueListingState {
         true
     }
 
+    /// Apply a `BrowserPayload::QueueListingComplete`. Returns `true` if
+    /// the payload matches the active queue and the state mutated.
+    /// Sets `rows`, `total`, `truncated`, `percent = 100`, `fetched_at`,
+    /// clears `error` / `timed_out`, and re-clamps the selection.
     pub fn apply_complete(
         &mut self,
         queue_id: &str,
@@ -136,6 +140,9 @@ impl QueueListingState {
         true
     }
 
+    /// Apply a `BrowserPayload::QueueListingError`. Returns `true` if
+    /// the payload matches the active queue and the state mutated.
+    /// Stores the error message and resets `percent` to 0.
     pub fn apply_error(&mut self, queue_id: &str, msg: String) -> bool {
         if self.queue_id != queue_id {
             return false;
@@ -145,6 +152,9 @@ impl QueueListingState {
         true
     }
 
+    /// Apply a `BrowserPayload::QueueListingTimeout`. Returns `true` if
+    /// the payload matches the active queue and the state mutated.
+    /// Sets `timed_out = true`, records a fixed error message, and resets `percent` to 0.
     pub fn apply_timeout(&mut self, queue_id: &str) -> bool {
         if self.queue_id != queue_id {
             return false;
@@ -331,6 +341,16 @@ mod tests {
             .collect();
         s.selected = 40;
         s.apply_complete("q1", vec![row("ff-x", Some("b"), 1000, false)], 1, false);
+        assert_eq!(s.selected, 0);
+    }
+
+    #[test]
+    fn filter_no_match_returns_empty_visible() {
+        let mut s = QueueListingState::pending("q1".into(), "Q1".into());
+        s.rows = vec![row("ff-1", Some("alpha.txt"), 1000, false)];
+        s.selected = 0;
+        s.set_filter(Some("zzz".into()));
+        assert!(s.visible_indices().is_empty());
         assert_eq!(s.selected, 0);
     }
 }
