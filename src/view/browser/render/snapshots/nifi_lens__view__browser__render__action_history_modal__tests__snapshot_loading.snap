@@ -3,7 +3,7 @@ source: src/view/browser/render/action_history_modal.rs
 expression: "format!(\"{}\", term.backend())"
 ---
 "┌ Action history · FetchKafka (loading…) ──────────────────────────────────────────────────────────┐"
-"│  time              user             op              type             source                      │"
+"│  age      user             op              type             source                               │"
 "│ loading…                                                                                         │"
 "│                                                                                                  │"
 "│                                                                                                  │"

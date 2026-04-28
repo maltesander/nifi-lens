@@ -12,6 +12,7 @@ use ratatui::text::{Line, Span};
 use ratatui::widgets::{Clear, Paragraph};
 
 use crate::theme;
+use crate::timestamp::{format_age_secs, parse_nifi_timestamp};
 use crate::view::browser::state::action_history_modal::ActionHistoryModalState;
 use crate::widget::panel::Panel;
 
@@ -70,7 +71,7 @@ fn progress_chip(modal: &ActionHistoryModalState) -> Span<'_> {
 }
 
 fn render_header(frame: &mut Frame, area: Rect) {
-    let header = "  time              user             op              type             source";
+    let header = "  age      user             op              type             source";
     let line = Line::from(Span::styled(header, theme::muted()));
     frame.render_widget(Paragraph::new(line), area);
 }
@@ -100,10 +101,12 @@ fn render_body(frame: &mut Frame, area: Rect, modal: &ActionHistoryModalState) {
         .filter(|s| s.committed && !s.matches.is_empty())
         .and_then(|s| s.current.map(|c| s.matches[c].line_idx));
 
+    let now = time::OffsetDateTime::now_utc();
     let mut lines: Vec<Line> = Vec::with_capacity(modal.actions.len() * 2);
     for (i, a) in modal.actions.iter().enumerate() {
         let inner = a.action.as_ref();
         let timestamp = a.timestamp.as_deref().unwrap_or("—");
+        let age = render_age(timestamp, now);
         let user = inner
             .and_then(|x| x.user_identity.as_deref())
             .unwrap_or("—");
@@ -120,13 +123,14 @@ fn render_body(frame: &mut Frame, area: Rect, modal: &ActionHistoryModalState) {
             Style::default()
         };
         lines.push(Line::from(vec![Span::styled(
-            format!("  {timestamp:<18} {user:<16} {op:<15} {stype:<16} {sname}"),
+            format!("  {age:<8} {user:<16} {op:<15} {stype:<16} {sname}"),
             row_style,
         )]));
         if modal.expanded_index == Some(i) {
-            // v1: expansion shows full timestamp on its own line.
-            // ActionDetailsDto is empty in the OpenAPI types; richer
-            // expansion lands when upstream exposes the JSON details.
+            // v1: expansion shows the absolute timestamp on its own
+            // line. ActionDetailsDto is empty in the OpenAPI types;
+            // richer expansion lands when upstream exposes the JSON
+            // details.
             lines.push(Line::from(vec![
                 Span::raw("      "),
                 Span::styled("at ", theme::muted()),
@@ -155,6 +159,19 @@ fn render_footer_status(frame: &mut Frame, area: Rect, modal: &ActionHistoryModa
         return;
     }
     render_footer_hint(frame, area);
+}
+
+/// Render an action's timestamp as a relative age (e.g. `12s`, `5m`,
+/// `3h`) using the project's `format_age_secs` formatter. Falls back to
+/// an em-dash when the timestamp is missing or unparseable. NiFi
+/// timestamps come in two shapes (RFC-3339 / `MM/DD/YYYY HH:MM:SS UTC`);
+/// `parse_nifi_timestamp` handles both.
+fn render_age(timestamp: &str, now: time::OffsetDateTime) -> String {
+    let Some(dt) = parse_nifi_timestamp(timestamp) else {
+        return "\u{2014}".to_string();
+    };
+    let secs = (now - dt).whole_seconds().max(0) as u64;
+    format_age_secs(secs)
 }
 
 fn render_footer_hint(frame: &mut Frame, area: Rect) {
@@ -218,6 +235,18 @@ mod tests {
         assert_snapshot!(format!("{}", term.backend()));
     }
 
+    /// Insta filter that redacts the age column to a stable placeholder
+    /// so snapshots are deterministic across runs. Action timestamps are
+    /// fixed in test fixtures, but the rendered age depends on
+    /// `OffsetDateTime::now_utc()` and would otherwise drift over time.
+    /// The format `format_age_secs` produces is `<digits><s|m|h>` (e.g.
+    /// `12s`, `3h`); the regex matches a digit run followed by exactly
+    /// one of those unit characters, anchored after the leading row
+    /// padding.
+    fn age_filter() -> Vec<(&'static str, &'static str)> {
+        vec![(r"  \d+[smh] ", "  <AGE> ")]
+    }
+
     #[test]
     fn snapshot_loaded_5_actions() {
         let mut term = Terminal::new(test_backend(20)).unwrap();
@@ -226,7 +255,9 @@ mod tests {
             render(f, f.area(), &modal);
         })
         .unwrap();
-        assert_snapshot!(format!("{}", term.backend()));
+        insta::with_settings!({ filters => age_filter() }, {
+            assert_snapshot!(format!("{}", term.backend()));
+        });
     }
 
     #[test]
@@ -239,7 +270,9 @@ mod tests {
             render(f, f.area(), &modal);
         })
         .unwrap();
-        assert_snapshot!(format!("{}", term.backend()));
+        insta::with_settings!({ filters => age_filter() }, {
+            assert_snapshot!(format!("{}", term.backend()));
+        });
     }
 
     #[test]
@@ -251,6 +284,7 @@ mod tests {
             render(f, f.area(), &modal);
         })
         .unwrap();
+        // No age column rendered in the degraded path; no filter needed.
         assert_snapshot!(format!("{}", term.backend()));
     }
 
@@ -263,6 +297,7 @@ mod tests {
             render(f, f.area(), &modal);
         })
         .unwrap();
+        // Empty body — no rows mean no age column to redact.
         assert_snapshot!(format!("{}", term.backend()));
     }
 
@@ -279,7 +314,9 @@ mod tests {
             render(f, f.area(), &modal);
         })
         .unwrap();
-        assert_snapshot!(format!("{}", term.backend()));
+        insta::with_settings!({ filters => age_filter() }, {
+            assert_snapshot!(format!("{}", term.backend()));
+        });
     }
 
     #[test]
@@ -300,7 +337,31 @@ mod tests {
             render(f, f.area(), &modal);
         })
         .unwrap();
-        assert_snapshot!(format!("{}", term.backend()));
+        insta::with_settings!({ filters => age_filter() }, {
+            assert_snapshot!(format!("{}", term.backend()));
+        });
+    }
+
+    #[test]
+    fn render_age_returns_em_dash_for_unparseable() {
+        let now = time::OffsetDateTime::now_utc();
+        assert_eq!(render_age("not a timestamp", now), "\u{2014}");
+        assert_eq!(render_age("—", now), "\u{2014}");
+    }
+
+    #[test]
+    fn render_age_handles_rfc3339_and_nifi_format() {
+        let now = time::macros::datetime!(2026-04-28 11:00:00 UTC);
+        // 5 minutes ago in RFC-3339.
+        assert_eq!(render_age("2026-04-28T10:55:00Z", now), "5m");
+        // Same instant in NiFi human format.
+        assert_eq!(render_age("04/28/2026 10:55:00 UTC", now), "5m");
+        // 30 seconds ago.
+        assert_eq!(render_age("2026-04-28T10:59:30Z", now), "30s");
+        // 2 hours ago.
+        assert_eq!(render_age("2026-04-28T09:00:00Z", now), "2h");
+        // Future timestamp clamps to 0s (no negative ages).
+        assert_eq!(render_age("2026-04-28T12:00:00Z", now), "0s");
     }
 
     // Verify TEST_BACKEND_WIDTH is used as the standard width.
