@@ -3211,3 +3211,62 @@ fn action_history_disabled_for_folder_rows() {
         );
     }
 }
+
+// ---------------------------------------------------------------------------
+// OpenActionHistory dispatch arm
+// ---------------------------------------------------------------------------
+
+fn make_state_with_processor_selected(id: &str, name: &str) -> AppState {
+    let mut s = make_state_with_selected_kind(NodeKind::Processor);
+    let arena_idx = s.browser.visible[s.browser.selected];
+    s.browser.nodes[arena_idx].id = id.to_string();
+    s.browser.nodes[arena_idx].name = name.to_string();
+    s
+}
+
+fn make_state_with_folder_selected() -> AppState {
+    use crate::client::FolderKind;
+    make_state_with_selected_kind(NodeKind::Folder(FolderKind::Queues))
+}
+
+#[test]
+fn open_action_history_verb_opens_modal_and_emits_intent() {
+    use crate::app::state::PendingIntent;
+    use crate::input::{BrowserVerb, ViewVerb};
+
+    let mut state = make_state_with_processor_selected("proc-1", "FetchKafka");
+    let result = BrowserHandler::handle_verb(
+        &mut state,
+        ViewVerb::Browser(BrowserVerb::OpenActionHistory),
+    )
+    .expect("handled");
+    assert!(result.redraw);
+    let intent = result.intent.expect("intent emitted");
+    match intent {
+        PendingIntent::SpawnActionHistoryModalFetch { source_id, .. } => {
+            assert_eq!(source_id, "proc-1");
+        }
+        other => panic!("wrong intent: {other:?}"),
+    }
+    let m = state
+        .browser
+        .action_history_modal
+        .as_ref()
+        .expect("modal opened");
+    assert_eq!(m.source_id, "proc-1");
+    assert_eq!(m.component_label, "FetchKafka");
+}
+
+#[test]
+fn open_action_history_verb_noop_when_disabled() {
+    use crate::input::{BrowserVerb, ViewVerb};
+    // Folder rows: enabled() returns false → arm guards a noop.
+    let mut state = make_state_with_folder_selected();
+    let result = BrowserHandler::handle_verb(
+        &mut state,
+        ViewVerb::Browser(BrowserVerb::OpenActionHistory),
+    )
+    .expect("handled");
+    assert!(state.browser.action_history_modal.is_none());
+    assert!(result.intent.is_none());
+}

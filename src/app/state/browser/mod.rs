@@ -124,8 +124,36 @@ impl ViewKeyHandler for BrowserHandler {
                 return Some(UpdateResult::default());
             }
             BrowserVerb::OpenActionHistory => {
-                // Stub: full dispatch wired in Task 10.
-                return Some(UpdateResult::default());
+                // Defensive: enabled() gates this verb to UUID-bearing rows.
+                // Belt-and-suspenders mirroring the ShowVersionControl pattern.
+                if !state.browser_selection_supports_action_history() {
+                    return Some(UpdateResult::default());
+                }
+                let Some(&arena_idx) = state.browser.visible.get(state.browser.selected) else {
+                    return Some(UpdateResult::default());
+                };
+                let node = &state.browser.nodes[arena_idx];
+                let source_id = node.id.clone();
+                let component_label = node.name.clone();
+                state
+                    .browser
+                    .open_action_history_modal(source_id.clone(), component_label);
+                let Some(fetch_signal) = state
+                    .browser
+                    .action_history_modal
+                    .as_ref()
+                    .map(|m| m.fetch_signal.clone())
+                else {
+                    return Some(UpdateResult::default());
+                };
+                return Some(UpdateResult {
+                    redraw: true,
+                    intent: Some(super::PendingIntent::SpawnActionHistoryModalFetch {
+                        source_id,
+                        fetch_signal,
+                    }),
+                    tracer_followup: None,
+                });
             }
             BrowserVerb::ShowVersionControl => {
                 if !state.browser_selection_is_versioned_pg() {
