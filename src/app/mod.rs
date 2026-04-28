@@ -327,8 +327,17 @@ pub async fn run(
                     );
                     state.browser.parameter_modal_handle = Some(h);
                 }
-                PendingIntent::SpawnActionHistoryModalFetch { .. } => {
-                    // Wired in Task 12.
+                PendingIntent::SpawnActionHistoryModalFetch {
+                    source_id,
+                    fetch_signal,
+                } => {
+                    let h = crate::view::browser::worker::spawn_action_history_modal_fetch(
+                        client.clone(),
+                        tx.clone(),
+                        source_id,
+                        fetch_signal,
+                    );
+                    state.browser.action_history_modal_handle = Some(h);
                 }
                 other => {
                     let intent = match other {
