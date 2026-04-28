@@ -47,6 +47,9 @@ pub struct ActionHistoryModalState {
     /// `notify_one()` when scroll position is near the loaded tail
     /// AND `actions.len() < total`.
     pub fetch_signal: Arc<Notify>,
+    /// Currently selected row (cursor index into `actions`). The renderer
+    /// highlights this row; ToggleExpand/Copy use it as the target.
+    pub selected: usize,
 }
 
 impl ActionHistoryModalState {
@@ -62,6 +65,7 @@ impl ActionHistoryModalState {
             scroll: VerticalScrollState::default(),
             search: None,
             fetch_signal: Arc::new(Notify::new()),
+            selected: 0,
         }
     }
 
@@ -98,7 +102,25 @@ impl ActionHistoryModalState {
         self.error = None;
         self.expanded_index = None;
         self.scroll = VerticalScrollState::default();
+        self.selected = 0;
         // Keep `search` and `source_id` / `component_label` intact.
+    }
+
+    /// Move selection up by 1, clamping to 0.
+    pub fn move_selection_up(&mut self) {
+        self.selected = self.selected.saturating_sub(1);
+    }
+
+    /// Move selection down by 1, clamping to `len - 1`.
+    pub fn move_selection_down(&mut self) {
+        if self.selected + 1 < self.actions.len() {
+            self.selected += 1;
+        }
+    }
+
+    /// Selected row index, or 0 if no rows.
+    pub fn selected_row(&self) -> usize {
+        self.selected
     }
 
     /// Toggle inline expansion of the row currently selected by
@@ -213,5 +235,24 @@ mod tests {
         let mut s = ActionHistoryModalState::pending("proc-1".into(), "X".into());
         s.apply_page("proc-1", (0..5).map(entity).collect(), Some(5));
         assert!(!s.should_signal_next_page(4, 100));
+    }
+
+    #[test]
+    fn move_selection_clamps_to_bounds() {
+        let mut s = ActionHistoryModalState::pending("p".into(), "X".into());
+        // No actions — both moves are no-ops.
+        s.move_selection_down();
+        assert_eq!(s.selected, 0);
+        s.move_selection_up();
+        assert_eq!(s.selected, 0);
+        // Add 3 actions, navigate.
+        s.apply_page("p", (0..3).map(entity).collect(), Some(3));
+        s.move_selection_down();
+        s.move_selection_down();
+        assert_eq!(s.selected, 2);
+        s.move_selection_down(); // clamps at len-1
+        assert_eq!(s.selected, 2);
+        s.move_selection_up();
+        assert_eq!(s.selected, 1);
     }
 }

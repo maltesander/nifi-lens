@@ -3383,3 +3383,111 @@ fn apply_action_history_error_preserves_handle_when_source_id_stale() {
             .await;
     });
 }
+
+#[test]
+fn action_history_modal_close_clears_modal() {
+    use crate::input::{ActionHistoryModalVerb, ViewVerb};
+    let mut state = fresh_state();
+    state
+        .browser
+        .open_action_history_modal("proc-1".into(), "X".into());
+    let _ = BrowserHandler::handle_verb(
+        &mut state,
+        ViewVerb::ActionHistoryModal(ActionHistoryModalVerb::Close),
+    );
+    assert!(state.browser.action_history_modal.is_none());
+}
+
+#[test]
+fn action_history_modal_close_cancels_search_first() {
+    use crate::input::{ActionHistoryModalVerb, ViewVerb};
+    let mut state = fresh_state();
+    state
+        .browser
+        .open_action_history_modal("proc-1".into(), "X".into());
+    let modal = state.browser.action_history_modal.as_mut().unwrap();
+    modal.search = Some(crate::widget::search::SearchState::default());
+    let _ = BrowserHandler::handle_verb(
+        &mut state,
+        ViewVerb::ActionHistoryModal(ActionHistoryModalVerb::Close),
+    );
+    // First Close cancels search; modal stays open.
+    assert!(state.browser.action_history_modal.is_some());
+    assert!(
+        state
+            .browser
+            .action_history_modal
+            .as_ref()
+            .unwrap()
+            .search
+            .is_none()
+    );
+    // Second Close closes the modal.
+    let _ = BrowserHandler::handle_verb(
+        &mut state,
+        ViewVerb::ActionHistoryModal(ActionHistoryModalVerb::Close),
+    );
+    assert!(state.browser.action_history_modal.is_none());
+}
+
+#[test]
+fn action_history_modal_refresh_resets_state_and_emits_intent() {
+    use crate::input::{ActionHistoryModalVerb, ViewVerb};
+    let mut state = fresh_state();
+    state
+        .browser
+        .open_action_history_modal("proc-1".into(), "FetchKafka".into());
+    // Pre-populate with one action.
+    let mut action = nifi_rust_client::dynamic::types::ActionEntity::default();
+    action.id = Some(1);
+    state
+        .browser
+        .action_history_modal
+        .as_mut()
+        .unwrap()
+        .apply_page("proc-1", vec![action], Some(1));
+    let result = BrowserHandler::handle_verb(
+        &mut state,
+        ViewVerb::ActionHistoryModal(ActionHistoryModalVerb::Refresh),
+    )
+    .unwrap();
+    assert!(
+        matches!(
+            result.intent,
+            Some(PendingIntent::SpawnActionHistoryModalFetch { .. })
+        ),
+        "Refresh must emit SpawnActionHistoryModalFetch intent"
+    );
+    let m = state.browser.action_history_modal.as_ref().unwrap();
+    assert!(m.actions.is_empty(), "actions must be cleared on refresh");
+    assert!(m.loading, "loading must be set on refresh");
+}
+
+#[test]
+fn action_history_modal_toggle_expand_uses_selected_row() {
+    use crate::input::{ActionHistoryModalVerb, ViewVerb};
+    let mut state = fresh_state();
+    state
+        .browser
+        .open_action_history_modal("proc-1".into(), "X".into());
+    // Set selection to row 3.
+    state
+        .browser
+        .action_history_modal
+        .as_mut()
+        .unwrap()
+        .selected = 3;
+    let _ = BrowserHandler::handle_verb(
+        &mut state,
+        ViewVerb::ActionHistoryModal(ActionHistoryModalVerb::ToggleExpand),
+    );
+    assert_eq!(
+        state
+            .browser
+            .action_history_modal
+            .as_ref()
+            .unwrap()
+            .expanded_index,
+        Some(3)
+    );
+}
