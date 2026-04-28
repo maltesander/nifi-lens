@@ -327,6 +327,9 @@ pub async fn run(
                     );
                     state.browser.parameter_modal_handle = Some(h);
                 }
+                PendingIntent::SpawnActionHistoryModalFetch { .. } => {
+                    // Wired in Task 12.
+                }
                 other => {
                     let intent = match other {
                         PendingIntent::SwitchContext(name) => Some(Intent::SwitchContext(name)),

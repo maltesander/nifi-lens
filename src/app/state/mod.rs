@@ -684,6 +684,16 @@ pub enum PendingIntent {
         pg_id: String,
         bound_context_id: String,
     },
+    /// Spawn the Browser action-history modal's paginator worker.
+    /// The handle is stored on `BrowserState.action_history_modal_handle`
+    /// and aborted on close / refresh / tab switch / selection change.
+    /// `fetch_signal` is the modal's `Notify` — the worker awaits on
+    /// `notified()` to fetch the next page after the reducer fires
+    /// `notify_one()` on scroll-near-tail.
+    SpawnActionHistoryModalFetch {
+        source_id: String,
+        fetch_signal: std::sync::Arc<tokio::sync::Notify>,
+    },
     Quit,
 }
 
