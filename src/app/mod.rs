@@ -280,7 +280,7 @@ pub async fn run(
                 id,
                 cadence,
             );
-            state.browser.sparkline_handle = Some(h);
+            state.browser.sparkline_handle = Some(crate::app::worker::AbortOnDrop::new(h));
         }
 
         // Dispatch queue-listing followups. The reducer emits
@@ -356,7 +356,8 @@ pub async fn run(
                         tx.clone(),
                         pg_id,
                     );
-                    state.browser.version_modal_handle = Some(h);
+                    state.browser.version_modal_handle =
+                        Some(crate::app::worker::AbortOnDrop::new(h));
                 }
                 PendingIntent::SpawnParameterContextModalFetch {
                     pg_id,
@@ -368,7 +369,8 @@ pub async fn run(
                         pg_id,
                         bound_context_id,
                     );
-                    state.browser.parameter_modal_handle = Some(h);
+                    state.browser.parameter_modal_handle =
+                        Some(crate::app::worker::AbortOnDrop::new(h));
                 }
                 PendingIntent::SpawnActionHistoryModalFetch {
                     source_id,
@@ -380,7 +382,8 @@ pub async fn run(
                         source_id,
                         fetch_signal,
                     );
-                    state.browser.action_history_modal_handle = Some(h);
+                    state.browser.action_history_modal_handle =
+                        Some(crate::app::worker::AbortOnDrop::new(h));
                 }
                 PendingIntent::SpawnSparklineFetchLoop { kind, id, cadence } => {
                     let h = crate::view::browser::worker::spawn_sparkline_fetch_loop(
@@ -390,7 +393,7 @@ pub async fn run(
                         id,
                         cadence,
                     );
-                    state.browser.sparkline_handle = Some(h);
+                    state.browser.sparkline_handle = Some(crate::app::worker::AbortOnDrop::new(h));
                 }
                 PendingIntent::SpawnQueueListingFetch { queue_id, .. }
                 | PendingIntent::SpawnQueueListingRefresh { queue_id } => {
@@ -511,7 +514,7 @@ pub async fn run(
                 id,
                 cadence,
             );
-            state.browser.sparkline_handle = Some(h);
+            state.browser.sparkline_handle = Some(crate::app::worker::AbortOnDrop::new(h));
         }
 
         // Reconcile the queue-listing worker after ensure() / tab entry.

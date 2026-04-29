@@ -1224,9 +1224,7 @@ fn handle_version_control_modal_verb(
             let pg_id = modal.pg_id.clone();
             // Dropping the search index too — body is changing.
             modal.search = None;
-            if let Some(h) = state.browser.version_modal_handle.take() {
-                h.abort();
-            }
+            state.browser.version_modal_handle = None;
             UpdateResult {
                 redraw: true,
                 intent: Some(super::PendingIntent::SpawnVersionControlModalFetch { pg_id }),
@@ -1335,9 +1333,7 @@ fn handle_parameter_context_modal_verb(
                 crate::view::browser::state::parameter_context_modal::ParameterContextLoad::Loading;
             // Drop the search index too — body is changing.
             modal.search = None;
-            if let Some(h) = state.browser.parameter_modal_handle.take() {
-                h.abort();
-            }
+            state.browser.parameter_modal_handle = None;
             // Re-look up the bound context id. The binding may have
             // updated since the modal was first opened.
             let bound_context_id = state
@@ -1621,9 +1617,7 @@ fn handle_action_history_modal_verb(
             modal.reset_for_refresh();
             let fetch_signal = modal.fetch_signal.clone();
             // Abort the current worker; the dispatcher spawns a fresh one.
-            if let Some(h) = state.browser.action_history_modal_handle.take() {
-                h.abort();
-            }
+            state.browser.action_history_modal_handle = None;
             UpdateResult {
                 redraw: true,
                 intent: Some(super::PendingIntent::SpawnActionHistoryModalFetch {

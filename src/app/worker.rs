@@ -39,6 +39,36 @@ pub(crate) async fn send_poll_result(
     }
 }
 
+/// Newtype around a `tokio::task::JoinHandle<()>` whose `Drop` impl
+/// calls `abort()`. Replaces the explicit `if let Some(h) = handle.take()
+/// { h.abort(); }` pattern across `BrowserState`'s view-local worker
+/// handles so abort happens automatically when the field is replaced
+/// or the parent struct is dropped.
+///
+/// `JoinHandle::abort()` is idempotent and safe to call after the task
+/// has finished; this wrapper inherits those semantics.
+#[derive(Debug)]
+pub struct AbortOnDrop(JoinHandle<()>);
+
+impl AbortOnDrop {
+    /// Wrap a freshly-spawned handle so it aborts when this struct drops.
+    pub fn new(handle: JoinHandle<()>) -> Self {
+        Self(handle)
+    }
+
+    /// Borrow the inner handle for read-only inspection (e.g.
+    /// `.is_finished()`).
+    pub fn handle(&self) -> &JoinHandle<()> {
+        &self.0
+    }
+}
+
+impl Drop for AbortOnDrop {
+    fn drop(&mut self) {
+        self.0.abort();
+    }
+}
+
 /// Tracks which view is currently "active" (i.e. the owner of the
 /// subscription set and any spawned worker handle).
 ///
@@ -158,9 +188,7 @@ impl WorkerRegistry {
                 // Abort any in-flight parameter-context modal worker so
                 // it can't deliver stale data after the user has left
                 // the Browser tab.
-                if let Some(h) = browser.parameter_modal_handle.take() {
-                    h.abort();
-                }
+                browser.parameter_modal_handle = None;
                 // Tear down the sparkline strip's worker + state so a
                 // stale series doesn't render briefly on Browser
                 // re-entry before the next periodic tick repopulates.

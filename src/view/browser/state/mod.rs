@@ -217,7 +217,7 @@ pub struct BrowserState {
     /// Live worker handle for the version-control modal's diff fetch.
     /// Aborted on `Close` and on `Refresh` (which spawns a new one).
     /// Cleared by the loaded / failed event handlers.
-    pub version_modal_handle: Option<tokio::task::JoinHandle<()>>,
+    pub version_modal_handle: Option<crate::app::worker::AbortOnDrop>,
     /// Open parameter-context modal state, if any. `None` while the
     /// modal is closed. Populated asynchronously with chain data by
     /// the view-local worker (Task 17).
@@ -225,14 +225,14 @@ pub struct BrowserState {
     /// Live worker handle for the parameter-context modal's chain fetch.
     /// Aborted on `Close` and on `Refresh` (which spawns a new one).
     /// Cleared by the loaded / failed event handlers.
-    pub parameter_modal_handle: Option<tokio::task::JoinHandle<()>>,
+    pub parameter_modal_handle: Option<crate::app::worker::AbortOnDrop>,
     /// Open action-history modal state, if any. `None` when the modal
     /// is closed. Captured at open time, populated asynchronously by
     /// the view-local worker (Task 11).
     pub action_history_modal: Option<action_history_modal::ActionHistoryModalState>,
     /// Live worker handle for the action-history modal's paginator.
     /// Aborted on close, refresh, tab switch, or selection change.
-    pub action_history_modal_handle: Option<tokio::task::JoinHandle<()>>,
+    pub action_history_modal_handle: Option<crate::app::worker::AbortOnDrop>,
     /// Queue listing state for the currently-selected Connection node.
     /// `Some` exactly when the selection is a Connection; `None` for all
     /// other node kinds or when the Browser tab is inactive.
@@ -252,7 +252,7 @@ pub struct BrowserState {
     /// Live worker handle for the per-selection sparkline fetch loop.
     /// Aborted on selection change, tab switch, or before the dispatcher
     /// spawns a new one.
-    pub sparkline_handle: Option<tokio::task::JoinHandle<()>>,
+    pub sparkline_handle: Option<crate::app::worker::AbortOnDrop>,
 }
 
 /// One segment in the breadcrumb path.
@@ -425,9 +425,7 @@ impl BrowserState {
     /// before it lands on the channel, so a stale `…Loaded` event
     /// can't reopen state on a freshly-closed modal.
     pub fn close_version_control_modal(&mut self) {
-        if let Some(h) = self.version_modal_handle.take() {
-            h.abort();
-        }
+        self.version_modal_handle = None;
         self.version_modal = None;
     }
 
@@ -524,9 +522,7 @@ impl BrowserState {
     /// in-flight worker so a stale `…Loaded` event can't update a
     /// freshly-closed (or re-opened) modal.
     pub fn close_parameter_context_modal(&mut self) {
-        if let Some(h) = self.parameter_modal_handle.take() {
-            h.abort();
-        }
+        self.parameter_modal_handle = None;
         self.parameter_modal = None;
     }
 
@@ -534,9 +530,7 @@ impl BrowserState {
     /// Replaces any previously-open action-history modal. Aborts the
     /// previous worker handle if present.
     pub fn open_action_history_modal(&mut self, source_id: String, component_label: String) {
-        if let Some(h) = self.action_history_modal_handle.take() {
-            h.abort();
-        }
+        self.action_history_modal_handle = None;
         self.action_history_modal = Some(action_history_modal::ActionHistoryModalState::pending(
             source_id,
             component_label,
@@ -545,9 +539,7 @@ impl BrowserState {
 
     /// Close the action-history modal and abort any in-flight worker.
     pub fn close_action_history_modal(&mut self) {
-        if let Some(h) = self.action_history_modal_handle.take() {
-            h.abort();
-        }
+        self.action_history_modal_handle = None;
         self.action_history_modal = None;
     }
 
@@ -561,9 +553,7 @@ impl BrowserState {
         kind: crate::client::history::ComponentKind,
         id: String,
     ) {
-        if let Some(h) = self.sparkline_handle.take() {
-            h.abort();
-        }
+        self.sparkline_handle = None;
         self.sparkline = Some(sparkline::SparklineState::pending(kind, id));
     }
 
@@ -571,9 +561,7 @@ impl BrowserState {
     /// Idempotent. Called on selection change to a non-supported kind,
     /// on tab switch out, and on context switch.
     pub fn close_sparkline(&mut self) {
-        if let Some(h) = self.sparkline_handle.take() {
-            h.abort();
-        }
+        self.sparkline_handle = None;
         self.sparkline = None;
     }
 

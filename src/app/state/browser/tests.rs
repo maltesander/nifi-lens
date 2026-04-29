@@ -3366,7 +3366,8 @@ fn apply_action_history_error_preserves_handle_when_source_id_stale() {
                 let h = tokio::task::spawn_local(async {
                     tokio::time::sleep(std::time::Duration::from_secs(60)).await;
                 });
-                state.browser.action_history_modal_handle = Some(h);
+                state.browser.action_history_modal_handle =
+                    Some(crate::app::worker::AbortOnDrop::new(h));
                 // Stale error from the previously-open proc-1 modal.
                 let payload = BrowserPayload::ActionHistoryError {
                     source_id: "proc-1".into(),

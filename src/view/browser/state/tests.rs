@@ -2827,7 +2827,7 @@ fn close_action_history_modal_clears_state_and_aborts_handle() {
                 let h = tokio::task::spawn_local(async {
                     tokio::time::sleep(std::time::Duration::from_secs(60)).await;
                 });
-                state.action_history_modal_handle = Some(h);
+                state.action_history_modal_handle = Some(crate::app::worker::AbortOnDrop::new(h));
                 state.close_action_history_modal();
                 assert!(state.action_history_modal.is_none());
                 assert!(state.action_history_modal_handle.is_none());
@@ -2880,7 +2880,7 @@ fn close_sparkline_clears_state_and_aborts_handle() {
                 let h = tokio::task::spawn_local(async {
                     tokio::time::sleep(std::time::Duration::from_secs(60)).await;
                 });
-                s.sparkline_handle = Some(h);
+                s.sparkline_handle = Some(crate::app::worker::AbortOnDrop::new(h));
                 s.close_sparkline();
                 assert!(s.sparkline.is_none());
                 assert!(s.sparkline_handle.is_none());
@@ -2905,7 +2905,7 @@ fn open_sparkline_for_selection_aborts_previous_handle() {
                 let h1 = tokio::task::spawn_local(async {
                     tokio::time::sleep(std::time::Duration::from_secs(60)).await;
                 });
-                s.sparkline_handle = Some(h1);
+                s.sparkline_handle = Some(crate::app::worker::AbortOnDrop::new(h1));
 
                 // Open a new selection — old handle must be aborted, slot cleared.
                 s.open_sparkline_for_selection(ComponentKind::Processor, "p-2".into());
