@@ -73,13 +73,13 @@ nifi-lens/
 State is mutated **only on the UI task**. No locks, no races.
 
 **Modal conventions (apply to every full-screen modal unless noted):**
-each modal owns a `*ModalVerb` enum that shadows outer-tab keys via
-the keymap shadow gate; standard chords are `Esc` close, `↑/↓/PgUp/
-PgDn/Home/End` scroll, `/` search, `n`/`Shift+N` next/prev match,
-`c` copy, `r` refresh; search uses `widget::search` primitives;
-below 60×20 the modal degrades to the single muted line `terminal
-too small`. v0.1 modals are **read-only** — no commit/revert/edit
-actions.
+each modal owns a `*ModalVerb` enum that embeds `Common(CommonVerb)`
+for shared chords (`Esc`/`/`/`n`/`Shift+N`/`c`/`r`); body keys (`↑/↓/
+PgUp/PgDn/Home/End`) are modal-specific. The keymap shadows outer-tab
+keys via `input::modal_gate::ModalGate` (one impl per modal in
+`src/input/modal_gate.rs`). Search uses `widget::search` primitives.
+Below `widget::modal::MIN_WIDTH × MIN_HEIGHT` the modal degrades via
+`widget::modal::render_too_small`. v0.1 modals are **read-only**.
 
 ### Central cluster store
 
@@ -166,6 +166,14 @@ All keyboard input flows through `src/input/`. A `KeyMap` translates
 - `AppAction` (Quit/Help/ContextSwitcher/FuzzyFind/Jump/Paste/Cut — `g`/`v`/`x`)
 - `ViewVerb` — wraps per-view enums (`BulletinsVerb`, `BrowserVerb`, `EventsVerb`, `TracerVerb`)
 
+Shared chords (`Refresh`, `Copy`, `OpenSearch`, `SearchNext`,
+`SearchPrev`, `Close`) live on `CommonVerb` (`src/input/verb.rs`).
+Per-view enums embed a `Common(CommonVerb)` arm and list opt-in
+variants in `Verb::all()` — chord/label/hint metadata defined once.
+Modal shadow dispatch goes through `input::modal_gate::ModalGate` —
+one impl per modal, chained inside `KeyMap::translate`. Adding a
+new modal is a single gate impl.
+
 Every enum implements the `Verb` trait, the **single source of truth**
 for chord, label, hint text, enabled predicate, and truncation
 priority. Hint bar and help modal iterate `Verb::all()` — adding a
@@ -173,49 +181,35 @@ keybinding cannot desync the two surfaces.
 
 Views expose a small trait surface (`handle_verb`, `handle_focus`,
 `default_cross_link`, `is_text_input_focused`, `handle_text_input`)
-instead of raw `KeyEvent` matches. `FocusAction::Descend` is "drill
-into / activate / submit"; `Ascend` is "leave the focused pane /
-cancel pending input". Rule 1a: when a view has no local descent
-target, `Enter` falls back to `default_cross_link` — in practice
-only Bulletins, which defaults to Browser to preserve historical
-muscle memory.
+instead of raw `KeyEvent` matches. `FocusAction::Descend` =
+drill/activate/submit; `Ascend` = leave focused pane / cancel input.
+When a view has no local descent target, `Enter` falls back to
+`default_cross_link` (Bulletins → Browser).
 
-`F12` dumps the keymap reverse table and per-endpoint subscriber
-state to the log (one info line per chord, plus one structured event
-per `ClusterEndpoint`). Unadvertised; use it when debugging "why
-doesn't key X do anything".
+`F12` dumps the keymap reverse table + subscriber state to the log
+(unadvertised debug aid).
 
-Verbs whose shortcut is already visible adjacent to the hint strip
-can opt out via `Verb::show_in_hint_bar() -> false` while still
-appearing in `?` help. Used by Bulletins severity filters
-(`1`/`2`/`3`, surfaced by `[E n] [W n] [I n]` chips) and by
-`BulletinsVerb::SearchNext`/`SearchPrev` (modal-only).
+Verbs already visible adjacent to the hint strip can opt out via
+`Verb::show_in_hint_bar() -> false` while still appearing in `?`
+help (Bulletins severity `1`/`2`/`3`; `SearchNext`/`SearchPrev`).
 
 ### Adding a new view
 
 1. Create `src/view/<name>/` with `mod.rs`, `state.rs`, and rendering
-   (single `render.rs` or a `render/` submodule for larger views —
-   Browser uses the latter). Add `worker.rs` only if the view needs
-   on-demand detail fetches. Mirror Events for the small case or
-   Browser for the render-submodule case.
-2. Add a `ViewId::<Name>` variant. Update `ViewId::next()` /
-   `prev()` cycle arms.
+   (single `render.rs` like Events, or a `render/` submodule like
+   Browser). Add `worker.rs` only if on-demand detail fetches needed.
+2. Add a `ViewId::<Name>` variant; update `next()` / `prev()` arms.
 3. Create `src/app/state/<name>.rs` with a `<Name>Handler` ZST
    implementing `ViewKeyHandler`.
-4. Add one arm to the `dispatch_handler!` macro in
-   `src/app/state/mod.rs`.
-5. If the view needs live cluster data, subscribe to the relevant
-   `ClusterEndpoint`s in `WorkerRegistry::ensure`'s arm and
-   unsubscribe on tab exit. For on-demand fetches, spawn a view-local
-   worker.
-6. Add a render arm to `src/app/ui.rs`'s render dispatch.
+4. Add one arm to `dispatch_handler!` in `src/app/state/mod.rs`.
+5. For live cluster data, subscribe/unsubscribe `ClusterEndpoint`s
+   in `WorkerRegistry::ensure`. For on-demand fetches, spawn a
+   view-local worker.
+6. Add a render arm to `src/app/ui.rs`.
 7. Add a top-bar label (`src/widget/top_bar.rs`).
 
-All seven steps are mechanical. New views should use `src/layout.rs`
-helpers, `src/widget/filter_bar.rs` for chip rows,
-`src/widget/scroll.rs` for modal scroll fields, and
-`crate::client::status::*` typed enums. See "Visual language" for
-the full shared-helper catalogue.
+All seven steps are mechanical. See "Visual language → Shared
+helpers" for reusable layout / modal / filter_bar / scroll helpers.
 
 ### Logging
 
@@ -510,6 +504,9 @@ than inline `Color::*`/`Modifier::*` constructors.
 
 Shared helpers:
 
+- `src/widget/modal.rs` — `MIN_WIDTH` / `MIN_HEIGHT` constants,
+  `render_too_small()` size-gate helper, `render_verb_hint_strip<V:
+  Verb>()` footer hint strip. Used by every full-screen modal.
 - `src/widget/scroll.rs` — `VerticalScrollState` /
   `BidirectionalScrollState` primitives composed by every full-screen
   modal (scroll-by / page-up-down / jump-top-bottom / horizontal
