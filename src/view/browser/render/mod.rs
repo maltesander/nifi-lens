@@ -891,8 +891,7 @@ mod tree_render_tests {
         );
     }
 
-    #[test]
-    fn tree_row_renders_rpg_with_transmission_glyph_and_target_uri() {
+    fn rpg_fixture(transmission_status: &str, target_uri: &str) -> BrowserState {
         let mut state = BrowserState::new();
         state.nodes.push(TreeNode {
             parent: None,
@@ -917,13 +916,13 @@ mod tree_render_tests {
             group_id: "root-id".into(),
             name: "MyRemoteSink".into(),
             status_summary: NodeStatusSummary::RemoteProcessGroup {
-                transmission_status: "Transmitting".into(),
+                transmission_status: transmission_status.into(),
                 active_threads: 2,
                 flow_files_received: 0,
                 flow_files_sent: 10,
                 bytes_received: 0,
                 bytes_sent: 1024,
-                target_uri: "https://nifi-east:8443/nifi".into(),
+                target_uri: target_uri.into(),
             },
             parameter_context_ref: None,
         });
@@ -931,21 +930,34 @@ mod tree_render_tests {
         crate::view::browser::state::rebuild_visible(&mut state);
         // Select the RPG row so it's visible.
         state.selected = 1;
+        state
+    }
 
+    #[test]
+    fn tree_row_renders_rpg_with_transmission_glyph_and_target_uri() {
+        let state = rpg_fixture("Transmitting", "https://nifi-east:8443/nifi");
         let snap = ClusterSnapshot::default();
         let mut terminal = Terminal::new(test_backend(TEST_BACKEND_SHORT)).unwrap();
         terminal
             .draw(|f| render_tree(f, f.area(), &state, &snap))
             .unwrap();
-        let out = format!("{}", terminal.backend());
-        assert!(
-            out.contains('▶'),
-            "tree output missing transmission glyph: {out:?}"
+        assert_snapshot!(
+            "tree_row_renders_rpg_with_transmission_glyph_and_target_uri",
+            format!("{}", terminal.backend())
         );
-        assert!(out.contains("MyRemoteSink"), "missing RPG name: {out:?}");
-        assert!(
-            out.contains("https://nifi-east:8443/nifi"),
-            "missing target URI: {out:?}"
+    }
+
+    #[test]
+    fn tree_row_renders_rpg_with_empty_target_uri_suppresses_suffix() {
+        let state = rpg_fixture("Not Transmitting", "");
+        let snap = ClusterSnapshot::default();
+        let mut terminal = Terminal::new(test_backend(TEST_BACKEND_SHORT)).unwrap();
+        terminal
+            .draw(|f| render_tree(f, f.area(), &state, &snap))
+            .unwrap();
+        assert_snapshot!(
+            "tree_row_renders_rpg_with_empty_target_uri_suppresses_suffix",
+            format!("{}", terminal.backend())
         );
     }
 }
