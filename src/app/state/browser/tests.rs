@@ -2706,7 +2706,7 @@ fn close_modal_verb_clears_parameter_modal() {
     BrowserHandler::handle_verb(
         &mut s,
         crate::input::ViewVerb::ParameterContextModal(
-            crate::input::ParameterContextModalVerb::Close,
+            crate::input::ParameterContextModalVerb::Common(crate::input::CommonVerb::Close),
         ),
     );
 
@@ -2730,7 +2730,7 @@ fn close_modal_verb_cancels_active_search_first() {
     BrowserHandler::handle_verb(
         &mut s,
         crate::input::ViewVerb::ParameterContextModal(
-            crate::input::ParameterContextModalVerb::Close,
+            crate::input::ParameterContextModalVerb::Common(crate::input::CommonVerb::Close),
         ),
     );
 
@@ -2814,7 +2814,7 @@ fn refresh_verb_sets_modal_to_loading_and_emits_spawn_intent() {
     let result = BrowserHandler::handle_verb(
         &mut s,
         crate::input::ViewVerb::ParameterContextModal(
-            crate::input::ParameterContextModalVerb::Refresh,
+            crate::input::ParameterContextModalVerb::Common(crate::input::CommonVerb::Refresh),
         ),
     )
     .expect("Refresh must produce a result");
@@ -2965,7 +2965,9 @@ fn esc_unfocuses_body_back_to_sidebar() {
     // Manually set Body focus.
     s.browser.parameter_modal.as_mut().unwrap().focused_pane = ParameterContextPane::Body;
 
-    let verb = crate::input::ViewVerb::ParameterContextModal(ParameterContextModalVerb::Close);
+    let verb = crate::input::ViewVerb::ParameterContextModal(ParameterContextModalVerb::Common(
+        crate::input::CommonVerb::Close,
+    ));
     BrowserHandler::handle_verb(&mut s, verb).expect("Close must be handled");
 
     // Modal must still be open.

@@ -1298,7 +1298,7 @@ fn handle_parameter_context_modal_verb(
     use crate::view::browser::state::parameter_context_modal::ParameterContextPane;
 
     match v {
-        V::Close => {
+        V::Common(CommonVerb::Close) => {
             // Priority: cancel search → unfocus Body → close modal.
             let has_search = state
                 .browser
@@ -1322,7 +1322,7 @@ fn handle_parameter_context_modal_verb(
             }
             redraw()
         }
-        V::Refresh => {
+        V::Common(CommonVerb::Refresh) => {
             // Re-spawn the worker. Refresh does NOT close the modal,
             // so we abort the previous handle directly here rather
             // than going through close_parameter_context_modal().
@@ -1489,19 +1489,19 @@ fn handle_parameter_context_modal_verb(
             }
             redraw()
         }
-        V::Search => {
+        V::Common(CommonVerb::OpenSearch) => {
             state.browser.parameter_modal_search_open();
             redraw()
         }
-        V::SearchNext => {
+        V::Common(CommonVerb::SearchNext) => {
             state.browser.parameter_modal_search_cycle_next();
             redraw()
         }
-        V::SearchPrev => {
+        V::Common(CommonVerb::SearchPrev) => {
             state.browser.parameter_modal_search_cycle_prev();
             redraw()
         }
-        V::Copy => {
+        V::Common(CommonVerb::Copy) => {
             if let Some(text) = parameter_context_modal_copy_text(&state.browser) {
                 let preview: String = text.chars().take(40).collect();
                 match state.copy_to_clipboard(text) {

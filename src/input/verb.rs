@@ -662,7 +662,7 @@ impl Verb for VersionControlModalVerb {
 /// Verbs that are only active when the parameter-context modal is open.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum ParameterContextModalVerb {
-    Close,
+    Common(CommonVerb),
     RowUp,
     RowDown,
     PageUp,
@@ -675,17 +675,12 @@ pub enum ParameterContextModalVerb {
     ToggleByContext,
     ToggleShadowed,
     ToggleUsedBy,
-    Search,
-    SearchNext,
-    SearchPrev,
-    Copy,
-    Refresh,
 }
 
 impl Verb for ParameterContextModalVerb {
     fn chord(self) -> Chord {
         match self {
-            Self::Close => Chord::simple(KeyCode::Esc),
+            Self::Common(c) => c.chord(),
             Self::RowUp => Chord::simple(KeyCode::Up),
             Self::RowDown => Chord::simple(KeyCode::Down),
             Self::PageUp => Chord::simple(KeyCode::PageUp),
@@ -696,17 +691,12 @@ impl Verb for ParameterContextModalVerb {
             Self::ToggleByContext => Chord::simple(KeyCode::Char('t')),
             Self::ToggleShadowed => Chord::simple(KeyCode::Char('s')),
             Self::ToggleUsedBy => Chord::simple(KeyCode::Char('u')),
-            Self::Search => Chord::simple(KeyCode::Char('/')),
-            Self::SearchNext => Chord::simple(KeyCode::Char('n')),
-            Self::SearchPrev => Chord::shift(KeyCode::Char('N')),
-            Self::Copy => Chord::simple(KeyCode::Char('c')),
-            Self::Refresh => Chord::simple(KeyCode::Char('r')),
         }
     }
 
     fn label(self) -> &'static str {
         match self {
-            Self::Close => "close / unfocus",
+            Self::Common(c) => c.label(),
             Self::RowUp => "row up",
             Self::RowDown => "row down",
             Self::PageUp => "page up",
@@ -717,17 +707,12 @@ impl Verb for ParameterContextModalVerb {
             Self::ToggleByContext => "by context",
             Self::ToggleShadowed => "show shadowed",
             Self::ToggleUsedBy => "used by",
-            Self::Search => "search",
-            Self::SearchNext => "next match",
-            Self::SearchPrev => "prev match",
-            Self::Copy => "copy",
-            Self::Refresh => "refresh",
         }
     }
 
     fn hint(self) -> &'static str {
         match self {
-            Self::Close => "close",
+            Self::Common(c) => c.hint(),
             Self::RowUp | Self::RowDown => "row",
             Self::PageUp | Self::PageDown => "page",
             Self::JumpTop => "top",
@@ -736,11 +721,6 @@ impl Verb for ParameterContextModalVerb {
             Self::ToggleByContext => "by-ctx",
             Self::ToggleShadowed => "shadowed",
             Self::ToggleUsedBy => "used-by",
-            Self::Search => "search",
-            Self::SearchNext => "next",
-            Self::SearchPrev => "prev",
-            Self::Copy => "copy",
-            Self::Refresh => "refresh",
         }
     }
 
@@ -758,8 +738,8 @@ impl Verb for ParameterContextModalVerb {
                 | Self::JumpTop
                 | Self::JumpBottom
                 | Self::FocusBody
-                | Self::SearchNext
-                | Self::SearchPrev
+                | Self::Common(CommonVerb::SearchNext)
+                | Self::Common(CommonVerb::SearchPrev)
         )
     }
 
@@ -772,7 +752,7 @@ impl Verb for ParameterContextModalVerb {
 
     fn all() -> &'static [Self] {
         &[
-            Self::Close,
+            Self::Common(CommonVerb::Close),
             Self::RowUp,
             Self::RowDown,
             Self::PageUp,
@@ -783,11 +763,11 @@ impl Verb for ParameterContextModalVerb {
             Self::ToggleByContext,
             Self::ToggleShadowed,
             Self::ToggleUsedBy,
-            Self::Search,
-            Self::SearchNext,
-            Self::SearchPrev,
-            Self::Copy,
-            Self::Refresh,
+            Self::Common(CommonVerb::OpenSearch),
+            Self::Common(CommonVerb::SearchNext),
+            Self::Common(CommonVerb::SearchPrev),
+            Self::Common(CommonVerb::Copy),
+            Self::Common(CommonVerb::Refresh),
         ]
     }
 }
@@ -1347,27 +1327,27 @@ mod tests {
     #[test]
     fn parameter_context_modal_verb_chords() {
         use ParameterContextModalVerb as V;
-        assert_eq!(V::Close.chord().display(), "Esc");
+        assert_eq!(V::Common(CommonVerb::Close).chord().display(), "Esc");
         assert_eq!(V::ToggleByContext.chord().display(), "t");
         assert_eq!(V::ToggleShadowed.chord().display(), "s");
         assert_eq!(V::ToggleUsedBy.chord().display(), "u");
-        assert_eq!(V::Search.chord().display(), "/");
-        assert_eq!(V::Refresh.chord().display(), "r");
-        assert_eq!(V::Copy.chord().display(), "c");
+        assert_eq!(V::Common(CommonVerb::OpenSearch).chord().display(), "/");
+        assert_eq!(V::Common(CommonVerb::Refresh).chord().display(), "r");
+        assert_eq!(V::Common(CommonVerb::Copy).chord().display(), "c");
     }
 
     #[test]
     fn parameter_context_modal_verb_in_all() {
         let all = ParameterContextModalVerb::all();
-        assert!(all.contains(&ParameterContextModalVerb::Close));
+        assert!(all.contains(&ParameterContextModalVerb::Common(CommonVerb::Close)));
         assert!(all.contains(&ParameterContextModalVerb::ToggleByContext));
         assert!(all.contains(&ParameterContextModalVerb::ToggleUsedBy));
     }
 
     #[test]
     fn parameter_context_modal_search_next_prev_hidden_from_hint_bar() {
-        assert!(!ParameterContextModalVerb::SearchNext.show_in_hint_bar());
-        assert!(!ParameterContextModalVerb::SearchPrev.show_in_hint_bar());
+        assert!(!ParameterContextModalVerb::Common(CommonVerb::SearchNext).show_in_hint_bar());
+        assert!(!ParameterContextModalVerb::Common(CommonVerb::SearchPrev).show_in_hint_bar());
     }
 
     #[test]
