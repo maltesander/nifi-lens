@@ -9,7 +9,7 @@ pub(crate) struct TracerHandler;
 
 impl ViewKeyHandler for TracerHandler {
     fn handle_verb(state: &mut AppState, verb: crate::input::ViewVerb) -> Option<UpdateResult> {
-        use crate::input::TracerVerb;
+        use crate::input::{CommonVerb, TracerVerb};
         use crate::view::tracer::state::{ContentPane, DetailTab, EventDetail, TracerMode};
 
         // ContentModalVerb takes priority when the modal is open.
@@ -23,7 +23,7 @@ impl ViewKeyHandler for TracerHandler {
         };
 
         match tv {
-            TracerVerb::Refresh => match &state.tracer.mode {
+            TracerVerb::Common(CommonVerb::Refresh) => match &state.tracer.mode {
                 TracerMode::Lineage(view) => {
                     let uuid = view.uuid.clone();
                     return Some(UpdateResult {
@@ -50,7 +50,7 @@ impl ViewKeyHandler for TracerHandler {
                 }
                 _ => {}
             },
-            TracerVerb::Copy => {
+            TracerVerb::Common(CommonVerb::Copy) => {
                 use crate::view::tracer::state::LineageFocus;
                 match &state.tracer.mode {
                     TracerMode::Lineage(view) => {
@@ -159,6 +159,15 @@ impl ViewKeyHandler for TracerHandler {
                 }
                 return Some(UpdateResult::default());
             }
+            // OpenSearch / SearchNext / SearchPrev / Close are not bound on
+            // the Tracer top-level (search and close are inside the content
+            // modal). Keep the match exhaustive.
+            TracerVerb::Common(
+                CommonVerb::OpenSearch
+                | CommonVerb::SearchNext
+                | CommonVerb::SearchPrev
+                | CommonVerb::Close,
+            ) => {}
         }
 
         Some(UpdateResult {

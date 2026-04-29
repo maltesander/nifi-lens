@@ -1071,8 +1071,8 @@ mod keymap_tests {
         // When the content modal is open, ContentModalVerb chords win.
         // `i` is TracerVerb::OpenContentModal when modal is closed,
         // but there is no ContentModalVerb on `i`, so it should become Unmapped.
-        // `c` is TracerVerb::Copy when modal is closed; it should become
-        // ContentModal(Copy) when the modal is open.
+        // `c` is TracerVerb::Common(CommonVerb::Copy) when modal is closed;
+        // it should become ContentModal(Copy) when the modal is open.
         let km = KeyMap::default();
         // Modal open: `c` → ContentModal(Copy)
         assert_eq!(

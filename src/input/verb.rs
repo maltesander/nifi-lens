@@ -133,8 +133,7 @@ pub enum EventsVerb {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum TracerVerb {
-    Refresh,
-    Copy,
+    Common(CommonVerb),
     Save,
     ToggleDiff,
     OpenContentModal,
@@ -417,8 +416,7 @@ impl Verb for EventsVerb {
 impl Verb for TracerVerb {
     fn chord(self) -> Chord {
         match self {
-            Self::Refresh => Chord::simple(KeyCode::Char('r')),
-            Self::Copy => Chord::simple(KeyCode::Char('c')),
+            Self::Common(c) => c.chord(),
             Self::Save => Chord::simple(KeyCode::Char('s')),
             Self::ToggleDiff => Chord::simple(KeyCode::Char('d')),
             Self::OpenContentModal => Chord::simple(KeyCode::Char('i')),
@@ -426,8 +424,7 @@ impl Verb for TracerVerb {
     }
     fn label(self) -> &'static str {
         match self {
-            Self::Refresh => "refresh lineage",
-            Self::Copy => "copy UUID / attribute value",
+            Self::Common(c) => c.label(),
             Self::Save => "save content to file",
             Self::ToggleDiff => "toggle attribute diff",
             Self::OpenContentModal => "open content viewer modal",
@@ -435,8 +432,7 @@ impl Verb for TracerVerb {
     }
     fn hint(self) -> &'static str {
         match self {
-            Self::Refresh => "refresh",
-            Self::Copy => "copy",
+            Self::Common(c) => c.hint(),
             Self::Save => "save",
             Self::ToggleDiff => "diff",
             Self::OpenContentModal => "view",
@@ -467,8 +463,8 @@ impl Verb for TracerVerb {
     }
     fn all() -> &'static [Self] {
         &[
-            Self::Refresh,
-            Self::Copy,
+            Self::Common(CommonVerb::Refresh),
+            Self::Common(CommonVerb::Copy),
             Self::Save,
             Self::ToggleDiff,
             Self::OpenContentModal,
