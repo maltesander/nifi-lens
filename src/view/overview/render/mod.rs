@@ -55,7 +55,7 @@ pub fn render(frame: &mut Frame, area: Rect, state: &OverviewState) {
     let zones = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
-            Constraint::Length(5),            // components panel (3 rows + 2 border)
+            Constraint::Length(6),            // components panel (4 rows + 2 border)
             Constraint::Length(nodes_height), // nodes panel
             Constraint::Length(7),            // bulletins/noisy panel (5 content + 2 border)
             Constraint::Fill(1),              // unhealthy queues panel

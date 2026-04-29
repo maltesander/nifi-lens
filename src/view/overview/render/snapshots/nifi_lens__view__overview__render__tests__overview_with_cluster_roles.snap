@@ -1,11 +1,12 @@
 ---
-source: src/view/overview/render/mod.rs
+source: src/view/overview/render/tests.rs
 expression: render_to_string(&state.overview)
 ---
 "┌ Components ──────────────────────────────────────────────────────────────────────────────────────┐"
 "│  Process groups         5    all in sync   INPUTS     2  OUTPUTS    1                            │"
 "│  Processors            46    RUNNING   42  STOPPED    3  INVALID    0  DISABLED   1              │"
 "│  Controller services    ?    cs list unavailable                                                 │"
+"│  Remote PGs             0    TRANSMIT   0  NOT-TX     0                                          │"
 "└──────────────────────────────────────────────────────────────────────────────────────────────────┘"
 "┌ Nodes (2/2 connected) ───────────────────────────────────────────────────────────────────────────┐"
 "│ [P·]    node1:8080  —                heap ██░░░  50% gc   50ms (+0)  load 0.38  1.5              │"
@@ -22,7 +23,6 @@ expression: render_to_string(&state.overview)
 "┌ Unhealthy queues ────────────────────────────────────────────────────────────────────────────────┐"
 "│fill  queue                             src → dst                                         ffiles  │"
 "│                                        no queues reported yet                                    │"
-"│                                                                                                  │"
 "│                                                                                                  │"
 "│                                                                                                  │"
 "│                                                                                                  │"
