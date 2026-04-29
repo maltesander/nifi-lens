@@ -1391,7 +1391,7 @@ mod keymap_tests {
             InputEvent::View(ViewVerb::BrowserPeek(BrowserPeekVerb::CopyAsJson))
         ));
 
-        // Esc inside the peek modal routes to BrowserPeekVerb::Close
+        // Esc inside the peek modal routes to BrowserPeekVerb::Common(CommonVerb::Close)
         // (not FocusAction::Ascend).
         let ev = km.translate(
             KeyEvent::new(KeyCode::Esc, KeyModifiers::empty()),
@@ -1405,7 +1405,9 @@ mod keymap_tests {
         );
         assert!(matches!(
             ev,
-            InputEvent::View(ViewVerb::BrowserPeek(BrowserPeekVerb::Close))
+            InputEvent::View(ViewVerb::BrowserPeek(BrowserPeekVerb::Common(
+                CommonVerb::Close
+            )))
         ));
 
         // Ctrl+C must always quit even with the peek modal open.

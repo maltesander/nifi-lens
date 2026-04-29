@@ -862,11 +862,7 @@ impl Verb for ActionHistoryModalVerb {
 /// the keymap shadow gate while the modal is open (Task 9 wires the gate).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum BrowserPeekVerb {
-    /// Esc — cascades: closes search prompt first, then closes the modal.
-    Close,
-    OpenSearch,
-    SearchNext,
-    SearchPrev,
+    Common(CommonVerb),
     /// `c` — copy the loaded attributes table as pretty-printed JSON.
     CopyAsJson,
 }
@@ -874,28 +870,19 @@ pub enum BrowserPeekVerb {
 impl Verb for BrowserPeekVerb {
     fn chord(self) -> Chord {
         match self {
-            Self::Close => Chord::simple(KeyCode::Esc),
-            Self::OpenSearch => Chord::simple(KeyCode::Char('/')),
-            Self::SearchNext => Chord::simple(KeyCode::Char('n')),
-            Self::SearchPrev => Chord::shift(KeyCode::Char('N')),
+            Self::Common(c) => c.chord(),
             Self::CopyAsJson => Chord::simple(KeyCode::Char('c')),
         }
     }
     fn label(self) -> &'static str {
         match self {
-            Self::Close => "close peek modal",
-            Self::OpenSearch => "open text search",
-            Self::SearchNext => "next match",
-            Self::SearchPrev => "previous match",
+            Self::Common(c) => c.label(),
             Self::CopyAsJson => "copy attributes as JSON",
         }
     }
     fn hint(self) -> &'static str {
         match self {
-            Self::Close => "close",
-            Self::OpenSearch => "find",
-            Self::SearchNext => "next",
-            Self::SearchPrev => "prev",
+            Self::Common(c) => c.hint(),
             Self::CopyAsJson => "copy json",
         }
     }
@@ -903,20 +890,20 @@ impl Verb for BrowserPeekVerb {
         50
     }
     fn show_in_hint_bar(self) -> bool {
-        // Show all five — the modal hint strip has room.
+        // Show all — the modal hint strip has room.
         true
     }
     fn enabled(self, _ctx: &HintContext<'_>) -> bool {
         // Modal is the dispatch gate — chords only fire when the
-        // keymap is in peek-modal mode (Task 9 wires the gate).
+        // keymap is in peek-modal mode.
         true
     }
     fn all() -> &'static [Self] {
         &[
-            Self::Close,
-            Self::OpenSearch,
-            Self::SearchNext,
-            Self::SearchPrev,
+            Self::Common(CommonVerb::Close),
+            Self::Common(CommonVerb::OpenSearch),
+            Self::Common(CommonVerb::SearchNext),
+            Self::Common(CommonVerb::SearchPrev),
             Self::CopyAsJson,
         ]
     }

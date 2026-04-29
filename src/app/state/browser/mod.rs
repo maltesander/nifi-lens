@@ -1903,10 +1903,11 @@ fn handle_browser_peek_verb(
     state: &mut AppState,
     verb: crate::input::BrowserPeekVerb,
 ) -> UpdateResult {
-    use crate::input::BrowserPeekVerb;
+    use crate::input::{BrowserPeekVerb, CommonVerb};
 
     match verb {
-        BrowserPeekVerb::Close => {
+        // Esc — cascades: closes search prompt first, then closes the modal.
+        BrowserPeekVerb::Common(CommonVerb::Close) => {
             // Cascade: close search prompt → close modal.
             let close_modal = match state
                 .browser
@@ -1932,7 +1933,7 @@ fn handle_browser_peek_verb(
                 ..Default::default()
             }
         }
-        BrowserPeekVerb::OpenSearch => {
+        BrowserPeekVerb::Common(CommonVerb::OpenSearch) => {
             if let Some(peek) = state
                 .browser
                 .queue_listing
@@ -1946,7 +1947,7 @@ fn handle_browser_peek_verb(
                 ..Default::default()
             }
         }
-        BrowserPeekVerb::SearchNext => {
+        BrowserPeekVerb::Common(CommonVerb::SearchNext) => {
             if let Some(peek) = state
                 .browser
                 .queue_listing
@@ -1960,7 +1961,7 @@ fn handle_browser_peek_verb(
                 ..Default::default()
             }
         }
-        BrowserPeekVerb::SearchPrev => {
+        BrowserPeekVerb::Common(CommonVerb::SearchPrev) => {
             if let Some(peek) = state
                 .browser
                 .queue_listing
@@ -1993,6 +1994,11 @@ fn handle_browser_peek_verb(
                 ..Default::default()
             }
         }
+        // Refresh and Copy are not bound on the peek modal — Refresh
+        // would clobber the in-progress GET; Copy is shadowed by
+        // CopyAsJson which has the same chord (`c`). Keep the match
+        // exhaustive.
+        BrowserPeekVerb::Common(CommonVerb::Refresh | CommonVerb::Copy) => UpdateResult::default(),
     }
 }
 

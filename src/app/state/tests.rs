@@ -2087,7 +2087,7 @@ mod queue_listing_reducer_tests {
     #[test]
     fn peek_close_clears_modal() {
         use crate::app::state::ViewKeyHandler;
-        use crate::input::{BrowserPeekVerb, ViewVerb};
+        use crate::input::{BrowserPeekVerb, CommonVerb, ViewVerb};
         use crate::view::browser::state::queue_listing::{QueueListingRow, QueueListingState};
         use std::time::Duration;
 
@@ -2109,7 +2109,7 @@ mod queue_listing_reducer_tests {
 
         let _ = crate::app::state::browser::BrowserHandler::handle_verb(
             &mut state,
-            ViewVerb::BrowserPeek(BrowserPeekVerb::Close),
+            ViewVerb::BrowserPeek(BrowserPeekVerb::Common(CommonVerb::Close)),
         );
         assert!(state.browser.queue_listing.as_ref().unwrap().peek.is_none());
     }
@@ -2117,7 +2117,7 @@ mod queue_listing_reducer_tests {
     #[test]
     fn peek_search_opens_search_state() {
         use crate::app::state::ViewKeyHandler;
-        use crate::input::{BrowserPeekVerb, ViewVerb};
+        use crate::input::{BrowserPeekVerb, CommonVerb, ViewVerb};
         use crate::view::browser::state::queue_listing::{QueueListingRow, QueueListingState};
         use std::time::Duration;
 
@@ -2138,7 +2138,7 @@ mod queue_listing_reducer_tests {
         state.browser.open_queue_listing_peek_modal();
         let _ = crate::app::state::browser::BrowserHandler::handle_verb(
             &mut state,
-            ViewVerb::BrowserPeek(BrowserPeekVerb::OpenSearch),
+            ViewVerb::BrowserPeek(BrowserPeekVerb::Common(CommonVerb::OpenSearch)),
         );
         assert!(
             state
@@ -2157,7 +2157,7 @@ mod queue_listing_reducer_tests {
     #[test]
     fn peek_close_with_active_search_closes_search_first() {
         use crate::app::state::ViewKeyHandler;
-        use crate::input::{BrowserPeekVerb, ViewVerb};
+        use crate::input::{BrowserPeekVerb, CommonVerb, ViewVerb};
         use crate::view::browser::state::queue_listing::{QueueListingRow, QueueListingState};
         use std::time::Duration;
 
@@ -2188,7 +2188,7 @@ mod queue_listing_reducer_tests {
 
         let _ = crate::app::state::browser::BrowserHandler::handle_verb(
             &mut state,
-            ViewVerb::BrowserPeek(BrowserPeekVerb::Close),
+            ViewVerb::BrowserPeek(BrowserPeekVerb::Common(CommonVerb::Close)),
         );
         let peek = state
             .browser
@@ -2202,7 +2202,7 @@ mod queue_listing_reducer_tests {
 
         let _ = crate::app::state::browser::BrowserHandler::handle_verb(
             &mut state,
-            ViewVerb::BrowserPeek(BrowserPeekVerb::Close),
+            ViewVerb::BrowserPeek(BrowserPeekVerb::Common(CommonVerb::Close)),
         );
         assert!(state.browser.queue_listing.as_ref().unwrap().peek.is_none());
     }
