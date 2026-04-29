@@ -4,7 +4,7 @@ use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 
 use super::{AppState, PendingIntent, UpdateResult, ViewKeyHandler};
 use crate::input::FilterField as InputFilterField;
-use crate::input::{EventsVerb, FocusAction, GoTarget, ViewVerb};
+use crate::input::{CommonVerb, EventsVerb, FocusAction, GoTarget, ViewVerb};
 use crate::view::events::state::FilterField;
 
 /// Convert `crate::input::FilterField` to `crate::view::events::state::FilterField`.
@@ -49,11 +49,21 @@ impl ViewKeyHandler for EventsHandler {
             EventsVerb::RaiseCap => {
                 state.events.raise_cap();
             }
-            EventsVerb::Refresh => {
+            EventsVerb::Common(CommonVerb::Refresh) => {
                 if let Some(r) = submit_query(state) {
                     return Some(r);
                 }
             }
+            // OpenSearch / SearchNext / SearchPrev / Copy / Close are not
+            // bound at the Events top-level (Esc is FocusAction::Ascend, copy
+            // and search are not exposed). Keep the match exhaustive.
+            EventsVerb::Common(
+                CommonVerb::Copy
+                | CommonVerb::OpenSearch
+                | CommonVerb::SearchNext
+                | CommonVerb::SearchPrev
+                | CommonVerb::Close,
+            ) => {}
         }
         Some(UpdateResult {
             redraw: true,

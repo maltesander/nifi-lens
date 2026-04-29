@@ -124,11 +124,11 @@ pub enum BrowserQueueVerb {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum EventsVerb {
+    Common(CommonVerb),
     EditField(FilterField),
     NewQuery,
     Reset,
     RaiseCap,
-    Refresh,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -356,6 +356,7 @@ impl Verb for BrowserQueueVerb {
 impl Verb for EventsVerb {
     fn chord(self) -> Chord {
         match self {
+            Self::Common(c) => c.chord(),
             Self::EditField(FilterField::Time) => Chord::shift(KeyCode::Char('D')),
             Self::EditField(FilterField::Types) => Chord::shift(KeyCode::Char('T')),
             Self::EditField(FilterField::Source) => Chord::shift(KeyCode::Char('S')),
@@ -364,11 +365,11 @@ impl Verb for EventsVerb {
             Self::NewQuery => Chord::shift(KeyCode::Char('N')),
             Self::Reset => Chord::shift(KeyCode::Char('R')),
             Self::RaiseCap => Chord::shift(KeyCode::Char('L')),
-            Self::Refresh => Chord::simple(KeyCode::Char('r')),
         }
     }
     fn label(self) -> &'static str {
         match self {
+            Self::Common(c) => c.label(),
             Self::EditField(FilterField::Time) => "edit Time filter",
             Self::EditField(FilterField::Types) => "edit Types filter",
             Self::EditField(FilterField::Source) => "edit Source filter",
@@ -377,11 +378,11 @@ impl Verb for EventsVerb {
             Self::NewQuery => "clear filters and submit new query",
             Self::Reset => "reset filters (no submit)",
             Self::RaiseCap => "raise result cap 500 -> 5000",
-            Self::Refresh => "re-run current query",
         }
     }
     fn hint(self) -> &'static str {
         match self {
+            Self::Common(c) => c.hint(),
             Self::EditField(FilterField::Time) => "time",
             Self::EditField(FilterField::Types) => "types",
             Self::EditField(FilterField::Source) => "src",
@@ -390,13 +391,12 @@ impl Verb for EventsVerb {
             Self::NewQuery => "new",
             Self::Reset => "reset",
             Self::RaiseCap => "cap",
-            Self::Refresh => "refresh",
         }
     }
     fn priority(self) -> u8 {
         match self {
+            Self::Common(c) => c.priority(),
             Self::EditField(_) | Self::NewQuery | Self::Reset | Self::RaiseCap => 10,
-            Self::Refresh => 50,
         }
     }
     fn all() -> &'static [Self] {
@@ -408,8 +408,8 @@ impl Verb for EventsVerb {
             Self::EditField(FilterField::Attr),
             Self::NewQuery,
             Self::Reset,
+            Self::Common(CommonVerb::Refresh),
             Self::RaiseCap,
-            Self::Refresh,
         ]
     }
 }
@@ -1127,7 +1127,7 @@ mod tests {
     #[test]
     fn events_refresh_is_r() {
         assert_eq!(
-            EventsVerb::Refresh.chord(),
+            EventsVerb::Common(CommonVerb::Refresh).chord(),
             Chord::simple(KeyCode::Char('r'))
         );
     }

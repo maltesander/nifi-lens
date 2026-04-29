@@ -886,7 +886,7 @@ mod keymap_tests {
     #[test]
     fn r_on_events_produces_events_refresh_not_bulletins_refresh() {
         // Cross-view chord collision: `r` is bound to both BulletinsVerb::Common(CommonVerb::Refresh)
-        // and EventsVerb::Refresh. With view-aware translate, the active view wins.
+        // and EventsVerb::Common(CommonVerb::Refresh). With view-aware translate, the active view wins.
         let km = KeyMap::default();
         assert_eq!(
             km.translate(
@@ -899,7 +899,7 @@ mod keymap_tests {
                 false,
                 &dummy_state()
             ),
-            InputEvent::View(ViewVerb::Events(EventsVerb::Refresh))
+            InputEvent::View(ViewVerb::Events(EventsVerb::Common(CommonVerb::Refresh)))
         );
         assert_eq!(
             km.translate(
