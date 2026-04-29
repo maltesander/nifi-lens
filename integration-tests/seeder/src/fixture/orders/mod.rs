@@ -32,6 +32,7 @@
 pub mod break_; // `break` is a Rust keyword; use `break_`
 pub mod deadletter;
 pub mod remote_targets;
+pub mod shared;
 pub mod sink_apac;
 pub mod sink_eu;
 pub mod sink_us;
