@@ -12,7 +12,11 @@ keywords = ["nifi", "tui", "observability", "ratatui", "terminal"]
 categories = ["command-line-utilities"]
 
 [workspace]
-members = [".", "integration-tests/seeder"]
+members = [
+    ".",
+    "integration-tests/seeder",
+    "integration-tests/seeder/tools/gen-orders-payload",
+]
 resolver = "2"
 
 [[bin]]
