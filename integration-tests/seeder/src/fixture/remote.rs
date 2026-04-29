@@ -96,19 +96,20 @@ fn make_rpg_entity(name: &str, target_uri: &str) -> types::RemoteProcessGroupEnt
     entity
 }
 
-/// Build a `RemotePortRunStatusEntity` requesting `state`. The body needs
-/// the current revision (NiFi enforces optimistic concurrency on
-/// `/run-status` PUTs); we read revision `0` here because we just created
-/// the RPG and haven't mutated it yet.
+/// Build a `RemotePortRunStatusEntity` requesting `state` at the given
+/// `revision_version`. The body needs the current revision — NiFi enforces
+/// optimistic concurrency on `/run-status` PUTs. The caller is responsible
+/// for supplying a fresh version obtained immediately before the PUT.
 ///
 /// The dynamic `state` field is `Option<String>`; we serialise the typed
 /// helper enum via its `as_str()` wire form so the conversion lives in
 /// one place.
 fn make_run_status(
+    revision_version: i64,
     state: types::RemotePortRunStatusEntityState,
 ) -> types::RemotePortRunStatusEntity {
     let mut revision = types::RevisionDto::default();
-    revision.version = Some(0);
+    revision.version = Some(revision_version);
 
     let mut entity = types::RemotePortRunStatusEntity::default();
     entity.revision = Some(revision);
@@ -117,12 +118,30 @@ fn make_run_status(
 }
 
 /// PUT `/remote-process-groups/{id}/run-status` to transition the RPG.
+///
+/// Fetches the current revision immediately before the PUT — NiFi may have
+/// advanced the version counter during the target-side handshake that occurs
+/// after `create_remote_process_group` returns, so hardcoding revision 0
+/// causes a 400 "not the most up-to-date revision" error on live clusters.
 async fn set_rpg_run_status(
     client: &DynamicClient,
     rpg_id: &str,
     state: types::RemotePortRunStatusEntityState,
 ) -> Result<()> {
-    let body = make_run_status(state);
+    let entity = client
+        .remoteprocessgroups()
+        .get_remote_process_group(rpg_id)
+        .await
+        .map_err(|e| SeederError::Api {
+            message: format!("get remote process group {rpg_id} for revision"),
+            source: Box::new(e),
+        })?;
+    let revision_version = entity
+        .revision
+        .as_ref()
+        .and_then(|r| r.version)
+        .unwrap_or(0);
+    let body = make_run_status(revision_version, state);
     client
         .remoteprocessgroups()
         .update_remote_process_group_run_status(rpg_id, &body)
@@ -152,15 +171,15 @@ mod tests {
     }
 
     #[test]
-    fn make_run_status_sets_state_and_revision_zero() {
-        let body = make_run_status(types::RemotePortRunStatusEntityState::Transmitting);
+    fn make_run_status_sets_state_and_revision() {
+        let body = make_run_status(3, types::RemotePortRunStatusEntityState::Transmitting);
         assert_eq!(body.state.as_deref(), Some("TRANSMITTING"));
-        assert_eq!(body.revision.unwrap().version, Some(0));
+        assert_eq!(body.revision.unwrap().version, Some(3));
     }
 
     #[test]
     fn make_run_status_serialises_stopped_as_wire_value() {
-        let body = make_run_status(types::RemotePortRunStatusEntityState::Stopped);
+        let body = make_run_status(0, types::RemotePortRunStatusEntityState::Stopped);
         assert_eq!(body.state.as_deref(), Some("STOPPED"));
     }
 
