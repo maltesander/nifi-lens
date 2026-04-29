@@ -77,10 +77,53 @@ pub fn try_dispatch<G: ModalGate>(state: &AppState, key: KeyEvent) -> Option<Inp
     Some(InputEvent::Unmapped)
 }
 
+/// Tracer content viewer modal (`src/view/tracer/modal/`).
+pub struct ContentModalGate;
+
+impl ModalGate for ContentModalGate {
+    type V = crate::input::ContentModalVerb;
+
+    fn host_view() -> ViewId {
+        ViewId::Tracer
+    }
+
+    fn is_active(state: &AppState) -> bool {
+        state.tracer.content_modal.is_some() && state.modal.is_none()
+    }
+
+    fn to_view_verb(v: Self::V) -> ViewVerb {
+        ViewVerb::ContentModal(v)
+    }
+
+    fn scroll_passthrough() -> ScrollPassthrough {
+        ScrollPassthrough::Allow(&[
+            FocusAction::Up,
+            FocusAction::Down,
+            FocusAction::Left,
+            FocusAction::Right,
+            FocusAction::PageUp,
+            FocusAction::PageDown,
+            FocusAction::First,
+            FocusAction::Last,
+        ])
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     // Compile-time test: `ModalGate` is object-safe-adjacent (associated
     // types prevent dyn use, but the bounds chain compiles).
     fn _trait_compiles<G: ModalGate>(_p: std::marker::PhantomData<G>) {}
+
+    #[test]
+    fn content_modal_gate_inactive_on_fresh_state() {
+        let state = crate::test_support::fresh_state();
+        assert!(!ContentModalGate::is_active(&state));
+    }
+
+    #[test]
+    fn content_modal_gate_host_view_is_tracer() {
+        assert_eq!(ContentModalGate::host_view(), ViewId::Tracer);
+    }
 }
