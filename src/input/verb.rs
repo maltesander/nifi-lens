@@ -577,13 +577,8 @@ impl Verb for ContentModalVerb {
 /// Verbs that are only active when the version-control modal is open.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum VersionControlModalVerb {
-    Close,
-    OpenSearch,
-    SearchNext,
-    SearchPrev,
-    Copy,
+    Common(CommonVerb),
     ToggleEnvironmental,
-    Refresh,
     ScrollUp,
     ScrollDown,
     PageUp,
@@ -595,13 +590,8 @@ pub enum VersionControlModalVerb {
 impl Verb for VersionControlModalVerb {
     fn chord(self) -> Chord {
         match self {
-            Self::Close => Chord::simple(KeyCode::Esc),
-            Self::OpenSearch => Chord::simple(KeyCode::Char('/')),
-            Self::SearchNext => Chord::simple(KeyCode::Char('n')),
-            Self::SearchPrev => Chord::shift(KeyCode::Char('N')),
-            Self::Copy => Chord::simple(KeyCode::Char('c')),
+            Self::Common(c) => c.chord(),
             Self::ToggleEnvironmental => Chord::simple(KeyCode::Char('e')),
-            Self::Refresh => Chord::simple(KeyCode::Char('r')),
             Self::ScrollUp => Chord::simple(KeyCode::Up),
             Self::ScrollDown => Chord::simple(KeyCode::Down),
             Self::PageUp => Chord::simple(KeyCode::PageUp),
@@ -612,13 +602,8 @@ impl Verb for VersionControlModalVerb {
     }
     fn label(self) -> &'static str {
         match self {
-            Self::Close => "close modal",
-            Self::OpenSearch => "open text search",
-            Self::SearchNext => "next match",
-            Self::SearchPrev => "previous match",
-            Self::Copy => "copy diff to clipboard",
+            Self::Common(c) => c.label(),
             Self::ToggleEnvironmental => "toggle environmental differences",
-            Self::Refresh => "refresh diff",
             Self::ScrollUp => "scroll up",
             Self::ScrollDown => "scroll down",
             Self::PageUp => "page up",
@@ -629,12 +614,9 @@ impl Verb for VersionControlModalVerb {
     }
     fn hint(self) -> &'static str {
         match self {
-            Self::Close => "close",
-            Self::OpenSearch => "find",
-            Self::SearchNext => "match",
-            Self::Copy => "copy",
+            Self::Common(c) => c.hint(),
             Self::ToggleEnvironmental => "env",
-            Self::Refresh => "refresh",
+            // Scroll variants have no hint — surfaced in `?` help only.
             _ => "",
         }
     }
@@ -644,12 +626,12 @@ impl Verb for VersionControlModalVerb {
     fn show_in_hint_bar(self) -> bool {
         matches!(
             self,
-            Self::Close
-                | Self::OpenSearch
-                | Self::SearchNext
-                | Self::Copy
+            Self::Common(CommonVerb::Close)
+                | Self::Common(CommonVerb::OpenSearch)
+                | Self::Common(CommonVerb::SearchNext)
+                | Self::Common(CommonVerb::Copy)
+                | Self::Common(CommonVerb::Refresh)
                 | Self::ToggleEnvironmental
-                | Self::Refresh
         )
     }
     fn enabled(self, _ctx: &HintContext<'_>) -> bool {
@@ -660,13 +642,13 @@ impl Verb for VersionControlModalVerb {
     }
     fn all() -> &'static [Self] {
         &[
-            Self::Close,
-            Self::OpenSearch,
-            Self::SearchNext,
-            Self::SearchPrev,
-            Self::Copy,
+            Self::Common(CommonVerb::Close),
+            Self::Common(CommonVerb::OpenSearch),
+            Self::Common(CommonVerb::SearchNext),
+            Self::Common(CommonVerb::SearchPrev),
+            Self::Common(CommonVerb::Copy),
             Self::ToggleEnvironmental,
-            Self::Refresh,
+            Self::Common(CommonVerb::Refresh),
             Self::ScrollUp,
             Self::ScrollDown,
             Self::PageUp,
@@ -1188,16 +1170,34 @@ mod tests {
     fn version_control_modal_verb_chords() {
         use crate::input::Verb;
         use VersionControlModalVerb as V;
-        assert_eq!(V::Close.chord(), Chord::simple(KeyCode::Esc));
-        assert_eq!(V::OpenSearch.chord(), Chord::simple(KeyCode::Char('/')));
-        assert_eq!(V::SearchNext.chord(), Chord::simple(KeyCode::Char('n')));
-        assert_eq!(V::SearchPrev.chord(), Chord::shift(KeyCode::Char('N')));
-        assert_eq!(V::Copy.chord(), Chord::simple(KeyCode::Char('c')));
+        assert_eq!(
+            V::Common(CommonVerb::Close).chord(),
+            Chord::simple(KeyCode::Esc)
+        );
+        assert_eq!(
+            V::Common(CommonVerb::OpenSearch).chord(),
+            Chord::simple(KeyCode::Char('/'))
+        );
+        assert_eq!(
+            V::Common(CommonVerb::SearchNext).chord(),
+            Chord::simple(KeyCode::Char('n'))
+        );
+        assert_eq!(
+            V::Common(CommonVerb::SearchPrev).chord(),
+            Chord::shift(KeyCode::Char('N'))
+        );
+        assert_eq!(
+            V::Common(CommonVerb::Copy).chord(),
+            Chord::simple(KeyCode::Char('c'))
+        );
         assert_eq!(
             V::ToggleEnvironmental.chord(),
             Chord::simple(KeyCode::Char('e'))
         );
-        assert_eq!(V::Refresh.chord(), Chord::simple(KeyCode::Char('r')));
+        assert_eq!(
+            V::Common(CommonVerb::Refresh).chord(),
+            Chord::simple(KeyCode::Char('r'))
+        );
         assert_eq!(V::ScrollUp.chord(), Chord::simple(KeyCode::Up));
         assert_eq!(V::ScrollDown.chord(), Chord::simple(KeyCode::Down));
         assert_eq!(V::PageUp.chord(), Chord::simple(KeyCode::PageUp));
@@ -1210,7 +1210,7 @@ mod tests {
     fn version_control_modal_verb_in_all() {
         use crate::input::Verb;
         let all = VersionControlModalVerb::all();
-        assert!(all.contains(&VersionControlModalVerb::Close));
+        assert!(all.contains(&VersionControlModalVerb::Common(CommonVerb::Close)));
         assert_eq!(all.len(), 13);
     }
 

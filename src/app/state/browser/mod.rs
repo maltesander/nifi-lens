@@ -1161,7 +1161,7 @@ fn handle_version_control_modal_verb(
     state: &mut AppState,
     v: crate::input::VersionControlModalVerb,
 ) -> UpdateResult {
-    use crate::input::VersionControlModalVerb as V;
+    use crate::input::{CommonVerb, VersionControlModalVerb as V};
 
     let redraw = || UpdateResult {
         redraw: true,
@@ -1172,7 +1172,7 @@ fn handle_version_control_modal_verb(
     };
 
     match v {
-        V::Close => {
+        V::Common(CommonVerb::Close) => {
             // Esc cancels an active search first; only when no search
             // is active does Esc close the modal.
             let has_search = state
@@ -1187,19 +1187,19 @@ fn handle_version_control_modal_verb(
             }
             redraw()
         }
-        V::OpenSearch => {
+        V::Common(CommonVerb::OpenSearch) => {
             state.browser.version_modal_search_open();
             redraw()
         }
-        V::SearchNext => {
+        V::Common(CommonVerb::SearchNext) => {
             state.browser.version_modal_search_cycle_next();
             redraw()
         }
-        V::SearchPrev => {
+        V::Common(CommonVerb::SearchPrev) => {
             state.browser.version_modal_search_cycle_prev();
             redraw()
         }
-        V::Copy => {
+        V::Common(CommonVerb::Copy) => {
             if let Some(text) = version_control_modal_copy_text(&state.browser) {
                 let preview: String = text.chars().take(40).collect();
                 match state.copy_to_clipboard(text) {
@@ -1213,7 +1213,7 @@ fn handle_version_control_modal_verb(
             state.browser.toggle_environmental();
             redraw()
         }
-        V::Refresh => {
+        V::Common(CommonVerb::Refresh) => {
             // Re-spawn the worker. Refresh does NOT close the modal,
             // so we abort the previous handle directly here rather
             // than going through close_version_control_modal().
