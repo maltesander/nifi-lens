@@ -19,6 +19,71 @@ pub enum Severity {
     Info,
 }
 
+/// Verbs shared across multiple views and modals: refresh, copy, search,
+/// close. Each per-view verb enum that wants these chords embeds a
+/// `Common(CommonVerb)` arm and lists which `CommonVerb` variants it
+/// supports in its own `Verb::all()`. The chord/label/hint metadata is
+/// defined exactly once, here.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum CommonVerb {
+    Refresh,
+    Copy,
+    OpenSearch,
+    SearchNext,
+    SearchPrev,
+    Close,
+}
+
+impl Verb for CommonVerb {
+    fn chord(self) -> Chord {
+        match self {
+            Self::Refresh => Chord::simple(KeyCode::Char('r')),
+            Self::Copy => Chord::simple(KeyCode::Char('c')),
+            Self::OpenSearch => Chord::simple(KeyCode::Char('/')),
+            Self::SearchNext => Chord::simple(KeyCode::Char('n')),
+            Self::SearchPrev => Chord::shift(KeyCode::Char('N')),
+            Self::Close => Chord::simple(KeyCode::Esc),
+        }
+    }
+    fn label(self) -> &'static str {
+        match self {
+            Self::Refresh => "refresh",
+            Self::Copy => "copy",
+            Self::OpenSearch => "open text search",
+            Self::SearchNext => "next match",
+            Self::SearchPrev => "previous match",
+            Self::Close => "close",
+        }
+    }
+    fn hint(self) -> &'static str {
+        match self {
+            Self::Refresh => "refresh",
+            Self::Copy => "copy",
+            Self::OpenSearch => "find",
+            Self::SearchNext => "next",
+            Self::SearchPrev => "prev",
+            Self::Close => "close",
+        }
+    }
+    fn priority(self) -> u8 {
+        match self {
+            Self::Close => 100,
+            Self::OpenSearch => 80,
+            _ => 50,
+        }
+    }
+    fn all() -> &'static [Self] {
+        &[
+            Self::Refresh,
+            Self::Copy,
+            Self::OpenSearch,
+            Self::SearchNext,
+            Self::SearchPrev,
+            Self::Close,
+        ]
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum BulletinsVerb {
     ToggleSeverity(Severity),
@@ -1457,5 +1522,54 @@ mod tests {
         assert!(chords.contains(&Chord::simple(KeyCode::Char('n'))));
         assert!(chords.contains(&Chord::shift(KeyCode::Char('N'))));
         assert!(chords.contains(&Chord::simple(KeyCode::Char('c'))));
+    }
+
+    #[test]
+    fn common_verb_chords_match_documented_bindings() {
+        use crossterm::event::KeyCode;
+        assert_eq!(
+            CommonVerb::Refresh.chord(),
+            Chord::simple(KeyCode::Char('r'))
+        );
+        assert_eq!(CommonVerb::Copy.chord(), Chord::simple(KeyCode::Char('c')));
+        assert_eq!(
+            CommonVerb::OpenSearch.chord(),
+            Chord::simple(KeyCode::Char('/'))
+        );
+        assert_eq!(
+            CommonVerb::SearchNext.chord(),
+            Chord::simple(KeyCode::Char('n'))
+        );
+        assert_eq!(
+            CommonVerb::SearchPrev.chord(),
+            Chord::shift(KeyCode::Char('N'))
+        );
+        assert_eq!(CommonVerb::Close.chord(), Chord::simple(KeyCode::Esc));
+    }
+
+    #[test]
+    fn common_verb_all_lists_every_variant() {
+        let all = CommonVerb::all();
+        assert_eq!(
+            all.len(),
+            6,
+            "if you add a CommonVerb variant, list it in all()"
+        );
+    }
+
+    #[test]
+    fn common_verb_close_has_higher_priority_than_search() {
+        // Close (Esc) is a core escape verb (priority 100). OpenSearch is
+        // promoted to 80 because it's frequently used. The rest default to 50.
+        assert!(CommonVerb::Close.priority() > CommonVerb::OpenSearch.priority());
+        assert!(CommonVerb::OpenSearch.priority() > CommonVerb::Refresh.priority());
+    }
+
+    #[test]
+    fn common_verb_show_in_hint_bar_default() {
+        // CommonVerb has no hint-bar exclusions today.
+        for &v in CommonVerb::all() {
+            assert!(v.show_in_hint_bar(), "{v:?} should appear in hint bar");
+        }
     }
 }
