@@ -16,10 +16,10 @@
 //! `transform`'s `usd_rate` parameter is the one mutated to "oops" in
 //! `orders::break::apply_break` — this is the headline failure narrative.
 //!
-//! Module-level `#[allow(dead_code)]` covers the period (phases 3..=4
-//! of the seeder rework) where this module compiles before its consumer
-//! (`fixture::orders`) lands. Removed in phase 4 once `orders/mod.rs`
-//! calls `seed`/`bind` and reads the `OrdersContextIds` fields.
+//! Module-level `#[allow(dead_code)]` covers the gap between phase 3
+//! (this task) and phase 5 (Task 13), where the orders module (built in
+//! tasks 5-12) is in flight and `fixture::seed` doesn't yet call
+//! `parameter_contexts::seed`. Removed in Task 13 when the wiring lands.
 #![allow(dead_code)]
 
 use nifi_rust_client::dynamic::{DynamicClient, types};
@@ -96,7 +96,7 @@ pub async fn seed(client: &DynamicClient) -> Result<OrdersContextIds> {
     )
     .await?;
 
-    tracing::info!("seeding fixture-pc-region-us");
+    tracing::info!(%orders_id, "seeding fixture-pc-region-us");
     let region_us_id = create_context(
         client,
         "fixture-pc-region-us",
@@ -109,7 +109,7 @@ pub async fn seed(client: &DynamicClient) -> Result<OrdersContextIds> {
     )
     .await?;
 
-    tracing::info!("seeding fixture-pc-region-apac");
+    tracing::info!(%orders_id, "seeding fixture-pc-region-apac");
     let region_apac_id = create_context(
         client,
         "fixture-pc-region-apac",
