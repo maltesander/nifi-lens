@@ -9,6 +9,7 @@ pub mod noisy;
 pub mod parameterized;
 pub mod payload;
 pub mod registry;
+pub mod remote;
 pub mod services;
 pub mod versioned;
 
@@ -58,6 +59,7 @@ pub async fn seed(client: &DynamicClient, detected_version: &semver::Version) ->
     versioned::seed(client, &marker_pg_id, &registry_ids, detected_version).await?;
     parameterized::seed_parameterized_pipeline(client, &marker_pg_id, &pc_ids, detected_version)
         .await?;
+    remote::seed(client, &marker_pg_id).await?;
 
     tracing::info!("fixture seed complete");
     Ok(())

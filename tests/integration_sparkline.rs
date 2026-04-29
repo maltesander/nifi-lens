@@ -1,5 +1,5 @@
 //! Integration test for the status-history client helper against the
-//! live `nifilens-fixture-v7` cluster. Verifies that the seeder's
+//! live `nifilens-fixture-v8` cluster. Verifies that the seeder's
 //! healthy-pipeline ConvertRecord processor returns at least one bucket
 //! after a brief warm-up — exercising the `/flow/{type}/{id}/status/history`
 //! dispatcher path on both fixture NiFi versions.
