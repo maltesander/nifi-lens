@@ -1549,6 +1549,37 @@ fn resolve_id_trims_whitespace() {
 }
 
 #[test]
+fn resolve_id_matches_remote_process_group_arena_entry() {
+    use crate::client::{NodeKind, NodeStatusSummary};
+    let mut s = BrowserState::new();
+    s.nodes.push(TreeNode {
+        parent: None,
+        children: vec![],
+        kind: NodeKind::RemoteProcessGroup,
+        id: "b2c3d4e5-f6a7-8901-bcde-f12345678901".into(),
+        group_id: "pg-root".into(),
+        name: "MyRemoteSink".into(),
+        status_summary: NodeStatusSummary::RemoteProcessGroup {
+            transmission_status: "Transmitting".into(),
+            active_threads: 0,
+            flow_files_received: 0,
+            flow_files_sent: 0,
+            bytes_received: 0,
+            bytes_sent: 0,
+            target_uri: "https://remote.example.com/nifi".into(),
+        },
+        parameter_context_ref: None,
+    });
+    let got = s
+        .resolve_id("b2c3d4e5-f6a7-8901-bcde-f12345678901")
+        .expect("RPG must resolve");
+    assert_eq!(got.arena_idx, 0);
+    assert!(matches!(got.kind, NodeKind::RemoteProcessGroup));
+    assert_eq!(got.name, "MyRemoteSink");
+    assert_eq!(got.group_id, "pg-root");
+}
+
+#[test]
 fn connections_for_processor_splits_in_and_out_edges() {
     use crate::client::{NodeKind, NodeStatusSummary};
     use crate::view::browser::state::{EdgeDirection, TreeNode};
