@@ -18,6 +18,59 @@ use tokio::task::JoinHandle;
 use crate::client::{ContentSide, NifiClient};
 use crate::event::{AppEvent, TracerPayload, ViewPayload};
 
+/// RAII guard for a server-side lineage query: when dropped, fires a
+/// best-effort `DELETE /provenance-events/lineage/{id}` via `spawn_local`.
+/// Owned by `spawn_lineage`'s async closure so cleanup happens whether
+/// the closure returns normally, encounters an error, or panics.
+struct LineageQueryGuard {
+    client: Arc<RwLock<NifiClient>>,
+    query_id: String,
+    cluster_node_id: Option<String>,
+}
+
+impl LineageQueryGuard {
+    fn new(
+        client: Arc<RwLock<NifiClient>>,
+        query_id: String,
+        cluster_node_id: Option<String>,
+    ) -> Self {
+        Self {
+            client,
+            query_id,
+            cluster_node_id,
+        }
+    }
+
+    fn query_id(&self) -> &str {
+        &self.query_id
+    }
+
+    fn cluster_node_id(&self) -> Option<&str> {
+        self.cluster_node_id.as_deref()
+    }
+}
+
+impl Drop for LineageQueryGuard {
+    fn drop(&mut self) {
+        let client = self.client.clone();
+        let query_id = self.query_id.clone();
+        let cluster_node_id = self.cluster_node_id.clone();
+        tokio::task::spawn_local(async move {
+            let guard = client.read().await;
+            if let Err(err) = guard
+                .delete_lineage(&query_id, cluster_node_id.as_deref())
+                .await
+            {
+                tracing::warn!(
+                    query_id = %query_id,
+                    error = %err,
+                    "tracer: lineage query Drop-cleanup failed",
+                );
+            }
+        });
+    }
+}
+
 /// Fetches the latest cached provenance events for a component and emits
 /// [`TracerPayload::LatestEvents`] or [`TracerPayload::LatestEventsFailed`].
 pub fn spawn_latest_events(
@@ -56,15 +109,21 @@ pub fn spawn_latest_events(
 /// 1. `submit_lineage` → emits `LineageSubmitted`
 /// 2. Loop every 500 ms: `poll_lineage`
 ///    - `Running { percent }` → emits `LineagePartial`
-///    - `Finished(snapshot)` → emits `LineageDone`, best-effort `delete_lineage`, returns
+///    - `Finished(snapshot)` → emits `LineageDone`, returns
 /// 3. Any error → emits `LineageFailed`
+///
+/// Once the query is submitted the handle is wrapped in a
+/// `LineageQueryGuard` whose `Drop` impl fires a best-effort
+/// `delete_lineage`, guaranteeing server-side cleanup regardless of how
+/// the closure exits (normal return, channel-closed early-return, or
+/// panic during poll).
 pub fn spawn_lineage(
     client: Arc<RwLock<NifiClient>>,
     tx: mpsc::Sender<AppEvent>,
     uuid: String,
 ) -> JoinHandle<()> {
     tokio::task::spawn_local(async move {
-        // Step 1: submit
+        // Step 1: submit. On error, no cleanup needed (no server-side query exists).
         let (query_id, cluster_node_id) = {
             let guard = client.read().await;
             match guard.submit_lineage(&uuid).await {
@@ -84,6 +143,10 @@ pub fn spawn_lineage(
             }
         };
 
+        // Wrap in RAII guard — Drop fires DELETE on every exit path below.
+        let lineage_guard =
+            LineageQueryGuard::new(client.clone(), query_id.clone(), cluster_node_id.clone());
+
         // Step 2: notify caller of the query_id
         if tx
             .send(AppEvent::Data(ViewPayload::Tracer(
@@ -96,18 +159,20 @@ pub fn spawn_lineage(
             .await
             .is_err()
         {
-            return;
+            return; // Guard drops → DELETE fires.
         }
 
         // Step 3: poll loop
         loop {
             tokio::time::sleep(Duration::from_millis(500)).await;
 
-            let guard = client.read().await;
-            match guard
-                .poll_lineage(&query_id, cluster_node_id.as_deref())
-                .await
-            {
+            let poll_result = {
+                let guard = client.read().await;
+                guard
+                    .poll_lineage(lineage_guard.query_id(), lineage_guard.cluster_node_id())
+                    .await
+            };
+            match poll_result {
                 Ok(crate::client::LineagePoll::Running { percent }) => {
                     if tx
                         .send(AppEvent::Data(ViewPayload::Tracer(
@@ -133,11 +198,7 @@ pub fn spawn_lineage(
                             },
                         )))
                         .await;
-                    // Best-effort cleanup — ignore errors
-                    let _ = guard
-                        .delete_lineage(&query_id, cluster_node_id.as_deref())
-                        .await;
-                    return;
+                    return; // Guard drops → DELETE fires.
                 }
                 Err(err) => {
                     let _ = tx
@@ -149,7 +210,7 @@ pub fn spawn_lineage(
                             },
                         )))
                         .await;
-                    return;
+                    return; // Guard drops → DELETE fires (bug-fix: error branch previously skipped DELETE).
                 }
             }
         }
