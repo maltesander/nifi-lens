@@ -912,7 +912,8 @@ pub struct RemotePortSummary {
     pub id: String,
     pub name: String,
     /// Synthesised from the DTO's boolean fields. `"MISSING"` when
-    /// `exists == Some(false)`; `"RUNNING"` when `transmitting == Some(true)`;
+    /// `exists == Some(false)` (the port no longer exists on the remote
+    /// NiFi); `"RUNNING"` when `transmitting == Some(true)`;
     /// otherwise `"STOPPED"`.
     pub run_status: String,
     pub concurrent_tasks: u32,
@@ -977,8 +978,8 @@ impl NifiClient {
             target_uri,
             target_secure: component.target_secure.unwrap_or(false),
             transport_protocol: component.transport_protocol.clone().unwrap_or_default(),
-            transmission_status: status.transmission_status.clone().unwrap_or_default(),
-            validation_status: status.validation_status.clone().unwrap_or_default(),
+            transmission_status: status.transmission_status.unwrap_or_default(),
+            validation_status: status.validation_status.unwrap_or_default(),
             validation_errors,
             comments: component.comments.clone().unwrap_or_default(),
             input_ports,
@@ -1026,6 +1027,29 @@ fn remote_port_summary_from_dto(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    async fn test_client(
+        server: &wiremock::MockServer,
+    ) -> std::sync::Arc<tokio::sync::RwLock<NifiClient>> {
+        use wiremock::matchers::{method, path};
+        use wiremock::{Mock, ResponseTemplate};
+        Mock::given(method("GET"))
+            .and(path("/nifi-api/flow/about"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!(
+                {"about": {"version": "2.6.0", "title": "NiFi"}}
+            )))
+            .mount(server)
+            .await;
+        let inner = nifi_rust_client::NifiClientBuilder::new(&server.uri())
+            .expect("builder")
+            .build_dynamic()
+            .expect("dynamic");
+        inner.detect_version().await.expect("detect_version");
+        let version = semver::Version::parse("2.6.0").expect("parse");
+        std::sync::Arc::new(tokio::sync::RwLock::new(NifiClient::from_parts(
+            inner, "test", version,
+        )))
+    }
 
     #[test]
     fn short_type_strips_package_prefix() {
@@ -1106,27 +1130,8 @@ mod tests {
 
     #[tokio::test(flavor = "current_thread")]
     async fn browser_remote_process_group_detail_returns_target_uris_and_ports() {
-        use std::sync::Arc;
-        use tokio::sync::RwLock;
         use wiremock::matchers::{method, path};
         use wiremock::{Mock, MockServer, ResponseTemplate};
-
-        async fn test_client(server: &MockServer) -> Arc<RwLock<NifiClient>> {
-            Mock::given(method("GET"))
-                .and(path("/nifi-api/flow/about"))
-                .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!(
-                    {"about": {"version": "2.6.0", "title": "NiFi"}}
-                )))
-                .mount(server)
-                .await;
-            let inner = nifi_rust_client::NifiClientBuilder::new(&server.uri())
-                .expect("builder")
-                .build_dynamic()
-                .expect("dynamic");
-            inner.detect_version().await.expect("detect_version");
-            let version = semver::Version::parse("2.6.0").expect("parse");
-            Arc::new(RwLock::new(NifiClient::from_parts(inner, "test", version)))
-        }
 
         let mock = MockServer::start().await;
         Mock::given(method("GET"))
@@ -1194,8 +1199,10 @@ mod tests {
         assert_eq!(detail.validation_status, "VALID");
         assert_eq!(detail.input_ports.len(), 1);
         assert_eq!(detail.input_ports[0].name, "ingest");
+        assert_eq!(detail.input_ports[0].run_status, "RUNNING");
         assert_eq!(detail.output_ports.len(), 1);
         assert_eq!(detail.output_ports[0].name, "errors");
+        assert_eq!(detail.output_ports[0].run_status, "STOPPED");
         assert_eq!(detail.active_remote_input_port_count, 1);
         assert_eq!(detail.inactive_remote_output_port_count, 1);
     }
