@@ -271,7 +271,7 @@ impl AppState {
     /// True iff the Browser tab is active and the selected row is a
     /// UUID-bearing component for which NiFi records flow-configuration
     /// action history (processor, PG, connection, controller service,
-    /// input/output port). Folder rows return false.
+    /// input/output port, remote process group). Folder rows return false.
     pub fn browser_selection_supports_action_history(&self) -> bool {
         if self.current_tab != ViewId::Browser {
             return false;
@@ -289,7 +289,8 @@ impl AppState {
                 | crate::client::NodeKind::Connection
                 | crate::client::NodeKind::ControllerService
                 | crate::client::NodeKind::InputPort
-                | crate::client::NodeKind::OutputPort,
+                | crate::client::NodeKind::OutputPort
+                | crate::client::NodeKind::RemoteProcessGroup,
         )
     }
 

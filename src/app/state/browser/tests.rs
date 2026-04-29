@@ -3223,6 +3223,15 @@ fn action_history_disabled_for_folder_rows() {
     }
 }
 
+#[test]
+fn action_history_verb_is_enabled_on_rpg_row() {
+    let state = make_state_with_selected_kind(NodeKind::RemoteProcessGroup);
+    assert!(
+        state.browser_selection_supports_action_history(),
+        "expected action-history to be enabled for RemoteProcessGroup"
+    );
+}
+
 // ---------------------------------------------------------------------------
 // OpenActionHistory dispatch arm
 // ---------------------------------------------------------------------------
