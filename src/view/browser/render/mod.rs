@@ -438,6 +438,16 @@ fn render_tree(
                 let (c, s) = crate::widget::run_icon::processor_run_icon(run_status);
                 (c.to_string(), s)
             }
+            (
+                NodeKind::RemoteProcessGroup,
+                NodeStatusSummary::RemoteProcessGroup {
+                    transmission_status,
+                    ..
+                },
+            ) => {
+                let (c, s) = crate::widget::run_icon::transmission_icon(transmission_status);
+                (c.to_string(), s)
+            }
             _ => (kind_glyph(&node.kind).to_owned(), Style::default()),
         };
         let indent = "  ".repeat(depth);
@@ -472,6 +482,14 @@ fn render_tree(
         {
             row_spans.push(Span::raw(" "));
             row_spans.push(Span::styled(format!("[{label}]"), style.patch(row_style)));
+        }
+        if let NodeStatusSummary::RemoteProcessGroup { target_uri, .. } = &node.status_summary
+            && !target_uri.is_empty()
+        {
+            row_spans.push(Span::styled(
+                format!("  → {target_uri}"),
+                theme::muted().patch(row_style),
+            ));
         }
         lines.push(Line::from(row_spans));
     }
@@ -870,6 +888,64 @@ mod tree_render_tests {
         assert_snapshot!(
             "tree_row_renders_sync_err_chip",
             format!("{}", terminal.backend())
+        );
+    }
+
+    #[test]
+    fn tree_row_renders_rpg_with_transmission_glyph_and_target_uri() {
+        let mut state = BrowserState::new();
+        state.nodes.push(TreeNode {
+            parent: None,
+            children: vec![1],
+            kind: NodeKind::ProcessGroup,
+            id: "root-id".into(),
+            group_id: String::new(),
+            name: "Root".into(),
+            status_summary: NodeStatusSummary::ProcessGroup {
+                running: 0,
+                stopped: 1,
+                invalid: 0,
+                disabled: 0,
+            },
+            parameter_context_ref: None,
+        });
+        state.nodes.push(TreeNode {
+            parent: Some(0),
+            children: vec![],
+            kind: NodeKind::RemoteProcessGroup,
+            id: "rpg-1".into(),
+            group_id: "root-id".into(),
+            name: "MyRemoteSink".into(),
+            status_summary: NodeStatusSummary::RemoteProcessGroup {
+                transmission_status: "Transmitting".into(),
+                active_threads: 2,
+                flow_files_received: 0,
+                flow_files_sent: 10,
+                bytes_received: 0,
+                bytes_sent: 1024,
+                target_uri: "https://nifi-east:8443/nifi".into(),
+            },
+            parameter_context_ref: None,
+        });
+        state.expanded.insert(0);
+        crate::view::browser::state::rebuild_visible(&mut state);
+        // Select the RPG row so it's visible.
+        state.selected = 1;
+
+        let snap = ClusterSnapshot::default();
+        let mut terminal = Terminal::new(test_backend(TEST_BACKEND_SHORT)).unwrap();
+        terminal
+            .draw(|f| render_tree(f, f.area(), &state, &snap))
+            .unwrap();
+        let out = format!("{}", terminal.backend());
+        assert!(
+            out.contains('▶'),
+            "tree output missing transmission glyph: {out:?}"
+        );
+        assert!(out.contains("MyRemoteSink"), "missing RPG name: {out:?}");
+        assert!(
+            out.contains("https://nifi-east:8443/nifi"),
+            "missing target URI: {out:?}"
         );
     }
 }
