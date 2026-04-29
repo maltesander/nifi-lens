@@ -625,6 +625,7 @@ mod tests {
                 invalid: 0,
                 disabled: 0,
             },
+            remote_process_groups: crate::client::RemoteProcessGroupCounts::default(),
             process_group_ids: vec![],
             nodes: vec![],
         };
@@ -831,6 +832,7 @@ mod tests {
             input_port_count: 0,
             output_port_count: 0,
             processors: crate::client::ProcessorStateCounts::default(),
+            remote_process_groups: crate::client::RemoteProcessGroupCounts::default(),
             process_group_ids: vec!["root".into(), "child".into()],
             nodes: vec![],
         };

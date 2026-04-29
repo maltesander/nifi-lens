@@ -1148,6 +1148,7 @@ mod tests {
                     invalid: 0,
                     disabled: 0,
                 },
+                remote_process_groups: crate::client::RemoteProcessGroupCounts::default(),
                 connections: vec![q("c0", 95), q("c1", 90)],
                 process_group_ids: vec![],
                 nodes: vec![],

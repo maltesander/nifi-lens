@@ -467,6 +467,14 @@ impl ProcessorStateCounts {
     }
 }
 
+/// Tally of remote process groups by transmission state.
+#[derive(Debug, Clone, Default)]
+pub struct RemoteProcessGroupCounts {
+    pub total: u32,
+    pub transmitting: u32,
+    pub not_transmitting: u32,
+}
+
 /// Recursive process-group status, flattened for the Overview tab and
 /// the Browser arena.
 ///
@@ -487,6 +495,8 @@ pub struct RootPgStatusSnapshot {
     pub output_port_count: u32,
     /// Per-state processor tally across every PG.
     pub processors: ProcessorStateCounts,
+    /// Transmission-state tally for remote process groups across every PG.
+    pub remote_process_groups: RemoteProcessGroupCounts,
     /// Every PG id in the flow in DFS order (root first, then each
     /// subtree). Empty / missing ids are skipped. `ClusterStore` reads
     /// this to drive the connections-by-PG fetcher.
@@ -556,6 +566,18 @@ fn collect_counts(
                 Some(ProcessorStatus::Disabled) => out.processors.disabled += 1,
                 // Validating / Unknown / None: silently drop (matches legacy behavior).
                 Some(ProcessorStatus::Validating | ProcessorStatus::Unknown) | None => {}
+            }
+        }
+    }
+    if let Some(rpgs) = snapshot.remote_process_group_status_snapshots.as_ref() {
+        for entity in rpgs {
+            let Some(snap) = entity.remote_process_group_status_snapshot.as_ref() else {
+                continue;
+            };
+            out.remote_process_groups.total += 1;
+            match snap.transmission_status.as_deref() {
+                Some("Transmitting") => out.remote_process_groups.transmitting += 1,
+                _ => out.remote_process_groups.not_transmitting += 1,
             }
         }
     }
@@ -905,6 +927,32 @@ mod root_pg_status_snapshot_tests {
 
         let snap = RootPgStatusSnapshot::from_aggregate(&root);
         assert_eq!(snap.pg_ids(), vec!["gc".to_string()]);
+    }
+
+    #[allow(clippy::field_reassign_with_default)]
+    #[test]
+    fn collect_counts_tallies_remote_process_groups_by_transmission_state() {
+        use nifi_rust_client::dynamic::types::{
+            RemoteProcessGroupStatusSnapshotDto, RemoteProcessGroupStatusSnapshotEntity,
+        };
+        let mk_rpg = |status: &str| {
+            let mut dto = RemoteProcessGroupStatusSnapshotDto::default();
+            dto.transmission_status = Some(status.into());
+            let mut entity = RemoteProcessGroupStatusSnapshotEntity::default();
+            entity.remote_process_group_status_snapshot = Some(dto);
+            entity
+        };
+        let mut pg = ProcessGroupStatusSnapshotDto::default();
+        pg.id = Some("root".into());
+        pg.remote_process_group_status_snapshots = Some(vec![
+            mk_rpg("Transmitting"),
+            mk_rpg("Transmitting"),
+            mk_rpg("Not Transmitting"),
+        ]);
+        let snap = RootPgStatusSnapshot::from_aggregate(&pg);
+        assert_eq!(snap.remote_process_groups.total, 3);
+        assert_eq!(snap.remote_process_groups.transmitting, 2);
+        assert_eq!(snap.remote_process_groups.not_transmitting, 1);
     }
 }
 
