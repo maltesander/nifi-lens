@@ -109,6 +109,88 @@ impl ModalGate for ContentModalGate {
     }
 }
 
+/// Browser version-control modal (`src/view/browser/render/version_control_modal.rs`).
+pub struct VersionControlModalGate;
+
+impl ModalGate for VersionControlModalGate {
+    type V = crate::input::VersionControlModalVerb;
+
+    fn host_view() -> ViewId {
+        ViewId::Browser
+    }
+
+    fn is_active(state: &AppState) -> bool {
+        state.browser.version_modal.is_some() && state.modal.is_none()
+    }
+
+    fn to_view_verb(v: Self::V) -> ViewVerb {
+        ViewVerb::VersionControlModal(v)
+    }
+}
+
+/// Browser parameter-context modal (`src/view/browser/render/parameter_context_modal.rs`).
+pub struct ParameterContextModalGate;
+
+impl ModalGate for ParameterContextModalGate {
+    type V = crate::input::ParameterContextModalVerb;
+
+    fn host_view() -> ViewId {
+        ViewId::Browser
+    }
+
+    fn is_active(state: &AppState) -> bool {
+        state.browser.parameter_modal.is_some() && state.modal.is_none()
+    }
+
+    fn to_view_verb(v: Self::V) -> ViewVerb {
+        ViewVerb::ParameterContextModal(v)
+    }
+}
+
+/// Browser action-history modal (`src/view/browser/render/action_history_modal.rs`).
+pub struct ActionHistoryModalGate;
+
+impl ModalGate for ActionHistoryModalGate {
+    type V = crate::input::ActionHistoryModalVerb;
+
+    fn host_view() -> ViewId {
+        ViewId::Browser
+    }
+
+    fn is_active(state: &AppState) -> bool {
+        state.browser.action_history_modal.is_some() && state.modal.is_none()
+    }
+
+    fn to_view_verb(v: Self::V) -> ViewVerb {
+        ViewVerb::ActionHistoryModal(v)
+    }
+}
+
+/// Browser queue-listing peek modal (`src/view/browser/render/queue_listing_peek.rs`).
+pub struct BrowserPeekGate;
+
+impl ModalGate for BrowserPeekGate {
+    type V = crate::input::BrowserPeekVerb;
+
+    fn host_view() -> ViewId {
+        ViewId::Browser
+    }
+
+    fn is_active(state: &AppState) -> bool {
+        state
+            .browser
+            .queue_listing
+            .as_ref()
+            .and_then(|s| s.peek.as_ref())
+            .is_some()
+            && state.modal.is_none()
+    }
+
+    fn to_view_verb(v: Self::V) -> ViewVerb {
+        ViewVerb::BrowserPeek(v)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -125,5 +207,37 @@ mod tests {
     #[test]
     fn content_modal_gate_host_view_is_tracer() {
         assert_eq!(ContentModalGate::host_view(), ViewId::Tracer);
+    }
+
+    #[test]
+    fn version_control_modal_gate_inactive_on_fresh_state() {
+        let state = crate::test_support::fresh_state();
+        assert!(!VersionControlModalGate::is_active(&state));
+    }
+
+    #[test]
+    fn parameter_context_modal_gate_inactive_on_fresh_state() {
+        let state = crate::test_support::fresh_state();
+        assert!(!ParameterContextModalGate::is_active(&state));
+    }
+
+    #[test]
+    fn action_history_modal_gate_inactive_on_fresh_state() {
+        let state = crate::test_support::fresh_state();
+        assert!(!ActionHistoryModalGate::is_active(&state));
+    }
+
+    #[test]
+    fn browser_peek_gate_inactive_on_fresh_state() {
+        let state = crate::test_support::fresh_state();
+        assert!(!BrowserPeekGate::is_active(&state));
+    }
+
+    #[test]
+    fn all_browser_gates_host_browser() {
+        assert_eq!(VersionControlModalGate::host_view(), ViewId::Browser);
+        assert_eq!(ParameterContextModalGate::host_view(), ViewId::Browser);
+        assert_eq!(ActionHistoryModalGate::host_view(), ViewId::Browser);
+        assert_eq!(BrowserPeekGate::host_view(), ViewId::Browser);
     }
 }
