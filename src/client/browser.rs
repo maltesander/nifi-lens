@@ -124,7 +124,8 @@ pub struct ConnectionEndpointIds {
 }
 
 /// Recursive walker that appends PG / processor / connection / input port
-/// / output port rows for one PG to `out`, then recurses into child PGs.
+/// / output port / remote process group rows for one PG to `out`, then
+/// recurses into child PGs.
 /// Controller-service rows are NOT appended here — the Browser reducer
 /// attaches those from the separate `ControllerServicesSnapshot.members`
 /// list because CS identity/state lives in a different API call.
