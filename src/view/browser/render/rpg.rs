@@ -8,6 +8,10 @@
 //! ││ name / parent / target / secure / protocol / │          │
 //! ││ transmission / validation                    │          │
 //! │└──────────────────────────────────────────────┘          │
+//! │┌ Validation errors  N ────────────────────────┐          │  ← optional
+//! ││ error message 1                              │          │
+//! ││ ...                                          │          │
+//! │└──────────────────────────────────────────────┘          │
 //! │┌ Input ports  N ──────────────────────────────┐          │
 //! ││ NAME      STATE     TASKS  COMMENTS          │          │
 //! ││ ...                                          │          │
@@ -16,7 +20,6 @@
 //! ││ NAME      STATE     TASKS  COMMENTS          │          │
 //! ││ ...                                          │          │
 //! │└──────────────────────────────────────────────┘          │
-//! └──────────────────────────────────────────────────────────┘
 //! ```
 //!
 //! The Identity panel reserves the right-half sparkline strip via
@@ -30,34 +33,78 @@
 
 use ratatui::Frame;
 use ratatui::layout::{Constraint, Direction, Layout, Rect};
-use ratatui::style::Modifier;
+use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Cell, Paragraph, Row, Table};
 
 use crate::client::browser::{RemotePortSummary, RemoteProcessGroupDetail};
+use crate::client::status::PortStatus;
+use crate::layout;
 use crate::theme;
 use crate::view::browser::state::BrowserState;
 use crate::widget::panel::Panel;
+
+/// Distinguishes the two ports panels — drives both the panel title and
+/// the empty-state placeholder, replacing the prior title-string sniff.
+#[derive(Debug, Clone, Copy)]
+enum PortKind {
+    Input,
+    Output,
+}
+
+impl PortKind {
+    fn title(self) -> &'static str {
+        match self {
+            Self::Input => " Input ports ",
+            Self::Output => " Output ports ",
+        }
+    }
+
+    fn empty_placeholder(self) -> &'static str {
+        match self {
+            Self::Input => "(no input ports)",
+            Self::Output => "(no output ports)",
+        }
+    }
+}
 
 pub fn render(frame: &mut Frame, area: Rect, d: &RemoteProcessGroupDetail, state: &BrowserState) {
     let outer = Panel::new(build_header_title(d)).into_block();
     let inner = outer.inner(area);
     frame.render_widget(outer, area);
 
-    // Identity needs ≥7 lines for the full header; ports panels get the
-    // remaining space, split evenly so neither table dominates.
+    // Layout: Identity (10 rows; ≥7 lines for the full header + comments) +
+    // optional Validation errors (dynamic, hidden when no errors) +
+    // Input/Output ports (Min 3 each, split evenly so neither dominates).
+    let validation_h = if d.validation_errors.is_empty() {
+        0
+    } else {
+        (d.validation_errors
+            .len()
+            .min(layout::VALIDATION_ERROR_ROWS_MAX)
+            + 2) as u16
+    };
+
+    let mut constraints: Vec<Constraint> = vec![Constraint::Length(10)];
+    if validation_h > 0 {
+        constraints.push(Constraint::Length(validation_h));
+    }
+    constraints.push(Constraint::Fill(1));
+    constraints.push(Constraint::Fill(1));
+
     let rows = Layout::default()
         .direction(Direction::Vertical)
-        .constraints([
-            Constraint::Length(10),
-            Constraint::Fill(1),
-            Constraint::Fill(1),
-        ])
+        .constraints(constraints)
         .split(inner);
 
     render_identity(frame, rows[0], d, state);
-    render_ports_panel(frame, rows[1], " Input ports ", &d.input_ports);
-    render_ports_panel(frame, rows[2], " Output ports ", &d.output_ports);
+    let mut idx = 1;
+    if validation_h > 0 {
+        render_validation_errors_panel(frame, rows[idx], d);
+        idx += 1;
+    }
+    render_ports_panel(frame, rows[idx], PortKind::Input, &d.input_ports);
+    render_ports_panel(frame, rows[idx + 1], PortKind::Output, &d.output_ports);
 }
 
 /// Build the outer panel title:
@@ -130,12 +177,6 @@ fn render_identity(
                 Span::styled(d.validation_status.clone(), validation_style),
             ]),
         ];
-        for err in &d.validation_errors {
-            lines.push(Line::from(vec![
-                Span::raw("  • "),
-                Span::styled(truncate(err, value_w), theme::error()),
-            ]));
-        }
         if !d.comments.is_empty() {
             lines.push(Line::from(vec![
                 label("comments"),
@@ -146,27 +187,40 @@ fn render_identity(
     });
 }
 
-fn render_ports_panel(
-    frame: &mut Frame,
-    area: Rect,
-    title: &'static str,
-    ports: &[RemotePortSummary],
-) {
+/// Renders the bullet list of validation errors in a dedicated bordered
+/// panel below Identity. Caller must ensure `d.validation_errors` is
+/// non-empty — the panel is laid out only in that case.
+fn render_validation_errors_panel(frame: &mut Frame, area: Rect, d: &RemoteProcessGroupDetail) {
+    let count = d.validation_errors.len();
+    let panel = Panel::new(" Validation errors ")
+        .right(Line::from(format!(" {count} ")))
+        .into_block();
+    let inner = panel.inner(area);
+    frame.render_widget(panel, area);
+
+    let lines: Vec<Line> = d
+        .validation_errors
+        .iter()
+        .take(layout::VALIDATION_ERROR_ROWS_MAX)
+        .map(|e| Line::from(Span::styled(e.as_str(), theme::error())))
+        .collect();
+    frame.render_widget(Paragraph::new(lines), inner);
+}
+
+fn render_ports_panel(frame: &mut Frame, area: Rect, kind: PortKind, ports: &[RemotePortSummary]) {
     let total = ports.len();
-    let panel = Panel::new(title)
+    let panel = Panel::new(kind.title())
         .right(Line::from(format!(" {total} ")))
         .into_block();
     let inner = panel.inner(area);
     frame.render_widget(panel, area);
 
     if ports.is_empty() {
-        let placeholder = if title.trim() == "Input ports" {
-            "(no input ports)"
-        } else {
-            "(no output ports)"
-        };
         frame.render_widget(
-            Paragraph::new(Line::from(Span::styled(placeholder, theme::muted()))),
+            Paragraph::new(Line::from(Span::styled(
+                kind.empty_placeholder(),
+                theme::muted(),
+            ))),
             inner,
         );
         return;
@@ -204,15 +258,18 @@ fn render_ports_panel(
     frame.render_widget(table, inner);
 }
 
-/// Style for a remote port `run_status` value. Mirrors the ProcessorStatus
-/// idea on a smaller domain — RPG remote ports synthesise three values:
-/// `RUNNING` (transmitting), `STOPPED`, `MISSING` (port no longer exists
-/// on the remote NiFi).
-fn port_run_status_style(run_status: &str) -> ratatui::style::Style {
-    match run_status {
-        "RUNNING" => theme::success(),
-        "MISSING" => theme::error(),
-        _ => theme::muted(),
+/// Style for a remote port `run_status` value. Defers to the typed
+/// `PortStatus` helper for the standard NiFi port states (`RUNNING`,
+/// `STOPPED`, `DISABLED`, `INVALID`, `VALIDATING`); RPGs additionally
+/// synthesize `MISSING` (port no longer exists on the remote NiFi),
+/// which falls outside `PortStatus` and is handled inline here.
+fn port_run_status_style(run_status: &str) -> Style {
+    if run_status.eq_ignore_ascii_case("MISSING") {
+        return theme::error();
+    }
+    match PortStatus::from_wire(run_status) {
+        PortStatus::Unknown => Style::default(),
+        s => s.style(),
     }
 }
 
@@ -294,6 +351,22 @@ mod snapshots {
         let state = BrowserState::new();
         let out = render_to_string(&d, &state);
         assert_snapshot!("rpg_identity_invalid_with_errors", out);
+    }
+
+    #[test]
+    fn rpg_identity_renders_invalid_with_multiple_validation_errors() {
+        let mut d = seeded_detail();
+        d.transmission_status = "Not Transmitting".into();
+        d.validation_status = "INVALID".into();
+        d.validation_errors = vec![
+            "Authentication failed".into(),
+            "Target URI unreachable".into(),
+            "Protocol mismatch".into(),
+        ];
+        d.input_ports.clear();
+        let state = BrowserState::new();
+        let out = render_to_string(&d, &state);
+        assert_snapshot!("rpg_identity_invalid_with_multiple_errors", out);
     }
 
     #[test]
