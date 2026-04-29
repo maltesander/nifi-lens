@@ -1,12 +1,13 @@
 ---
 source: src/view/browser/render/rpg.rs
+assertion_line: 372
 expression: out
 ---
 "┌ MyRemoteSink · remote process group · Transmitting ──────────────────────────────────────────────────────────────────┐"
 "│┌ Identity ──────────────────────────────────────────────────────────────────────────────────────────────────────────┐│"
 "││name                MyRemoteSink                 recv  ▁▁▁▂▂▃▃▄▄▅▅▆▆▇▇█▁▁▁▂▂▃▃▄▄▅▅▆▆▇▇█▁▁▁▂▂▃▃▄ peak 75             ││"
 "││parent group        pg-1                         sent  ▁▁▁▂▂▂▃▃▃▄▄▅▅▅▆▆▆▇▇█▁▁▁▂▂▂▃▃▃▄▄▅▅▅▆▆▆▇▇█ peak 57             ││"
-"││target uri          https://nifi-east:8443/nifi  threads ▁▃▅█▁▃▅█▁▃▅█▁▃▅█▁▃▅█▁▃▅█▁▃▅█▁▃▅█▁▃▅█▁▃▅█ peak 6            ││"
+"││target uri          https://nifi-east:8443/nifi  rate  ▁▃▅█▁▃▅█▁▃▅█▁▃▅█▁▃▅█▁▃▅█▁▃▅█▁▃▅█▁▃▅█▁▃▅█ peak 6              ││"
 "││target secure       yes                                                                                             ││"
 "││transport protocol  HTTP                                                                                            ││"
 "││transmission        Transmitting                                                                                    ││"

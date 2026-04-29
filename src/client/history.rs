@@ -83,9 +83,10 @@ pub struct Bucket {
     /// `taskNanos` metric — populated for Processor kind; `None` for
     /// ProcessGroup / Connection.
     pub task_time_ns: Option<u64>,
-    /// `activeThreads` metric — populated for RemoteProcessGroup
-    /// kind; `None` for Processor / PG / Connection.
-    pub active_threads: Option<u64>,
+    /// `totalBytesPerSecond` metric — populated for RemoteProcessGroup
+    /// kind; `None` for Processor / PG / Connection. Tracks aggregate
+    /// transmit + receive throughput rate.
+    pub bytes_per_sec: Option<u64>,
 }
 
 /// Reduced status-history payload — only the metrics the sparkline
@@ -212,8 +213,8 @@ fn reduce_status_history(
             // DTO. PG uses `flowFilesIn` / `flowFilesOut` /
             // `queuedCount` (not `flowFilesQueued`); Connection uses
             // `inputCount` / `outputCount` / `queuedCount`. RPG uses
-            // `receivedCount` / `sentCount` / `activeThreads`. Try
-            // the most common keys first, then fall back to aliases.
+            // `receivedCount` / `sentCount` / `totalBytesPerSecond`.
+            // Try the most common keys first, then fall back to aliases.
             let in_count = pick_first_metric(
                 &metrics,
                 &[
@@ -229,7 +230,7 @@ fn reduce_status_history(
                 &["flowFilesOut", "outputCount", "sentCount", "flowFilesSent"],
             )
             .unwrap_or(0);
-            let (queued_count, task_time_ns, active_threads) = match kind {
+            let (queued_count, task_time_ns, bytes_per_sec) = match kind {
                 ComponentKind::Processor => (None, pick_metric(&metrics, "taskNanos"), None),
                 ComponentKind::ProcessGroup | ComponentKind::Connection => (
                     pick_first_metric(&metrics, &["queuedCount", "flowFilesQueued"]),
@@ -239,7 +240,7 @@ fn reduce_status_history(
                 ComponentKind::RemoteProcessGroup => (
                     None,
                     None,
-                    pick_first_metric(&metrics, &["activeThreads", "activeThreadCount"]),
+                    pick_first_metric(&metrics, &["totalBytesPerSecond"]),
                 ),
                 ComponentKind::ControllerService | ComponentKind::Port => (None, None, None),
             };
@@ -254,7 +255,7 @@ fn reduce_status_history(
                 out_count,
                 queued_count,
                 task_time_ns,
-                active_threads,
+                bytes_per_sec,
             }
         })
         .collect();
@@ -653,7 +654,7 @@ mod tests {
     }
 
     #[tokio::test(flavor = "current_thread")]
-    async fn status_history_remote_process_group_returns_received_sent_threads() {
+    async fn status_history_remote_process_group_returns_received_sent_bytes_per_sec() {
         let server = MockServer::start().await;
         Mock::given(method("GET"))
             .and(path(
@@ -667,7 +668,7 @@ mod tests {
                             "statusMetrics": {
                                 "receivedCount": 100,
                                 "sentCount": 200,
-                                "activeThreads": 3
+                                "totalBytesPerSecond": 3
                             }
                         }
                     ]
@@ -683,6 +684,6 @@ mod tests {
         assert_eq!(series.buckets.len(), 1);
         assert_eq!(series.buckets[0].in_count, 100); // received
         assert_eq!(series.buckets[0].out_count, 200); // sent
-        assert_eq!(series.buckets[0].active_threads, Some(3));
+        assert_eq!(series.buckets[0].bytes_per_sec, Some(3));
     }
 }

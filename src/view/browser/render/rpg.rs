@@ -355,7 +355,7 @@ mod snapshots {
                     out_count: ((i * 3) % 60) as u64,
                     queued_count: None,
                     task_time_ns: None,
-                    active_threads: Some(((i * 2) % 8) as u64),
+                    bytes_per_sec: Some(((i * 2) % 8) as u64),
                 })
                 .collect(),
             generated_at: std::time::SystemTime::now(),

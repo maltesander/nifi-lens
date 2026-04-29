@@ -220,11 +220,11 @@ pub(super) fn render_inline_sparkline_strip(
                 count_formatter as fn(u64) -> String,
             ),
             ComponentKind::RemoteProcessGroup => (
-                "threads",
+                "rate",
                 series
                     .buckets
                     .iter()
-                    .map(|b| b.active_threads.unwrap_or(0))
+                    .map(|b| b.bytes_per_sec.unwrap_or(0))
                     .collect(),
                 count_formatter as fn(u64) -> String,
             ),

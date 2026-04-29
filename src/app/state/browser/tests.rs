@@ -3590,7 +3590,7 @@ fn apply_sparkline_update_replaces_series_when_selection_matches() {
             out_count: 6,
             queued_count: None,
             task_time_ns: Some(100),
-            active_threads: None,
+            bytes_per_sec: None,
         }],
         generated_at: std::time::SystemTime::now(),
     };
@@ -3621,7 +3621,7 @@ fn apply_sparkline_update_drops_stale_emit() {
             out_count: 99,
             queued_count: None,
             task_time_ns: None,
-            active_threads: None,
+            bytes_per_sec: None,
         }],
         generated_at: std::time::SystemTime::now(),
     };

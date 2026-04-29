@@ -367,7 +367,7 @@ mod tests {
                 out_count: 8,
                 queued_count: None,
                 task_time_ns: Some(1000),
-                active_threads: None,
+                bytes_per_sec: None,
             }],
             generated_at: std::time::SystemTime::now(),
         };
