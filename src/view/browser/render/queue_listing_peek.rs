@@ -13,26 +13,21 @@ use crate::view::browser::state::queue_listing::QueueListingPeekState;
 use crate::widget::panel::Panel;
 use crate::widget::search::SearchState;
 
-const MIN_WIDTH: u16 = 60;
-const MIN_HEIGHT: u16 = 20;
-
 /// Render the full-screen flowfile peek modal into `area`.
 ///
 /// - Identity fields are shown immediately from `state.identity`.
 /// - Attributes table renders once `state.attrs` is populated by the worker.
 /// - Error and loading chips appear in the panel's right title until data arrives.
 pub fn render_peek_modal(f: &mut Frame<'_>, area: Rect, state: &QueueListingPeekState) {
-    // Clear the underlying buffer first so the modal overlay doesn't
-    // leak the tree / detail-pane content drawn by the regular browser
-    // render below it. Mirrors the action-history / parameter-context
-    // modal pattern.
-    f.render_widget(Clear, area);
-
-    if area.width < MIN_WIDTH || area.height < MIN_HEIGHT {
-        let line = Line::from(Span::styled("terminal too small", theme::muted()));
-        f.render_widget(Paragraph::new(line), area);
+    if crate::widget::modal::render_too_small(f, area) {
         return;
     }
+
+    // Clear the underlying buffer so the modal overlay doesn't leak the
+    // tree / detail-pane content drawn by the regular browser render
+    // below it. Mirrors the action-history / parameter-context modal
+    // pattern.
+    f.render_widget(Clear, area);
 
     let title = build_title_left(state);
     let chips = build_title_chips(state);
@@ -210,19 +205,9 @@ fn compute_row_highlights(
 }
 
 fn render_hints(f: &mut Frame<'_>, area: Rect) {
-    let hint = Line::from(vec![
-        Span::styled("Esc", theme::accent()),
-        Span::raw(" close   "),
-        Span::styled("/", theme::accent()),
-        Span::raw(" search   "),
-        Span::styled("n", theme::accent()),
-        Span::raw("/"),
-        Span::styled("N", theme::accent()),
-        Span::raw(" next/prev   "),
-        Span::styled("c", theme::accent()),
-        Span::raw(" copy json"),
-    ]);
-    f.render_widget(Paragraph::new(hint), area);
+    use crate::input::BrowserPeekVerb;
+    use crate::input::Verb;
+    crate::widget::modal::render_verb_hint_strip(f, area, BrowserPeekVerb::all());
 }
 
 #[cfg(test)]

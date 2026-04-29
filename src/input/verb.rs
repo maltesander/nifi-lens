@@ -926,7 +926,7 @@ impl Verb for BrowserPeekVerb {
             Self::OpenSearch => "find",
             Self::SearchNext => "next",
             Self::SearchPrev => "prev",
-            Self::CopyAsJson => "copy",
+            Self::CopyAsJson => "copy json",
         }
     }
     fn priority(self) -> u8 {
