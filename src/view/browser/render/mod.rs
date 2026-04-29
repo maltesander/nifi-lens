@@ -17,6 +17,7 @@ pub mod processor;
 mod properties_modal;
 pub mod queue_listing;
 pub mod queue_listing_peek;
+pub mod rpg;
 pub mod version_control_modal;
 pub use param_ref_scan::{ParamRefScan, scan as scan_param_refs};
 pub use properties_modal::render_properties_modal;
@@ -631,16 +632,8 @@ fn render_detail(
         Some(NodeDetail::Port(d)) => {
             port::render(frame, detail_area, d, state, bulletins, &state.detail_focus);
         }
-        Some(NodeDetail::RemoteProcessGroup(_)) => {
-            // Task 10 will wire the RPG Identity render. Until then,
-            // surface the same loading placeholder used pre-fetch so the
-            // detail pane is never blank.
-            let lines = vec![
-                header_line,
-                Line::from(""),
-                Line::from(Span::styled("loading…", theme::muted())),
-            ];
-            frame.render_widget(Paragraph::new(lines), detail_area);
+        Some(NodeDetail::RemoteProcessGroup(d)) => {
+            rpg::render(frame, detail_area, d, state);
         }
         None => {
             let lines = vec![
