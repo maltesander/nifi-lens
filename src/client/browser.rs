@@ -82,9 +82,6 @@ pub enum NodeStatusSummary {
         state: String,
     },
     Port,
-    Folder {
-        count: u32,
-    },
     RemoteProcessGroup {
         /// Wire value from `RemoteProcessGroupStatusSnapshotDto::transmission_status`.
         /// Either "Transmitting" or "Not Transmitting" — verbatim, the
@@ -99,6 +96,9 @@ pub enum NodeStatusSummary {
         /// Identity-pane upgrades to `target_uris` (plural) when the
         /// on-demand detail fetch returns it.
         target_uri: String,
+    },
+    Folder {
+        count: u32,
     },
 }
 
