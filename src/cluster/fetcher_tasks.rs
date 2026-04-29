@@ -721,6 +721,11 @@ async fn run_parallel(
 ///
 /// Mirrors the mapping `browser_tree` used to do inline before the
 /// fan-out moved into the cluster store.
+///
+/// For connections whose endpoint type is `REMOTE_OUTPUT_PORT` or
+/// `REMOTE_INPUT_PORT`, substitutes the parent RPG's `group_id` in place
+/// of the port's own id so `BrowserState::resolve_id` can match the
+/// arena entry.
 fn map_res(
     context: &str,
     pg_id: &str,
@@ -733,6 +738,9 @@ fn map_res(
                 let Some(conn_id) = entity.id.clone() else {
                     continue;
                 };
+                // REMOTE_*_PORT endpoints: the port UUID itself is not an arena entry;
+                // the parent RPG's UUID lives in `*_group_id`, so we substitute that
+                // for `BrowserState::resolve_id` to match the RPG arena row.
                 let source_id = if entity.source_type == "REMOTE_OUTPUT_PORT" {
                     entity
                         .source_group_id
