@@ -159,7 +159,7 @@ pub fn detect_tabular_format(bytes: &[u8]) -> Option<TabularFormat> {
 /// Maximum decoded JSON-Lines body bytes per side. Internal OOM guard;
 /// the user-facing knob is `[tracer.ceiling] tabular` which caps the
 /// fetched bytes that reach the decoder.
-const TABULAR_BODY_LIMIT: usize = 128 * 1024 * 1024;
+const TABULAR_BODY_LIMIT: usize = 128 * crate::bytes::MIB as usize;
 
 /// Maximum number of records decoded per side. Internal safety cap.
 const TABULAR_RECORD_LIMIT: usize = 50_000;

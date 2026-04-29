@@ -14,6 +14,10 @@ use tokio::sync::Notify;
 use crate::widget::scroll::VerticalScrollState;
 use crate::widget::search::SearchState;
 
+/// Auto-load the next page when the viewport bottom is within this many
+/// rows of the loaded tail. Mentioned in AGENTS.md "Action history modal".
+pub const AUTOLOAD_LOOKAHEAD_ROWS: usize = 10;
+
 #[derive(Debug, Clone)]
 pub struct ActionHistoryModalState {
     /// Component the modal was opened on. Stays fixed for the modal

@@ -399,15 +399,15 @@ impl Default for TracerCeilingConfig {
 }
 
 fn default_ceiling_text() -> Option<usize> {
-    Some(4 * 1024 * 1024)
+    Some(4 * crate::bytes::MIB as usize)
 }
 
 fn default_ceiling_tabular() -> Option<usize> {
-    Some(64 * 1024 * 1024)
+    Some(64 * crate::bytes::MIB as usize)
 }
 
 fn default_ceiling_diff() -> Option<usize> {
-    Some(16 * 1024 * 1024)
+    Some(16 * crate::bytes::MIB as usize)
 }
 
 /// Migrate the deprecated flat `modal_streaming_ceiling` key onto
@@ -767,7 +767,7 @@ mod tests {
         // No [tracer] section → defaults.
         let cfg: TracerConfig = toml::from_str("").unwrap();
         let cfg = apply_legacy_tracer_keys(cfg);
-        assert_eq!(cfg.ceiling.text, Some(4 * 1024 * 1024));
+        assert_eq!(cfg.ceiling.text, Some(4 * crate::bytes::MIB as usize));
     }
 
     #[test]
@@ -779,7 +779,7 @@ mod tests {
         )
         .unwrap();
         let cfg = apply_legacy_tracer_keys(cfg);
-        assert_eq!(cfg.ceiling.text, Some(16 * 1024 * 1024));
+        assert_eq!(cfg.ceiling.text, Some(16 * crate::bytes::MIB as usize));
     }
 
     #[test]
@@ -825,7 +825,7 @@ mod tests {
         .unwrap();
         let cfg = apply_legacy_tracer_keys(cfg);
         // Bad values warn-log but fall back to the 4 MiB default.
-        assert_eq!(cfg.ceiling.text, Some(4 * 1024 * 1024));
+        assert_eq!(cfg.ceiling.text, Some(4 * crate::bytes::MIB as usize));
     }
 
     #[test]
@@ -838,9 +838,9 @@ mod tests {
         .unwrap();
         let cfg = apply_legacy_tracer_keys(cfg);
         // Legacy key wins for `text` ceiling; others stay default.
-        assert_eq!(cfg.ceiling.text, Some(16 * 1024 * 1024));
-        assert_eq!(cfg.ceiling.tabular, Some(64 * 1024 * 1024));
-        assert_eq!(cfg.ceiling.diff, Some(16 * 1024 * 1024));
+        assert_eq!(cfg.ceiling.text, Some(16 * crate::bytes::MIB as usize));
+        assert_eq!(cfg.ceiling.tabular, Some(64 * crate::bytes::MIB as usize));
+        assert_eq!(cfg.ceiling.diff, Some(16 * crate::bytes::MIB as usize));
     }
 
     #[test]
@@ -855,23 +855,23 @@ mod tests {
         .unwrap();
         let cfg = apply_legacy_tracer_keys(cfg);
         // Explicit `[ceiling] text` wins over the legacy key.
-        assert_eq!(cfg.ceiling.text, Some(8 * 1024 * 1024));
+        assert_eq!(cfg.ceiling.text, Some(8 * crate::bytes::MIB as usize));
     }
 
     #[test]
     fn tracer_no_legacy_key_means_no_warn_and_no_change() {
         let cfg: TracerConfig = toml::from_str("").unwrap();
         let cfg = apply_legacy_tracer_keys(cfg);
-        assert_eq!(cfg.ceiling.text, Some(4 * 1024 * 1024));
+        assert_eq!(cfg.ceiling.text, Some(4 * crate::bytes::MIB as usize));
         assert_eq!(cfg.modal_streaming_ceiling, None);
     }
 
     #[test]
     fn tracer_ceiling_section_defaults() {
         let cfg: TracerConfig = toml::from_str("").unwrap();
-        assert_eq!(cfg.ceiling.text, Some(4 * 1024 * 1024));
-        assert_eq!(cfg.ceiling.tabular, Some(64 * 1024 * 1024));
-        assert_eq!(cfg.ceiling.diff, Some(16 * 1024 * 1024));
+        assert_eq!(cfg.ceiling.text, Some(4 * crate::bytes::MIB as usize));
+        assert_eq!(cfg.ceiling.tabular, Some(64 * crate::bytes::MIB as usize));
+        assert_eq!(cfg.ceiling.diff, Some(16 * crate::bytes::MIB as usize));
     }
 
     #[test]
@@ -885,9 +885,9 @@ mod tests {
             "#,
         )
         .unwrap();
-        assert_eq!(cfg.ceiling.text, Some(8 * 1024 * 1024));
-        assert_eq!(cfg.ceiling.tabular, Some(256 * 1024 * 1024));
-        assert_eq!(cfg.ceiling.diff, Some(32 * 1024 * 1024));
+        assert_eq!(cfg.ceiling.text, Some(8 * crate::bytes::MIB as usize));
+        assert_eq!(cfg.ceiling.tabular, Some(256 * crate::bytes::MIB as usize));
+        assert_eq!(cfg.ceiling.diff, Some(32 * crate::bytes::MIB as usize));
     }
 
     #[test]
@@ -901,7 +901,7 @@ mod tests {
         .unwrap();
         assert_eq!(cfg.ceiling.tabular, None);
         // Other keys keep defaults.
-        assert_eq!(cfg.ceiling.text, Some(4 * 1024 * 1024));
+        assert_eq!(cfg.ceiling.text, Some(4 * crate::bytes::MIB as usize));
     }
 
     #[test]

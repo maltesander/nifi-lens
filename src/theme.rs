@@ -50,13 +50,19 @@ pub fn border_dim() -> Style {
     muted()
 }
 
+/// Percentages at or above this are rendered as error (red).
+const SEVERITY_PCT_CRITICAL: f32 = 90.0;
+/// Percentages at or above this (but below critical) are rendered as warning.
+const SEVERITY_PCT_WARNING: f32 = 75.0;
+
 /// Maps a percentage (0-100+) to a severity style. Use at render call
-/// sites that currently inline `match pct { p if p >= 90.0 => ..., ... }`
+/// sites that currently inline
+/// `match pct { p if p >= SEVERITY_PCT_CRITICAL => ..., ... }`
 /// blocks — Health heap, queue fill, etc.
 pub fn severity_by_pct(pct: f32) -> Style {
-    if pct >= 90.0 {
+    if pct >= SEVERITY_PCT_CRITICAL {
         error()
-    } else if pct >= 75.0 {
+    } else if pct >= SEVERITY_PCT_WARNING {
         warning()
     } else {
         Style::default()

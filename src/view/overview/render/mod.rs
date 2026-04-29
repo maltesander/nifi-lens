@@ -157,6 +157,11 @@ pub(super) fn health_severity_style(s: crate::client::overview::Severity) -> Sty
     }
 }
 
+/// Heartbeat age below this is considered fresh (muted style).
+const HEARTBEAT_FRESH_SECS: u64 = 30;
+/// Heartbeat age between fresh and stale is warning-styled.
+const HEARTBEAT_STALE_SECS: u64 = 120;
+
 /// Style for the heartbeat age text appended to the address cell.
 ///
 /// Shared helper: used by `nodes.rs` for the address cell's heartbeat-age
@@ -164,8 +169,8 @@ pub(super) fn health_severity_style(s: crate::client::overview::Severity) -> Sty
 pub(super) fn heartbeat_age_style(age: Option<std::time::Duration>) -> Style {
     match age {
         None => theme::muted(),
-        Some(d) if d.as_secs() < 30 => theme::muted(),
-        Some(d) if d.as_secs() < 120 => theme::warning(),
+        Some(d) if d.as_secs() < HEARTBEAT_FRESH_SECS => theme::muted(),
+        Some(d) if d.as_secs() < HEARTBEAT_STALE_SECS => theme::warning(),
         Some(_) => theme::error(),
     }
 }

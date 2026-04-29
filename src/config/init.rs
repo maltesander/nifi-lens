@@ -176,8 +176,17 @@ mod tests {
             Duration::from_secs(15)
         );
         assert_eq!(parsed.polling.cluster.bulletins, Duration::from_secs(5));
-        assert_eq!(parsed.tracer.ceiling.text, Some(4 * 1024 * 1024));
-        assert_eq!(parsed.tracer.ceiling.tabular, Some(64 * 1024 * 1024));
-        assert_eq!(parsed.tracer.ceiling.diff, Some(16 * 1024 * 1024));
+        assert_eq!(
+            parsed.tracer.ceiling.text,
+            Some(4 * crate::bytes::MIB as usize)
+        );
+        assert_eq!(
+            parsed.tracer.ceiling.tabular,
+            Some(64 * crate::bytes::MIB as usize)
+        );
+        assert_eq!(
+            parsed.tracer.ceiling.diff,
+            Some(16 * crate::bytes::MIB as usize)
+        );
     }
 }

@@ -2009,7 +2009,10 @@ fn action_history_check_signal_next_page(
         .scroll
         .offset
         .saturating_add(modal.scroll.last_viewport_rows);
-    if modal.should_signal_next_page(viewport_bottom, 10) {
+    if modal.should_signal_next_page(
+        viewport_bottom,
+        crate::view::browser::state::action_history_modal::AUTOLOAD_LOOKAHEAD_ROWS,
+    ) {
         modal.loading = true;
         modal.fetch_signal.notify_one();
     }
