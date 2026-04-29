@@ -3388,21 +3388,21 @@ fn apply_action_history_error_preserves_handle_when_source_id_stale() {
 
 #[test]
 fn action_history_modal_close_clears_modal() {
-    use crate::input::{ActionHistoryModalVerb, ViewVerb};
+    use crate::input::{ActionHistoryModalVerb, CommonVerb, ViewVerb};
     let mut state = fresh_state();
     state
         .browser
         .open_action_history_modal("proc-1".into(), "X".into());
     let _ = BrowserHandler::handle_verb(
         &mut state,
-        ViewVerb::ActionHistoryModal(ActionHistoryModalVerb::Close),
+        ViewVerb::ActionHistoryModal(ActionHistoryModalVerb::Common(CommonVerb::Close)),
     );
     assert!(state.browser.action_history_modal.is_none());
 }
 
 #[test]
 fn action_history_modal_close_cancels_search_first() {
-    use crate::input::{ActionHistoryModalVerb, ViewVerb};
+    use crate::input::{ActionHistoryModalVerb, CommonVerb, ViewVerb};
     let mut state = fresh_state();
     state
         .browser
@@ -3411,7 +3411,7 @@ fn action_history_modal_close_cancels_search_first() {
     modal.search = Some(crate::widget::search::SearchState::default());
     let _ = BrowserHandler::handle_verb(
         &mut state,
-        ViewVerb::ActionHistoryModal(ActionHistoryModalVerb::Close),
+        ViewVerb::ActionHistoryModal(ActionHistoryModalVerb::Common(CommonVerb::Close)),
     );
     // First Close cancels search; modal stays open.
     assert!(state.browser.action_history_modal.is_some());
@@ -3427,14 +3427,14 @@ fn action_history_modal_close_cancels_search_first() {
     // Second Close closes the modal.
     let _ = BrowserHandler::handle_verb(
         &mut state,
-        ViewVerb::ActionHistoryModal(ActionHistoryModalVerb::Close),
+        ViewVerb::ActionHistoryModal(ActionHistoryModalVerb::Common(CommonVerb::Close)),
     );
     assert!(state.browser.action_history_modal.is_none());
 }
 
 #[test]
 fn action_history_modal_refresh_resets_state_and_emits_intent() {
-    use crate::input::{ActionHistoryModalVerb, ViewVerb};
+    use crate::input::{ActionHistoryModalVerb, CommonVerb, ViewVerb};
     let mut state = fresh_state();
     state
         .browser
@@ -3450,7 +3450,7 @@ fn action_history_modal_refresh_resets_state_and_emits_intent() {
         .apply_page("proc-1", vec![action], Some(1));
     let result = BrowserHandler::handle_verb(
         &mut state,
-        ViewVerb::ActionHistoryModal(ActionHistoryModalVerb::Refresh),
+        ViewVerb::ActionHistoryModal(ActionHistoryModalVerb::Common(CommonVerb::Refresh)),
     )
     .unwrap();
     assert!(
@@ -3496,7 +3496,7 @@ fn action_history_modal_toggle_expand_uses_selected_row() {
 
 #[test]
 fn action_history_modal_search_input_routes_chars_to_query() {
-    use crate::input::{ActionHistoryModalVerb, ViewVerb};
+    use crate::input::{ActionHistoryModalVerb, CommonVerb, ViewVerb};
     use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 
     let mut state = fresh_state();
@@ -3506,7 +3506,7 @@ fn action_history_modal_search_input_routes_chars_to_query() {
     // Open search via the verb dispatch.
     let _ = BrowserHandler::handle_verb(
         &mut state,
-        ViewVerb::ActionHistoryModal(ActionHistoryModalVerb::OpenSearch),
+        ViewVerb::ActionHistoryModal(ActionHistoryModalVerb::Common(CommonVerb::OpenSearch)),
     );
     // input_active should be true now.
     assert!(

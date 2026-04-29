@@ -1597,7 +1597,7 @@ fn handle_action_history_modal_verb(
     };
 
     match v {
-        V::Close => {
+        V::Common(CommonVerb::Close) => {
             // Priority cascade: cancel search → collapse expanded → close modal.
             let Some(modal) = state.browser.action_history_modal.as_mut() else {
                 return UpdateResult::default();
@@ -1613,7 +1613,7 @@ fn handle_action_history_modal_verb(
             state.browser.close_action_history_modal();
             redraw()
         }
-        V::Refresh => {
+        V::Common(CommonVerb::Refresh) => {
             let Some(modal) = state.browser.action_history_modal.as_mut() else {
                 return UpdateResult::default();
             };
@@ -1689,7 +1689,7 @@ fn handle_action_history_modal_verb(
             }
             redraw()
         }
-        V::OpenSearch => {
+        V::Common(CommonVerb::OpenSearch) => {
             if let Some(modal) = state.browser.action_history_modal.as_mut() {
                 modal.search = Some(crate::widget::search::SearchState {
                     input_active: true,
@@ -1698,7 +1698,7 @@ fn handle_action_history_modal_verb(
             }
             redraw()
         }
-        V::SearchNext => {
+        V::Common(CommonVerb::SearchNext) => {
             if let Some(modal) = state.browser.action_history_modal.as_mut()
                 && let Some(s) = modal.search.as_mut()
                 && !s.matches.is_empty()
@@ -1707,7 +1707,7 @@ fn handle_action_history_modal_verb(
             }
             redraw()
         }
-        V::SearchPrev => {
+        V::Common(CommonVerb::SearchPrev) => {
             if let Some(modal) = state.browser.action_history_modal.as_mut()
                 && let Some(s) = modal.search.as_mut()
                 && !s.matches.is_empty()
@@ -1717,7 +1717,7 @@ fn handle_action_history_modal_verb(
             }
             redraw()
         }
-        V::Copy => {
+        V::Common(CommonVerb::Copy) => {
             // Capture the TSV before borrowing state mutably for
             // copy_to_clipboard (two borrows of state at once).
             let tsv = state

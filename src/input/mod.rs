@@ -1286,7 +1286,7 @@ mod keymap_tests {
         let km = KeyMap::default();
         let state = dummy_state();
 
-        // 'c' inside the modal must route to ActionHistoryModalVerb::Copy
+        // 'c' inside the modal must route to ActionHistoryModalVerb::Common(CommonVerb::Copy)
         // (not BrowserVerb::Common(CommonVerb::Copy)).
         let ev = km.translate(
             KeyEvent::new(KeyCode::Char('c'), KeyModifiers::empty()),
@@ -1300,10 +1300,12 @@ mod keymap_tests {
         );
         assert!(matches!(
             ev,
-            InputEvent::View(ViewVerb::ActionHistoryModal(ActionHistoryModalVerb::Copy))
+            InputEvent::View(ViewVerb::ActionHistoryModal(
+                ActionHistoryModalVerb::Common(CommonVerb::Copy)
+            ))
         ));
 
-        // Esc inside the modal routes to ActionHistoryModalVerb::Close
+        // Esc inside the modal routes to ActionHistoryModalVerb::Common(CommonVerb::Close)
         // (not FocusAction::Ascend).
         let ev = km.translate(
             KeyEvent::new(KeyCode::Esc, KeyModifiers::empty()),
@@ -1317,7 +1319,9 @@ mod keymap_tests {
         );
         assert!(matches!(
             ev,
-            InputEvent::View(ViewVerb::ActionHistoryModal(ActionHistoryModalVerb::Close))
+            InputEvent::View(ViewVerb::ActionHistoryModal(
+                ActionHistoryModalVerb::Common(CommonVerb::Close)
+            ))
         ));
 
         // Ctrl+C must always quit even with the modal open.
