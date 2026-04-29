@@ -99,7 +99,8 @@ fn kind_priority(kind: NodeKind) -> u8 {
         NodeKind::Connection => 3,
         NodeKind::InputPort => 4,
         NodeKind::OutputPort => 5,
-        NodeKind::Folder(_) => 6,
+        NodeKind::RemoteProcessGroup => 6,
+        NodeKind::Folder(_) => 7,
     }
 }
 
@@ -112,6 +113,7 @@ const KIND_ALIASES: &[(&str, NodeKind)] = &[
     (":conn", NodeKind::Connection),
     (":in", NodeKind::InputPort),
     (":out", NodeKind::OutputPort),
+    (":rpg", NodeKind::RemoteProcessGroup),
 ];
 
 /// Fixed alias table mapping colon-prefixed tokens to `DriftFilter`.
@@ -276,7 +278,7 @@ pub fn render(
 
     frame.render_widget(Clear, rect);
     let block = crate::widget::panel::Panel::new(
-        " Fuzzy Find — :proc :pg :cs :conn :in :out :drift :stale :modified :syncerr · esc close ",
+        " Fuzzy Find — :proc :pg :cs :conn :in :out :rpg :drift :stale :modified :syncerr · esc close",
     )
     .into_block();
     let inner = block.inner(rect);
@@ -454,6 +456,7 @@ fn kind_short_label(kind: NodeKind) -> &'static str {
         NodeKind::ControllerService => "CS",
         NodeKind::InputPort => "In",
         NodeKind::OutputPort => "Out",
+        NodeKind::RemoteProcessGroup => "RPG",
         NodeKind::Folder(_) => "Folder",
     }
 }
@@ -894,6 +897,69 @@ mod tests {
             parse_prefix(":out").0,
             QueryFilter::Kind(NodeKind::OutputPort)
         );
+        assert_eq!(
+            parse_prefix(":rpg").0,
+            QueryFilter::Kind(NodeKind::RemoteProcessGroup)
+        );
+    }
+
+    #[test]
+    fn parse_prefix_recognizes_rpg_alias() {
+        assert_eq!(
+            parse_prefix(":rpg my-remote"),
+            (
+                QueryFilter::Kind(NodeKind::RemoteProcessGroup),
+                "my-remote".to_string()
+            )
+        );
+        assert_eq!(
+            parse_prefix(":rpg"),
+            (
+                QueryFilter::Kind(NodeKind::RemoteProcessGroup),
+                String::new()
+            )
+        );
+    }
+
+    #[test]
+    fn rpg_filter_narrows_index_to_remote_process_groups() {
+        use crate::view::browser::state::StateBadge;
+
+        let index = FlowIndex {
+            entries: vec![
+                FlowIndexEntry {
+                    id: "proc1".into(),
+                    group_id: "root".into(),
+                    kind: NodeKind::Processor,
+                    name: "GenerateFlowFile".into(),
+                    group_path: "root".into(),
+                    state: StateBadge::Processor {
+                        glyph: '\u{25CF}',
+                        style: crate::theme::success(),
+                    },
+                    haystack: "generateflowfile   processor   root".into(),
+                    version_state: None,
+                },
+                FlowIndexEntry {
+                    id: "rpg1".into(),
+                    group_id: "root".into(),
+                    kind: NodeKind::RemoteProcessGroup,
+                    name: "RemoteCluster".into(),
+                    group_path: "root".into(),
+                    state: StateBadge::Port,
+                    haystack: "remotecluster   rpg   root".into(),
+                    version_state: None,
+                },
+            ],
+        };
+
+        let mut s = FuzzyFindState::new();
+        s.query = ":rpg".into();
+        s.rebuild_matches(&index);
+        assert_eq!(s.matches.len(), 1);
+        assert_eq!(s.filter, QueryFilter::Kind(NodeKind::RemoteProcessGroup));
+        let entry = s.selected_entry(&index).unwrap();
+        assert_eq!(entry.id, "rpg1");
     }
 
     #[test]

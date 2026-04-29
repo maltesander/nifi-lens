@@ -15,7 +15,7 @@
 //!   - `LogAttribute-parameterized`: `Log Payload = "connecting to
 //!     #{kafka_bootstrap}"`, `Log Prefix = "##{literal_text}"`.
 //!
-//! The marker PG is `nifilens-fixture-v7`.
+//! The marker PG is `nifilens-fixture-v8`.
 
 use std::sync::Arc;
 

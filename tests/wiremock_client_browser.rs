@@ -472,6 +472,58 @@ async fn version_information_returns_unversioned_for_null_payload() {
 }
 
 #[tokio::test]
+async fn browser_remote_process_group_detail_403_returns_typed_error() {
+    let server = MockServer::start().await;
+    stub_login_and_about(&server).await;
+
+    Mock::given(method("GET"))
+        .and(path("/nifi-api/remote-process-groups/rpg-forbidden"))
+        .respond_with(ResponseTemplate::new(403).set_body_string("forbidden"))
+        .mount(&server)
+        .await;
+
+    let client = NifiClient::connect(&ctx(server.uri())).await.unwrap();
+    let err = client
+        .browser_remote_process_group_detail("rpg-forbidden")
+        .await
+        .unwrap_err();
+    let msg = format!("{err}");
+    // classify_or_fallback maps 401/auth to NifiUnauthorized; 403 hits the
+    // fallback, so the error must contain the RPG id and context.
+    assert!(
+        msg.to_lowercase().contains("remote")
+            || msg.to_lowercase().contains("rpg")
+            || msg.to_lowercase().contains("rpg-forbidden"),
+        "expected RemoteProcessGroupDetailFailed, got: {msg}"
+    );
+}
+
+#[tokio::test]
+async fn browser_remote_process_group_detail_404_returns_typed_error() {
+    let server = MockServer::start().await;
+    stub_login_and_about(&server).await;
+
+    Mock::given(method("GET"))
+        .and(path("/nifi-api/remote-process-groups/rpg-missing"))
+        .respond_with(ResponseTemplate::new(404).set_body_string("not found"))
+        .mount(&server)
+        .await;
+
+    let client = NifiClient::connect(&ctx(server.uri())).await.unwrap();
+    let err = client
+        .browser_remote_process_group_detail("rpg-missing")
+        .await
+        .unwrap_err();
+    let msg = format!("{err}");
+    assert!(
+        msg.to_lowercase().contains("remote")
+            || msg.to_lowercase().contains("rpg")
+            || msg.to_lowercase().contains("rpg-missing"),
+        "expected RemoteProcessGroupDetailFailed, got: {msg}"
+    );
+}
+
+#[tokio::test]
 async fn local_modifications_groups_by_component() {
     let server = MockServer::start().await;
     stub_login_and_about(&server).await;

@@ -30,6 +30,7 @@ pub enum ComponentKind {
     Connection,
     ControllerService,
     Port,
+    RemoteProcessGroup,
 }
 
 impl ComponentKind {
@@ -41,6 +42,7 @@ impl ComponentKind {
             Self::Connection => "Connection",
             Self::ControllerService => "ControllerService",
             Self::Port => "Port",
+            Self::RemoteProcessGroup => "RemoteProcessGroup",
         }
     }
 }
@@ -81,6 +83,10 @@ pub struct Bucket {
     /// `taskNanos` metric — populated for Processor kind; `None` for
     /// ProcessGroup / Connection.
     pub task_time_ns: Option<u64>,
+    /// `totalBytesPerSecond` metric — populated for RemoteProcessGroup
+    /// kind; `None` for Processor / PG / Connection. Tracks aggregate
+    /// transmit + receive throughput rate.
+    pub bytes_per_sec: Option<u64>,
 }
 
 /// Reduced status-history payload — only the metrics the sparkline
@@ -114,6 +120,12 @@ pub async fn status_history(
         ComponentKind::Processor => client.flow().get_processor_status_history(id).await,
         ComponentKind::ProcessGroup => client.flow().get_process_group_status_history(id).await,
         ComponentKind::Connection => client.flow().get_connection_status_history(id).await,
+        ComponentKind::RemoteProcessGroup => {
+            client
+                .flow()
+                .get_remote_process_group_status_history(id)
+                .await
+        }
         ComponentKind::ControllerService | ComponentKind::Port => {
             return Err(NifiLensError::SparklineUnsupportedKind {
                 kind: kind.label().to_string(),
@@ -200,19 +212,37 @@ fn reduce_status_history(
             // NiFi history-repo metric keys differ from the snapshot
             // DTO. PG uses `flowFilesIn` / `flowFilesOut` /
             // `queuedCount` (not `flowFilesQueued`); Connection uses
-            // `inputCount` / `outputCount` / `queuedCount`. Try the
-            // PG-style keys first (more common surface), then fall
-            // back to the connection-style aliases.
-            let in_count = pick_first_metric(&metrics, &["flowFilesIn", "inputCount"]).unwrap_or(0);
-            let out_count =
-                pick_first_metric(&metrics, &["flowFilesOut", "outputCount"]).unwrap_or(0);
-            let (queued_count, task_time_ns) = match kind {
-                ComponentKind::Processor => (None, pick_metric(&metrics, "taskNanos")),
+            // `inputCount` / `outputCount` / `queuedCount`. RPG uses
+            // `receivedCount` / `sentCount` / `totalBytesPerSecond`.
+            // Try the most common keys first, then fall back to aliases.
+            let in_count = pick_first_metric(
+                &metrics,
+                &[
+                    "flowFilesIn",
+                    "inputCount",
+                    "receivedCount",
+                    "flowFilesReceived",
+                ],
+            )
+            .unwrap_or(0);
+            let out_count = pick_first_metric(
+                &metrics,
+                &["flowFilesOut", "outputCount", "sentCount", "flowFilesSent"],
+            )
+            .unwrap_or(0);
+            let (queued_count, task_time_ns, bytes_per_sec) = match kind {
+                ComponentKind::Processor => (None, pick_metric(&metrics, "taskNanos"), None),
                 ComponentKind::ProcessGroup | ComponentKind::Connection => (
                     pick_first_metric(&metrics, &["queuedCount", "flowFilesQueued"]),
                     None,
+                    None,
                 ),
-                ComponentKind::ControllerService | ComponentKind::Port => (None, None),
+                ComponentKind::RemoteProcessGroup => (
+                    None,
+                    None,
+                    pick_first_metric(&metrics, &["totalBytesPerSecond"]),
+                ),
+                ComponentKind::ControllerService | ComponentKind::Port => (None, None, None),
             };
             let timestamp = snap
                 .timestamp
@@ -225,6 +255,7 @@ fn reduce_status_history(
                 out_count,
                 queued_count,
                 task_time_ns,
+                bytes_per_sec,
             }
         })
         .collect();
@@ -620,5 +651,39 @@ mod tests {
                 "expected SparklineUnsupportedKind for {kind:?}, got {err:?}"
             );
         }
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn status_history_remote_process_group_returns_received_sent_bytes_per_sec() {
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path(
+                "/nifi-api/flow/remote-process-groups/rpg-1/status/history",
+            ))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "statusHistory": {
+                    "aggregateSnapshots": [
+                        {
+                            "timestamp": "01/01/2026 00:00:00 UTC",
+                            "statusMetrics": {
+                                "receivedCount": 100,
+                                "sentCount": 200,
+                                "totalBytesPerSecond": 3
+                            }
+                        }
+                    ]
+                }
+            })))
+            .mount(&server)
+            .await;
+        let client_arc = test_client(&server).await;
+        let guard = client_arc.read().await;
+        let series = status_history(&guard, ComponentKind::RemoteProcessGroup, "rpg-1")
+            .await
+            .expect("ok");
+        assert_eq!(series.buckets.len(), 1);
+        assert_eq!(series.buckets[0].in_count, 100); // received
+        assert_eq!(series.buckets[0].out_count, 200); // sent
+        assert_eq!(series.buckets[0].bytes_per_sec, Some(3));
     }
 }

@@ -1,8 +1,9 @@
 //! Renderer for the Overview tab's top "Components" panel.
 //!
-//! Three-row table — process groups, processors, controller services.
-//! Display-only; not focusable. Aligned columns: 2-pad + 20-label +
-//! 4-count + 4-gap + repeating 12-slot (8 label + 4 value).
+//! Four-row table — process groups, processors, controller services,
+//! remote process groups. Display-only; not focusable. Aligned columns:
+//! 2-pad + 20-label + 4-count + 4-gap + repeating 12-slot (8 label +
+//! 4 value).
 
 use ratatui::Frame;
 use ratatui::layout::Rect;
@@ -11,7 +12,10 @@ use ratatui::text::{Line, Span};
 use ratatui::widgets::Paragraph;
 
 use super::super::state::OverviewState;
-use crate::client::{ControllerServiceCounts, ControllerStatusSnapshot, ProcessorStateCounts};
+use crate::client::{
+    ControllerServiceCounts, ControllerStatusSnapshot, ProcessorStateCounts,
+    RemoteProcessGroupCounts,
+};
 use crate::theme;
 
 /// Three-row Components table — process groups, processors, controller
@@ -33,6 +37,7 @@ pub(super) fn render_components_table(frame: &mut Frame, area: Rect, state: &Ove
         pg_row(controller, root_pg),
         processors_row(&root_pg.processors),
         controller_services_row(state.cs_counts.as_ref()),
+        remote_pgs_row(&root_pg.remote_process_groups),
     ];
     frame.render_widget(Paragraph::new(lines), area);
 }
@@ -123,4 +128,12 @@ fn slot_text(text: &'static str, style: Style) -> Vec<Span<'static>> {
 /// Two-space gap between consecutive slots.
 fn slot_gap() -> Vec<Span<'static>> {
     vec![Span::raw("  ")]
+}
+
+fn remote_pgs_row(c: &RemoteProcessGroupCounts) -> Line<'static> {
+    let mut spans = label_and_count("Remote PGs", c.total);
+    spans.extend(slot("TRANSMIT", c.transmitting, theme::success()));
+    spans.extend(slot_gap());
+    spans.extend(slot("NOT-TX", c.not_transmitting, theme::muted()));
+    Line::from(spans)
 }

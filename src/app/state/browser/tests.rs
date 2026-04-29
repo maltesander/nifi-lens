@@ -3166,6 +3166,15 @@ fn make_state_with_selected_kind(kind: NodeKind) -> AppState {
             state: "ENABLED".into(),
         },
         NodeKind::InputPort | NodeKind::OutputPort => NodeStatusSummary::Port,
+        NodeKind::RemoteProcessGroup => NodeStatusSummary::RemoteProcessGroup {
+            transmission_status: "Not Transmitting".into(),
+            active_threads: 0,
+            flow_files_received: 0,
+            flow_files_sent: 0,
+            bytes_received: 0,
+            bytes_sent: 0,
+            target_uri: String::new(),
+        },
         NodeKind::Folder(_) => NodeStatusSummary::Folder { count: 0 },
     };
     s.browser.nodes.push(TreeNode {
@@ -3212,6 +3221,15 @@ fn action_history_disabled_for_folder_rows() {
             "expected false for Folder({fk:?})"
         );
     }
+}
+
+#[test]
+fn action_history_verb_is_enabled_on_rpg_row() {
+    let state = make_state_with_selected_kind(NodeKind::RemoteProcessGroup);
+    assert!(
+        state.browser_selection_supports_action_history(),
+        "expected action-history to be enabled for RemoteProcessGroup"
+    );
 }
 
 // ---------------------------------------------------------------------------
@@ -3572,6 +3590,7 @@ fn apply_sparkline_update_replaces_series_when_selection_matches() {
             out_count: 6,
             queued_count: None,
             task_time_ns: Some(100),
+            bytes_per_sec: None,
         }],
         generated_at: std::time::SystemTime::now(),
     };
@@ -3602,6 +3621,7 @@ fn apply_sparkline_update_drops_stale_emit() {
             out_count: 99,
             queued_count: None,
             task_time_ns: None,
+            bytes_per_sec: None,
         }],
         generated_at: std::time::SystemTime::now(),
     };

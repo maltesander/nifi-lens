@@ -51,6 +51,25 @@ fn conn(id: &str, parent: usize, fill: u32) -> RawNode {
     }
 }
 
+fn rpg(id: &str, parent: usize) -> RawNode {
+    RawNode {
+        parent_idx: Some(parent),
+        kind: NodeKind::RemoteProcessGroup,
+        id: id.into(),
+        group_id: format!("g-{parent}"),
+        name: id.into(),
+        status_summary: NodeStatusSummary::RemoteProcessGroup {
+            transmission_status: "Transmitting".into(),
+            active_threads: 0,
+            flow_files_received: 0,
+            flow_files_sent: 0,
+            bytes_received: 0,
+            bytes_sent: 0,
+            target_uri: "https://remote.example.com/nifi".into(),
+        },
+    }
+}
+
 fn snap(nodes: Vec<RawNode>) -> RecursiveSnapshot {
     RecursiveSnapshot {
         nodes,
@@ -397,12 +416,75 @@ fn selection_change_sets_pending_detail_and_pushes_request() {
 }
 
 #[test]
+fn selecting_rpg_emits_detail_fetch_request() {
+    // Arena: root PG (0) with one RPG child (1). Selecting the RPG row
+    // must enqueue a `DetailRequest` on `detail_tx` with the matching
+    // (kind, id), the same mechanism processor selection uses — the
+    // worker arm dispatches on `NodeKind::RemoteProcessGroup`.
+    let mut s = BrowserState::new();
+    apply_tree_snapshot(&mut s, snap(vec![pg("root", None, 0), rpg("rpg-1", 0)]));
+    let (tx, mut rx) = mpsc::unbounded_channel();
+    s.detail_tx = Some(tx);
+
+    // Move down to the RPG row (visible idx 1 = arena idx 1).
+    s.move_down();
+    s.emit_detail_request_for_current_selection();
+
+    assert_eq!(s.pending_detail, Some(1));
+    let req = rx.try_recv().expect("RPG detail request pushed");
+    assert_eq!(req.arena_idx, 1);
+    assert_eq!(req.kind, NodeKind::RemoteProcessGroup);
+    assert_eq!(req.id, "rpg-1");
+}
+
+#[test]
 fn selection_change_with_no_detail_tx_is_noop_but_sets_pending() {
     let mut s = BrowserState::new();
     apply_tree_snapshot(&mut s, demo_snap());
     s.move_down();
     s.emit_detail_request_for_current_selection();
     assert_eq!(s.pending_detail, Some(1));
+}
+
+#[test]
+fn apply_node_detail_lands_rpg_payload_in_details_cache() {
+    use crate::client::browser::RemoteProcessGroupDetail;
+    let mut s = BrowserState::new();
+    apply_tree_snapshot(&mut s, snap(vec![pg("root", None, 0), rpg("rpg-1", 0)]));
+
+    let payload = NodeDetailSnapshot {
+        arena_idx: 1,
+        kind: NodeKind::RemoteProcessGroup,
+        id: "rpg-1".into(),
+        detail: NodeDetail::RemoteProcessGroup(RemoteProcessGroupDetail {
+            id: "rpg-1".into(),
+            name: "Sink".into(),
+            parent_group_id: Some("root".into()),
+            target_uri: "https://remote/nifi".into(),
+            target_secure: true,
+            transport_protocol: "HTTP".into(),
+            transmission_status: "Transmitting".into(),
+            validation_status: "VALID".into(),
+            validation_errors: vec![],
+            comments: String::new(),
+            input_ports: vec![],
+            output_ports: vec![],
+            active_remote_input_port_count: 0,
+            inactive_remote_input_port_count: 0,
+            active_remote_output_port_count: 0,
+            inactive_remote_output_port_count: 0,
+        }),
+    };
+    apply_node_detail(&mut s, payload);
+    // The arena-guard check (kind + id match against `state.nodes[idx]`)
+    // is the only stale-emit defense; payloads land in `state.details`
+    // keyed by arena index, the same shape the renderer reads.
+    let detail = match s.details.get(&1) {
+        Some(NodeDetail::RemoteProcessGroup(d)) => d,
+        other => panic!("expected RemoteProcessGroup detail, got {other:?}"),
+    };
+    assert_eq!(detail.id, "rpg-1");
+    assert_eq!(detail.name, "Sink");
 }
 
 #[test]
@@ -1546,6 +1628,37 @@ fn resolve_id_trims_whitespace() {
         s.resolve_id("   a1b2c3d4-e5f6-7890-abcd-ef1234567890   ")
             .is_some()
     );
+}
+
+#[test]
+fn resolve_id_matches_remote_process_group_arena_entry() {
+    use crate::client::{NodeKind, NodeStatusSummary};
+    let mut s = BrowserState::new();
+    s.nodes.push(TreeNode {
+        parent: None,
+        children: vec![],
+        kind: NodeKind::RemoteProcessGroup,
+        id: "b2c3d4e5-f6a7-8901-bcde-f12345678901".into(),
+        group_id: "pg-root".into(),
+        name: "MyRemoteSink".into(),
+        status_summary: NodeStatusSummary::RemoteProcessGroup {
+            transmission_status: "Transmitting".into(),
+            active_threads: 0,
+            flow_files_received: 0,
+            flow_files_sent: 0,
+            bytes_received: 0,
+            bytes_sent: 0,
+            target_uri: "https://remote.example.com/nifi".into(),
+        },
+        parameter_context_ref: None,
+    });
+    let got = s
+        .resolve_id("b2c3d4e5-f6a7-8901-bcde-f12345678901")
+        .expect("RPG must resolve");
+    assert_eq!(got.arena_idx, 0);
+    assert!(matches!(got.kind, NodeKind::RemoteProcessGroup));
+    assert_eq!(got.name, "MyRemoteSink");
+    assert_eq!(got.group_id, "pg-root");
 }
 
 #[test]

@@ -1162,6 +1162,95 @@ fn g_from_bulletins_no_selection_is_noop() {
 }
 
 #[test]
+fn bulletins_jump_resolves_rpg_source_id() {
+    // Regression: a bulletin whose source_id is an RPG UUID must produce
+    // OpenInBrowser carrying that UUID — the bulletins → browser path has
+    // no kind filter so it passes through for every component kind.
+    use crate::client::{
+        BulletinSnapshot, NodeKind, NodeStatusSummary, RawNode, RecursiveSnapshot,
+    };
+
+    let mut s = fresh_state();
+    s.current_tab = ViewId::Bulletins;
+
+    // Use a canonical UUID so that resolve_id (which requires UUID shape)
+    // can find the RPG in the arena end-to-end.
+    const RPG_ID: &str = "aabbccdd-0011-2233-4455-66778899aabb";
+    const PG_ID: &str = "00000000-0000-0000-0000-000000000001";
+
+    // Populate the Browser arena with an RPG node.
+    crate::view::browser::state::apply_tree_snapshot(
+        &mut s.browser,
+        RecursiveSnapshot {
+            nodes: vec![
+                RawNode {
+                    parent_idx: None,
+                    kind: NodeKind::ProcessGroup,
+                    id: PG_ID.into(),
+                    group_id: PG_ID.into(),
+                    name: "root".into(),
+                    status_summary: NodeStatusSummary::ProcessGroup {
+                        running: 0,
+                        stopped: 0,
+                        invalid: 0,
+                        disabled: 0,
+                    },
+                },
+                RawNode {
+                    parent_idx: Some(0),
+                    kind: NodeKind::RemoteProcessGroup,
+                    id: RPG_ID.into(),
+                    group_id: PG_ID.into(),
+                    name: "Remote Cluster".into(),
+                    status_summary: NodeStatusSummary::RemoteProcessGroup {
+                        transmission_status: "Transmitting".into(),
+                        active_threads: 0,
+                        flow_files_received: 0,
+                        flow_files_sent: 0,
+                        bytes_received: 0,
+                        bytes_sent: 0,
+                        target_uri: "https://remote:8443/nifi".into(),
+                    },
+                },
+            ],
+            fetched_at: std::time::SystemTime::now(),
+        },
+    );
+
+    // Seed a bulletin whose source_id is the RPG's UUID.
+    s.bulletins.ring.push_back(BulletinSnapshot {
+        id: 99,
+        level: "WARNING".into(),
+        message: "rpg-connectivity".into(),
+        source_id: RPG_ID.into(),
+        source_name: "Remote Cluster".into(),
+        source_type: "RemoteProcessGroup".into(),
+        group_id: PG_ID.into(),
+        timestamp_iso: "2026-04-29T00:00:00Z".into(),
+        timestamp_human: String::new(),
+    });
+    s.bulletins.selected = 0;
+
+    let link = build_go_crosslink(&s, crate::input::GoTarget::Browser);
+    assert!(
+        matches!(&link, Some(CrossLink::OpenInBrowser { component_id, group_id })
+                if component_id == RPG_ID && group_id == PG_ID),
+        "expected OpenInBrowser({RPG_ID}, {PG_ID}), got {link:?}"
+    );
+    // Also confirm the RPG is in the arena so resolve_id works end-to-end.
+    let resolved = s.browser.resolve_id(RPG_ID);
+    assert!(
+        resolved.is_some(),
+        "resolve_id must find RPG '{RPG_ID}' in the arena"
+    );
+    assert_eq!(
+        resolved.unwrap().kind,
+        NodeKind::RemoteProcessGroup,
+        "resolved kind must be RemoteProcessGroup"
+    );
+}
+
+#[test]
 fn g_auto_gotos_directly_when_single_cross_link() {
     // Overview + Queues focus: only GoTarget::Browser is available (Events
     // returns None for Queues focus), so selection_cross_links() → [Browser].

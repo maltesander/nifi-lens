@@ -74,6 +74,7 @@ pub(crate) fn tiny_root_pg_status() -> RootPgStatusSnapshot {
         input_port_count: 0,
         output_port_count: 0,
         processors: ProcessorStateCounts::default(),
+        remote_process_groups: crate::client::RemoteProcessGroupCounts::default(),
         process_group_ids: vec!["root".into()],
         nodes: vec![RawNode {
             parent_idx: None,

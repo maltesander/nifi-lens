@@ -1167,6 +1167,7 @@ impl BrowserState {
             NodeKind::Processor => ComponentKind::Processor,
             NodeKind::ProcessGroup => ComponentKind::ProcessGroup,
             NodeKind::Connection => ComponentKind::Connection,
+            NodeKind::RemoteProcessGroup => ComponentKind::RemoteProcessGroup,
             NodeKind::ControllerService
             | NodeKind::InputPort
             | NodeKind::OutputPort
@@ -1637,6 +1638,7 @@ pub enum NodeDetail {
     Connection(ConnectionDetail),
     ControllerService(ControllerServiceDetail),
     Port(crate::client::PortDetail),
+    RemoteProcessGroup(crate::client::browser::RemoteProcessGroupDetail),
 }
 
 #[derive(Debug, Clone)]
@@ -2209,6 +2211,7 @@ pub fn build_flow_index(state: &BrowserState) -> FlowIndex {
                 NodeKind::InputPort => "InputPort",
                 NodeKind::OutputPort => "OutputPort",
                 NodeKind::ControllerService => "CS",
+                NodeKind::RemoteProcessGroup => "RPG",
                 NodeKind::Folder(_) => "Folder",
             };
             let group_path = match n.parent {
@@ -2236,6 +2239,7 @@ pub fn build_flow_index(state: &BrowserState) -> FlowIndex {
                 },
                 NodeStatusSummary::Port => StateBadge::Port,
                 NodeStatusSummary::Folder { .. } => StateBadge::Port,
+                NodeStatusSummary::RemoteProcessGroup { .. } => StateBadge::Port,
             };
             FlowIndexEntry {
                 id: n.id.clone(),

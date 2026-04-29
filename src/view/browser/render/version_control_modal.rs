@@ -636,4 +636,40 @@ mod tests {
         term.draw(|f| render(f, f.area(), &modal)).unwrap();
         assert_snapshot!("vc_modal_narrow_60x20", format!("{}", term.backend()));
     }
+
+    /// Regression test: `RemoteProcessGroup` component-type diffs must appear
+    /// in the diff body. The renderer uses the raw `component_type` string
+    /// verbatim in the section header — this test pins that behaviour so a
+    /// future per-type dispatcher cannot accidentally drop RPG sections.
+    #[test]
+    fn diff_modal_renders_remote_process_group_section() {
+        use crate::client::{ComponentDiffSection, RenderedDifference};
+
+        let mut term = Terminal::new(test_backend(28)).unwrap();
+        let modal = loaded_modal_with(
+            VersionControlInformationDtoState::LocallyModified,
+            false,
+            vec![ComponentDiffSection {
+                component_id: "rpg-aabbccdd".into(),
+                component_name: "downstream-cluster".into(),
+                component_type: "Remote Process Group".into(),
+                display_label: "downstream-cluster".into(),
+                differences: vec![RenderedDifference {
+                    kind: "PROPERTY_CHANGED".into(),
+                    description: "\"targetUris\"  'https://old:8080' → 'https://new:8080'".into(),
+                    environmental: false,
+                }],
+            }],
+        );
+        term.draw(|f| render(f, f.area(), &modal)).unwrap();
+        let out = format!("{}", term.backend());
+        assert!(
+            out.contains("Remote Process Group"),
+            "missing RPG section header in diff body: {out:?}"
+        );
+        assert!(
+            out.contains("targetUris"),
+            "missing targetUris field diff in diff body: {out:?}"
+        );
+    }
 }

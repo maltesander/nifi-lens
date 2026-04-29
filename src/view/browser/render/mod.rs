@@ -17,6 +17,7 @@ pub mod processor;
 mod properties_modal;
 pub mod queue_listing;
 pub mod queue_listing_peek;
+pub mod rpg;
 pub mod version_control_modal;
 pub use param_ref_scan::{ParamRefScan, scan as scan_param_refs};
 pub use properties_modal::render_properties_modal;
@@ -193,6 +194,11 @@ pub(super) fn render_inline_sparkline_strip(
     // `in`/`out` — a row that vanishes whenever a metric is partially
     // absent is more confusing than zeros. `peak` reflects the actual
     // recorded values, so all-zeros still surface as `peak 0`.
+    let (row1_label, row2_label) = match sparkline.kind {
+        ComponentKind::RemoteProcessGroup => ("recv", "sent"),
+        _ => ("in", "out"),
+    };
+
     let (row3_label, row3_values, row3_formatter): (&str, Vec<u64>, fn(u64) -> String) =
         match sparkline.kind {
             ComponentKind::Processor => (
@@ -213,12 +219,21 @@ pub(super) fn render_inline_sparkline_strip(
                     .collect(),
                 count_formatter as fn(u64) -> String,
             ),
+            ComponentKind::RemoteProcessGroup => (
+                "rate",
+                series
+                    .buckets
+                    .iter()
+                    .map(|b| b.bytes_per_sec.unwrap_or(0))
+                    .collect(),
+                count_formatter as fn(u64) -> String,
+            ),
             ComponentKind::ControllerService | ComponentKind::Port => return,
         };
 
     frame.render_widget(
         Paragraph::new(render_sparkline_row(
-            "in",
+            row1_label,
             5,
             &in_values,
             theme::spark_in(),
@@ -229,7 +244,7 @@ pub(super) fn render_inline_sparkline_strip(
     );
     frame.render_widget(
         Paragraph::new(render_sparkline_row(
-            "out",
+            row2_label,
             5,
             &out_values,
             theme::spark_out(),
@@ -438,6 +453,16 @@ fn render_tree(
                 let (c, s) = crate::widget::run_icon::processor_run_icon(run_status);
                 (c.to_string(), s)
             }
+            (
+                NodeKind::RemoteProcessGroup,
+                NodeStatusSummary::RemoteProcessGroup {
+                    transmission_status,
+                    ..
+                },
+            ) => {
+                let (c, s) = crate::widget::run_icon::transmission_icon(transmission_status);
+                (c.to_string(), s)
+            }
             _ => (kind_glyph(&node.kind).to_owned(), Style::default()),
         };
         let indent = "  ".repeat(depth);
@@ -473,6 +498,14 @@ fn render_tree(
             row_spans.push(Span::raw(" "));
             row_spans.push(Span::styled(format!("[{label}]"), style.patch(row_style)));
         }
+        if let NodeStatusSummary::RemoteProcessGroup { target_uri, .. } = &node.status_summary
+            && !target_uri.is_empty()
+        {
+            row_spans.push(Span::styled(
+                format!("  → {target_uri}"),
+                theme::muted().patch(row_style),
+            ));
+        }
         lines.push(Line::from(row_spans));
     }
     let p = Paragraph::new(lines);
@@ -497,6 +530,7 @@ fn kind_glyph(kind: &NodeKind) -> &'static str {
         NodeKind::InputPort => "⇥",
         NodeKind::OutputPort => "⇤",
         NodeKind::ControllerService => "⚙",
+        NodeKind::RemoteProcessGroup => "⇌",
         NodeKind::Folder(FolderKind::Queues) => "→",
         NodeKind::Folder(FolderKind::ControllerServices) => "⚙",
     }
@@ -612,6 +646,9 @@ fn render_detail(
         Some(NodeDetail::Port(d)) => {
             port::render(frame, detail_area, d, state, bulletins, &state.detail_focus);
         }
+        Some(NodeDetail::RemoteProcessGroup(d)) => {
+            rpg::render(frame, detail_area, d, state);
+        }
         None => {
             let lines = vec![
                 header_line,
@@ -631,6 +668,7 @@ fn kind_label(kind: &NodeKind) -> &'static str {
         NodeKind::InputPort => "Input Port",
         NodeKind::OutputPort => "Output Port",
         NodeKind::ControllerService => "Controller Service",
+        NodeKind::RemoteProcessGroup => "Remote Process Group",
         NodeKind::Folder(FolderKind::Queues) => "Queues",
         NodeKind::Folder(FolderKind::ControllerServices) => "Controller services",
     }
@@ -867,6 +905,76 @@ mod tree_render_tests {
             .unwrap();
         assert_snapshot!(
             "tree_row_renders_sync_err_chip",
+            format!("{}", terminal.backend())
+        );
+    }
+
+    fn rpg_fixture(transmission_status: &str, target_uri: &str) -> BrowserState {
+        let mut state = BrowserState::new();
+        state.nodes.push(TreeNode {
+            parent: None,
+            children: vec![1],
+            kind: NodeKind::ProcessGroup,
+            id: "root-id".into(),
+            group_id: String::new(),
+            name: "Root".into(),
+            status_summary: NodeStatusSummary::ProcessGroup {
+                running: 0,
+                stopped: 1,
+                invalid: 0,
+                disabled: 0,
+            },
+            parameter_context_ref: None,
+        });
+        state.nodes.push(TreeNode {
+            parent: Some(0),
+            children: vec![],
+            kind: NodeKind::RemoteProcessGroup,
+            id: "rpg-1".into(),
+            group_id: "root-id".into(),
+            name: "MyRemoteSink".into(),
+            status_summary: NodeStatusSummary::RemoteProcessGroup {
+                transmission_status: transmission_status.into(),
+                active_threads: 2,
+                flow_files_received: 0,
+                flow_files_sent: 10,
+                bytes_received: 0,
+                bytes_sent: 1024,
+                target_uri: target_uri.into(),
+            },
+            parameter_context_ref: None,
+        });
+        state.expanded.insert(0);
+        crate::view::browser::state::rebuild_visible(&mut state);
+        // Select the RPG row so it's visible.
+        state.selected = 1;
+        state
+    }
+
+    #[test]
+    fn tree_row_renders_rpg_with_transmission_glyph_and_target_uri() {
+        let state = rpg_fixture("Transmitting", "https://nifi-east:8443/nifi");
+        let snap = ClusterSnapshot::default();
+        let mut terminal = Terminal::new(test_backend(TEST_BACKEND_SHORT)).unwrap();
+        terminal
+            .draw(|f| render_tree(f, f.area(), &state, &snap))
+            .unwrap();
+        assert_snapshot!(
+            "tree_row_renders_rpg_with_transmission_glyph_and_target_uri",
+            format!("{}", terminal.backend())
+        );
+    }
+
+    #[test]
+    fn tree_row_renders_rpg_with_empty_target_uri_suppresses_suffix() {
+        let state = rpg_fixture("Not Transmitting", "");
+        let snap = ClusterSnapshot::default();
+        let mut terminal = Terminal::new(test_backend(TEST_BACKEND_SHORT)).unwrap();
+        terminal
+            .draw(|f| render_tree(f, f.area(), &state, &snap))
+            .unwrap();
+        assert_snapshot!(
+            "tree_row_renders_rpg_with_empty_target_uri_suppresses_suffix",
             format!("{}", terminal.backend())
         );
     }

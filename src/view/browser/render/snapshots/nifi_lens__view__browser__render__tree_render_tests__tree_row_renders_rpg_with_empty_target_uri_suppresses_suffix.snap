@@ -1,0 +1,25 @@
+---
+source: src/view/browser/render/mod.rs
+assertion_line: 958
+expression: "format!(\"{}\", terminal.backend())"
+---
+"▾  Root                                                                                             "
+"    ■ MyRemoteSink                                                                                  "
+"                                                                                                    "
+"                                                                                                    "
+"                                                                                                    "
+"                                                                                                    "
+"                                                                                                    "
+"                                                                                                    "
+"                                                                                                    "
+"                                                                                                    "
+"                                                                                                    "
+"                                                                                                    "
+"                                                                                                    "
+"                                                                                                    "
+"                                                                                                    "
+"                                                                                                    "
+"                                                                                                    "
+"                                                                                                    "
+"                                                                                                    "
+"                                                                                                    "

@@ -1,12 +1,12 @@
 ---
-source: src/view/overview/render/mod.rs
-assertion_line: 888
-expression: render_to_string(&state)
+source: src/view/overview/render/tests.rs
+expression: out
 ---
 "┌ Components ──────────────────────────────────────────────────────────────────────────────────────┐"
 "│  Process groups         7    STALE      1  MODIFIED   2  SYNC-ERR   0  INPUTS     2  OUTPUTS    1│"
 "│  Processors            46    RUNNING   42  STOPPED    3  INVALID    0  DISABLED   1              │"
 "│  Controller services   12    ENABLED   12  DISABLED   0  INVALID    0                            │"
+"│  Remote PGs             0    TRANSMIT   0  NOT-TX     0                                          │"
 "└──────────────────────────────────────────────────────────────────────────────────────────────────┘"
 "┌ Nodes ───────────────────────────────────────────────────────────────────────────────────────────┐"
 "│  loading system diagnostics…                                                                     │"
@@ -22,7 +22,6 @@ expression: render_to_string(&state)
 "┌ Unhealthy queues ────────────────────────────────────────────────────────────────────────────────┐"
 "│fill  queue                             src → dst                                         ffiles  │"
 "│                                        no queues reported yet                                    │"
-"│                                                                                                  │"
 "│                                                                                                  │"
 "│                                                                                                  │"
 "│                                                                                                  │"

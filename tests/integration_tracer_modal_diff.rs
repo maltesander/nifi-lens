@@ -99,15 +99,22 @@ fn hex_dump(bytes: &[u8], n: usize) -> String {
     out
 }
 
+/// Find the most-recent CONTENT_MODIFIED event whose input bytes still
+/// match `input_validator(...)`. Skips events whose content claim has
+/// been recycled (NiFi's content claim allocator on clustered 2.9.0
+/// reuses claim slots aggressively, so an old event's recorded
+/// `(claim_id, offset, length)` may now point at unrelated bytes from
+/// a sibling pipeline branch).
 async fn wait_for_event(
     client: &NifiClient,
     component_id: &str,
     version: &str,
     component_label: &str,
+    input_validator: impl Fn(&[u8]) -> bool,
 ) -> Option<i64> {
     let deadline = std::time::Instant::now() + Duration::from_secs(120);
     loop {
-        let snap = match client.latest_events(component_id, 5).await {
+        let snap = match client.latest_events(component_id, 25).await {
             Ok(s) => s,
             Err(NifiLensError::LatestProvenanceEventsFailed { .. }) => {
                 eprintln!(
@@ -117,19 +124,46 @@ async fn wait_for_event(
             }
             Err(other) => panic!("latest_events on {version} failed: {other:?}"),
         };
-        if let Some(first) = snap.events.first() {
-            eprintln!(
-                "  {component_label}: {} events, using event_id={}",
-                snap.events.len(),
-                first.event_id
-            );
-            return Some(first.event_id);
+        // CONTENT_MODIFIED is the only event type with both input and
+        // output content claims pointing at distinct bytes. Filter to
+        // those, then fetch the input content for each candidate and
+        // accept the first one whose bytes still match the expected
+        // shape. On NiFi 2.9.0 clustered, content claims are GC'd
+        // aggressively under load — a CONTENT_MODIFIED event from
+        // earlier in the harness run may have its claim recycled to
+        // hold bytes from an unrelated pipeline.
+        let candidates: Vec<&_> = snap
+            .events
+            .iter()
+            .filter(|e| e.event_type == "CONTENT_MODIFIED")
+            .collect();
+        for candidate in &candidates {
+            let input = match client
+                .provenance_content_range(candidate.event_id, ContentSide::Input, 0, 4096)
+                .await
+            {
+                Ok(s) => s.bytes,
+                Err(_) => continue,
+            };
+            if input_validator(&input) {
+                eprintln!(
+                    "  {component_label}: {} events, using CONTENT_MODIFIED event_id={} (input shape ok)",
+                    snap.events.len(),
+                    candidate.event_id
+                );
+                return Some(candidate.event_id);
+            }
         }
         if std::time::Instant::now() >= deadline {
-            eprintln!("  no {component_label} events after 2 min on {version} — skipping");
+            eprintln!(
+                "  no CONTENT_MODIFIED {component_label} event with valid input shape after 2 min on {version} — skipping"
+            );
             return None;
         }
-        eprintln!("  no {component_label} events yet; retrying in 10 s …");
+        eprintln!(
+            "  no validated {component_label} events yet ({} candidates); retrying in 10 s …",
+            candidates.len()
+        );
         tokio::time::sleep(Duration::from_secs(10)).await;
     }
 }
@@ -187,10 +221,25 @@ async fn diff_pipeline_events_are_diffable_against_all_fixture_versions() {
             .unwrap_or_else(|e| panic!("root_pg_status on {version} failed: {e:?}"));
 
         // 1. UpdateRecord-json: JSON ↔ JSON (same mime, diffable).
+        // Validate the input is the diff-pipeline sensor JSON array
+        // (starts with `[` and contains a SENSOR- record). This rejects
+        // events whose content claims have been GC'd and now hold
+        // unrelated bytes from sibling pipelines.
+        let json_validator = |bytes: &[u8]| {
+            std::str::from_utf8(bytes)
+                .map(|s| s.trim_start().starts_with('[') && s.contains("SENSOR-"))
+                .unwrap_or(false)
+        };
         if let Some(upd_json_id) =
             find_processor_by_name_in_pg(&snapshot.nodes, "diff-pipeline", "UpdateRecord-json")
-            && let Some(event_id) =
-                wait_for_event(&client, &upd_json_id, version, "UpdateRecord-json").await
+            && let Some(event_id) = wait_for_event(
+                &client,
+                &upd_json_id,
+                version,
+                "UpdateRecord-json",
+                json_validator,
+            )
+            .await
             && let Some((input, output)) =
                 fetch_both_sides(&client, event_id, version, "UpdateRecord-json").await
         {
@@ -228,11 +277,18 @@ async fn diff_pipeline_events_are_diffable_against_all_fixture_versions() {
         }
 
         // 2. ConvertRecord: JSON ↔ CSV (mime mismatch; exercises the
-        //    diff-disabled path at the Tracer level).
+        //    diff-disabled path at the Tracer level). Same validator
+        //    as UpdateRecord-json: input is the JSON sensor array.
         if let Some(convert_id) =
             find_processor_by_name_in_pg(&snapshot.nodes, "diff-pipeline", "ConvertRecord")
-            && let Some(event_id) =
-                wait_for_event(&client, &convert_id, version, "ConvertRecord").await
+            && let Some(event_id) = wait_for_event(
+                &client,
+                &convert_id,
+                version,
+                "ConvertRecord",
+                json_validator,
+            )
+            .await
             && let Some((input, output)) =
                 fetch_both_sides(&client, event_id, version, "ConvertRecord").await
         {
@@ -261,10 +317,22 @@ async fn diff_pipeline_events_are_diffable_against_all_fixture_versions() {
         }
 
         // 3. UpdateRecord-csv: CSV ↔ CSV (same mime, diffable).
+        // Validator: input is CSV with the sensor header.
+        let csv_validator = |bytes: &[u8]| {
+            std::str::from_utf8(bytes)
+                .map(|s| s.contains("SENSOR-") && s.contains(','))
+                .unwrap_or(false)
+        };
         if let Some(upd_csv_id) =
             find_processor_by_name_in_pg(&snapshot.nodes, "diff-pipeline", "UpdateRecord-csv")
-            && let Some(event_id) =
-                wait_for_event(&client, &upd_csv_id, version, "UpdateRecord-csv").await
+            && let Some(event_id) = wait_for_event(
+                &client,
+                &upd_csv_id,
+                version,
+                "UpdateRecord-csv",
+                csv_validator,
+            )
+            .await
             && let Some((input, output)) =
                 fetch_both_sides(&client, event_id, version, "UpdateRecord-csv").await
         {

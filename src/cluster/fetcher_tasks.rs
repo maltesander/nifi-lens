@@ -625,6 +625,59 @@ mod standalone_409_tests {
     }
 }
 
+#[cfg(test)]
+mod map_res_tests {
+    use super::*;
+
+    #[test]
+    #[allow(clippy::field_reassign_with_default)]
+    fn map_res_remote_input_port_destination_uses_group_id() {
+        use nifi_rust_client::dynamic::types::{ConnectionEntity, ConnectionsEntity};
+        let mut entity = ConnectionEntity::default();
+        entity.id = Some("conn-1".into());
+        entity.source_id = Some("proc-1".into());
+        entity.source_type = "PROCESSOR".into();
+        entity.destination_id = Some("port-uuid-not-rpg".into());
+        entity.destination_type = "REMOTE_INPUT_PORT".into();
+        entity.destination_group_id = Some("rpg-uuid".into());
+
+        let mut conns = ConnectionsEntity::default();
+        conns.connections = Some(vec![entity]);
+
+        let out = map_res("ctx", "pg-1", Ok(conns)).expect("map_res ok");
+        let endpoints = out.by_connection.get("conn-1").expect("conn-1 present");
+        assert_eq!(
+            endpoints.destination_id, "rpg-uuid",
+            "remote input port destination must backfill the RPG group_id, not the port id"
+        );
+        assert_eq!(endpoints.source_id, "proc-1");
+    }
+
+    #[test]
+    #[allow(clippy::field_reassign_with_default)]
+    fn map_res_remote_output_port_source_uses_group_id() {
+        use nifi_rust_client::dynamic::types::{ConnectionEntity, ConnectionsEntity};
+        let mut entity = ConnectionEntity::default();
+        entity.id = Some("conn-2".into());
+        entity.source_id = Some("port-uuid-not-rpg".into());
+        entity.source_type = "REMOTE_OUTPUT_PORT".into();
+        entity.source_group_id = Some("rpg-uuid".into());
+        entity.destination_id = Some("proc-2".into());
+        entity.destination_type = "PROCESSOR".into();
+
+        let mut conns = ConnectionsEntity::default();
+        conns.connections = Some(vec![entity]);
+
+        let out = map_res("ctx", "pg-1", Ok(conns)).expect("map_res ok");
+        let endpoints = out.by_connection.get("conn-2").expect("conn-2 present");
+        assert_eq!(
+            endpoints.source_id, "rpg-uuid",
+            "remote output port source must backfill the RPG group_id, not the port id"
+        );
+        assert_eq!(endpoints.destination_id, "proc-2");
+    }
+}
+
 /// Fan-out fetch: one `/process-groups/{id}/connections` call per PG,
 /// executed concurrently with at most `concurrency` in-flight requests.
 /// Per-PG errors are passed through — the caller
@@ -668,6 +721,11 @@ async fn run_parallel(
 ///
 /// Mirrors the mapping `browser_tree` used to do inline before the
 /// fan-out moved into the cluster store.
+///
+/// For connections whose endpoint type is `REMOTE_OUTPUT_PORT` or
+/// `REMOTE_INPUT_PORT`, substitutes the parent RPG's `group_id` in place
+/// of the port's own id so `BrowserState::resolve_id` can match the
+/// arena entry.
 fn map_res(
     context: &str,
     pg_id: &str,
@@ -680,11 +738,30 @@ fn map_res(
                 let Some(conn_id) = entity.id.clone() else {
                     continue;
                 };
+                // REMOTE_*_PORT endpoints: the port UUID itself is not an arena entry;
+                // the parent RPG's UUID lives in `*_group_id`, so we substitute that
+                // for `BrowserState::resolve_id` to match the RPG arena row.
+                let source_id = if entity.source_type == "REMOTE_OUTPUT_PORT" {
+                    entity
+                        .source_group_id
+                        .clone()
+                        .unwrap_or_else(|| entity.source_id.clone().unwrap_or_default())
+                } else {
+                    entity.source_id.clone().unwrap_or_default()
+                };
+                let destination_id = if entity.destination_type == "REMOTE_INPUT_PORT" {
+                    entity
+                        .destination_group_id
+                        .clone()
+                        .unwrap_or_else(|| entity.destination_id.clone().unwrap_or_default())
+                } else {
+                    entity.destination_id.clone().unwrap_or_default()
+                };
                 by_connection.insert(
                     conn_id,
                     ConnectionEndpointIds {
-                        source_id: entity.source_id.clone().unwrap_or_default(),
-                        destination_id: entity.destination_id.clone().unwrap_or_default(),
+                        source_id,
+                        destination_id,
                     },
                 );
             }

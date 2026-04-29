@@ -1,5 +1,5 @@
 //! Integration test for the action-history paginator against the live
-//! `nifilens-fixture-v7` cluster. Verifies that the seeder's initial
+//! `nifilens-fixture-v8` cluster. Verifies that the seeder's initial
 //! setup creates auditable actions on the healthy-pipeline ConvertRecord
 //! processor and that `flow_actions_paginator` returns them filtered by
 //! `sourceId`.

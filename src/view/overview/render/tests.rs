@@ -206,6 +206,7 @@ fn snapshot_healthy_cluster() {
                 invalid: 0,
                 disabled: 1,
             },
+            remote_process_groups: crate::client::RemoteProcessGroupCounts::default(),
             process_group_ids: vec![],
             nodes: vec![],
         },
@@ -360,6 +361,7 @@ fn snapshot_unhealthy_cluster() {
                 invalid: 2,
                 disabled: 0,
             },
+            remote_process_groups: crate::client::RemoteProcessGroupCounts::default(),
             process_group_ids: vec![],
             nodes: vec![],
         },
@@ -479,6 +481,7 @@ fn snapshot_with_nodes_populated() {
                 invalid: 0,
                 disabled: 1,
             },
+            remote_process_groups: crate::client::RemoteProcessGroupCounts::default(),
             process_group_ids: vec![],
             nodes: vec![],
         },
@@ -800,6 +803,7 @@ fn seed_state_with_two_nodes() -> crate::app::state::AppState {
             invalid: 0,
             disabled: 1,
         },
+        remote_process_groups: crate::client::RemoteProcessGroupCounts::default(),
         process_group_ids: vec![],
         nodes: vec![],
     };
@@ -1098,4 +1102,36 @@ fn snapshot_nodes_list_cert_chips_mixed() {
     term.draw(|f| super::nodes::render_nodes_zone_at(f, f.area(), &state, false, fixed_now()))
         .unwrap();
     insta::assert_snapshot!("nodes_list_cert_chips_mixed", format!("{}", term.backend()));
+}
+
+#[test]
+fn components_table_includes_remote_pgs_row_when_rpgs_present() {
+    let mut state = OverviewState::new();
+    seed_controller_status(&mut state, ControllerStatusSnapshot::default());
+    seed_root_pg(
+        &mut state,
+        RootPgStatusSnapshot {
+            remote_process_groups: crate::client::RemoteProcessGroupCounts {
+                total: 3,
+                transmitting: 2,
+                not_transmitting: 1,
+            },
+            ..Default::default()
+        },
+    );
+    state.cs_counts = Some(crate::client::ControllerServiceCounts {
+        enabled: 0,
+        disabled: 0,
+        invalid: 0,
+    });
+    let out = render_to_string(&state);
+    assert!(
+        out.contains("Remote PGs"),
+        "missing Remote PGs row: {out:?}"
+    );
+    assert!(out.contains("  3"), "missing total: {out:?}");
+    assert!(
+        out.contains("TRANSMIT"),
+        "missing transmitting label: {out:?}"
+    );
 }

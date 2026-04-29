@@ -1,10 +1,10 @@
 ---
-source: src/view/overview/render/mod.rs
-assertion_line: 788
+source: src/view/overview/render/tests.rs
 expression: render_to_string(&state)
 ---
 "┌ Components ──────────────────────────────────────────────────────────────────────────────────────┐"
 "│loading…                                                                                          │"
+"│                                                                                                  │"
 "│                                                                                                  │"
 "│                                                                                                  │"
 "└──────────────────────────────────────────────────────────────────────────────────────────────────┘"
@@ -22,7 +22,6 @@ expression: render_to_string(&state)
 "┌ Unhealthy queues ────────────────────────────────────────────────────────────────────────────────┐"
 "│fill  queue                             src → dst                                         ffiles  │"
 "│                                        no queues reported yet                                    │"
-"│                                                                                                  │"
 "│                                                                                                  │"
 "│                                                                                                  │"
 "│                                                                                                  │"

@@ -75,6 +75,7 @@ mod tests {
                     out_count: i as u64,
                     queued_count: None,
                     task_time_ns: Some(i as u64),
+                    bytes_per_sec: None,
                 })
                 .collect(),
             generated_at: SystemTime::now(),

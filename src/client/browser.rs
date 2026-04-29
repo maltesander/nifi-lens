@@ -50,6 +50,7 @@ pub enum NodeKind {
     InputPort,
     OutputPort,
     ControllerService,
+    RemoteProcessGroup,
     Folder(FolderKind),
 }
 
@@ -81,6 +82,21 @@ pub enum NodeStatusSummary {
         state: String,
     },
     Port,
+    RemoteProcessGroup {
+        /// Wire value from `RemoteProcessGroupStatusSnapshotDto::transmission_status`.
+        /// Either "Transmitting" or "Not Transmitting" — verbatim, the
+        /// renderer matches on these strings.
+        transmission_status: String,
+        active_threads: u32,
+        flow_files_received: u32,
+        flow_files_sent: u32,
+        bytes_received: u64,
+        bytes_sent: u64,
+        /// Singular `target_uri` from the recursive snapshot. The
+        /// Identity-pane upgrades to `target_uris` (plural) when the
+        /// on-demand detail fetch returns it.
+        target_uri: String,
+    },
     Folder {
         count: u32,
     },
@@ -108,7 +124,8 @@ pub struct ConnectionEndpointIds {
 }
 
 /// Recursive walker that appends PG / processor / connection / input port
-/// / output port rows for one PG to `out`, then recurses into child PGs.
+/// / output port / remote process group rows for one PG to `out`, then
+/// recurses into child PGs.
 /// Controller-service rows are NOT appended here — the Browser reducer
 /// attaches those from the separate `ControllerServicesSnapshot.members`
 /// list because CS identity/state lives in a different API call.
@@ -215,6 +232,30 @@ pub fn walk_pg_nodes(
                 group_id: p.group_id.clone().unwrap_or_default(),
                 name: p.name.clone().unwrap_or_default(),
                 status_summary: NodeStatusSummary::Port,
+            });
+        }
+    }
+
+    if let Some(rpgs) = snap.remote_process_group_status_snapshots.as_ref() {
+        for entity in rpgs {
+            let Some(r) = entity.remote_process_group_status_snapshot.as_ref() else {
+                continue;
+            };
+            out.push(RawNode {
+                parent_idx: Some(pg_idx),
+                kind: NodeKind::RemoteProcessGroup,
+                id: r.id.clone().unwrap_or_default(),
+                group_id: r.group_id.clone().unwrap_or_default(),
+                name: r.name.clone().unwrap_or_default(),
+                status_summary: NodeStatusSummary::RemoteProcessGroup {
+                    transmission_status: r.transmission_status.clone().unwrap_or_default(),
+                    active_threads: r.active_thread_count.unwrap_or(0).max(0) as u32,
+                    flow_files_received: r.flow_files_received.unwrap_or(0).max(0) as u32,
+                    flow_files_sent: r.flow_files_sent.unwrap_or(0).max(0) as u32,
+                    bytes_received: r.bytes_received.unwrap_or(0).max(0) as u64,
+                    bytes_sent: r.bytes_sent.unwrap_or(0).max(0) as u64,
+                    target_uri: r.target_uri.clone().unwrap_or_default(),
+                },
             });
         }
     }
@@ -835,9 +876,180 @@ impl NifiClient {
     }
 }
 
+/// Identity + ports for a single Remote Process Group, fetched on
+/// demand by the Browser detail pane.
+#[derive(Debug, Clone)]
+pub struct RemoteProcessGroupDetail {
+    pub id: String,
+    pub name: String,
+    pub parent_group_id: Option<String>,
+    /// Resolved from `RemoteProcessGroupDto.target_uris` (plural) when
+    /// present, falling back to the legacy singular `target_uri`. Display
+    /// verbatim — may be a comma-separated round-robin list on newer NiFi.
+    pub target_uri: String,
+    pub target_secure: bool,
+    pub transport_protocol: String,
+    /// Wire string from `RemoteProcessGroupStatusDto.transmission_status`
+    /// (e.g. `"Transmitting"` / `"Not Transmitting"`).
+    pub transmission_status: String,
+    /// Wire string from `RemoteProcessGroupStatusDto.validation_status`
+    /// (e.g. `"VALID"` / `"INVALID"` / `"VALIDATING"`).
+    pub validation_status: String,
+    pub validation_errors: Vec<String>,
+    pub comments: String,
+    pub input_ports: Vec<RemotePortSummary>,
+    pub output_ports: Vec<RemotePortSummary>,
+    pub active_remote_input_port_count: u32,
+    pub inactive_remote_input_port_count: u32,
+    pub active_remote_output_port_count: u32,
+    pub inactive_remote_output_port_count: u32,
+}
+
+/// One remote port (input or output) as exposed by the remote NiFi.
+/// Display-only inside the RPG Identity pane; not an arena node.
+#[derive(Debug, Clone)]
+pub struct RemotePortSummary {
+    pub id: String,
+    pub name: String,
+    /// Synthesised from the DTO's boolean fields. `"MISSING"` when
+    /// `exists == Some(false)` (the port no longer exists on the remote
+    /// NiFi); `"RUNNING"` when `transmitting == Some(true)`;
+    /// otherwise `"STOPPED"`.
+    pub run_status: String,
+    pub concurrent_tasks: u32,
+    pub comments: String,
+}
+
+impl NifiClient {
+    /// Single-call detail fetch for an RPG. Wraps
+    /// `client.remoteprocessgroups().get_remote_process_group(id)` and
+    /// shapes `RemoteProcessGroupEntity.component` plus its nested
+    /// `contents` into a flat detail struct. `transmission_status` and
+    /// `validation_status` are read from `entity.status` (a
+    /// `RemoteProcessGroupStatusDto`), not from `component`.
+    pub async fn browser_remote_process_group_detail(
+        &self,
+        rpg_id: &str,
+    ) -> Result<RemoteProcessGroupDetail, NifiLensError> {
+        tracing::debug!(context = %self.context_name(), %rpg_id, "fetching RPG detail");
+        let entity = self
+            .inner
+            .remoteprocessgroups()
+            .get_remote_process_group(rpg_id)
+            .await
+            .map_err(|err| {
+                classify_or_fallback(self.context_name(), Box::new(err), |source| {
+                    NifiLensError::RemoteProcessGroupDetailFailed {
+                        context: self.context_name().to_string(),
+                        id: rpg_id.to_string(),
+                        source,
+                    }
+                })
+            })?;
+        let component = entity.component.unwrap_or_default();
+        let status = entity.status.unwrap_or_default();
+
+        let target_uri = component
+            .target_uris
+            .clone()
+            .filter(|s| !s.is_empty())
+            .or_else(|| component.target_uri.clone())
+            .unwrap_or_default();
+
+        let validation_errors = component.validation_errors.clone().unwrap_or_default();
+        let contents = component.contents.clone().unwrap_or_default();
+        let input_ports = contents
+            .input_ports
+            .unwrap_or_default()
+            .into_iter()
+            .map(remote_port_summary_from_dto)
+            .collect();
+        let output_ports = contents
+            .output_ports
+            .unwrap_or_default()
+            .into_iter()
+            .map(remote_port_summary_from_dto)
+            .collect();
+
+        Ok(RemoteProcessGroupDetail {
+            id: rpg_id.to_string(),
+            name: component.name.clone().unwrap_or_default(),
+            parent_group_id: component.parent_group_id.clone(),
+            target_uri,
+            target_secure: component.target_secure.unwrap_or(false),
+            transport_protocol: component.transport_protocol.clone().unwrap_or_default(),
+            transmission_status: status.transmission_status.unwrap_or_default(),
+            validation_status: status.validation_status.unwrap_or_default(),
+            validation_errors,
+            comments: component.comments.clone().unwrap_or_default(),
+            input_ports,
+            output_ports,
+            active_remote_input_port_count: component
+                .active_remote_input_port_count
+                .unwrap_or(0)
+                .max(0) as u32,
+            inactive_remote_input_port_count: component
+                .inactive_remote_input_port_count
+                .unwrap_or(0)
+                .max(0) as u32,
+            active_remote_output_port_count: component
+                .active_remote_output_port_count
+                .unwrap_or(0)
+                .max(0) as u32,
+            inactive_remote_output_port_count: component
+                .inactive_remote_output_port_count
+                .unwrap_or(0)
+                .max(0) as u32,
+        })
+    }
+}
+
+fn remote_port_summary_from_dto(
+    dto: nifi_rust_client::dynamic::types::RemoteProcessGroupPortDto,
+) -> RemotePortSummary {
+    let run_status = if dto.exists == Some(false) {
+        "MISSING"
+    } else if dto.transmitting == Some(true) {
+        "RUNNING"
+    } else {
+        "STOPPED"
+    }
+    .to_string();
+    RemotePortSummary {
+        id: dto.id.unwrap_or_default(),
+        name: dto.name.unwrap_or_default(),
+        run_status,
+        concurrent_tasks: dto.concurrently_schedulable_task_count.unwrap_or(0).max(0) as u32,
+        comments: dto.comments.unwrap_or_default(),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    async fn test_client(
+        server: &wiremock::MockServer,
+    ) -> std::sync::Arc<tokio::sync::RwLock<NifiClient>> {
+        use wiremock::matchers::{method, path};
+        use wiremock::{Mock, ResponseTemplate};
+        Mock::given(method("GET"))
+            .and(path("/nifi-api/flow/about"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!(
+                {"about": {"version": "2.6.0", "title": "NiFi"}}
+            )))
+            .mount(server)
+            .await;
+        let inner = nifi_rust_client::NifiClientBuilder::new(&server.uri())
+            .expect("builder")
+            .build_dynamic()
+            .expect("dynamic");
+        inner.detect_version().await.expect("detect_version");
+        let version = semver::Version::parse("2.6.0").expect("parse");
+        std::sync::Arc::new(tokio::sync::RwLock::new(NifiClient::from_parts(
+            inner, "test", version,
+        )))
+    }
 
     #[test]
     fn short_type_strips_package_prefix() {
@@ -855,6 +1067,144 @@ mod tests {
     #[test]
     fn short_type_empty_string() {
         assert_eq!(short_type(""), "");
+    }
+
+    #[test]
+    #[allow(clippy::field_reassign_with_default)]
+    fn walk_pg_nodes_emits_rpg_row_under_parent_pg() {
+        use nifi_rust_client::dynamic::types::{
+            ProcessGroupStatusSnapshotDto, RemoteProcessGroupStatusSnapshotDto,
+            RemoteProcessGroupStatusSnapshotEntity,
+        };
+        let mut rpg_dto = RemoteProcessGroupStatusSnapshotDto::default();
+        rpg_dto.id = Some("rpg-1".into());
+        rpg_dto.group_id = Some("pg-1".into());
+        rpg_dto.name = Some("MyRemoteSink".into());
+        rpg_dto.transmission_status = Some("Transmitting".into());
+        rpg_dto.active_thread_count = Some(2);
+        rpg_dto.flow_files_received = Some(5);
+        rpg_dto.flow_files_sent = Some(7);
+        rpg_dto.bytes_received = Some(100);
+        rpg_dto.bytes_sent = Some(200);
+        rpg_dto.target_uri = Some("https://nifi-east:8443/nifi".into());
+
+        let mut rpg_entity = RemoteProcessGroupStatusSnapshotEntity::default();
+        rpg_entity.id = Some("rpg-1".into());
+        rpg_entity.remote_process_group_status_snapshot = Some(rpg_dto);
+
+        let mut pg = ProcessGroupStatusSnapshotDto::default();
+        pg.id = Some("pg-1".into());
+        pg.name = Some("root".into());
+        pg.remote_process_group_status_snapshots = Some(vec![rpg_entity]);
+
+        let mut out = Vec::new();
+        walk_pg_nodes(&pg, None, &mut out);
+        assert_eq!(out.len(), 2);
+        assert!(matches!(out[0].kind, NodeKind::ProcessGroup));
+        assert!(matches!(out[1].kind, NodeKind::RemoteProcessGroup));
+        assert_eq!(out[1].id, "rpg-1");
+        assert_eq!(out[1].group_id, "pg-1");
+        assert_eq!(out[1].name, "MyRemoteSink");
+        assert_eq!(out[1].parent_idx, Some(0));
+        match &out[1].status_summary {
+            NodeStatusSummary::RemoteProcessGroup {
+                transmission_status,
+                active_threads,
+                flow_files_received,
+                flow_files_sent,
+                bytes_received,
+                bytes_sent,
+                target_uri,
+            } => {
+                assert_eq!(transmission_status, "Transmitting");
+                assert_eq!(*active_threads, 2);
+                assert_eq!(*flow_files_received, 5);
+                assert_eq!(*flow_files_sent, 7);
+                assert_eq!(*bytes_received, 100);
+                assert_eq!(*bytes_sent, 200);
+                assert_eq!(target_uri, "https://nifi-east:8443/nifi");
+            }
+            other => panic!("expected RemoteProcessGroup status_summary; got {other:?}"),
+        }
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn browser_remote_process_group_detail_returns_target_uris_and_ports() {
+        use wiremock::matchers::{method, path};
+        use wiremock::{Mock, MockServer, ResponseTemplate};
+
+        let mock = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path("/nifi-api/remote-process-groups/rpg-1"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "id": "rpg-1",
+                "component": {
+                    "id": "rpg-1",
+                    "name": "MyRemoteSink",
+                    "parentGroupId": "pg-1",
+                    "targetUri": "https://legacy:8443/nifi",
+                    "targetUris": "https://nifi-east:8443/nifi,https://nifi-west:8443/nifi",
+                    "targetSecure": true,
+                    "transportProtocol": "HTTP",
+                    "comments": "",
+                    "activeRemoteInputPortCount": 1,
+                    "inactiveRemoteInputPortCount": 0,
+                    "activeRemoteOutputPortCount": 0,
+                    "inactiveRemoteOutputPortCount": 1,
+                    "contents": {
+                        "inputPorts": [
+                            {
+                                "id": "ip-1",
+                                "name": "ingest",
+                                "transmitting": true,
+                                "concurrentlySchedulableTaskCount": 4,
+                                "comments": ""
+                            }
+                        ],
+                        "outputPorts": [
+                            {
+                                "id": "op-1",
+                                "name": "errors",
+                                "transmitting": false,
+                                "concurrentlySchedulableTaskCount": 1,
+                                "comments": "noisy"
+                            }
+                        ]
+                    }
+                },
+                "status": {
+                    "transmissionStatus": "Transmitting",
+                    "validationStatus": "VALID"
+                }
+            })))
+            .mount(&mock)
+            .await;
+        let client = test_client(&mock).await;
+        let guard = client.read().await;
+        let detail = guard
+            .browser_remote_process_group_detail("rpg-1")
+            .await
+            .expect("ok");
+        assert_eq!(detail.id, "rpg-1");
+        assert_eq!(detail.name, "MyRemoteSink");
+        assert_eq!(detail.parent_group_id.as_deref(), Some("pg-1"));
+        // target_uris (plural) wins over target_uri (singular legacy):
+        assert_eq!(
+            detail.target_uri,
+            "https://nifi-east:8443/nifi,https://nifi-west:8443/nifi"
+        );
+        assert!(detail.target_secure);
+        assert_eq!(detail.transport_protocol, "HTTP");
+        assert_eq!(detail.transmission_status, "Transmitting");
+        assert_eq!(detail.validation_status, "VALID");
+        assert_eq!(detail.input_ports.len(), 1);
+        assert_eq!(detail.input_ports[0].name, "ingest");
+        assert_eq!(detail.input_ports[0].run_status, "RUNNING");
+        assert_eq!(detail.output_ports.len(), 1);
+        assert_eq!(detail.output_ports[0].name, "errors");
+        assert_eq!(detail.output_ports[0].run_status, "STOPPED");
+        assert_eq!(detail.active_remote_input_port_count, 1);
+        assert_eq!(detail.inactive_remote_output_port_count, 1);
     }
 
     #[test]
