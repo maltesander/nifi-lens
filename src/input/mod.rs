@@ -11,6 +11,7 @@
 //! and its truncation priority.
 
 pub mod action;
+pub mod modal_gate;
 pub mod verb;
 
 // Re-exports: downstream code imports from `crate::input`, not the
@@ -566,7 +567,7 @@ impl KeyMap {
     }
 }
 
-fn chord_matches(chord: Chord, key: crossterm::event::KeyEvent) -> bool {
+pub(crate) fn chord_matches(chord: Chord, key: crossterm::event::KeyEvent) -> bool {
     if chord.leader.is_some() {
         return false; // leader combos are not dispatched directly
     }
