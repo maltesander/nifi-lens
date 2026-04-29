@@ -7,6 +7,7 @@ pub mod gauge;
 pub mod goto_menu;
 pub mod help_modal;
 pub mod hint_bar;
+pub mod modal;
 pub mod node_badge;
 pub mod panel;
 pub mod run_icon;
