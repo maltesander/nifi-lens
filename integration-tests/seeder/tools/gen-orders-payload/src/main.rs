@@ -22,6 +22,8 @@ const REGIONS: &[(&str, &str)] = &[("EU", "EUR"), ("US", "USD"), ("APAC", "SGD")
 
 const STATUSES: &[&str] = &["PENDING", "CONFIRMED", "SHIPPED", "CANCELLED"];
 
+const SKU_LETTERS: &[u8; 26] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZ";
+
 fn main() {
     let mut rng = ChaCha8Rng::seed_from_u64(RNG_SEED);
     let mut out = String::with_capacity(MIB);
@@ -35,7 +37,12 @@ fn main() {
         let price_cents: u32 = rng.gen_range(500..=9999);
         let unit_price = price_cents as f64 / 100.0;
         let subtotal = unit_price * qty as f64;
-        let sku_letter = (b'A' + rng.gen_range(0..26)) as char;
+        // Type the index as u8 (matching the original `b'A' + ...`) so the
+        // rand crate's sampling consumes the same number of RNG bytes —
+        // otherwise indexing into SKU_LETTERS infers usize and shifts the
+        // whole stream off the committed asset.
+        let sku_idx: u8 = rng.gen_range(0..26);
+        let sku_letter = SKU_LETTERS[sku_idx as usize] as char;
         let sku_num: u32 = rng.gen_range(0..1000);
         let cust: u32 = rng.gen_range(0..100_000);
         let status = STATUSES[rng.gen_range(0..STATUSES.len())];
@@ -46,9 +53,9 @@ fn main() {
         let minute: u32 = rng.gen_range(0..60);
         let second: u32 = rng.gen_range(0..60);
 
-        write!(
+        writeln!(
             &mut out,
-            "ORD-{:07},CUST-{:05},{},SKU-{}{:03},{},{:.2},{},{:.2},{},2026-04-{:02}T{:02}:{:02}:{:02}Z\n",
+            "ORD-{:07},CUST-{:05},{},SKU-{}{:03},{},{:.2},{},{:.2},{},2026-04-{:02}T{:02}:{:02}:{:02}Z",
             i,
             cust,
             region,
