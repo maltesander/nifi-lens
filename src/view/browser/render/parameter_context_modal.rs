@@ -19,9 +19,6 @@ use crate::view::browser::state::{
 use crate::widget::panel::Panel;
 use crate::widget::search::{MatchSpan, SearchState};
 
-const MIN_WIDTH: u16 = 60;
-const MIN_HEIGHT: u16 = 20;
-
 /// Resolved-flat / by-context table column widths. Order: flags | name |
 /// value | from. The renderer and `searchable_body` MUST agree on these
 /// widths so search-match byte offsets align with the rendered cells.
@@ -73,10 +70,7 @@ pub fn render(
     browser: &BrowserState,
     snapshot: &ClusterSnapshot,
 ) {
-    if area.width < MIN_WIDTH || area.height < MIN_HEIGHT {
-        let line = Line::from(Span::styled("terminal too small", theme::muted()));
-        frame.render_widget(Clear, area);
-        frame.render_widget(Paragraph::new(line).alignment(Alignment::Center), area);
+    if crate::widget::modal::render_too_small(frame, area) {
         return;
     }
 
@@ -795,18 +789,7 @@ fn render_footer_status(frame: &mut Frame, area: Rect, modal: &ParameterContextM
 fn render_footer_hint(frame: &mut Frame, area: Rect) {
     use crate::input::ParameterContextModalVerb;
     use crate::input::Verb;
-
-    let parts: Vec<String> = ParameterContextModalVerb::all()
-        .iter()
-        .copied()
-        .filter(|v| v.show_in_hint_bar() && !v.hint().is_empty())
-        .map(|v| format!("[{}] {}", v.chord().display(), v.hint()))
-        .collect();
-    let text = parts.join(" · ");
-    frame.render_widget(
-        Paragraph::new(Line::from(Span::styled(text, theme::muted()))),
-        area,
-    );
+    crate::widget::modal::render_verb_hint_strip(frame, area, ParameterContextModalVerb::all());
 }
 
 #[cfg(test)]
