@@ -1,9 +1,22 @@
-//! sink-us/ child PG. Stubbed; filled in Task 9.
+//! sink-us/ — bound to fixture-pc-region-us (chain depth 3).
+//!
+//! Stages:
+//!   in-us (input port)
+//!   UpdateAttribute-tag-region (compliance = #{compliance_tag}, region = #{region_filter})
+//!   ConvertRecord (JSON -> Parquet)        — uses scoped Parquet CSes
+//!   UpdateRecord-parquet-tag (adds audit_id; CONTENT_MODIFIED — Parquet↔Parquet diff)
+//!   LogAttribute-INFO
 
 use nifi_rust_client::dynamic::DynamicClient;
 
-use crate::error::{Result, SeederError};
-use crate::fixture::parameter_contexts::OrdersContextIds;
+use crate::entities::{make_processor, props};
+use crate::error::Result;
+use crate::fixture::common::{
+    create_child_pg, create_connection_in_pg, create_input_port, create_processor,
+    start_input_port, start_processor, wait_for_valid,
+};
+use crate::fixture::parameter_contexts::{self, OrdersContextIds};
+use crate::fixture::services::create_and_enable_cs_inline;
 
 pub struct SinkUsIds {
     pub pg_id: String,
@@ -11,11 +24,158 @@ pub struct SinkUsIds {
 }
 
 pub async fn seed(
-    _client: &DynamicClient,
-    _orders_pg_id: &str,
-    _contexts: &OrdersContextIds,
+    client: &DynamicClient,
+    orders_pg_id: &str,
+    contexts: &OrdersContextIds,
 ) -> Result<SinkUsIds> {
-    Err(SeederError::Invariant {
-        message: "sink_us::seed not yet implemented".into(),
-    })
+    tracing::info!("seeding orders-pipeline/sink-us");
+
+    let pg_id = create_child_pg(client, orders_pg_id, "sink-us").await?;
+    parameter_contexts::bind(client, &pg_id, &contexts.region_us_id).await?;
+
+    // Scoped Parquet reader/writer + JSON reader.
+    let json_reader_id = create_and_enable_cs_inline(
+        client,
+        &pg_id,
+        "orders-json-reader-us",
+        "org.apache.nifi.json.JsonTreeReader",
+    )
+    .await?;
+    let parquet_reader_id = create_and_enable_cs_inline(
+        client,
+        &pg_id,
+        "orders-parquet-reader",
+        "org.apache.nifi.parquet.ParquetReader",
+    )
+    .await?;
+    let parquet_writer_id = create_and_enable_cs_inline(
+        client,
+        &pg_id,
+        "orders-parquet-writer",
+        "org.apache.nifi.parquet.ParquetRecordSetWriter",
+    )
+    .await?;
+
+    let in_port_id = create_input_port(client, &pg_id, "in-us").await?;
+
+    let tag_id = create_processor(
+        client,
+        &pg_id,
+        make_processor(
+            "UpdateAttribute-tag-region",
+            "org.apache.nifi.processors.attributes.UpdateAttribute",
+            props(&[
+                ("compliance", "#{compliance_tag}"),
+                ("region", "#{region_filter}"),
+            ]),
+            None,
+            vec![],
+        ),
+        "UpdateAttribute-tag-region",
+    )
+    .await?;
+
+    let convert_id = create_processor(
+        client,
+        &pg_id,
+        make_processor(
+            "ConvertRecord",
+            "org.apache.nifi.processors.standard.ConvertRecord",
+            props(&[
+                ("Record Reader", &json_reader_id),
+                ("Record Writer", &parquet_writer_id),
+            ]),
+            None,
+            vec!["failure"],
+        ),
+        "ConvertRecord",
+    )
+    .await?;
+
+    let upd_id = create_processor(
+        client,
+        &pg_id,
+        make_processor(
+            "UpdateRecord-parquet-tag",
+            "org.apache.nifi.processors.standard.UpdateRecord",
+            props(&[
+                ("Record Reader", &parquet_reader_id),
+                ("Record Writer", &parquet_writer_id),
+                // Add a synthesized audit_id field.
+                ("/audit_id", "${UUID()}"),
+            ]),
+            None,
+            vec!["failure"],
+        ),
+        "UpdateRecord-parquet-tag",
+    )
+    .await?;
+
+    let log_id = create_processor(
+        client,
+        &pg_id,
+        make_processor(
+            "LogAttribute-INFO",
+            "org.apache.nifi.processors.standard.LogAttribute",
+            props(&[("Log Level", "info"), ("Log Payload", "false")]),
+            None,
+            vec!["success"],
+        ),
+        "LogAttribute-INFO",
+    )
+    .await?;
+
+    create_connection_in_pg(
+        client,
+        &pg_id,
+        &in_port_id,
+        "INPUT_PORT",
+        &tag_id,
+        "PROCESSOR",
+        vec![],
+    )
+    .await?;
+    create_connection_in_pg(
+        client,
+        &pg_id,
+        &tag_id,
+        "PROCESSOR",
+        &convert_id,
+        "PROCESSOR",
+        vec!["success"],
+    )
+    .await?;
+    create_connection_in_pg(
+        client,
+        &pg_id,
+        &convert_id,
+        "PROCESSOR",
+        &upd_id,
+        "PROCESSOR",
+        vec!["success"],
+    )
+    .await?;
+    create_connection_in_pg(
+        client,
+        &pg_id,
+        &upd_id,
+        "PROCESSOR",
+        &log_id,
+        "PROCESSOR",
+        vec!["success"],
+    )
+    .await?;
+
+    for (id, name) in [
+        (&log_id, "LogAttribute-INFO"),
+        (&upd_id, "UpdateRecord-parquet-tag"),
+        (&convert_id, "ConvertRecord"),
+        (&tag_id, "UpdateAttribute-tag-region"),
+    ] {
+        wait_for_valid(client, id, name).await?;
+        start_processor(client, id).await?;
+    }
+    start_input_port(client, &in_port_id).await?;
+
+    Ok(SinkUsIds { pg_id, in_port_id })
 }
