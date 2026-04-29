@@ -7,6 +7,7 @@ pub mod diff;
 pub mod healthy;
 pub mod invalid;
 pub mod noisy;
+pub mod parameter_contexts;
 pub mod parameterized;
 pub mod payload;
 pub mod registry;
