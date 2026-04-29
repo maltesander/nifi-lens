@@ -188,8 +188,13 @@ pub async fn seed(
         make_processor(
             "RouteOnAttribute-region",
             "org.apache.nifi.processors.standard.RouteOnAttribute",
+            // Default Routing Strategy ("Route to Property name") emits
+            // one relationship per dynamic property — flowfiles clone to
+            // every matching downstream. The "Route to 'matched' if all
+            // match" strategy would collapse these into a single
+            // `matched`/`unmatched` pair, breaking the per-region
+            // connections below.
             props(&[
-                ("Routing Strategy", "Route to 'matched' if all match"),
                 ("region-eu", "${region_filter:contains('EU')}"),
                 ("region-us", "${region_filter:contains('US')}"),
                 ("region-apac", "${region_filter:contains('APAC')}"),
