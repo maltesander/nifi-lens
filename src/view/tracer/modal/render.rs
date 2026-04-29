@@ -660,7 +660,7 @@ pub(super) fn render_search_strip(frame: &mut Frame, area: Rect, modal: &Content
 /// and cannot be constructed here due to split borrow constraints).
 pub(super) fn render_footer_hint(frame: &mut Frame, area: Rect, modal: &ContentModalState) {
     use crate::input::Verb;
-    use crate::input::verb::ContentModalVerb;
+    use crate::input::verb::{CommonVerb, ContentModalVerb};
 
     // Inline enabled check mirroring ContentModalVerb::enabled() but
     // operating on the modal reference directly (no AppState needed).
@@ -669,7 +669,8 @@ pub(super) fn render_footer_hint(frame: &mut Frame, area: Rect, modal: &ContentM
             ContentModalVerb::JumpDiff => {
                 matches!(modal.diffable, crate::view::tracer::state::Diffable::Ok)
             }
-            ContentModalVerb::SearchNext | ContentModalVerb::SearchPrev => {
+            ContentModalVerb::Common(CommonVerb::SearchNext)
+            | ContentModalVerb::Common(CommonVerb::SearchPrev) => {
                 modal.search.as_ref().map(|s| s.committed).unwrap_or(false)
             }
             ContentModalVerb::HunkNext | ContentModalVerb::HunkPrev => {

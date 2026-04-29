@@ -1119,7 +1119,7 @@ fn modal_search_backspace_removes_char() {
 #[test]
 fn modal_search_next_scrolls_offset_into_viewport() {
     use crate::client::tracer::ContentRender;
-    use crate::input::ContentModalVerb;
+    use crate::input::{CommonVerb, ContentModalVerb};
     use crate::view::tracer::state::{
         ContentModalHeader, ContentModalState, ContentModalTab, Diffable, SideBuffer,
     };
@@ -1196,7 +1196,7 @@ fn modal_search_next_scrolls_offset_into_viewport() {
     // Dispatch SearchNext via handle_verb.
     let r = super::TracerHandler::handle_verb(
         &mut s,
-        crate::input::ViewVerb::ContentModal(ContentModalVerb::SearchNext),
+        crate::input::ViewVerb::ContentModal(ContentModalVerb::Common(CommonVerb::SearchNext)),
     )
     .expect("SearchNext should be consumed");
     assert!(r.redraw);

@@ -469,65 +469,52 @@ impl Verb for TracerVerb {
 /// Verbs that are only active when the content viewer modal is open.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum ContentModalVerb {
+    Common(CommonVerb),
     SwitchTabNext,
     SwitchTabPrev,
     JumpInput,
     JumpOutput,
     JumpDiff,
-    OpenSearch,
-    SearchNext,
-    SearchPrev,
     HunkNext,
     HunkPrev,
-    Copy,
     Save,
-    Close,
 }
 
 impl Verb for ContentModalVerb {
     fn chord(self) -> Chord {
         match self {
+            Self::Common(c) => c.chord(),
             Self::SwitchTabNext => Chord::simple(KeyCode::Tab),
             Self::SwitchTabPrev => Chord::simple(KeyCode::BackTab),
             Self::JumpInput => Chord::simple(KeyCode::Char('1')),
             Self::JumpOutput => Chord::simple(KeyCode::Char('2')),
             Self::JumpDiff => Chord::simple(KeyCode::Char('3')),
-            Self::OpenSearch => Chord::simple(KeyCode::Char('/')),
-            Self::SearchNext => Chord::simple(KeyCode::Char('n')),
-            Self::SearchPrev => Chord::shift(KeyCode::Char('N')),
             Self::HunkNext => Chord::ctrl(KeyCode::Down),
             Self::HunkPrev => Chord::ctrl(KeyCode::Up),
-            Self::Copy => Chord::simple(KeyCode::Char('c')),
             Self::Save => Chord::simple(KeyCode::Char('s')),
-            Self::Close => Chord::simple(KeyCode::Esc),
         }
     }
     fn label(self) -> &'static str {
         match self {
+            Self::Common(c) => c.label(),
             Self::SwitchTabNext => "switch tab forward",
             Self::SwitchTabPrev => "switch tab backward",
             Self::JumpInput => "jump to Input tab",
             Self::JumpOutput => "jump to Output tab",
             Self::JumpDiff => "jump to Diff tab",
-            Self::OpenSearch => "open text search",
-            Self::SearchNext => "next match",
-            Self::SearchPrev => "previous match",
             Self::HunkNext => "next change",
             Self::HunkPrev => "previous change",
-            Self::Copy => "copy visible body to clipboard",
             Self::Save => "save full content to file",
-            Self::Close => "close modal",
         }
     }
     fn hint(self) -> &'static str {
         match self {
+            Self::Common(c) => c.hint(),
             Self::SwitchTabNext => "switch",
-            Self::OpenSearch => "find",
-            Self::SearchNext => "match",
             Self::HunkNext => "change",
-            Self::Copy => "copy",
             Self::Save => "save",
-            Self::Close => "close",
+            // SwitchTabPrev / JumpInput / JumpOutput / JumpDiff / HunkPrev
+            // have no hint — they're surfaced in the `?` help modal only.
             _ => "",
         }
     }
@@ -537,13 +524,13 @@ impl Verb for ContentModalVerb {
     fn show_in_hint_bar(self) -> bool {
         matches!(
             self,
-            Self::SwitchTabNext
-                | Self::OpenSearch
-                | Self::SearchNext
+            Self::Common(CommonVerb::OpenSearch)
+                | Self::Common(CommonVerb::SearchNext)
+                | Self::Common(CommonVerb::Copy)
+                | Self::Common(CommonVerb::Close)
+                | Self::SwitchTabNext
                 | Self::HunkNext
-                | Self::Copy
                 | Self::Save
-                | Self::Close
         )
     }
     fn enabled(self, ctx: &HintContext<'_>) -> bool {
@@ -554,7 +541,7 @@ impl Verb for ContentModalVerb {
             Self::JumpDiff => {
                 matches!(modal.diffable, crate::view::tracer::state::Diffable::Ok)
             }
-            Self::SearchNext | Self::SearchPrev => {
+            Self::Common(CommonVerb::SearchNext) | Self::Common(CommonVerb::SearchPrev) => {
                 modal.search.as_ref().map(|s| s.committed).unwrap_or(false)
             }
             Self::HunkNext | Self::HunkPrev => {
@@ -575,14 +562,14 @@ impl Verb for ContentModalVerb {
             Self::JumpInput,
             Self::JumpOutput,
             Self::JumpDiff,
-            Self::OpenSearch,
-            Self::SearchNext,
-            Self::SearchPrev,
+            Self::Common(CommonVerb::OpenSearch),
+            Self::Common(CommonVerb::SearchNext),
+            Self::Common(CommonVerb::SearchPrev),
             Self::HunkNext,
             Self::HunkPrev,
-            Self::Copy,
+            Self::Common(CommonVerb::Copy),
             Self::Save,
-            Self::Close,
+            Self::Common(CommonVerb::Close),
         ]
     }
 }

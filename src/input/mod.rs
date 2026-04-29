@@ -1086,7 +1086,9 @@ mod keymap_tests {
                 false,
                 &dummy_state()
             ),
-            InputEvent::View(ViewVerb::ContentModal(ContentModalVerb::Copy))
+            InputEvent::View(ViewVerb::ContentModal(ContentModalVerb::Common(
+                CommonVerb::Copy
+            )))
         );
         // Modal open: `i` is not a ContentModalVerb chord → Unmapped
         assert_eq!(
@@ -1121,8 +1123,9 @@ mod keymap_tests {
     #[test]
     fn content_modal_esc_becomes_close_not_focus_ascend() {
         // Esc is normally FocusAction::Ascend (priority slot), but
-        // ContentModalVerb::Close binds Esc and the modal-open path checks
-        // ContentModalVerb BEFORE falling through to FocusAction.
+        // ContentModalVerb::Common(CommonVerb::Close) binds Esc and the
+        // modal-open path checks ContentModalVerb BEFORE falling through to
+        // FocusAction.
         let km = KeyMap::default();
         assert_eq!(
             km.translate(
@@ -1135,7 +1138,9 @@ mod keymap_tests {
                 false,
                 &dummy_state()
             ),
-            InputEvent::View(ViewVerb::ContentModal(ContentModalVerb::Close))
+            InputEvent::View(ViewVerb::ContentModal(ContentModalVerb::Common(
+                CommonVerb::Close
+            )))
         );
     }
 

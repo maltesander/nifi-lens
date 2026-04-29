@@ -1014,14 +1014,14 @@ fn handle_content_modal_verb(
     state: &mut AppState,
     v: crate::input::ContentModalVerb,
 ) -> UpdateResult {
-    use crate::input::ContentModalVerb;
+    use crate::input::{CommonVerb, ContentModalVerb};
     use crate::view::tracer::state::{
         self as ts, ContentModalTab, Diffable, close_content_modal, content_modal_copy_text,
         hunk_next, hunk_prev, switch_content_modal_tab,
     };
 
     match v {
-        ContentModalVerb::Close => {
+        ContentModalVerb::Common(CommonVerb::Close) => {
             // Esc cancels an active search first (input-active Esc is
             // already handled in `handle_content_modal_search_input`;
             // this path handles Esc after a search has been committed).
@@ -1045,7 +1045,7 @@ fn handle_content_modal_verb(
             }
         }
 
-        ContentModalVerb::Copy => {
+        ContentModalVerb::Common(CommonVerb::Copy) => {
             if let Some(text) = content_modal_copy_text(&state.tracer) {
                 super::clipboard_copy(state, &text);
             }
@@ -1214,7 +1214,7 @@ fn handle_content_modal_verb(
             }
         }
 
-        ContentModalVerb::OpenSearch => {
+        ContentModalVerb::Common(CommonVerb::OpenSearch) => {
             use crate::widget::search::SearchState;
             if let Some(modal) = state.tracer.content_modal.as_mut() {
                 modal.search = Some(SearchState {
@@ -1230,7 +1230,7 @@ fn handle_content_modal_verb(
                 queue_listing_followup: None,
             }
         }
-        ContentModalVerb::SearchNext => {
+        ContentModalVerb::Common(CommonVerb::SearchNext) => {
             if let Some(modal) = state.tracer.content_modal.as_mut()
                 && let Some(s) = modal.search.as_mut()
                 && s.committed
@@ -1253,7 +1253,7 @@ fn handle_content_modal_verb(
                 queue_listing_followup: None,
             }
         }
-        ContentModalVerb::SearchPrev => {
+        ContentModalVerb::Common(CommonVerb::SearchPrev) => {
             if let Some(modal) = state.tracer.content_modal.as_mut()
                 && let Some(s) = modal.search.as_mut()
                 && s.committed
@@ -1305,6 +1305,9 @@ fn handle_content_modal_verb(
                 UpdateResult::default()
             }
         }
+        // Refresh is not bound inside the content modal — keep the match
+        // exhaustive over the lifted Common chord set.
+        ContentModalVerb::Common(CommonVerb::Refresh) => UpdateResult::default(),
     }
 }
 
