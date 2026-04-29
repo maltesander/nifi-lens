@@ -647,7 +647,7 @@ fn render_detail(
             port::render(frame, detail_area, d, state, bulletins, &state.detail_focus);
         }
         Some(NodeDetail::RemoteProcessGroup(d)) => {
-            rpg::render(frame, detail_area, d, state);
+            rpg::render(frame, detail_area, d, state, &state.detail_focus);
         }
         None => {
             let lines = vec![

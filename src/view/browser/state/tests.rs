@@ -3031,3 +3031,197 @@ fn open_sparkline_for_selection_aborts_previous_handle() {
             .await;
     });
 }
+
+// --- Remote Process Group focusable sections -----------------------------
+
+fn seeded_rpg_detail(
+    validation_errors: Vec<String>,
+    input_ports: Vec<crate::client::browser::RemotePortSummary>,
+    output_ports: Vec<crate::client::browser::RemotePortSummary>,
+) -> crate::client::browser::RemoteProcessGroupDetail {
+    crate::client::browser::RemoteProcessGroupDetail {
+        id: "rpg-1".into(),
+        name: "Sink".into(),
+        parent_group_id: Some("g-0".into()),
+        target_uri: "https://remote/nifi".into(),
+        target_secure: true,
+        transport_protocol: "HTTP".into(),
+        transmission_status: "Transmitting".into(),
+        validation_status: if validation_errors.is_empty() {
+            "VALID".into()
+        } else {
+            "INVALID".into()
+        },
+        validation_errors,
+        comments: String::new(),
+        input_ports,
+        output_ports,
+        active_remote_input_port_count: 0,
+        inactive_remote_input_port_count: 0,
+        active_remote_output_port_count: 0,
+        inactive_remote_output_port_count: 0,
+    }
+}
+
+fn port(id: &str, name: &str) -> crate::client::browser::RemotePortSummary {
+    crate::client::browser::RemotePortSummary {
+        id: id.into(),
+        name: name.into(),
+        run_status: "RUNNING".into(),
+        concurrent_tasks: 1,
+        comments: String::new(),
+    }
+}
+
+#[test]
+fn for_node_rpg_returns_input_and_output_ports() {
+    let s = DetailSections::for_node(NodeKind::RemoteProcessGroup);
+    assert_eq!(
+        s.0,
+        &[DetailSection::InputPorts, DetailSection::OutputPorts][..]
+    );
+}
+
+#[test]
+fn for_node_detail_rpg_with_validation_inserts_validation_errors_first() {
+    let s = DetailSections::for_node_detail(NodeKind::RemoteProcessGroup, true);
+    assert_eq!(
+        s.0,
+        &[
+            DetailSection::ValidationErrors,
+            DetailSection::InputPorts,
+            DetailSection::OutputPorts,
+        ][..]
+    );
+}
+
+#[test]
+fn for_node_detail_rpg_without_validation_matches_for_node() {
+    let s = DetailSections::for_node_detail(NodeKind::RemoteProcessGroup, false);
+    assert_eq!(
+        s.0,
+        DetailSections::for_node(NodeKind::RemoteProcessGroup).0
+    );
+}
+
+fn rpg_state_with_detail(detail: crate::client::browser::RemoteProcessGroupDetail) -> BrowserState {
+    let mut s = BrowserState::new();
+    apply_tree_snapshot(&mut s, snap(vec![pg("root", None, 0), rpg("rpg-1", 0)]));
+    // Move selection from root (0) to the RPG (1).
+    s.move_down();
+    s.details.insert(1, NodeDetail::RemoteProcessGroup(detail));
+    s
+}
+
+#[test]
+fn section_len_rpg_input_ports_counts_ports() {
+    use std::collections::VecDeque;
+    let detail = seeded_rpg_detail(
+        vec![],
+        vec![port("ip-1", "ingest"), port("ip-2", "events")],
+        vec![],
+    );
+    let s = rpg_state_with_detail(detail);
+    let bulletins = VecDeque::new();
+    assert_eq!(s.section_len(DetailSection::InputPorts, &bulletins), 2);
+}
+
+#[test]
+fn section_len_rpg_output_ports_counts_ports() {
+    use std::collections::VecDeque;
+    let detail = seeded_rpg_detail(vec![], vec![], vec![port("op-1", "errors")]);
+    let s = rpg_state_with_detail(detail);
+    let bulletins = VecDeque::new();
+    assert_eq!(s.section_len(DetailSection::OutputPorts, &bulletins), 1);
+}
+
+#[test]
+fn section_len_rpg_validation_errors_counts_messages() {
+    use std::collections::VecDeque;
+    let detail = seeded_rpg_detail(
+        vec!["Target unreachable".into(), "Auth failed".into()],
+        vec![],
+        vec![],
+    );
+    let s = rpg_state_with_detail(detail);
+    let bulletins = VecDeque::new();
+    assert_eq!(
+        s.section_len(DetailSection::ValidationErrors, &bulletins),
+        2
+    );
+}
+
+#[test]
+fn focused_row_copy_value_rpg_input_port_returns_name() {
+    use crate::view::browser::state::DetailFocus;
+    use std::collections::VecDeque;
+    let detail = seeded_rpg_detail(
+        vec![],
+        vec![port("ip-1", "ingest"), port("ip-2", "events")],
+        vec![],
+    );
+    let mut s = rpg_state_with_detail(detail);
+    // Section idx 0 = InputPorts (no validation).
+    let mut rows = [0usize; MAX_DETAIL_SECTIONS];
+    rows[0] = 1;
+    s.detail_focus = DetailFocus::Section {
+        idx: 0,
+        rows,
+        x_offsets: [0; MAX_DETAIL_SECTIONS],
+    };
+    let bulletins = VecDeque::new();
+    assert_eq!(
+        s.focused_row_copy_value(&bulletins).as_deref(),
+        Some("events")
+    );
+}
+
+#[test]
+fn focused_row_copy_value_rpg_output_port_returns_name() {
+    use crate::view::browser::state::DetailFocus;
+    use std::collections::VecDeque;
+    let detail = seeded_rpg_detail(
+        vec![],
+        vec![],
+        vec![port("op-1", "errors"), port("op-2", "deadletter")],
+    );
+    let mut s = rpg_state_with_detail(detail);
+    // Section idx 1 = OutputPorts (no validation).
+    let mut rows = [0usize; MAX_DETAIL_SECTIONS];
+    rows[1] = 0;
+    s.detail_focus = DetailFocus::Section {
+        idx: 1,
+        rows,
+        x_offsets: [0; MAX_DETAIL_SECTIONS],
+    };
+    let bulletins = VecDeque::new();
+    assert_eq!(
+        s.focused_row_copy_value(&bulletins).as_deref(),
+        Some("errors")
+    );
+}
+
+#[test]
+fn focused_row_copy_value_rpg_validation_error_returns_message() {
+    use crate::view::browser::state::DetailFocus;
+    use std::collections::VecDeque;
+    let detail = seeded_rpg_detail(
+        vec!["Target unreachable".into(), "Auth failed".into()],
+        vec![],
+        vec![],
+    );
+    let mut s = rpg_state_with_detail(detail);
+    // With validation present, idx 0 = ValidationErrors, row 1.
+    let mut rows = [0usize; MAX_DETAIL_SECTIONS];
+    rows[0] = 1;
+    s.detail_focus = DetailFocus::Section {
+        idx: 0,
+        rows,
+        x_offsets: [0; MAX_DETAIL_SECTIONS],
+    };
+    let bulletins = VecDeque::new();
+    assert_eq!(
+        s.focused_row_copy_value(&bulletins).as_deref(),
+        Some("Auth failed")
+    );
+}

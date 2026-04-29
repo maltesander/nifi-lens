@@ -76,6 +76,11 @@ pub enum DetailSection {
     /// opens the parameter-context modal (same as the `p` verb). Only
     /// present in the section list when the PG has a bound context.
     ParameterContext,
+    /// RPG input-ports table. Read-only — Up/Down highlights a row but
+    /// Descend is a no-op (remote ports aren't arena nodes).
+    InputPorts,
+    /// RPG output-ports table. Same shape as `InputPorts`.
+    OutputPorts,
 }
 
 /// Per-node-kind list of focusable sections, in cycle order.
@@ -108,6 +113,9 @@ impl DetailSections {
             ]),
             NK::InputPort | NK::OutputPort => DetailSections(&[DetailSection::RecentBulletins]),
             NK::Connection => DetailSections(&[DetailSection::Endpoints]),
+            NK::RemoteProcessGroup => {
+                DetailSections(&[DetailSection::InputPorts, DetailSection::OutputPorts])
+            }
             _ => DetailSections(&[]),
         }
     }
@@ -150,6 +158,11 @@ impl DetailSections {
                 DetailSection::ValidationErrors,
                 DetailSection::ReferencingComponents,
                 DetailSection::RecentBulletins,
+            ]),
+            (NK::RemoteProcessGroup, true) => DetailSections(&[
+                DetailSection::ValidationErrors,
+                DetailSection::InputPorts,
+                DetailSection::OutputPorts,
             ]),
             _ => Self::for_node(kind),
         }
@@ -1356,6 +1369,11 @@ impl BrowserState {
                     0
                 }
             }
+            (DetailSection::ValidationErrors, NodeDetail::RemoteProcessGroup(d)) => {
+                d.validation_errors.len()
+            }
+            (DetailSection::InputPorts, NodeDetail::RemoteProcessGroup(d)) => d.input_ports.len(),
+            (DetailSection::OutputPorts, NodeDetail::RemoteProcessGroup(d)) => d.output_ports.len(),
             _ => 0,
         }
     }
@@ -1379,6 +1397,7 @@ impl BrowserState {
         let has_validation = match detail {
             NodeDetail::Processor(p) => !p.validation_errors.is_empty(),
             NodeDetail::ControllerService(cs) => !cs.validation_errors.is_empty(),
+            NodeDetail::RemoteProcessGroup(d) => !d.validation_errors.is_empty(),
             _ => false,
         };
         let sections = DetailSections::for_node_detail(kind, has_validation);
@@ -1420,6 +1439,15 @@ impl BrowserState {
                     .filter(|b| b.group_id == *group_id)
                     .nth(row)
                     .map(|b| b.message.clone())
+            }
+            (DetailSection::ValidationErrors, NodeDetail::RemoteProcessGroup(d)) => {
+                d.validation_errors.get(row).cloned()
+            }
+            (DetailSection::InputPorts, NodeDetail::RemoteProcessGroup(d)) => {
+                d.input_ports.get(row).map(|p| p.name.clone())
+            }
+            (DetailSection::OutputPorts, NodeDetail::RemoteProcessGroup(d)) => {
+                d.output_ports.get(row).map(|p| p.name.clone())
             }
             _ => None,
         }

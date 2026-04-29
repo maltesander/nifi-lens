@@ -274,6 +274,7 @@ impl ViewKeyHandler for BrowserHandler {
             let has_validation = match state.browser.details.get(&arena_idx) {
                 Some(NodeDetail::Processor(p)) => !p.validation_errors.is_empty(),
                 Some(NodeDetail::ControllerService(cs)) => !cs.validation_errors.is_empty(),
+                Some(NodeDetail::RemoteProcessGroup(d)) => !d.validation_errors.is_empty(),
                 _ => false,
             };
             let sections =

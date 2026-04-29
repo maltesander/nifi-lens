@@ -35,13 +35,14 @@ use ratatui::Frame;
 use ratatui::layout::{Constraint, Direction, Layout, Rect};
 use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
-use ratatui::widgets::{Cell, Paragraph, Row, Table};
+use ratatui::widgets::{Cell, Paragraph, Row, Table, TableState};
 
+use crate::client::NodeKind;
 use crate::client::browser::{RemotePortSummary, RemoteProcessGroupDetail};
 use crate::client::status::PortStatus;
 use crate::layout;
 use crate::theme;
-use crate::view::browser::state::BrowserState;
+use crate::view::browser::state::{BrowserState, DetailFocus, DetailSection, DetailSections};
 use crate::widget::panel::Panel;
 
 /// Distinguishes the two ports panels — drives both the panel title and
@@ -68,7 +69,13 @@ impl PortKind {
     }
 }
 
-pub fn render(frame: &mut Frame, area: Rect, d: &RemoteProcessGroupDetail, state: &BrowserState) {
+pub fn render(
+    frame: &mut Frame,
+    area: Rect,
+    d: &RemoteProcessGroupDetail,
+    state: &BrowserState,
+    detail_focus: &DetailFocus,
+) {
     let outer = Panel::new(build_header_title(d)).into_block();
     let inner = outer.inner(area);
     frame.render_widget(outer, area);
@@ -76,13 +83,16 @@ pub fn render(frame: &mut Frame, area: Rect, d: &RemoteProcessGroupDetail, state
     // Layout: Identity (10 rows; ≥7 lines for the full header + comments) +
     // optional Validation errors (dynamic, hidden when no errors) +
     // Input/Output ports (Min 3 each, split evenly so neither dominates).
-    let validation_h = if d.validation_errors.is_empty() {
-        0
-    } else {
+    let has_validation = !d.validation_errors.is_empty();
+    let sections = DetailSections::for_node_detail(NodeKind::RemoteProcessGroup, has_validation);
+
+    let validation_h = if has_validation {
         (d.validation_errors
             .len()
             .min(layout::VALIDATION_ERROR_ROWS_MAX)
             + 2) as u16
+    } else {
+        0
     };
 
     let mut constraints: Vec<Constraint> = vec![Constraint::Length(10)];
@@ -99,12 +109,26 @@ pub fn render(frame: &mut Frame, area: Rect, d: &RemoteProcessGroupDetail, state
 
     render_identity(frame, rows[0], d, state);
     let mut idx = 1;
-    if validation_h > 0 {
-        render_validation_errors_panel(frame, rows[idx], d);
+    if has_validation {
+        render_validation_errors_panel(frame, rows[idx], d, &sections, detail_focus);
         idx += 1;
     }
-    render_ports_panel(frame, rows[idx], PortKind::Input, &d.input_ports);
-    render_ports_panel(frame, rows[idx + 1], PortKind::Output, &d.output_ports);
+    render_ports_panel(
+        frame,
+        rows[idx],
+        PortKind::Input,
+        &d.input_ports,
+        &sections,
+        detail_focus,
+    );
+    render_ports_panel(
+        frame,
+        rows[idx + 1],
+        PortKind::Output,
+        &d.output_ports,
+        &sections,
+        detail_focus,
+    );
 }
 
 /// Build the outer panel title:
@@ -190,10 +214,30 @@ fn render_identity(
 /// Renders the bullet list of validation errors in a dedicated bordered
 /// panel below Identity. Caller must ensure `d.validation_errors` is
 /// non-empty — the panel is laid out only in that case.
-fn render_validation_errors_panel(frame: &mut Frame, area: Rect, d: &RemoteProcessGroupDetail) {
+fn render_validation_errors_panel(
+    frame: &mut Frame,
+    area: Rect,
+    d: &RemoteProcessGroupDetail,
+    sections: &DetailSections,
+    detail_focus: &DetailFocus,
+) {
+    let my_idx = sections
+        .0
+        .iter()
+        .position(|s| *s == DetailSection::ValidationErrors);
+    let is_focused = my_idx
+        .is_some_and(|i| matches!(detail_focus, DetailFocus::Section { idx, .. } if *idx == i));
+    let x_offset = my_idx
+        .and_then(|i| match detail_focus {
+            DetailFocus::Section { x_offsets, .. } if is_focused => Some(x_offsets[i]),
+            _ => None,
+        })
+        .unwrap_or(0);
+
     let count = d.validation_errors.len();
     let panel = Panel::new(" Validation errors ")
         .right(Line::from(format!(" {count} ")))
+        .focused(is_focused)
         .into_block();
     let inner = panel.inner(area);
     frame.render_widget(panel, area);
@@ -204,13 +248,29 @@ fn render_validation_errors_panel(frame: &mut Frame, area: Rect, d: &RemoteProce
         .take(layout::VALIDATION_ERROR_ROWS_MAX)
         .map(|e| Line::from(Span::styled(e.as_str(), theme::error())))
         .collect();
-    frame.render_widget(Paragraph::new(lines), inner);
+    frame.render_widget(Paragraph::new(lines).scroll((0, x_offset as u16)), inner);
 }
 
-fn render_ports_panel(frame: &mut Frame, area: Rect, kind: PortKind, ports: &[RemotePortSummary]) {
+fn render_ports_panel(
+    frame: &mut Frame,
+    area: Rect,
+    kind: PortKind,
+    ports: &[RemotePortSummary],
+    sections: &DetailSections,
+    detail_focus: &DetailFocus,
+) {
+    let target_section = match kind {
+        PortKind::Input => DetailSection::InputPorts,
+        PortKind::Output => DetailSection::OutputPorts,
+    };
+    let my_idx = sections.0.iter().position(|s| *s == target_section);
+    let is_focused = my_idx
+        .is_some_and(|i| matches!(detail_focus, DetailFocus::Section { idx, .. } if *idx == i));
+
     let total = ports.len();
     let panel = Panel::new(kind.title())
         .right(Line::from(format!(" {total} ")))
+        .focused(is_focused)
         .into_block();
     let inner = panel.inner(area);
     frame.render_widget(panel, area);
@@ -254,8 +314,17 @@ fn render_ports_panel(frame: &mut Frame, area: Rect, kind: PortKind, ports: &[Re
         Constraint::Length(5),
         Constraint::Fill(3),
     ];
-    let table = Table::new(rows_data, widths).header(header);
-    frame.render_widget(table, inner);
+    let table = Table::new(rows_data, widths)
+        .header(header)
+        .row_highlight_style(theme::cursor_row());
+
+    let mut table_state = TableState::default();
+    if let (Some(i), DetailFocus::Section { rows, .. }) = (my_idx, detail_focus)
+        && is_focused
+    {
+        table_state.select(Some(rows[i]));
+    }
+    frame.render_stateful_widget(table, inner, &mut table_state);
 }
 
 /// Style for a remote port `run_status` value. Defers to the typed
@@ -324,7 +393,20 @@ mod snapshots {
     fn render_to_string(d: &RemoteProcessGroupDetail, state: &BrowserState) -> String {
         let mut term = Terminal::new(TestBackend::new(120, 30)).unwrap();
         term.draw(|f| {
-            render(f, f.area(), d, state);
+            render(f, f.area(), d, state, &DetailFocus::Tree);
+        })
+        .unwrap();
+        format!("{}", term.backend())
+    }
+
+    fn render_to_string_with_focus(
+        d: &RemoteProcessGroupDetail,
+        state: &BrowserState,
+        detail_focus: &DetailFocus,
+    ) -> String {
+        let mut term = Terminal::new(TestBackend::new(120, 30)).unwrap();
+        term.draw(|f| {
+            render(f, f.area(), d, state, detail_focus);
         })
         .unwrap();
         format!("{}", term.backend())
@@ -339,7 +421,7 @@ mod snapshots {
         state.sparkline = sparkline;
         let mut term = Terminal::new(TestBackend::new(width, 30)).unwrap();
         term.draw(|f| {
-            render(f, f.area(), &d, &state);
+            render(f, f.area(), &d, &state, &DetailFocus::Tree);
         })
         .unwrap();
         format!("{}", term.backend())
@@ -435,5 +517,74 @@ mod snapshots {
         let state = BrowserState::new();
         let out = render_to_string(&d, &state);
         assert_snapshot!("rpg_identity_loaded_with_input_and_output_ports", out);
+    }
+
+    fn detail_with_two_input_two_output() -> RemoteProcessGroupDetail {
+        let mut d = seeded_detail();
+        d.input_ports.push(RemotePortSummary {
+            id: "ip-2".into(),
+            name: "events".into(),
+            run_status: "STOPPED".into(),
+            concurrent_tasks: 1,
+            comments: String::new(),
+        });
+        d.output_ports.push(RemotePortSummary {
+            id: "op-1".into(),
+            name: "errors".into(),
+            run_status: "RUNNING".into(),
+            concurrent_tasks: 2,
+            comments: String::new(),
+        });
+        d.output_ports.push(RemotePortSummary {
+            id: "op-2".into(),
+            name: "deadletter".into(),
+            run_status: "STOPPED".into(),
+            concurrent_tasks: 1,
+            comments: String::new(),
+        });
+        d
+    }
+
+    fn focus_section(idx: usize, row: usize) -> DetailFocus {
+        use crate::view::browser::state::MAX_DETAIL_SECTIONS;
+        let mut rows = [0usize; MAX_DETAIL_SECTIONS];
+        rows[idx] = row;
+        DetailFocus::Section {
+            idx,
+            rows,
+            x_offsets: [0; MAX_DETAIL_SECTIONS],
+        }
+    }
+
+    #[test]
+    fn rpg_input_ports_focus_renders_thick_border_and_row_highlight() {
+        let d = detail_with_two_input_two_output();
+        let state = BrowserState::new();
+        // No validation errors → idx 0 = InputPorts.
+        let out = render_to_string_with_focus(&d, &state, &focus_section(0, 1));
+        assert_snapshot!("rpg_input_ports_focused_row_1", out);
+    }
+
+    #[test]
+    fn rpg_output_ports_focus_renders_thick_border_and_row_highlight() {
+        let d = detail_with_two_input_two_output();
+        let state = BrowserState::new();
+        // No validation errors → idx 1 = OutputPorts.
+        let out = render_to_string_with_focus(&d, &state, &focus_section(1, 0));
+        assert_snapshot!("rpg_output_ports_focused_row_0", out);
+    }
+
+    #[test]
+    fn rpg_validation_errors_focus_renders_thick_border() {
+        let mut d = detail_with_two_input_two_output();
+        d.validation_status = "INVALID".into();
+        d.validation_errors = vec![
+            "Target URI unreachable".into(),
+            "Authentication failed".into(),
+        ];
+        let state = BrowserState::new();
+        // With validation present → idx 0 = ValidationErrors.
+        let out = render_to_string_with_focus(&d, &state, &focus_section(0, 0));
+        assert_snapshot!("rpg_validation_errors_focused", out);
     }
 }

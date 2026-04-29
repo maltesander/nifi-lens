@@ -370,6 +370,14 @@ remote ports the target NiFi exposes. Detail fetches flow through the
 global `IntentOutcome` banner on failure — no inline `last_error` chip
 in the Identity header yet.
 
+Detail focus: Validation errors (when present), Input ports, and
+Output ports are focusable sub-panels — `Tab` / `Shift+Tab` cycle
+through them in that order via the standard `DetailFocus::Section`
+pipeline. `↑`/`↓` move the row cursor inside the focused panel; `c`
+copies the highlighted row (port name or validation message). Port
+rows are not arena nodes, so `Enter` does not descend; the Identity
+pane is not focusable.
+
 Sparkline strip: three rows — `recv` (flowfiles received:
 `receivedCount` metric) / `sent` (flowfiles sent: `sentCount`) /
 `rate` (aggregate throughput: `totalBytesPerSecond`). NiFi does not
