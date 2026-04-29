@@ -3166,6 +3166,15 @@ fn make_state_with_selected_kind(kind: NodeKind) -> AppState {
             state: "ENABLED".into(),
         },
         NodeKind::InputPort | NodeKind::OutputPort => NodeStatusSummary::Port,
+        NodeKind::RemoteProcessGroup => NodeStatusSummary::RemoteProcessGroup {
+            transmission_status: "Not Transmitting".into(),
+            active_threads: 0,
+            flow_files_received: 0,
+            flow_files_sent: 0,
+            bytes_received: 0,
+            bytes_sent: 0,
+            target_uri: String::new(),
+        },
         NodeKind::Folder(_) => NodeStatusSummary::Folder { count: 0 },
     };
     s.browser.nodes.push(TreeNode {

@@ -50,6 +50,7 @@ pub enum NodeKind {
     InputPort,
     OutputPort,
     ControllerService,
+    RemoteProcessGroup,
     Folder(FolderKind),
 }
 
@@ -83,6 +84,21 @@ pub enum NodeStatusSummary {
     Port,
     Folder {
         count: u32,
+    },
+    RemoteProcessGroup {
+        /// Wire value from `RemoteProcessGroupStatusSnapshotDto::transmission_status`.
+        /// Either "Transmitting" or "Not Transmitting" — verbatim, the
+        /// renderer matches on these strings.
+        transmission_status: String,
+        active_threads: u32,
+        flow_files_received: u32,
+        flow_files_sent: u32,
+        bytes_received: u64,
+        bytes_sent: u64,
+        /// Singular `target_uri` from the recursive snapshot. The
+        /// Identity-pane upgrades to `target_uris` (plural) when the
+        /// on-demand detail fetch returns it.
+        target_uri: String,
     },
 }
 

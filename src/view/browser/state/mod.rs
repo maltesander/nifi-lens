@@ -1170,6 +1170,7 @@ impl BrowserState {
             NodeKind::ControllerService
             | NodeKind::InputPort
             | NodeKind::OutputPort
+            | NodeKind::RemoteProcessGroup
             | NodeKind::Folder(_) => return None,
         };
         Some((kind, node.id.clone()))
@@ -2209,6 +2210,7 @@ pub fn build_flow_index(state: &BrowserState) -> FlowIndex {
                 NodeKind::InputPort => "InputPort",
                 NodeKind::OutputPort => "OutputPort",
                 NodeKind::ControllerService => "CS",
+                NodeKind::RemoteProcessGroup => "RPG",
                 NodeKind::Folder(_) => "Folder",
             };
             let group_path = match n.parent {
@@ -2236,6 +2238,7 @@ pub fn build_flow_index(state: &BrowserState) -> FlowIndex {
                 },
                 NodeStatusSummary::Port => StateBadge::Port,
                 NodeStatusSummary::Folder { .. } => StateBadge::Port,
+                NodeStatusSummary::RemoteProcessGroup { .. } => StateBadge::Port,
             };
             FlowIndexEntry {
                 id: n.id.clone(),

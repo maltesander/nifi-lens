@@ -497,6 +497,7 @@ fn kind_glyph(kind: &NodeKind) -> &'static str {
         NodeKind::InputPort => "⇥",
         NodeKind::OutputPort => "⇤",
         NodeKind::ControllerService => "⚙",
+        NodeKind::RemoteProcessGroup => "⇌",
         NodeKind::Folder(FolderKind::Queues) => "→",
         NodeKind::Folder(FolderKind::ControllerServices) => "⚙",
     }
@@ -631,6 +632,7 @@ fn kind_label(kind: &NodeKind) -> &'static str {
         NodeKind::InputPort => "Input Port",
         NodeKind::OutputPort => "Output Port",
         NodeKind::ControllerService => "Controller Service",
+        NodeKind::RemoteProcessGroup => "Remote Process Group",
         NodeKind::Folder(FolderKind::Queues) => "Queues",
         NodeKind::Folder(FolderKind::ControllerServices) => "Controller services",
     }
