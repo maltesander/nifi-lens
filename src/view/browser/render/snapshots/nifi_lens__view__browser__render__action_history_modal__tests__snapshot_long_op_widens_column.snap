@@ -1,0 +1,25 @@
+---
+source: src/view/browser/render/action_history_modal.rs
+assertion_line: 333
+expression: "format!(\"{}\", term.backend())"
+---
+"┌ Action history · FetchKafka (showing 2 of 2) ────────────────────────────────────────────────────┐"
+"│  age      user             op                    type             source                         │"
+"│  <AGE>      user0            Start Version Control Processor        FetchKafka                     │"
+"│  <AGE>      user1            Configure             Processor        FetchKafka                     │"
+"│                                                                                                  │"
+"│                                                                                                  │"
+"│                                                                                                  │"
+"│                                                                                                  │"
+"│                                                                                                  │"
+"│                                                                                                  │"
+"│                                                                                                  │"
+"│                                                                                                  │"
+"│                                                                                                  │"
+"│                                                                                                  │"
+"│                                                                                                  │"
+"│                                                                                                  │"
+"│                                                                                                  │"
+"│                                                                                                  │"
+"│[Esc] close · [Enter] expand · [/] find · [c] copy · [r] refresh                                  │"
+"└──────────────────────────────────────────────────────────────────────────────────────────────────┘"

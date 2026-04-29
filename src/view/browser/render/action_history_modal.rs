@@ -16,6 +16,21 @@ use crate::timestamp::{format_age_secs, parse_nifi_timestamp};
 use crate::view::browser::state::action_history_modal::ActionHistoryModalState;
 use crate::widget::panel::Panel;
 
+const AGE_WIDTH: usize = 8;
+const MIN_USER_WIDTH: usize = 16;
+const MIN_OP_WIDTH: usize = 15;
+const MIN_TYPE_WIDTH: usize = 16;
+const MAX_USER_WIDTH: usize = 32;
+const MAX_OP_WIDTH: usize = 32;
+const MAX_TYPE_WIDTH: usize = 24;
+
+struct ColumnWidths {
+    age: usize,
+    user: usize,
+    op: usize,
+    stype: usize,
+}
+
 pub fn render(frame: &mut Frame, area: Rect, modal: &ActionHistoryModalState) {
     if crate::widget::modal::render_too_small(frame, area) {
         return;
@@ -47,9 +62,55 @@ pub fn render(frame: &mut Frame, area: Rect, modal: &ActionHistoryModalState) {
         ])
         .split(inner);
 
-    render_header(frame, rows[0]);
-    render_body(frame, rows[1], modal);
+    let widths = compute_column_widths(modal);
+    render_header(frame, rows[0], &widths);
+    render_body(frame, rows[1], modal, &widths);
     render_footer_status(frame, rows[2], modal);
+}
+
+/// Column widths grow to fit the longest value seen in the data, capped
+/// at per-column maxima so a single freakishly long entry can't crowd
+/// out everything else. Minimums match the header label widths so the
+/// table never visually narrows below the header.
+fn compute_column_widths(modal: &ActionHistoryModalState) -> ColumnWidths {
+    let mut user = MIN_USER_WIDTH;
+    let mut op = MIN_OP_WIDTH;
+    let mut stype = MIN_TYPE_WIDTH;
+    for a in &modal.actions {
+        let Some(inner) = a.action.as_ref() else {
+            continue;
+        };
+        if let Some(u) = inner.user_identity.as_deref() {
+            user = user.max(u.chars().count());
+        }
+        if let Some(o) = inner.operation.as_deref() {
+            op = op.max(o.chars().count());
+        }
+        if let Some(t) = inner.source_type.as_deref() {
+            stype = stype.max(t.chars().count());
+        }
+    }
+    ColumnWidths {
+        age: AGE_WIDTH,
+        user: user.min(MAX_USER_WIDTH),
+        op: op.min(MAX_OP_WIDTH),
+        stype: stype.min(MAX_TYPE_WIDTH),
+    }
+}
+
+/// Pad with spaces to `width`, or truncate with a trailing `…` if the
+/// value is longer than the column allows.
+fn fit_column(s: &str, width: usize) -> String {
+    let len = s.chars().count();
+    if len <= width {
+        format!("{s:<width$}")
+    } else if width <= 1 {
+        "…".chars().take(width).collect()
+    } else {
+        let mut out: String = s.chars().take(width - 1).collect();
+        out.push('…');
+        out
+    }
 }
 
 fn progress_chip(modal: &ActionHistoryModalState) -> Span<'_> {
@@ -64,13 +125,24 @@ fn progress_chip(modal: &ActionHistoryModalState) -> Span<'_> {
     Span::styled(chip, theme::muted())
 }
 
-fn render_header(frame: &mut Frame, area: Rect) {
-    let header = "  age      user             op              type             source";
+fn render_header(frame: &mut Frame, area: Rect, widths: &ColumnWidths) {
+    let header = format!(
+        "  {} {} {} {} source",
+        fit_column("age", widths.age),
+        fit_column("user", widths.user),
+        fit_column("op", widths.op),
+        fit_column("type", widths.stype),
+    );
     let line = Line::from(Span::styled(header, theme::muted()));
     frame.render_widget(Paragraph::new(line), area);
 }
 
-fn render_body(frame: &mut Frame, area: Rect, modal: &ActionHistoryModalState) {
+fn render_body(
+    frame: &mut Frame,
+    area: Rect,
+    modal: &ActionHistoryModalState,
+    widths: &ColumnWidths,
+) {
     if let Some(err) = &modal.error {
         let msg = format!(" error: {err}");
         frame.render_widget(Paragraph::new(Span::styled(msg, theme::error())), area);
@@ -117,7 +189,13 @@ fn render_body(frame: &mut Frame, area: Rect, modal: &ActionHistoryModalState) {
             Style::default()
         };
         lines.push(Line::from(vec![Span::styled(
-            format!("  {age:<8} {user:<16} {op:<15} {stype:<16} {sname}"),
+            format!(
+                "  {} {} {} {} {sname}",
+                fit_column(&age, widths.age),
+                fit_column(user, widths.user),
+                fit_column(op, widths.op),
+                fit_column(stype, widths.stype),
+            ),
             row_style,
         )]));
         if modal.expanded_index == Some(i) {
@@ -241,6 +319,58 @@ mod tests {
         insta::with_settings!({ filters => age_filter() }, {
             assert_snapshot!(format!("{}", term.backend()));
         });
+    }
+
+    #[test]
+    fn snapshot_long_op_widens_column() {
+        let mut term = Terminal::new(test_backend(20)).unwrap();
+        let mut modal = make_modal_state(2, false);
+        // First row has the 21-char op that motivated this fix; ensure
+        // the type/source columns still align cleanly to the right of it.
+        if let Some(a) = modal.actions[0].action.as_mut() {
+            a.operation = Some("Start Version Control".into());
+        }
+        term.draw(|f| {
+            render(f, f.area(), &modal);
+        })
+        .unwrap();
+        insta::with_settings!({ filters => age_filter() }, {
+            assert_snapshot!(format!("{}", term.backend()));
+        });
+    }
+
+    #[test]
+    fn fit_column_pads_short_value() {
+        assert_eq!(fit_column("abc", 8), "abc     ");
+    }
+
+    #[test]
+    fn fit_column_truncates_long_value() {
+        // 4-char value into 3-cell column: 2 chars + ellipsis.
+        assert_eq!(fit_column("abcd", 3), "ab…");
+    }
+
+    #[test]
+    fn compute_column_widths_grows_to_fit() {
+        let mut modal = make_modal_state(2, false);
+        if let Some(a) = modal.actions[0].action.as_mut() {
+            a.operation = Some("Start Version Control".into()); // 21 chars
+        }
+        let w = compute_column_widths(&modal);
+        assert_eq!(w.op, 21);
+        // Other columns stay at their minimums.
+        assert_eq!(w.user, MIN_USER_WIDTH);
+        assert_eq!(w.stype, MIN_TYPE_WIDTH);
+    }
+
+    #[test]
+    fn compute_column_widths_caps_runaway_values() {
+        let mut modal = make_modal_state(1, false);
+        if let Some(a) = modal.actions[0].action.as_mut() {
+            a.operation = Some("a".repeat(200));
+        }
+        let w = compute_column_widths(&modal);
+        assert_eq!(w.op, MAX_OP_WIDTH);
     }
 
     #[test]
