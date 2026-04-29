@@ -1224,40 +1224,9 @@ fn handle_key(state: &mut AppState, key: KeyEvent, config: &Config) -> UpdateRes
     }
 
     // translate() runs before view dispatch so the InputEvent is ready.
-    // `content_modal_open` shadows outer-tab keys onto ContentModalVerb.
-    // We also gate on `state.modal.is_none()` because an app-wide modal
-    // (e.g. Save) can be opened FROM the content modal; while that modal
-    // is up its input must not be swallowed by the content-modal shadow.
-    let content_modal_open = state.current_tab == crate::app::state::ViewId::Tracer
-        && state.tracer.content_modal.is_some()
-        && state.modal.is_none();
-    let version_modal_open = state.current_tab == crate::app::state::ViewId::Browser
-        && state.browser.version_modal.is_some()
-        && state.modal.is_none();
-    let parameter_modal_open = state.current_tab == crate::app::state::ViewId::Browser
-        && state.browser.parameter_modal.is_some()
-        && state.modal.is_none();
-    let action_history_modal_open = state.current_tab == crate::app::state::ViewId::Browser
-        && state.browser.action_history_modal.is_some()
-        && state.modal.is_none();
-    let peek_modal_open = state.current_tab == crate::app::state::ViewId::Browser
-        && state
-            .browser
-            .queue_listing
-            .as_ref()
-            .and_then(|s| s.peek.as_ref())
-            .is_some()
-        && state.modal.is_none();
-    let input_event = state.keymap.translate(
-        key,
-        state.current_tab,
-        content_modal_open,
-        version_modal_open,
-        parameter_modal_open,
-        action_history_modal_open,
-        peek_modal_open,
-        state,
-    );
+    // Modal shadow gates inside translate() handle the per-modal-open
+    // routing (see `src/input/modal_gate.rs`).
+    let input_event = state.keymap.translate(key, state);
 
     // Auto-clear non-Error banners on the next input event so info /
     // warning toasts don't linger after the user has moved on. Error

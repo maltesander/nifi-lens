@@ -228,16 +228,9 @@ pub enum InputEvent {
 pub struct KeyMap {}
 
 impl KeyMap {
-    #[allow(clippy::too_many_arguments)]
     pub fn translate(
         &self,
         mut key: crossterm::event::KeyEvent,
-        active_view: crate::app::state::ViewId,
-        content_modal_open: bool,
-        version_modal_open: bool,
-        parameter_modal_open: bool,
-        action_history_modal_open: bool,
-        peek_modal_open: bool,
         state: &crate::app::state::AppState,
     ) -> InputEvent {
         use crossterm::event::{KeyCode, KeyModifiers};
@@ -251,147 +244,32 @@ impl KeyMap {
             key.modifiers.remove(KeyModifiers::SHIFT);
         }
 
+        // Modal shadow gates: each modal owns its own keys while open.
+        // Order doesn't matter — the gates' `is_active` predicates and
+        // `host_view` checks are mutually exclusive (only one modal can
+        // be open on a given tab at a time, and an app-wide modal blocks
+        // all of them via `state.modal.is_none()` inside each gate).
+        use crate::input::modal_gate::{
+            self, ActionHistoryModalGate, BrowserPeekGate, ContentModalGate,
+            ParameterContextModalGate, VersionControlModalGate,
+        };
+        if let Some(ev) = modal_gate::try_dispatch::<ContentModalGate>(state, key) {
+            return ev;
+        }
+        if let Some(ev) = modal_gate::try_dispatch::<VersionControlModalGate>(state, key) {
+            return ev;
+        }
+        if let Some(ev) = modal_gate::try_dispatch::<ParameterContextModalGate>(state, key) {
+            return ev;
+        }
+        if let Some(ev) = modal_gate::try_dispatch::<ActionHistoryModalGate>(state, key) {
+            return ev;
+        }
+        if let Some(ev) = modal_gate::try_dispatch::<BrowserPeekGate>(state, key) {
+            return ev;
+        }
+
         use crate::app::state::ViewId;
-
-        // When the content viewer modal is open on the Tracer tab,
-        // ContentModalVerb chords take absolute priority — they shadow
-        // FocusAction (Esc → Close, not Ascend) and TabAction (Tab →
-        // SwitchTabNext, not NextPane). Keys not claimed by ContentModalVerb
-        // return Unmapped; outer app keys are blocked while the modal is up.
-        if content_modal_open && active_view == ViewId::Tracer {
-            // Ctrl+c / Ctrl+q / Ctrl+Q must always quit, even with the modal open.
-            if matches!(
-                key.code,
-                KeyCode::Char('c') | KeyCode::Char('q') | KeyCode::Char('Q')
-            ) && key.modifiers.contains(KeyModifiers::CONTROL)
-            {
-                return InputEvent::App(AppAction::Quit);
-            }
-
-            for &v in ContentModalVerb::all() {
-                if chord_matches(v.chord(), key) {
-                    return InputEvent::View(ViewVerb::ContentModal(v));
-                }
-            }
-
-            // Scroll keys (↑/↓/←/→/PgUp/PgDn/Home/End) pass through as
-            // FocusAction so handle_focus can scroll the modal body
-            // vertically (Up/Down/PgUp/PgDn/Home/End) or horizontally
-            // (Left/Right) through wide rows like full-width CSVs.
-            for &a in FocusAction::all() {
-                if matches!(
-                    a,
-                    FocusAction::Up
-                        | FocusAction::Down
-                        | FocusAction::Left
-                        | FocusAction::Right
-                        | FocusAction::PageUp
-                        | FocusAction::PageDown
-                        | FocusAction::First
-                        | FocusAction::Last
-                ) && chord_matches(a.chord(), key)
-                {
-                    return InputEvent::Focus(a);
-                }
-            }
-
-            return InputEvent::Unmapped;
-        }
-
-        // When the version-control modal is open on the Browser tab,
-        // VersionControlModalVerb chords take absolute priority — they
-        // shadow FocusAction (Esc → Close, not Ascend). Keys not claimed
-        // by VersionControlModalVerb return Unmapped; outer app keys are
-        // blocked while the modal is up.
-        if version_modal_open && active_view == ViewId::Browser {
-            // Ctrl+c / Ctrl+q / Ctrl+Q must always quit, even with the modal open.
-            if matches!(
-                key.code,
-                KeyCode::Char('c') | KeyCode::Char('q') | KeyCode::Char('Q')
-            ) && key.modifiers.contains(KeyModifiers::CONTROL)
-            {
-                return InputEvent::App(AppAction::Quit);
-            }
-
-            for &v in VersionControlModalVerb::all() {
-                if chord_matches(v.chord(), key) {
-                    return InputEvent::View(ViewVerb::VersionControlModal(v));
-                }
-            }
-
-            return InputEvent::Unmapped;
-        }
-
-        // When the parameter-context modal is open on the Browser tab,
-        // ParameterContextModalVerb chords take absolute priority — they
-        // shadow FocusAction (Esc → Close, not Ascend). Keys not claimed
-        // by ParameterContextModalVerb return Unmapped; outer app keys are
-        // blocked while the modal is up.
-        if parameter_modal_open && active_view == ViewId::Browser {
-            // Ctrl+c / Ctrl+q / Ctrl+Q must always quit, even with the modal open.
-            if matches!(
-                key.code,
-                KeyCode::Char('c') | KeyCode::Char('q') | KeyCode::Char('Q')
-            ) && key.modifiers.contains(KeyModifiers::CONTROL)
-            {
-                return InputEvent::App(AppAction::Quit);
-            }
-
-            for &v in ParameterContextModalVerb::all() {
-                if chord_matches(v.chord(), key) {
-                    return InputEvent::View(ViewVerb::ParameterContextModal(v));
-                }
-            }
-
-            return InputEvent::Unmapped;
-        }
-
-        // When the action-history modal is open on the Browser tab,
-        // ActionHistoryModalVerb chords take absolute priority — they
-        // shadow FocusAction (Esc → Close, not Ascend). Keys not claimed
-        // by ActionHistoryModalVerb return Unmapped; outer app keys are
-        // blocked while the modal is up.
-        if action_history_modal_open && active_view == ViewId::Browser {
-            // Ctrl+c / Ctrl+q / Ctrl+Q must always quit, even with the modal open.
-            if matches!(
-                key.code,
-                KeyCode::Char('c') | KeyCode::Char('q') | KeyCode::Char('Q')
-            ) && key.modifiers.contains(KeyModifiers::CONTROL)
-            {
-                return InputEvent::App(AppAction::Quit);
-            }
-
-            for &v in ActionHistoryModalVerb::all() {
-                if chord_matches(v.chord(), key) {
-                    return InputEvent::View(ViewVerb::ActionHistoryModal(v));
-                }
-            }
-
-            return InputEvent::Unmapped;
-        }
-
-        // When the peek modal is open on the Browser tab, BrowserPeekVerb
-        // chords take absolute priority — they shadow FocusAction
-        // (Esc → Close, not Ascend). Keys not claimed by BrowserPeekVerb
-        // return Unmapped; outer app keys are blocked while the modal is up.
-        if peek_modal_open && active_view == ViewId::Browser {
-            // Ctrl+c / Ctrl+q / Ctrl+Q must always quit, even with the modal open.
-            if matches!(
-                key.code,
-                KeyCode::Char('c') | KeyCode::Char('q') | KeyCode::Char('Q')
-            ) && key.modifiers.contains(KeyModifiers::CONTROL)
-            {
-                return InputEvent::App(AppAction::Quit);
-            }
-
-            for &v in BrowserPeekVerb::all() {
-                if chord_matches(v.chord(), key) {
-                    return InputEvent::View(ViewVerb::BrowserPeek(v));
-                }
-            }
-
-            return InputEvent::Unmapped;
-        }
 
         // When the queue listing has focus on the Browser tab,
         // BrowserQueueVerb chords take priority — they shadow
@@ -400,7 +278,7 @@ impl KeyMap {
         // handle_focus can drive the row cursor (Up/Down/PgUp/PgDn/
         // Home/End). All other keys are blocked while listing focus
         // is active.
-        if state.browser.listing_focused && active_view == ViewId::Browser {
+        if state.browser.listing_focused && state.current_tab == ViewId::Browser {
             if matches!(
                 key.code,
                 KeyCode::Char('c') | KeyCode::Char('q') | KeyCode::Char('Q')
@@ -477,7 +355,7 @@ impl KeyMap {
 
         // View-local verbs come last; only the active view's enum is
         // iterated to avoid cross-view chord collisions.
-        match active_view {
+        match state.current_tab {
             ViewId::Bulletins => {
                 for &v in BulletinsVerb::all() {
                     if chord_matches(v.chord(), key) {
@@ -637,21 +515,96 @@ mod keymap_tests {
     fn dummy_state() -> crate::app::state::AppState {
         crate::test_support::fresh_state()
     }
+    /// Build a fresh test state with `current_tab` set to `view`. Used by
+    /// translate tests that exercise per-view chord routing.
+    fn state_for(view: ViewId) -> crate::app::state::AppState {
+        let mut s = dummy_state();
+        s.current_tab = view;
+        s
+    }
+    /// Build a fresh Tracer-tab state with `tracer.content_modal` populated
+    /// so `ContentModalGate::is_active` returns true.
+    fn state_with_content_modal() -> crate::app::state::AppState {
+        use crate::view::tracer::modal_state::{
+            ContentModalHeader, ContentModalState, ContentModalTab, Diffable, SideBuffer,
+        };
+        use crate::widget::scroll::BidirectionalScrollState;
+        let mut s = state_for(ViewId::Tracer);
+        s.tracer.content_modal = Some(ContentModalState {
+            event_id: 1,
+            header: ContentModalHeader {
+                event_type: "DROP".into(),
+                event_timestamp_iso: String::new(),
+                component_name: "x".into(),
+                pg_path: "pg".into(),
+                input_size: Some(0),
+                output_size: Some(0),
+                input_mime: None,
+                output_mime: None,
+                input_available: true,
+                output_available: true,
+            },
+            active_tab: ContentModalTab::Input,
+            last_nondiff_tab: ContentModalTab::Input,
+            diffable: Diffable::Pending,
+            input: SideBuffer::default(),
+            output: SideBuffer::default(),
+            diff_cache: None,
+            scroll: BidirectionalScrollState::default(),
+            search: None,
+        });
+        s
+    }
+    /// Build a fresh Browser-tab state with `browser.action_history_modal`
+    /// populated so `ActionHistoryModalGate::is_active` returns true.
+    fn state_with_action_history_modal() -> crate::app::state::AppState {
+        use crate::view::browser::state::action_history_modal::ActionHistoryModalState;
+        let mut s = state_for(ViewId::Browser);
+        s.browser.action_history_modal = Some(ActionHistoryModalState::pending(
+            "src".into(),
+            "label".into(),
+        ));
+        s
+    }
+    /// Build a fresh Browser-tab state with `browser.queue_listing.peek`
+    /// populated so `BrowserPeekGate::is_active` returns true.
+    fn state_with_peek_modal() -> crate::app::state::AppState {
+        use crate::view::browser::state::queue_listing::{
+            PeekIdentity, QueueListingPeekState, QueueListingState,
+        };
+        use crate::widget::scroll::VerticalScrollState;
+        use std::time::Duration;
+        let mut s = state_for(ViewId::Browser);
+        let mut listing = QueueListingState::pending("q".into(), "queue".into());
+        listing.peek = Some(QueueListingPeekState {
+            uuid: "ff".into(),
+            queue_id: "q".into(),
+            cluster_node_id: None,
+            identity: PeekIdentity {
+                uuid: "ff".into(),
+                filename: None,
+                size: 0,
+                mime_type: None,
+                content_claim: None,
+                cluster_node_id: None,
+                lineage_duration: Duration::from_secs(0),
+                penalized: false,
+            },
+            attrs: None,
+            error: None,
+            scroll: VerticalScrollState::default(),
+            search: None,
+            fetch_handle: None,
+        });
+        s.browser.queue_listing = Some(listing);
+        s
+    }
 
     #[test]
     fn enter_translates_to_focus_descend() {
         let km = KeyMap::default();
         assert_eq!(
-            km.translate(
-                press(KeyCode::Enter),
-                ViewId::Overview,
-                false,
-                false,
-                false,
-                false,
-                false,
-                &dummy_state()
-            ),
+            km.translate(press(KeyCode::Enter), &dummy_state()),
             InputEvent::Focus(FocusAction::Descend)
         );
     }
@@ -660,16 +613,7 @@ mod keymap_tests {
     fn esc_translates_to_focus_ascend() {
         let km = KeyMap::default();
         assert_eq!(
-            km.translate(
-                press(KeyCode::Esc),
-                ViewId::Overview,
-                false,
-                false,
-                false,
-                false,
-                false,
-                &dummy_state()
-            ),
+            km.translate(press(KeyCode::Esc), &dummy_state()),
             InputEvent::Focus(FocusAction::Ascend)
         );
     }
@@ -680,12 +624,6 @@ mod keymap_tests {
         assert_eq!(
             km.translate(
                 press_mod(KeyCode::Left, KeyModifiers::SHIFT),
-                ViewId::Overview,
-                false,
-                false,
-                false,
-                false,
-                false,
                 &dummy_state(),
             ),
             InputEvent::History(HistoryAction::Back)
@@ -696,29 +634,11 @@ mod keymap_tests {
     fn bracket_still_unmapped_after_cleanup() {
         let km = KeyMap::default();
         assert_eq!(
-            km.translate(
-                press(KeyCode::Char('[')),
-                ViewId::Overview,
-                false,
-                false,
-                false,
-                false,
-                false,
-                &dummy_state()
-            ),
+            km.translate(press(KeyCode::Char('[')), &dummy_state()),
             InputEvent::Unmapped
         );
         assert_eq!(
-            km.translate(
-                press(KeyCode::Char(']')),
-                ViewId::Overview,
-                false,
-                false,
-                false,
-                false,
-                false,
-                &dummy_state()
-            ),
+            km.translate(press(KeyCode::Char(']')), &dummy_state()),
             InputEvent::Unmapped
         );
     }
@@ -727,16 +647,7 @@ mod keymap_tests {
     fn tab_is_focus_next_pane() {
         let km = KeyMap::default();
         assert_eq!(
-            km.translate(
-                press(KeyCode::Tab),
-                ViewId::Overview,
-                false,
-                false,
-                false,
-                false,
-                false,
-                &dummy_state()
-            ),
+            km.translate(press(KeyCode::Tab), &dummy_state()),
             InputEvent::Focus(FocusAction::NextPane)
         );
     }
@@ -745,16 +656,7 @@ mod keymap_tests {
     fn back_tab_is_focus_prev_pane() {
         let km = KeyMap::default();
         assert_eq!(
-            km.translate(
-                press(KeyCode::BackTab),
-                ViewId::Overview,
-                false,
-                false,
-                false,
-                false,
-                false,
-                &dummy_state()
-            ),
+            km.translate(press(KeyCode::BackTab), &dummy_state()),
             InputEvent::Focus(FocusAction::PrevPane)
         );
     }
@@ -769,12 +671,6 @@ mod keymap_tests {
         assert_eq!(
             km.translate(
                 press_mod(KeyCode::BackTab, KeyModifiers::SHIFT),
-                ViewId::Overview,
-                false,
-                false,
-                false,
-                false,
-                false,
                 &dummy_state(),
             ),
             InputEvent::Focus(FocusAction::PrevPane)
@@ -785,16 +681,7 @@ mod keymap_tests {
     fn f3_is_tab_goto_3() {
         let km = KeyMap::default();
         assert_eq!(
-            km.translate(
-                press(KeyCode::F(3)),
-                ViewId::Overview,
-                false,
-                false,
-                false,
-                false,
-                false,
-                &dummy_state()
-            ),
+            km.translate(press(KeyCode::F(3)), &dummy_state()),
             InputEvent::Tab(TabAction::Goto(3))
         );
     }
@@ -803,16 +690,7 @@ mod keymap_tests {
     fn q_is_quit() {
         let km = KeyMap::default();
         assert_eq!(
-            km.translate(
-                press(KeyCode::Char('q')),
-                ViewId::Overview,
-                false,
-                false,
-                false,
-                false,
-                false,
-                &dummy_state()
-            ),
+            km.translate(press(KeyCode::Char('q')), &dummy_state()),
             InputEvent::App(AppAction::Quit)
         );
     }
@@ -823,12 +701,6 @@ mod keymap_tests {
         assert_eq!(
             km.translate(
                 press_mod(KeyCode::Char('c'), KeyModifiers::CONTROL),
-                ViewId::Overview,
-                false,
-                false,
-                false,
-                false,
-                false,
                 &dummy_state(),
             ),
             InputEvent::App(AppAction::Quit)
@@ -839,16 +711,7 @@ mod keymap_tests {
     fn bare_g_produces_app_goto() {
         let km = KeyMap::default();
         assert_eq!(
-            km.translate(
-                press(KeyCode::Char('g')),
-                ViewId::Overview,
-                false,
-                false,
-                false,
-                false,
-                false,
-                &dummy_state()
-            ),
+            km.translate(press(KeyCode::Char('g')), &dummy_state()),
             InputEvent::App(AppAction::Goto)
         );
     }
@@ -857,29 +720,11 @@ mod keymap_tests {
     fn j_and_k_are_unmapped() {
         let km = KeyMap::default();
         assert_eq!(
-            km.translate(
-                press(KeyCode::Char('j')),
-                ViewId::Overview,
-                false,
-                false,
-                false,
-                false,
-                false,
-                &dummy_state()
-            ),
+            km.translate(press(KeyCode::Char('j')), &dummy_state()),
             InputEvent::Unmapped
         );
         assert_eq!(
-            km.translate(
-                press(KeyCode::Char('k')),
-                ViewId::Overview,
-                false,
-                false,
-                false,
-                false,
-                false,
-                &dummy_state()
-            ),
+            km.translate(press(KeyCode::Char('k')), &dummy_state()),
             InputEvent::Unmapped
         );
     }
@@ -890,29 +735,11 @@ mod keymap_tests {
         // and EventsVerb::Common(CommonVerb::Refresh). With view-aware translate, the active view wins.
         let km = KeyMap::default();
         assert_eq!(
-            km.translate(
-                press(KeyCode::Char('r')),
-                ViewId::Events,
-                false,
-                false,
-                false,
-                false,
-                false,
-                &dummy_state()
-            ),
+            km.translate(press(KeyCode::Char('r')), &state_for(ViewId::Events)),
             InputEvent::View(ViewVerb::Events(EventsVerb::Common(CommonVerb::Refresh)))
         );
         assert_eq!(
-            km.translate(
-                press(KeyCode::Char('r')),
-                ViewId::Bulletins,
-                false,
-                false,
-                false,
-                false,
-                false,
-                &dummy_state()
-            ),
+            km.translate(press(KeyCode::Char('r')), &state_for(ViewId::Bulletins)),
             InputEvent::View(ViewVerb::Bulletins(BulletinsVerb::Common(
                 CommonVerb::Refresh
             )))
@@ -928,26 +755,14 @@ mod keymap_tests {
         assert_eq!(
             km.translate(
                 press_mod(KeyCode::Char('T'), KeyModifiers::SHIFT),
-                ViewId::Events,
-                false,
-                false,
-                false,
-                false,
-                false,
-                &dummy_state(),
+                &state_for(ViewId::Events),
             ),
             InputEvent::View(ViewVerb::Events(EventsVerb::EditField(FilterField::Types)))
         );
         assert_eq!(
             km.translate(
                 press_mod(KeyCode::Char('T'), KeyModifiers::SHIFT),
-                ViewId::Bulletins,
-                false,
-                false,
-                false,
-                false,
-                false,
-                &dummy_state(),
+                &state_for(ViewId::Bulletins),
             ),
             InputEvent::View(ViewVerb::Bulletins(BulletinsVerb::CycleTypeFilter))
         );
@@ -1075,48 +890,22 @@ mod keymap_tests {
         // `c` is TracerVerb::Common(CommonVerb::Copy) when modal is closed;
         // it should become ContentModal(Copy) when the modal is open.
         let km = KeyMap::default();
+        let modal_open = state_with_content_modal();
         // Modal open: `c` → ContentModal(Copy)
         assert_eq!(
-            km.translate(
-                press(KeyCode::Char('c')),
-                ViewId::Tracer,
-                true,
-                false,
-                false,
-                false,
-                false,
-                &dummy_state()
-            ),
+            km.translate(press(KeyCode::Char('c')), &modal_open),
             InputEvent::View(ViewVerb::ContentModal(ContentModalVerb::Common(
                 CommonVerb::Copy
             )))
         );
         // Modal open: `i` is not a ContentModalVerb chord → Unmapped
         assert_eq!(
-            km.translate(
-                press(KeyCode::Char('i')),
-                ViewId::Tracer,
-                true,
-                false,
-                false,
-                false,
-                false,
-                &dummy_state()
-            ),
+            km.translate(press(KeyCode::Char('i')), &modal_open),
             InputEvent::Unmapped
         );
         // Modal closed: `i` → TracerVerb::OpenContentModal
         assert_eq!(
-            km.translate(
-                press(KeyCode::Char('i')),
-                ViewId::Tracer,
-                false,
-                false,
-                false,
-                false,
-                false,
-                &dummy_state()
-            ),
+            km.translate(press(KeyCode::Char('i')), &state_for(ViewId::Tracer)),
             InputEvent::View(ViewVerb::Tracer(TracerVerb::OpenContentModal))
         );
     }
@@ -1129,16 +918,7 @@ mod keymap_tests {
         // FocusAction.
         let km = KeyMap::default();
         assert_eq!(
-            km.translate(
-                press(KeyCode::Esc),
-                ViewId::Tracer,
-                true,
-                false,
-                false,
-                false,
-                false,
-                &dummy_state()
-            ),
+            km.translate(press(KeyCode::Esc), &state_with_content_modal()),
             InputEvent::View(ViewVerb::ContentModal(ContentModalVerb::Common(
                 CommonVerb::Close
             )))
@@ -1149,16 +929,7 @@ mod keymap_tests {
     fn content_modal_tab_becomes_switch_tab_next() {
         let km = KeyMap::default();
         assert_eq!(
-            km.translate(
-                press(KeyCode::Tab),
-                ViewId::Tracer,
-                true,
-                false,
-                false,
-                false,
-                false,
-                &dummy_state()
-            ),
+            km.translate(press(KeyCode::Tab), &state_with_content_modal()),
             InputEvent::View(ViewVerb::ContentModal(ContentModalVerb::SwitchTabNext))
         );
     }
@@ -1166,29 +937,18 @@ mod keymap_tests {
     #[test]
     fn ctrl_c_quits_even_when_modal_open() {
         let km = KeyMap::default();
+        let modal_open = state_with_content_modal();
         assert_eq!(
             km.translate(
                 press_mod(KeyCode::Char('c'), KeyModifiers::CONTROL),
-                ViewId::Tracer,
-                true,
-                false,
-                false,
-                false,
-                false,
-                &dummy_state(),
+                &modal_open,
             ),
             InputEvent::App(AppAction::Quit)
         );
         assert_eq!(
             km.translate(
                 press_mod(KeyCode::Char('q'), KeyModifiers::CONTROL),
-                ViewId::Tracer,
-                true,
-                false,
-                false,
-                false,
-                false,
-                &dummy_state(),
+                &modal_open,
             ),
             InputEvent::App(AppAction::Quit)
         );
@@ -1198,105 +958,45 @@ mod keymap_tests {
     fn modal_scroll_keys_pass_through_as_focus_action() {
         use crate::input::{FocusAction, InputEvent};
         let km = KeyMap::default();
+        let modal_open = state_with_content_modal();
         assert_eq!(
-            km.translate(
-                press(KeyCode::Up),
-                ViewId::Tracer,
-                true,
-                false,
-                false,
-                false,
-                false,
-                &dummy_state()
-            ),
+            km.translate(press(KeyCode::Up), &modal_open),
             InputEvent::Focus(FocusAction::Up)
         );
         assert_eq!(
-            km.translate(
-                press(KeyCode::Down),
-                ViewId::Tracer,
-                true,
-                false,
-                false,
-                false,
-                false,
-                &dummy_state()
-            ),
+            km.translate(press(KeyCode::Down), &modal_open),
             InputEvent::Focus(FocusAction::Down)
         );
         assert_eq!(
-            km.translate(
-                press(KeyCode::PageUp),
-                ViewId::Tracer,
-                true,
-                false,
-                false,
-                false,
-                false,
-                &dummy_state()
-            ),
+            km.translate(press(KeyCode::PageUp), &modal_open),
             InputEvent::Focus(FocusAction::PageUp)
         );
         assert_eq!(
-            km.translate(
-                press(KeyCode::PageDown),
-                ViewId::Tracer,
-                true,
-                false,
-                false,
-                false,
-                false,
-                &dummy_state()
-            ),
+            km.translate(press(KeyCode::PageDown), &modal_open),
             InputEvent::Focus(FocusAction::PageDown)
         );
         assert_eq!(
-            km.translate(
-                press(KeyCode::Home),
-                ViewId::Tracer,
-                true,
-                false,
-                false,
-                false,
-                false,
-                &dummy_state()
-            ),
+            km.translate(press(KeyCode::Home), &modal_open),
             InputEvent::Focus(FocusAction::First)
         );
         assert_eq!(
-            km.translate(
-                press(KeyCode::End),
-                ViewId::Tracer,
-                true,
-                false,
-                false,
-                false,
-                false,
-                &dummy_state()
-            ),
+            km.translate(press(KeyCode::End), &modal_open),
             InputEvent::Focus(FocusAction::Last)
         );
     }
 
     #[test]
     fn action_history_modal_open_shadows_browser_verb() {
-        use crate::app::state::ViewId;
         use crate::input::{ActionHistoryModalVerb, InputEvent, KeyMap, ViewVerb};
         use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 
         let km = KeyMap::default();
-        let state = dummy_state();
+        let state = state_with_action_history_modal();
 
         // 'c' inside the modal must route to ActionHistoryModalVerb::Common(CommonVerb::Copy)
         // (not BrowserVerb::Common(CommonVerb::Copy)).
         let ev = km.translate(
             KeyEvent::new(KeyCode::Char('c'), KeyModifiers::empty()),
-            ViewId::Browser,
-            /* content_modal_open */ false,
-            /* version_modal_open */ false,
-            /* parameter_modal_open */ false,
-            /* action_history_modal_open */ true,
-            false,
             &state,
         );
         assert!(matches!(
@@ -1308,16 +1008,7 @@ mod keymap_tests {
 
         // Esc inside the modal routes to ActionHistoryModalVerb::Common(CommonVerb::Close)
         // (not FocusAction::Ascend).
-        let ev = km.translate(
-            KeyEvent::new(KeyCode::Esc, KeyModifiers::empty()),
-            ViewId::Browser,
-            false,
-            false,
-            false,
-            true,
-            false,
-            &state,
-        );
+        let ev = km.translate(KeyEvent::new(KeyCode::Esc, KeyModifiers::empty()), &state);
         assert!(matches!(
             ev,
             InputEvent::View(ViewVerb::ActionHistoryModal(
@@ -1328,12 +1019,6 @@ mod keymap_tests {
         // Ctrl+C must always quit even with the modal open.
         let ev = km.translate(
             KeyEvent::new(KeyCode::Char('c'), KeyModifiers::CONTROL),
-            ViewId::Browser,
-            false,
-            false,
-            false,
-            true,
-            false,
             &state,
         );
         assert!(matches!(ev, InputEvent::App(crate::input::AppAction::Quit)));
@@ -1341,24 +1026,16 @@ mod keymap_tests {
 
     #[test]
     fn action_history_modal_only_shadows_on_browser_tab() {
-        use crate::app::state::ViewId;
         use crate::input::{InputEvent, KeyMap};
         use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 
         let km = KeyMap::default();
-        let state = dummy_state();
+        // Modal populated but current_tab forced to Tracer → gate must
+        // not fire (host_view check); Esc falls through to FocusAction.
+        let mut state = state_with_action_history_modal();
+        state.current_tab = ViewId::Tracer;
 
-        // Modal flag set but tab is Tracer → don't shadow.
-        let ev = km.translate(
-            KeyEvent::new(KeyCode::Esc, KeyModifiers::empty()),
-            ViewId::Tracer,
-            false,
-            false,
-            false,
-            true,
-            false,
-            &state,
-        );
+        let ev = km.translate(KeyEvent::new(KeyCode::Esc, KeyModifiers::empty()), &state);
         // Esc on a non-Browser tab routes through FocusAction::Ascend.
         assert!(matches!(
             ev,
@@ -1368,23 +1045,16 @@ mod keymap_tests {
 
     #[test]
     fn peek_modal_open_shadows_browser_verb() {
-        use crate::app::state::ViewId;
         use crate::input::{BrowserPeekVerb, InputEvent, KeyMap, ViewVerb};
         use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 
         let km = KeyMap::default();
-        let state = dummy_state();
+        let state = state_with_peek_modal();
 
         // 'c' inside the peek modal must route to BrowserPeekVerb::CopyAsJson
         // (not BrowserVerb::Common(CommonVerb::Copy)).
         let ev = km.translate(
             KeyEvent::new(KeyCode::Char('c'), KeyModifiers::empty()),
-            ViewId::Browser,
-            /* content_modal_open */ false,
-            /* version_modal_open */ false,
-            /* parameter_modal_open */ false,
-            /* action_history_modal_open */ false,
-            /* peek_modal_open */ true,
             &state,
         );
         assert!(matches!(
@@ -1394,16 +1064,7 @@ mod keymap_tests {
 
         // Esc inside the peek modal routes to BrowserPeekVerb::Common(CommonVerb::Close)
         // (not FocusAction::Ascend).
-        let ev = km.translate(
-            KeyEvent::new(KeyCode::Esc, KeyModifiers::empty()),
-            ViewId::Browser,
-            false,
-            false,
-            false,
-            false,
-            true,
-            &state,
-        );
+        let ev = km.translate(KeyEvent::new(KeyCode::Esc, KeyModifiers::empty()), &state);
         assert!(matches!(
             ev,
             InputEvent::View(ViewVerb::BrowserPeek(BrowserPeekVerb::Common(
@@ -1414,12 +1075,6 @@ mod keymap_tests {
         // Ctrl+C must always quit even with the peek modal open.
         let ev = km.translate(
             KeyEvent::new(KeyCode::Char('c'), KeyModifiers::CONTROL),
-            ViewId::Browser,
-            false,
-            false,
-            false,
-            false,
-            true,
             &state,
         );
         assert!(matches!(ev, InputEvent::App(crate::input::AppAction::Quit)));
@@ -1427,24 +1082,16 @@ mod keymap_tests {
 
     #[test]
     fn peek_modal_only_shadows_on_browser_tab() {
-        use crate::app::state::ViewId;
         use crate::input::{InputEvent, KeyMap};
         use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 
         let km = KeyMap::default();
-        let state = dummy_state();
+        // Peek modal populated but current_tab forced to Tracer → gate
+        // must not fire (host_view check); Esc falls through to FocusAction.
+        let mut state = state_with_peek_modal();
+        state.current_tab = ViewId::Tracer;
 
-        // peek_modal_open flag set but tab is Tracer → don't shadow.
-        let ev = km.translate(
-            KeyEvent::new(KeyCode::Esc, KeyModifiers::empty()),
-            ViewId::Tracer,
-            false,
-            false,
-            false,
-            false,
-            true,
-            &state,
-        );
+        let ev = km.translate(KeyEvent::new(KeyCode::Esc, KeyModifiers::empty()), &state);
         // Esc on a non-Browser tab routes through FocusAction::Ascend.
         assert!(matches!(
             ev,
