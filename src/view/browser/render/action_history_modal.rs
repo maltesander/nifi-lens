@@ -107,7 +107,7 @@ fn render_body(frame: &mut Frame, area: Rect, modal: &ActionHistoryModalState) {
         let op = inner.and_then(|x| x.operation.as_deref()).unwrap_or("—");
         let stype = inner.and_then(|x| x.source_type.as_deref()).unwrap_or("—");
         let sname = inner.and_then(|x| x.source_name.as_deref()).unwrap_or("—");
-        let selected = i == modal.selected;
+        let selected = i == modal.cursor.selected;
         let is_current_match = Some(i) == match_line_idx;
         let row_style = if selected {
             Style::default().add_modifier(Modifier::REVERSED)
@@ -134,7 +134,7 @@ fn render_body(frame: &mut Frame, area: Rect, modal: &ActionHistoryModalState) {
     }
 
     // Render with the modal's scroll offset.
-    let scroll_offset = u16::try_from(modal.scroll.offset).unwrap_or(u16::MAX);
+    let scroll_offset = u16::try_from(modal.cursor.offset).unwrap_or(u16::MAX);
     frame.render_widget(Paragraph::new(lines).scroll((scroll_offset, 0)), area);
 }
 
@@ -248,7 +248,7 @@ mod tests {
         let mut term = Terminal::new(test_backend(20)).unwrap();
         let mut modal = make_modal_state(5, false);
         modal.expanded_index = Some(2);
-        modal.selected = 2;
+        modal.cursor.selected = 2;
         term.draw(|f| {
             render(f, f.area(), &modal);
         })

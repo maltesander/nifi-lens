@@ -3,7 +3,7 @@
 //! Mirrors `version_control_modal` and `parameter_context_modal` in
 //! shape: per-open struct on `BrowserState.action_history_modal`,
 //! populated by the reducer from worker-emitted `ActionHistoryPage`
-//! payloads. Uses the shared `widget::scroll::VerticalScrollState`
+//! payloads. Uses the shared `widget::scroll::CursoredScrollState`
 //! and `widget::search::SearchState` primitives.
 
 use std::sync::Arc;
@@ -11,7 +11,7 @@ use std::sync::Arc;
 use nifi_rust_client::dynamic::types::ActionEntity;
 use tokio::sync::Notify;
 
-use crate::widget::scroll::VerticalScrollState;
+use crate::widget::scroll::CursoredScrollState;
 use crate::widget::search::SearchState;
 
 /// Auto-load the next page when the viewport bottom is within this many
@@ -40,9 +40,11 @@ pub struct ActionHistoryModalState {
     /// Index into `actions` of the row whose details are inline-
     /// expanded. `None` when no row is expanded.
     pub expanded_index: Option<usize>,
-    /// Vertical scroll position. The renderer drives the
-    /// `apply_dimensions` call on each frame to clamp.
-    pub scroll: VerticalScrollState,
+    /// Cursor + viewport offset. The cursor is the row index the
+    /// renderer highlights (used by ToggleExpand/Copy); navigation
+    /// methods on `CursoredScrollState` keep cursor and offset in
+    /// sync via `scroll_to_visible`.
+    pub cursor: CursoredScrollState,
     /// Optional search overlay; same lifecycle as the bulletins
     /// detail modal (`None` = inactive, `Some` with `input_active` =
     /// typing, `Some` with `committed` = n/N cycles matches).
@@ -51,9 +53,6 @@ pub struct ActionHistoryModalState {
     /// `notify_one()` when scroll position is near the loaded tail
     /// AND `actions.len() < total`.
     pub fetch_signal: Arc<Notify>,
-    /// Currently selected row (cursor index into `actions`). The renderer
-    /// highlights this row; ToggleExpand/Copy use it as the target.
-    pub selected: usize,
 }
 
 impl ActionHistoryModalState {
@@ -66,10 +65,9 @@ impl ActionHistoryModalState {
             loading: true,
             error: None,
             expanded_index: None,
-            scroll: VerticalScrollState::default(),
+            cursor: CursoredScrollState::default(),
             search: None,
             fetch_signal: Arc::new(Notify::new()),
-            selected: 0,
         }
     }
 
@@ -105,31 +103,30 @@ impl ActionHistoryModalState {
         self.loading = true;
         self.error = None;
         self.expanded_index = None;
-        self.scroll = VerticalScrollState::default();
-        self.selected = 0;
+        self.cursor = CursoredScrollState::default();
         // Keep `search` and `source_id` / `component_label` intact.
     }
 
-    /// Move selection up by 1, clamping to 0.
+    /// Move selection up by 1, clamping to 0. Auto-scrolls the
+    /// viewport to keep the cursor visible.
     pub fn move_selection_up(&mut self) {
-        self.selected = self.selected.saturating_sub(1);
+        self.cursor.move_up();
     }
 
-    /// Move selection down by 1, clamping to `len - 1`.
+    /// Move selection down by 1, clamping to `len - 1`. Auto-scrolls
+    /// the viewport to keep the cursor visible.
     pub fn move_selection_down(&mut self) {
-        if self.selected + 1 < self.actions.len() {
-            self.selected += 1;
-        }
+        self.cursor.move_down(self.actions.len());
     }
 
     /// Selected row index, or 0 if no rows.
     pub fn selected_row(&self) -> usize {
-        self.selected
+        self.cursor.selected
     }
 
     /// Toggle inline expansion of the row currently selected by
-    /// `scroll.selected_index()`. Pass the current selected row
-    /// from the reducer.
+    /// `cursor.selected`. Pass the current selected row from the
+    /// reducer.
     pub fn toggle_expanded(&mut self, selected: usize) {
         self.expanded_index = match self.expanded_index {
             Some(i) if i == selected => None,
@@ -283,17 +280,17 @@ mod tests {
         let mut s = ActionHistoryModalState::pending("p".into(), "X".into());
         // No actions — both moves are no-ops.
         s.move_selection_down();
-        assert_eq!(s.selected, 0);
+        assert_eq!(s.cursor.selected, 0);
         s.move_selection_up();
-        assert_eq!(s.selected, 0);
+        assert_eq!(s.cursor.selected, 0);
         // Add 3 actions, navigate.
         s.apply_page("p", (0..3).map(entity).collect(), Some(3));
         s.move_selection_down();
         s.move_selection_down();
-        assert_eq!(s.selected, 2);
+        assert_eq!(s.cursor.selected, 2);
         s.move_selection_down(); // clamps at len-1
-        assert_eq!(s.selected, 2);
+        assert_eq!(s.cursor.selected, 2);
         s.move_selection_up();
-        assert_eq!(s.selected, 1);
+        assert_eq!(s.cursor.selected, 1);
     }
 }

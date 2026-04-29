@@ -3478,6 +3478,7 @@ fn action_history_modal_toggle_expand_uses_selected_row() {
         .action_history_modal
         .as_mut()
         .unwrap()
+        .cursor
         .selected = 3;
     let _ = BrowserHandler::handle_verb(
         &mut state,

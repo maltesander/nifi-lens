@@ -127,6 +127,93 @@ impl BidirectionalScrollState {
     }
 }
 
+/// Vertical scroll state coupled to a row cursor. The cursor and the
+/// viewport offset are kept in sync — `move_up`/`move_down`/`page_*`/
+/// `jump_*` adjust both, calling `scroll_to_visible` so the cursor
+/// stays inside the rendered window.
+///
+/// Action history modal uses this to drive its row selection. Use it
+/// for any modal that presents a scrollable list with a row cursor.
+///
+/// Composes `VerticalScrollState` via `Deref` so callers that previously
+/// reached for `state.scroll.offset` / `state.scroll.last_viewport_rows`
+/// continue to work without change.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct CursoredScrollState {
+    pub scroll: VerticalScrollState,
+    /// Currently selected row (0-based). Callers clamp to `0..len` via
+    /// `move_down(len)` / `jump_bottom(len)`.
+    pub selected: usize,
+}
+
+impl std::ops::Deref for CursoredScrollState {
+    type Target = VerticalScrollState;
+    fn deref(&self) -> &Self::Target {
+        &self.scroll
+    }
+}
+
+impl std::ops::DerefMut for CursoredScrollState {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.scroll
+    }
+}
+
+impl CursoredScrollState {
+    /// Move the cursor up by 1 (clamped to 0) and ensure it remains
+    /// visible.
+    pub fn move_up(&mut self) {
+        self.selected = self.selected.saturating_sub(1);
+        self.scroll.scroll_to_visible(self.selected);
+    }
+
+    /// Move the cursor down by 1 (clamped to `len - 1`) and ensure it
+    /// remains visible. No-op if `len == 0`.
+    pub fn move_down(&mut self, len: usize) {
+        if self.selected + 1 < len {
+            self.selected += 1;
+            self.scroll.scroll_to_visible(self.selected);
+        }
+    }
+
+    /// Move the cursor up by one viewport (using
+    /// `last_viewport_rows`) and ensure visibility.
+    pub fn page_up(&mut self) {
+        let bump = self.scroll.last_viewport_rows.max(1);
+        self.selected = self.selected.saturating_sub(bump);
+        self.scroll.page_up();
+        self.scroll.scroll_to_visible(self.selected);
+    }
+
+    /// Move the cursor down by one viewport (clamped to `len - 1`)
+    /// and ensure visibility. No-op if `len == 0`.
+    pub fn page_down(&mut self, len: usize) {
+        if len == 0 {
+            return;
+        }
+        let bump = self.scroll.last_viewport_rows.max(1);
+        self.selected = (self.selected + bump).min(len.saturating_sub(1));
+        self.scroll.page_down(len);
+        self.scroll.scroll_to_visible(self.selected);
+    }
+
+    /// Jump cursor and viewport to the top.
+    pub fn jump_top(&mut self) {
+        self.selected = 0;
+        self.scroll.jump_top();
+    }
+
+    /// Jump cursor to `len - 1` and scroll the viewport to show the
+    /// bottom. No-op if `len == 0`.
+    pub fn jump_bottom(&mut self, len: usize) {
+        if len == 0 {
+            return;
+        }
+        self.selected = len - 1;
+        self.scroll.jump_bottom(len);
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -358,5 +445,69 @@ mod tests {
         b.reset();
         assert_eq!(b.vertical.offset, 0);
         assert_eq!(b.horizontal_offset, 0);
+    }
+
+    #[test]
+    fn cursored_move_up_clamps_to_zero() {
+        let mut c = CursoredScrollState::default();
+        c.scroll.last_viewport_rows = 5;
+        c.selected = 3;
+        c.move_up();
+        assert_eq!(c.selected, 2);
+        c.selected = 0;
+        c.move_up();
+        assert_eq!(c.selected, 0);
+    }
+
+    #[test]
+    fn cursored_move_down_clamps_to_len_minus_one() {
+        let mut c = CursoredScrollState::default();
+        c.scroll.last_viewport_rows = 5;
+        c.move_down(3);
+        assert_eq!(c.selected, 1);
+        c.move_down(3);
+        assert_eq!(c.selected, 2);
+        c.move_down(3);
+        assert_eq!(c.selected, 2, "clamped at len-1");
+    }
+
+    #[test]
+    fn cursored_move_down_noop_on_empty() {
+        let mut c = CursoredScrollState::default();
+        c.move_down(0);
+        assert_eq!(c.selected, 0);
+    }
+
+    #[test]
+    fn cursored_move_down_auto_scrolls_into_view() {
+        let mut c = CursoredScrollState {
+            scroll: VerticalScrollState {
+                offset: 0,
+                last_viewport_rows: 3,
+            },
+            selected: 0,
+        };
+        // Cursor at row 5 with viewport size 3 → offset must scroll so 5 is visible.
+        for _ in 0..5 {
+            c.move_down(20);
+        }
+        assert_eq!(c.selected, 5);
+        // After scroll_to_visible(5) with last_viewport_rows=3 → offset = 5 + 1 - 3 = 3
+        assert_eq!(c.scroll.offset, 3);
+    }
+
+    #[test]
+    fn cursored_jump_bottom_with_empty_is_noop() {
+        let mut c = CursoredScrollState::default();
+        c.jump_bottom(0);
+        assert_eq!(c.selected, 0);
+    }
+
+    #[test]
+    fn cursored_deref_exposes_inner_offset() {
+        let mut c = CursoredScrollState::default();
+        c.scroll.last_viewport_rows = 10;
+        c.scroll_by(5, 100); // via DerefMut
+        assert_eq!(c.offset, 5); // via Deref
     }
 }

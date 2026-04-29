@@ -1637,7 +1637,7 @@ fn handle_action_history_modal_verb(
         }
         V::ToggleExpand => {
             if let Some(modal) = state.browser.action_history_modal.as_mut() {
-                let selected = modal.selected;
+                let selected = modal.cursor.selected;
                 modal.toggle_expanded(selected);
             }
             redraw()
@@ -1657,34 +1657,28 @@ fn handle_action_history_modal_verb(
         }
         V::PageUp => {
             if let Some(modal) = state.browser.action_history_modal.as_mut() {
-                modal.scroll.page_up();
-                let viewport = modal.scroll.last_viewport_rows.max(1);
-                modal.selected = modal.selected.saturating_sub(viewport);
+                modal.cursor.page_up();
             }
             redraw()
         }
         V::PageDown => {
             if let Some(modal) = state.browser.action_history_modal.as_mut() {
                 let len = modal.actions.len();
-                modal.scroll.page_down(len);
-                let viewport = modal.scroll.last_viewport_rows.max(1);
-                modal.selected = (modal.selected + viewport).min(len.saturating_sub(1));
+                modal.cursor.page_down(len);
                 action_history_check_signal_next_page(modal);
             }
             redraw()
         }
         V::JumpTop => {
             if let Some(modal) = state.browser.action_history_modal.as_mut() {
-                modal.scroll.jump_top();
-                modal.selected = 0;
+                modal.cursor.jump_top();
             }
             redraw()
         }
         V::JumpBottom => {
             if let Some(modal) = state.browser.action_history_modal.as_mut() {
                 let len = modal.actions.len();
-                modal.scroll.jump_bottom(len);
-                modal.selected = len.saturating_sub(1);
+                modal.cursor.jump_bottom(len);
                 action_history_check_signal_next_page(modal);
             }
             redraw()
@@ -1724,7 +1718,7 @@ fn handle_action_history_modal_verb(
                 .browser
                 .action_history_modal
                 .as_ref()
-                .and_then(|m| m.actions.get(m.selected))
+                .and_then(|m| m.actions.get(m.cursor.selected))
                 .map(format_action_tsv);
             if let Some(tsv) = tsv
                 && let Err(err) = state.copy_to_clipboard(tsv)
@@ -2006,9 +2000,9 @@ fn action_history_check_signal_next_page(
     modal: &mut crate::view::browser::state::action_history_modal::ActionHistoryModalState,
 ) {
     let viewport_bottom = modal
-        .scroll
+        .cursor
         .offset
-        .saturating_add(modal.scroll.last_viewport_rows);
+        .saturating_add(modal.cursor.last_viewport_rows);
     if modal.should_signal_next_page(
         viewport_bottom,
         crate::view::browser::state::action_history_modal::AUTOLOAD_LOOKAHEAD_ROWS,
