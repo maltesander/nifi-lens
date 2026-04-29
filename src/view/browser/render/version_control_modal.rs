@@ -1,7 +1,6 @@
 //! Version-control modal renderer. Identity panel + diff body + footer.
-//!
-//! Task 20 ships the scaffold and Identity panel; Tasks 21-23 fill in
-//! the diff body, footer hint bar, and search highlights.
+//! Below `widget::modal::MIN_WIDTH × MIN_HEIGHT` degrades to a centered
+//! "terminal too small" line via `widget::modal::render_too_small`.
 
 use ratatui::Frame;
 use ratatui::layout::{Alignment, Constraint, Direction, Layout, Rect};
@@ -15,14 +14,8 @@ use crate::view::browser::state::{VersionControlDifferenceLoad, VersionControlMo
 use crate::widget::panel::Panel;
 use crate::widget::search::{MatchSpan, SearchState};
 
-const MIN_WIDTH: u16 = 60;
-const MIN_HEIGHT: u16 = 20;
-
 pub fn render(frame: &mut Frame, area: Rect, modal: &VersionControlModalState) {
-    if area.width < MIN_WIDTH || area.height < MIN_HEIGHT {
-        let line = Line::from(Span::styled("terminal too small", theme::muted()));
-        frame.render_widget(Clear, area);
-        frame.render_widget(Paragraph::new(line).alignment(Alignment::Center), area);
+    if crate::widget::modal::render_too_small(frame, area) {
         return;
     }
 
@@ -319,18 +312,7 @@ fn render_footer_status(frame: &mut Frame, area: Rect, modal: &VersionControlMod
 fn render_footer_hint(frame: &mut Frame, area: Rect, _modal: &VersionControlModalState) {
     use crate::input::Verb;
     use crate::input::VersionControlModalVerb;
-
-    let parts: Vec<String> = VersionControlModalVerb::all()
-        .iter()
-        .copied()
-        .filter(|v| v.show_in_hint_bar() && !v.hint().is_empty())
-        .map(|v| format!("[{}] {}", v.chord().display(), v.hint()))
-        .collect();
-    let text = parts.join(" · ");
-    frame.render_widget(
-        Paragraph::new(Line::from(Span::styled(text, theme::muted()))),
-        area,
-    );
+    crate::widget::modal::render_verb_hint_strip(frame, area, VersionControlModalVerb::all());
 }
 
 #[cfg(test)]
