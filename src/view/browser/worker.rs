@@ -75,7 +75,11 @@ async fn fetch_detail_once(
                 .await
                 .map(NodeDetail::Port)
         }
-        NodeKind::RemoteProcessGroup | NodeKind::Folder(_) => return,
+        NodeKind::RemoteProcessGroup => guard
+            .browser_remote_process_group_detail(&req.id)
+            .await
+            .map(NodeDetail::RemoteProcessGroup),
+        NodeKind::Folder(_) => return,
     };
     let result = detail.map(|detail| {
         ViewPayload::Browser(BrowserPayload::Detail(Box::new(NodeDetailSnapshot {

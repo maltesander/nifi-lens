@@ -631,6 +631,17 @@ fn render_detail(
         Some(NodeDetail::Port(d)) => {
             port::render(frame, detail_area, d, state, bulletins, &state.detail_focus);
         }
+        Some(NodeDetail::RemoteProcessGroup(_)) => {
+            // Task 10 will wire the RPG Identity render. Until then,
+            // surface the same loading placeholder used pre-fetch so the
+            // detail pane is never blank.
+            let lines = vec![
+                header_line,
+                Line::from(""),
+                Line::from(Span::styled("loading…", theme::muted())),
+            ];
+            frame.render_widget(Paragraph::new(lines), detail_area);
+        }
         None => {
             let lines = vec![
                 header_line,
