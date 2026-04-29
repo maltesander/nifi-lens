@@ -1282,7 +1282,7 @@ mod keymap_tests {
         let state = dummy_state();
 
         // 'c' inside the modal must route to ActionHistoryModalVerb::Copy
-        // (not BrowserVerb::Copy).
+        // (not BrowserVerb::Common(CommonVerb::Copy)).
         let ev = km.translate(
             KeyEvent::new(KeyCode::Char('c'), KeyModifiers::empty()),
             ViewId::Browser,
@@ -1366,7 +1366,7 @@ mod keymap_tests {
         let state = dummy_state();
 
         // 'c' inside the peek modal must route to BrowserPeekVerb::CopyAsJson
-        // (not BrowserVerb::Copy).
+        // (not BrowserVerb::Common(CommonVerb::Copy)).
         let ev = km.translate(
             KeyEvent::new(KeyCode::Char('c'), KeyModifiers::empty()),
             ViewId::Browser,

@@ -98,8 +98,7 @@ pub enum BulletinsVerb {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum BrowserVerb {
-    Refresh,
-    Copy,
+    Common(CommonVerb),
     OpenProperties,
     OpenParameterContext,
     OpenActionHistory,
@@ -234,8 +233,7 @@ impl Verb for BulletinsVerb {
 impl Verb for BrowserVerb {
     fn chord(self) -> Chord {
         match self {
-            Self::Refresh => Chord::simple(KeyCode::Char('r')),
-            Self::Copy => Chord::simple(KeyCode::Char('c')),
+            Self::Common(c) => c.chord(),
             Self::OpenProperties => Chord::simple(KeyCode::Char('p')),
             Self::OpenParameterContext => Chord::simple(KeyCode::Char('p')),
             Self::OpenActionHistory => Chord::simple(KeyCode::Char('a')),
@@ -244,8 +242,7 @@ impl Verb for BrowserVerb {
     }
     fn label(self) -> &'static str {
         match self {
-            Self::Refresh => "refresh flow",
-            Self::Copy => "copy id / row value",
+            Self::Common(c) => c.label(),
             Self::OpenProperties => "open properties",
             Self::OpenParameterContext => "open parameter context",
             Self::OpenActionHistory => "open action history",
@@ -254,8 +251,7 @@ impl Verb for BrowserVerb {
     }
     fn hint(self) -> &'static str {
         match self {
-            Self::Refresh => "refresh",
-            Self::Copy => "copy",
+            Self::Common(c) => c.hint(),
             Self::OpenProperties => "props",
             Self::OpenParameterContext => "param",
             Self::OpenActionHistory => "actions",
@@ -291,8 +287,8 @@ impl Verb for BrowserVerb {
     }
     fn all() -> &'static [Self] {
         &[
-            Self::Refresh,
-            Self::Copy,
+            Self::Common(CommonVerb::Refresh),
+            Self::Common(CommonVerb::Copy),
             Self::OpenProperties,
             Self::OpenParameterContext,
             Self::OpenActionHistory,

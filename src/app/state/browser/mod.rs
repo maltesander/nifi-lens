@@ -3,7 +3,7 @@
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 
 use super::{AppState, Modal, UpdateResult, ViewKeyHandler};
-use crate::input::{FocusAction, ViewVerb};
+use crate::input::{CommonVerb, FocusAction, ViewVerb};
 use crate::view::browser::state::{
     DetailFocus, DetailSection, DetailSections, MAX_DETAIL_SECTIONS, NodeDetail,
 };
@@ -44,7 +44,7 @@ impl ViewKeyHandler for BrowserHandler {
             _ => return None,
         };
         match bv {
-            BrowserVerb::Refresh => {
+            BrowserVerb::Common(CommonVerb::Refresh) => {
                 // Task 6: Browser's arena is rebuilt from the cluster
                 // snapshot, so the old per-worker force-tick oneshot is
                 // gone. Force-refresh now nudges every endpoint the
@@ -57,7 +57,7 @@ impl ViewKeyHandler for BrowserHandler {
                 state.cluster.force(ClusterEndpoint::ControllerServices);
                 state.cluster.force(ClusterEndpoint::ConnectionsByPg);
             }
-            BrowserVerb::Copy => {
+            BrowserVerb::Common(CommonVerb::Copy) => {
                 // Copy depends on where focus is: row value in detail focus,
                 // node id in tree focus.
                 if matches!(state.browser.detail_focus, DetailFocus::Section { .. }) {
@@ -199,6 +199,15 @@ impl ViewKeyHandler for BrowserHandler {
                     queue_listing_followup: None,
                 });
             }
+            // OpenSearch / SearchNext / SearchPrev / Close are not bound on
+            // the Browser top-level — only inside the modals (handled by their
+            // own dispatch above). These arms keep the match exhaustive.
+            BrowserVerb::Common(
+                CommonVerb::OpenSearch
+                | CommonVerb::SearchNext
+                | CommonVerb::SearchPrev
+                | CommonVerb::Close,
+            ) => {}
         }
         Some(UpdateResult {
             redraw: true,
