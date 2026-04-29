@@ -330,6 +330,48 @@ mod snapshots {
         format!("{}", term.backend())
     }
 
+    fn render_with_sparkline(
+        width: u16,
+        sparkline: Option<crate::view::browser::state::sparkline::SparklineState>,
+    ) -> String {
+        let d = seeded_detail();
+        let mut state = BrowserState::new();
+        state.sparkline = sparkline;
+        let mut term = Terminal::new(TestBackend::new(width, 30)).unwrap();
+        term.draw(|f| {
+            render(f, f.area(), &d, &state);
+        })
+        .unwrap();
+        format!("{}", term.backend())
+    }
+
+    fn sample_rpg_series(buckets: usize) -> crate::client::history::StatusHistorySeries {
+        use crate::client::history::{Bucket, StatusHistorySeries};
+        StatusHistorySeries {
+            buckets: (0..buckets)
+                .map(|i| Bucket {
+                    timestamp: std::time::SystemTime::now(),
+                    in_count: ((i * 5) % 80) as u64,
+                    out_count: ((i * 3) % 60) as u64,
+                    queued_count: None,
+                    task_time_ns: None,
+                    active_threads: Some(((i * 2) % 8) as u64),
+                })
+                .collect(),
+            generated_at: std::time::SystemTime::now(),
+        }
+    }
+
+    #[test]
+    fn rpg_sparkline_wide() {
+        use crate::client::history::ComponentKind;
+        use crate::view::browser::state::sparkline::SparklineState;
+        let mut s = SparklineState::pending(ComponentKind::RemoteProcessGroup, "rpg-1".into());
+        s.series = Some(sample_rpg_series(40));
+        let out = render_with_sparkline(120, Some(s));
+        assert_snapshot!("rpg_sparkline_wide", out);
+    }
+
     #[test]
     fn rpg_identity_renders_loaded_with_one_input_port() {
         let d = seeded_detail();

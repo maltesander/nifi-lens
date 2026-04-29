@@ -1167,10 +1167,10 @@ impl BrowserState {
             NodeKind::Processor => ComponentKind::Processor,
             NodeKind::ProcessGroup => ComponentKind::ProcessGroup,
             NodeKind::Connection => ComponentKind::Connection,
+            NodeKind::RemoteProcessGroup => ComponentKind::RemoteProcessGroup,
             NodeKind::ControllerService
             | NodeKind::InputPort
             | NodeKind::OutputPort
-            | NodeKind::RemoteProcessGroup
             | NodeKind::Folder(_) => return None,
         };
         Some((kind, node.id.clone()))

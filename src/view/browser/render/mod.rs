@@ -194,6 +194,11 @@ pub(super) fn render_inline_sparkline_strip(
     // `in`/`out` — a row that vanishes whenever a metric is partially
     // absent is more confusing than zeros. `peak` reflects the actual
     // recorded values, so all-zeros still surface as `peak 0`.
+    let (row1_label, row2_label) = match sparkline.kind {
+        ComponentKind::RemoteProcessGroup => ("recv", "sent"),
+        _ => ("in", "out"),
+    };
+
     let (row3_label, row3_values, row3_formatter): (&str, Vec<u64>, fn(u64) -> String) =
         match sparkline.kind {
             ComponentKind::Processor => (
@@ -228,7 +233,7 @@ pub(super) fn render_inline_sparkline_strip(
 
     frame.render_widget(
         Paragraph::new(render_sparkline_row(
-            "in",
+            row1_label,
             5,
             &in_values,
             theme::spark_in(),
@@ -239,7 +244,7 @@ pub(super) fn render_inline_sparkline_strip(
     );
     frame.render_widget(
         Paragraph::new(render_sparkline_row(
-            "out",
+            row2_label,
             5,
             &out_values,
             theme::spark_out(),
