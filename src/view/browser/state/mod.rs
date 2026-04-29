@@ -23,7 +23,6 @@ pub use parameter_context_modal::{
     ParameterContextLoad, ParameterContextModalState, ResolvedParameter, resolve,
 };
 pub mod queue_listing;
-pub mod rpg;
 pub mod sparkline;
 pub mod version_control_modal;
 pub use version_control_modal::{VersionControlDifferenceLoad, VersionControlModalState};
@@ -254,12 +253,6 @@ pub struct BrowserState {
     /// Aborted on selection change, tab switch, or before the dispatcher
     /// spawns a new one.
     pub sparkline_handle: Option<crate::app::worker::AbortOnDrop>,
-    /// Per-RPG selection state for the Browser detail pane. Set by
-    /// `emit_detail_request_for_current_selection` whenever the cursor
-    /// lands on a `NodeKind::RemoteProcessGroup` row, cleared otherwise.
-    /// The detail field is populated by the worker's reducer arm in
-    /// `apply_node_detail`.
-    pub rpg: rpg::RemoteProcessGroupSelection,
 }
 
 /// One segment in the breadcrumb path.
@@ -1136,7 +1129,6 @@ impl BrowserState {
     /// push a `DetailRequest` on `detail_tx` when a sender exists.
     pub fn emit_detail_request_for_current_selection(&mut self) {
         let Some(&arena_idx) = self.visible.get(self.selected) else {
-            self.rpg.clear();
             return;
         };
         let node = &self.nodes[arena_idx];
@@ -1144,16 +1136,7 @@ impl BrowserState {
             // Folders have no detail pane; mark nothing pending.
             self.pending_detail = None;
             self.pending_detail_unsent = false;
-            self.rpg.clear();
             return;
-        }
-        // Reconcile the per-RPG selection cache: install on RPG entry,
-        // tear down on every other kind so stale identity / error data
-        // does not leak across selection moves.
-        if matches!(node.kind, NodeKind::RemoteProcessGroup) {
-            self.rpg.select(node.id.clone());
-        } else {
-            self.rpg.clear();
         }
         self.pending_detail = Some(arena_idx);
         if let Some(tx) = self.detail_tx.as_ref() {
@@ -2033,16 +2016,6 @@ pub fn apply_node_detail(state: &mut BrowserState, payload: NodeDetailSnapshot) 
     let node = &state.nodes[payload.arena_idx];
     if node.id != payload.id || node.kind != payload.kind {
         return; // stale: node at that index changed
-    }
-    // RPG payloads also land in the per-selection cache so the Identity
-    // renderer can short-circuit a `state.details` lookup. The match
-    // here doubles as a stale-emit guard against worker emits that
-    // arrive after the user moved off the RPG row.
-    if let NodeDetail::RemoteProcessGroup(detail) = &payload.detail
-        && state.rpg.selected_id.as_deref() == Some(payload.id.as_str())
-    {
-        state.rpg.detail = Some(detail.clone());
-        state.rpg.last_error = None;
     }
     state.details.insert(payload.arena_idx, payload.detail);
     if state.pending_detail == Some(payload.arena_idx) {

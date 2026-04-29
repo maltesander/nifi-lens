@@ -417,7 +417,10 @@ fn selection_change_sets_pending_detail_and_pushes_request() {
 
 #[test]
 fn selecting_rpg_emits_detail_fetch_request() {
-    // Arena: root PG (0) with one RPG child (1).
+    // Arena: root PG (0) with one RPG child (1). Selecting the RPG row
+    // must enqueue a `DetailRequest` on `detail_tx` with the matching
+    // (kind, id), the same mechanism processor selection uses — the
+    // worker arm dispatches on `NodeKind::RemoteProcessGroup`.
     let mut s = BrowserState::new();
     apply_tree_snapshot(&mut s, snap(vec![pg("root", None, 0), rpg("rpg-1", 0)]));
     let (tx, mut rx) = mpsc::unbounded_channel();
@@ -427,52 +430,11 @@ fn selecting_rpg_emits_detail_fetch_request() {
     s.move_down();
     s.emit_detail_request_for_current_selection();
 
-    // Pending arena idx is set, request is pushed with RPG kind, and the
-    // per-RPG selection state captures the id.
     assert_eq!(s.pending_detail, Some(1));
     let req = rx.try_recv().expect("RPG detail request pushed");
     assert_eq!(req.arena_idx, 1);
     assert_eq!(req.kind, NodeKind::RemoteProcessGroup);
     assert_eq!(req.id, "rpg-1");
-    assert_eq!(s.rpg.selected_id.as_deref(), Some("rpg-1"));
-}
-
-#[test]
-fn selecting_non_rpg_clears_rpg_selection_state() {
-    // Arena: root PG (0), RPG (1), processor (2). Folder synthesis groups
-    // processors first then `rest` (which includes RPGs), so visible order
-    // after the root auto-expand is [root, p1, rpg-1]. Move down twice to
-    // reach the RPG, then move back up to the processor and verify the
-    // per-RPG state was torn down.
-    let mut s = BrowserState::new();
-    apply_tree_snapshot(
-        &mut s,
-        snap(vec![
-            pg("root", None, 0),
-            rpg("rpg-1", 0),
-            proc("p1", 0, "Running"),
-        ]),
-    );
-    let (tx, _rx) = mpsc::unbounded_channel();
-    s.detail_tx = Some(tx);
-
-    // Land on the processor first so `state.rpg.selected_id` stays None.
-    s.move_down(); // processor (visible idx 1)
-    s.emit_detail_request_for_current_selection();
-    assert!(s.rpg.selected_id.is_none());
-
-    // Move to the RPG row — selection state should populate.
-    s.move_down(); // RPG (visible idx 2)
-    s.emit_detail_request_for_current_selection();
-    assert_eq!(s.rpg.selected_id.as_deref(), Some("rpg-1"));
-    s.rpg.last_error = Some("seeded error".into()); // simulate stale error
-
-    // Move back to the processor — RPG state must be wiped.
-    s.move_up();
-    s.emit_detail_request_for_current_selection();
-    assert!(s.rpg.selected_id.is_none(), "rpg state must be torn down");
-    assert!(s.rpg.detail.is_none());
-    assert!(s.rpg.last_error.is_none());
 }
 
 #[test]
@@ -485,16 +447,10 @@ fn selection_change_with_no_detail_tx_is_noop_but_sets_pending() {
 }
 
 #[test]
-fn apply_node_detail_lands_rpg_payload_in_per_selection_cache() {
+fn apply_node_detail_lands_rpg_payload_in_details_cache() {
     use crate::client::browser::RemoteProcessGroupDetail;
     let mut s = BrowserState::new();
     apply_tree_snapshot(&mut s, snap(vec![pg("root", None, 0), rpg("rpg-1", 0)]));
-    let (tx, _rx) = mpsc::unbounded_channel();
-    s.detail_tx = Some(tx);
-
-    // Move onto the RPG row so `state.rpg.selected_id == Some("rpg-1")`.
-    s.move_down();
-    s.emit_detail_request_for_current_selection();
 
     let payload = NodeDetailSnapshot {
         arena_idx: 1,
@@ -520,65 +476,15 @@ fn apply_node_detail_lands_rpg_payload_in_per_selection_cache() {
         }),
     };
     apply_node_detail(&mut s, payload);
-    assert!(matches!(
-        s.details.get(&1),
-        Some(NodeDetail::RemoteProcessGroup(_))
-    ));
-    let cached = s.rpg.detail.as_ref().expect("rpg.detail populated");
-    assert_eq!(cached.id, "rpg-1");
-    assert_eq!(cached.name, "Sink");
-}
-
-#[test]
-fn apply_node_detail_drops_rpg_payload_when_selection_moved_off() {
-    use crate::client::browser::RemoteProcessGroupDetail;
-    let mut s = BrowserState::new();
-    apply_tree_snapshot(
-        &mut s,
-        snap(vec![
-            pg("root", None, 0),
-            rpg("rpg-1", 0),
-            proc("p1", 0, "Running"),
-        ]),
-    );
-    let (tx, _rx) = mpsc::unbounded_channel();
-    s.detail_tx = Some(tx);
-
-    // Visible: [root, p1, rpg-1]. Move to RPG, then off it.
-    s.move_down(); // p1
-    s.move_down(); // rpg-1
-    s.emit_detail_request_for_current_selection();
-    assert_eq!(s.rpg.selected_id.as_deref(), Some("rpg-1"));
-    s.move_up(); // back to p1
-    s.emit_detail_request_for_current_selection();
-    assert!(s.rpg.selected_id.is_none());
-
-    // A late-arriving RPG payload must NOT repopulate the cache.
-    let payload = NodeDetailSnapshot {
-        arena_idx: 1,
-        kind: NodeKind::RemoteProcessGroup,
-        id: "rpg-1".into(),
-        detail: NodeDetail::RemoteProcessGroup(RemoteProcessGroupDetail {
-            id: "rpg-1".into(),
-            name: "Sink".into(),
-            parent_group_id: Some("root".into()),
-            target_uri: String::new(),
-            target_secure: false,
-            transport_protocol: String::new(),
-            transmission_status: String::new(),
-            validation_status: String::new(),
-            validation_errors: vec![],
-            comments: String::new(),
-            input_ports: vec![],
-            output_ports: vec![],
-            active_remote_input_port_count: 0,
-            inactive_remote_input_port_count: 0,
-            active_remote_output_port_count: 0,
-            inactive_remote_output_port_count: 0,
-        }),
+    // The arena-guard check (kind + id match against `state.nodes[idx]`)
+    // is the only stale-emit defense; payloads land in `state.details`
+    // keyed by arena index, the same shape the renderer reads.
+    let detail = match s.details.get(&1) {
+        Some(NodeDetail::RemoteProcessGroup(d)) => d,
+        other => panic!("expected RemoteProcessGroup detail, got {other:?}"),
     };
-    apply_node_detail(&mut s, payload);
-    assert!(s.rpg.detail.is_none(), "stale emit must not repopulate");
+    assert_eq!(detail.id, "rpg-1");
+    assert_eq!(detail.name, "Sink");
 }
 
 #[test]
