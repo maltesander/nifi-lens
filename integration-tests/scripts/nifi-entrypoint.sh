@@ -11,6 +11,16 @@ prop_replace 'nifi.security.truststore'         "${TRUSTSTORE_PATH}"
 prop_replace 'nifi.security.truststoreType'     "${TRUSTSTORE_TYPE}"
 prop_replace 'nifi.security.truststorePasswd'   "${TRUSTSTORE_PASSWORD}"
 
+# Site-to-site listening, optional. When `REMOTE_INPUT_HOST` is set we enable
+# HTTP-based site-to-site (piggybacks on the regular web port, no new port
+# exposure needed). Required for Remote Process Groups in this fixture to
+# complete their handshake and accumulate status_history snapshots.
+if [ -n "${REMOTE_INPUT_HOST:-}" ]; then
+    prop_replace 'nifi.remote.input.host'         "${REMOTE_INPUT_HOST}"
+    prop_replace 'nifi.remote.input.secure'       "${REMOTE_INPUT_SECURE:-true}"
+    prop_replace 'nifi.remote.input.http.enabled' 'true'
+fi
+
 # Clustering properties are handled by NiFi's own start.sh via env vars:
 #   NIFI_CLUSTER_IS_NODE, NIFI_CLUSTER_ADDRESS, NIFI_CLUSTER_NODE_PROTOCOL_PORT,
 #   NIFI_ZK_CONNECT_STRING, NIFI_ELECTION_MAX_WAIT, NIFI_SENSITIVE_PROPS_KEY.

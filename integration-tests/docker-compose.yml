@@ -15,6 +15,10 @@ services:
       - TRUSTSTORE_TYPE=PKCS12
       - TRUSTSTORE_PASSWORD=testpassword
       - NIFI_WEB_PROXY_HOST=localhost:8443,localhost:8444,localhost:8445
+      # Enable site-to-site listening so the fixture's RPGs (which all
+      # target this NiFi) can complete their handshake.
+      - REMOTE_INPUT_HOST=nifi-2-6-0
+      - REMOTE_INPUT_SECURE=true
     volumes:
       - ./scripts/nifi-entrypoint.sh:/opt/nifi/scripts/nifi-entrypoint.sh:ro
       - ./scripts/certs/keystore.p12:/opt/nifi/nifi-current/conf/keystore.p12:ro
