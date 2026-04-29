@@ -16,7 +16,7 @@ use nifi_rust_client::dynamic::DynamicClient;
 
 use crate::entities::{make_processor, props};
 use crate::error::Result;
-use crate::fixture::healthy::{
+use crate::fixture::common::{
     create_child_pg, create_connection_in_pg, create_processor, start_processor, wait_for_valid,
 };
 

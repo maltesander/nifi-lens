@@ -21,7 +21,7 @@
 use nifi_rust_client::dynamic::{DynamicClient, types};
 
 use crate::error::{Result, SeederError};
-use crate::fixture::healthy::create_child_pg;
+use crate::fixture::common::create_child_pg;
 
 /// Hostname:port of the floor NiFi inside the docker compose network.
 /// Resolvable from the cluster nodes too (shared docker network). The

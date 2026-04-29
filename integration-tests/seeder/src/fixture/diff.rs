@@ -49,10 +49,10 @@ use nifi_rust_client::{NifiError, wait};
 
 use crate::entities::{make_controller_service, make_processor, props};
 use crate::error::{Result, SeederError};
-use crate::fixture::custom_text_property_key;
-use crate::fixture::healthy::{
+use crate::fixture::common::{
     create_child_pg, create_connection_in_pg, create_processor, start_processor, wait_for_valid,
 };
+use crate::fixture::custom_text_property_key;
 
 /// Embedded JSON payload used as GenerateFlowFile's Custom Text. ~180 KiB
 /// of structured sensor data (1000 records) — small enough to stay under

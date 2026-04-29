@@ -30,7 +30,7 @@ use nifi_rust_client::dynamic::{DynamicClient, types};
 
 use crate::entities::{make_processor, props};
 use crate::error::{Result, SeederError};
-use crate::fixture::healthy::{create_child_pg, create_processor};
+use crate::fixture::common::{create_child_pg, create_processor};
 
 /// Seeded parameter context IDs, returned so callers can assert on them.
 // T19 integration tests consume both fields; allow on the struct for now.

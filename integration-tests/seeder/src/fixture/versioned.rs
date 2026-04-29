@@ -21,8 +21,8 @@ use nifi_rust_client::dynamic::{DynamicClient, types};
 
 use crate::entities::{make_pg, make_processor, props};
 use crate::error::{Result, SeederError};
+use crate::fixture::common::{create_connection_in_pg, create_processor};
 use crate::fixture::custom_text_property_key;
-use crate::fixture::healthy::{create_connection_in_pg, create_processor};
 use crate::fixture::registry::RegistryIds;
 
 /// Identifiers captured from the initial gen → log pipeline of a

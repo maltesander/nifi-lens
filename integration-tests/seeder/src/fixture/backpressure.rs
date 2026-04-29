@@ -15,7 +15,7 @@ use nifi_rust_client::dynamic::DynamicClient;
 
 use crate::entities::{make_connection, make_processor, props};
 use crate::error::{Result, SeederError};
-use crate::fixture::healthy::{create_child_pg, create_processor, start_processor, wait_for_valid};
+use crate::fixture::common::{create_child_pg, create_processor, start_processor, wait_for_valid};
 
 pub async fn seed(client: &DynamicClient, parent_pg_id: &str) -> Result<()> {
     tracing::info!("seeding backpressure-pipeline");
