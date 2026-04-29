@@ -2,11 +2,11 @@
 //!
 //! Layout: Title bar with component label + (showing N of M) progress.
 //! Header row, then a scrollable rows list, then a hint strip.
-//! Below MIN_WIDTH × MIN_HEIGHT degrades to a centered "terminal too
-//! small" line, mirroring `version_control_modal`.
+//! Below `widget::modal::MIN_WIDTH × MIN_HEIGHT` degrades to a centered
+//! "terminal too small" line via `widget::modal::render_too_small`.
 
 use ratatui::Frame;
-use ratatui::layout::{Alignment, Constraint, Direction, Layout, Rect};
+use ratatui::layout::{Constraint, Direction, Layout, Rect};
 use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Clear, Paragraph};
@@ -16,14 +16,8 @@ use crate::timestamp::{format_age_secs, parse_nifi_timestamp};
 use crate::view::browser::state::action_history_modal::ActionHistoryModalState;
 use crate::widget::panel::Panel;
 
-const MIN_WIDTH: u16 = 60;
-const MIN_HEIGHT: u16 = 20;
-
 pub fn render(frame: &mut Frame, area: Rect, modal: &ActionHistoryModalState) {
-    if area.width < MIN_WIDTH || area.height < MIN_HEIGHT {
-        let line = Line::from(Span::styled("terminal too small", theme::muted()));
-        frame.render_widget(Clear, area);
-        frame.render_widget(Paragraph::new(line).alignment(Alignment::Center), area);
+    if crate::widget::modal::render_too_small(frame, area) {
         return;
     }
 
@@ -177,18 +171,7 @@ fn render_age(timestamp: &str, now: time::OffsetDateTime) -> String {
 fn render_footer_hint(frame: &mut Frame, area: Rect) {
     use crate::input::ActionHistoryModalVerb;
     use crate::input::Verb;
-
-    let parts: Vec<String> = ActionHistoryModalVerb::all()
-        .iter()
-        .copied()
-        .filter(|v| v.show_in_hint_bar() && !v.hint().is_empty())
-        .map(|v| format!("[{}] {}", v.chord().display(), v.hint()))
-        .collect();
-    let text = parts.join(" · ");
-    frame.render_widget(
-        Paragraph::new(Line::from(Span::styled(text, theme::muted()))),
-        area,
-    );
+    crate::widget::modal::render_verb_hint_strip(frame, area, ActionHistoryModalVerb::all());
 }
 
 #[cfg(test)]
