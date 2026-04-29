@@ -235,6 +235,30 @@ pub fn walk_pg_nodes(
         }
     }
 
+    if let Some(rpgs) = snap.remote_process_group_status_snapshots.as_ref() {
+        for entity in rpgs {
+            let Some(r) = entity.remote_process_group_status_snapshot.as_ref() else {
+                continue;
+            };
+            out.push(RawNode {
+                parent_idx: Some(pg_idx),
+                kind: NodeKind::RemoteProcessGroup,
+                id: r.id.clone().unwrap_or_default(),
+                group_id: r.group_id.clone().unwrap_or_default(),
+                name: r.name.clone().unwrap_or_default(),
+                status_summary: NodeStatusSummary::RemoteProcessGroup {
+                    transmission_status: r.transmission_status.clone().unwrap_or_default(),
+                    active_threads: r.active_thread_count.unwrap_or(0).max(0) as u32,
+                    flow_files_received: r.flow_files_received.unwrap_or(0).max(0) as u32,
+                    flow_files_sent: r.flow_files_sent.unwrap_or(0).max(0) as u32,
+                    bytes_received: r.bytes_received.unwrap_or(0).max(0) as u64,
+                    bytes_sent: r.bytes_sent.unwrap_or(0).max(0) as u64,
+                    target_uri: r.target_uri.clone().unwrap_or_default(),
+                },
+            });
+        }
+    }
+
     if let Some(children) = snap.process_group_status_snapshots.as_ref() {
         for entity in children {
             if let Some(child) = entity.process_group_status_snapshot.as_ref() {
@@ -871,6 +895,65 @@ mod tests {
     #[test]
     fn short_type_empty_string() {
         assert_eq!(short_type(""), "");
+    }
+
+    #[test]
+    #[allow(clippy::field_reassign_with_default)]
+    fn walk_pg_nodes_emits_rpg_row_under_parent_pg() {
+        use nifi_rust_client::dynamic::types::{
+            ProcessGroupStatusSnapshotDto, RemoteProcessGroupStatusSnapshotDto,
+            RemoteProcessGroupStatusSnapshotEntity,
+        };
+        let mut rpg_dto = RemoteProcessGroupStatusSnapshotDto::default();
+        rpg_dto.id = Some("rpg-1".into());
+        rpg_dto.group_id = Some("pg-1".into());
+        rpg_dto.name = Some("MyRemoteSink".into());
+        rpg_dto.transmission_status = Some("Transmitting".into());
+        rpg_dto.active_thread_count = Some(2);
+        rpg_dto.flow_files_received = Some(5);
+        rpg_dto.flow_files_sent = Some(7);
+        rpg_dto.bytes_received = Some(100);
+        rpg_dto.bytes_sent = Some(200);
+        rpg_dto.target_uri = Some("https://nifi-east:8443/nifi".into());
+
+        let mut rpg_entity = RemoteProcessGroupStatusSnapshotEntity::default();
+        rpg_entity.id = Some("rpg-1".into());
+        rpg_entity.remote_process_group_status_snapshot = Some(rpg_dto);
+
+        let mut pg = ProcessGroupStatusSnapshotDto::default();
+        pg.id = Some("pg-1".into());
+        pg.name = Some("root".into());
+        pg.remote_process_group_status_snapshots = Some(vec![rpg_entity]);
+
+        let mut out = Vec::new();
+        walk_pg_nodes(&pg, None, &mut out);
+        assert_eq!(out.len(), 2);
+        assert!(matches!(out[0].kind, NodeKind::ProcessGroup));
+        assert!(matches!(out[1].kind, NodeKind::RemoteProcessGroup));
+        assert_eq!(out[1].id, "rpg-1");
+        assert_eq!(out[1].group_id, "pg-1");
+        assert_eq!(out[1].name, "MyRemoteSink");
+        assert_eq!(out[1].parent_idx, Some(0));
+        match &out[1].status_summary {
+            NodeStatusSummary::RemoteProcessGroup {
+                transmission_status,
+                active_threads,
+                flow_files_received,
+                flow_files_sent,
+                bytes_received,
+                bytes_sent,
+                target_uri,
+            } => {
+                assert_eq!(transmission_status, "Transmitting");
+                assert_eq!(*active_threads, 2);
+                assert_eq!(*flow_files_received, 5);
+                assert_eq!(*flow_files_sent, 7);
+                assert_eq!(*bytes_received, 100);
+                assert_eq!(*bytes_sent, 200);
+                assert_eq!(target_uri, "https://nifi-east:8443/nifi");
+            }
+            other => panic!("expected RemoteProcessGroup status_summary; got {other:?}"),
+        }
     }
 
     #[test]
