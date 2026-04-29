@@ -2342,6 +2342,7 @@ name = "nifilens-fixture-seeder"
 version = "0.0.0"
 dependencies = [
  "clap",
+ "humantime",
  "nifi-lens",
  "nifi-rust-client",
  "reqwest",

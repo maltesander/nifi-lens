@@ -22,6 +22,14 @@ pub struct Args {
     /// Log level (off, error, warn, info, debug, trace). Default: info.
     #[arg(long, value_name = "LEVEL", default_value = "info")]
     pub log_level: String,
+
+    /// Sleep this long after seeding the topology before mutating the
+    /// `usd_rate` parameter context value. Default `0s` for CI; longer
+    /// (e.g. `5m`) for live demo capture so the "before" state is
+    /// observable.
+    #[arg(long, value_name = "DURATION", default_value = "0s",
+          value_parser = humantime::parse_duration)]
+    pub break_after: std::time::Duration,
 }
 
 #[cfg(test)]
@@ -68,5 +76,33 @@ mod tests {
             rendered.contains("--context"),
             "error should mention --context, got: {rendered}"
         );
+    }
+
+    #[test]
+    fn parses_break_after_flag() {
+        let args = Args::try_parse_from([
+            "nifilens-fixture-seeder",
+            "--config",
+            "/x.toml",
+            "--context",
+            "dev-nifi-2-6-0",
+            "--break-after",
+            "30s",
+        ])
+        .unwrap();
+        assert_eq!(args.break_after, std::time::Duration::from_secs(30));
+    }
+
+    #[test]
+    fn break_after_defaults_to_zero() {
+        let args = Args::try_parse_from([
+            "nifilens-fixture-seeder",
+            "--config",
+            "/x.toml",
+            "--context",
+            "dev-nifi-2-6-0",
+        ])
+        .unwrap();
+        assert_eq!(args.break_after, std::time::Duration::ZERO);
     }
 }
