@@ -341,6 +341,56 @@ opens the modal pre-selected (or synthesises `[!]` for unresolved).
 The `##{...}` escape is honoured: `##{literal}` is *not* annotated.
 Multi-ref values (`#{a}#{b}`) annotate but open without a preselect.
 
+### Remote Process Groups
+
+Snapshot data for RPGs piggybacks the `RootPgStatus` recursive walk —
+`walk_pg_nodes` emits `NodeKind::RemoteProcessGroup` leaves under their
+parent PG using the snapshot's `remoteProcessGroupStatusSnapshots`.
+On-demand detail is fetched via
+`client.remoteprocessgroups().get_remote_process_group(id)` (wired
+through `BrowserViewWorker` on selection). Sparkline data comes from
+`flow().get_remote_process_group_status_history(id)` (same periodic
+worker as other kinds).
+
+Tree row prefix glyph: `▶` in accent style for `TRANSMITTING` status,
+`■` muted otherwise (`widget::run_icon::transmission_icon`). Body shows
+the RPG name followed by a `→ target_uri` chip. There is no ports count
+chip on the tree row — port counts are only available from the on-demand
+detail, not the snapshot.
+
+Identity pane (rendered by the RPG render arm in `src/view/browser/`):
+header rows for name, parent PG (cross-link `→` resolves via
+`resolve_id`), target URI (prefers the newer plural `targetUris` field,
+falls back to the legacy singular `target_uri`), target-secure flag,
+transport protocol, transmission status, and validation status. A
+Validation errors sub-panel appears below the header only when errors
+are present; row count capped at `layout::VALIDATION_ERROR_ROWS_MAX`.
+Below that, an Input ports table and an Output ports table list the
+remote ports the target NiFi exposes. Detail fetches flow through the
+global `IntentOutcome` banner on failure — no inline `last_error` chip
+in the Identity header yet.
+
+Sparkline strip: three rows — `recv` (flowfiles received:
+`receivedCount` metric) / `sent` (flowfiles sent: `sentCount`) /
+`rate` (aggregate throughput: `totalBytesPerSecond`). NiFi does not
+emit an `activeThreads` metric for RPGs (confirmed against live data in
+Task 22); the third row is rate, not threads.
+
+Cross-link wiring: the `connections_by_pg` reducer detects
+`REMOTE_INPUT_PORT` / `REMOTE_OUTPUT_PORT` connectables and writes the
+parent RPG's `group_id` (not the port UUID) into the connection's
+`source_id` / `destination_id`. `BrowserState::resolve_id` then
+resolves the trailing `→` on connection endpoint rows to the RPG arena
+entry via the standard linear scan on `state.nodes`.
+
+Overview Components panel: a fourth `Remote PGs` row shows
+snapshot-derived `total / TRANSMIT / NOT-TX` slots (data from
+`RemoteProcessGroupCounts` inside `RootPgStatusSnapshot`).
+
+Fuzzy-find: `:rpg` filter alias narrows the `FlowIndex` corpus to
+RPG entries before nucleo scoring. RPGs are included in the index via
+the standard `apply_tree_snapshot` path; folders are still excluded.
+
 ### Bulletins ring buffer & detail modal
 
 Rolling in-memory window capped by `[bulletins] ring_size`
@@ -417,7 +467,8 @@ that selection-change paths fold in alongside the primary intent.
 
 Render via `widget::sparkline::render_sparkline_row` (label, glyphs,
 `peak N` suffix), three rows per kind: processor — in/out/task
-time; PG — in/out/queue count; connection — in/out/queue count.
+time; PG — in/out/queue count; connection — in/out/queue count;
+RPG — recv/sent/rate (`totalBytesPerSecond`).
 
 Layout is **content-driven, not percentage-driven**: renderer measures
 the natural rendered width of identity lines, places them on the left
@@ -599,7 +650,7 @@ lowercased; nucleo scores, top 50 shown.
 A leading colon-prefixed token narrows the corpus before fuzzy
 scoring via a `QueryFilter` enum:
 
-- Kind aliases: `:proc`, `:pg`, `:cs`, `:conn`, `:in`, `:out`.
+- Kind aliases: `:proc`, `:pg`, `:cs`, `:conn`, `:in`, `:out`, `:rpg`.
 - Drift aliases (PG-scoped): `:drift`, `:stale`, `:modified`,
   `:syncerr`.
 
@@ -688,15 +739,15 @@ compose -f integration-tests/docker-compose.yml up -d`, run the
 seeder with `--skip-if-seeded`, then `cargo run -- --config
 integration-tests/nifilens-config.toml --context dev-nifi-2-9-0`.
 `--skip-if-seeded` makes re-runs a no-op when the fixture marker PG
-(`nifilens-fixture-v7`) is already present.
+(`nifilens-fixture-v8`) is already present.
 
-**Fixture inventory** — top-level marker PG `nifilens-fixture-v7`
-contains nine PGs, two parameter contexts, four top-level CSes:
+**Fixture inventory** — top-level marker PG `nifilens-fixture-v8`
+contains ten PGs, two parameter contexts, four top-level CSes:
 
 - PGs: `healthy-pipeline` (with nested `ingest`/`enrich`),
   `noisy-pipeline`, `backpressure-pipeline`, `invalid-pipeline`,
   `bulky-pipeline`, `diff-pipeline`, `versioned-clean`,
-  `versioned-modified`, `parameterized-pipeline`.
+  `versioned-modified`, `parameterized-pipeline`, `remote-pipeline`.
 - Parameter contexts: `fixture-pc-base` (`kafka_bootstrap`,
   `retry_max`, sensitive `db_password`) and `fixture-pc-prod`
   (inherits base, overrides `retry_max`, adds `region`).
@@ -741,6 +792,11 @@ What each pipeline exercises:
   handle, not a content hash. Always fetch both sides. Owns scoped
   CSes (`diff-{json,csv,parquet,avro}-{reader,writer}`,
   `diff-csv-writer-out`).
+
+- `remote-pipeline` — two RPGs (one transmitting, one idle) targeting
+  the floor NiFi's site-to-site URL. Exercises the RPG tree node,
+  Identity pane, sparkline, action-history modal, and Overview
+  Components row.
 
 All fixture pipelines work on the 2.6.0 floor. Some NiFi processor
 *property keys* drift between minor versions even when display names

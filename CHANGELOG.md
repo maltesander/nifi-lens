@@ -9,6 +9,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Remote Process Group support** across the Browser tree (transmission
+  badge, target URI chip), Identity pane (target URI, transport
+  protocol, validation status, remote port descriptions), 3-row
+  sparkline (received flowfiles / sent flowfiles / total bytes/s),
+  Overview Components panel (`Remote PGs` row with TRANSMIT / NOT-TX
+  counts), fuzzy-find (`:rpg` filter alias), Bulletins → Browser jump,
+  action-history modal (`a`), and version-control diff modal.
 - Browser queue listing panel — selecting a queued connection in the
   Browser tab now lists up to 100 flowfiles inline, with per-row
   chords: `i` peek attributes, `t` trace lineage in Tracer, `c` copy

@@ -70,6 +70,7 @@
 - **Parameter contexts** — `p` on any PG opens a full-screen modal showing the inheritance chain, resolved-flat parameters table, and reverse-lookup; `#{name}` references in property values cross-link straight to the parameter.
 - **Action history** — `a` on any UUID-bearing Browser row (processor, PG, connection, controller service, port) opens a full-screen audit log of NiFi flow-configuration changes for that component. Paginated with auto-load on scroll, substring search (`/`), and copy-as-TSV (`c`).
 - **Inline sparkline strip** — the Browser identity panel for processor / PG / connection rows shows a compact 3-line sparkline (in flowfiles, out flowfiles, task time / queued count) of the last hour or so of `/flow/.../status/history`. Periodic refresh on selection; no chord. Suppressed at narrow widths to keep the identity panel readable.
+- **Remote Process Groups** — appear as leaves in the Browser tree with a transmission badge and target URI chip. Selecting a row opens an Identity pane with target URI, transport protocol, validation status, and the remote ports the target NiFi exposes. A 3-row sparkline tracks received / sent / total-bytes-per-second. Supports action history (`a`) and fuzzy-find (`:rpg`).
 - **Provenance events** — filterable cluster-wide event search cross-linked from Bulletins and Browser.
 - **Flowfile tracer** — paste a UUID for full lineage with attribute diffs and a full-screen content viewer that streams large bodies in 512 KiB chunks and renders colored unified diffs (JSON / CSV / Parquet / Avro).
 - **Multi-cluster** — kubeconfig-style contexts; one binary for every NiFi 2.x version.
@@ -317,6 +318,7 @@ Kind filters:
 | `:conn` | Connections                             |
 | `:in`   | Input ports                             |
 | `:out`  | Output ports                            |
+| `:rpg`  | Remote process groups                   |
 
 Drift filters (PG-only):
 
