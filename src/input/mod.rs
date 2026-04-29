@@ -19,8 +19,8 @@ pub mod verb;
 pub use action::{AppAction, FocusAction, GoTarget, HistoryAction, TabAction};
 pub use verb::{
     ActionHistoryModalVerb, BrowserPeekVerb, BrowserQueueVerb, BrowserVerb, BulletinsVerb,
-    ContentModalVerb, EventsVerb, FilterField, ParameterContextModalVerb, Severity, TracerVerb,
-    VersionControlModalVerb, ViewVerb,
+    CommonVerb, ContentModalVerb, EventsVerb, FilterField, ParameterContextModalVerb, Severity,
+    TracerVerb, VersionControlModalVerb, ViewVerb,
 };
 
 // ---------------------------------------------------------------------------
@@ -885,7 +885,7 @@ mod keymap_tests {
 
     #[test]
     fn r_on_events_produces_events_refresh_not_bulletins_refresh() {
-        // Cross-view chord collision: `r` is bound to both BulletinsVerb::Refresh
+        // Cross-view chord collision: `r` is bound to both BulletinsVerb::Common(CommonVerb::Refresh)
         // and EventsVerb::Refresh. With view-aware translate, the active view wins.
         let km = KeyMap::default();
         assert_eq!(
@@ -912,7 +912,9 @@ mod keymap_tests {
                 false,
                 &dummy_state()
             ),
-            InputEvent::View(ViewVerb::Bulletins(BulletinsVerb::Refresh))
+            InputEvent::View(ViewVerb::Bulletins(BulletinsVerb::Common(
+                CommonVerb::Refresh
+            )))
         );
     }
 

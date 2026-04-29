@@ -86,18 +86,14 @@ impl Verb for CommonVerb {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum BulletinsVerb {
+    Common(CommonVerb),
     ToggleSeverity(Severity),
     CycleTypeFilter,
     CycleGroupBy,
     TogglePause,
     MuteSource,
-    CopyMessage,
     ClearFilters,
-    OpenSearch,
     OpenDetail,
-    Refresh,
-    SearchNext,
-    SearchPrev,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -148,6 +144,7 @@ pub enum TracerVerb {
 impl Verb for BulletinsVerb {
     fn chord(self) -> Chord {
         match self {
+            Self::Common(c) => c.chord(),
             Self::ToggleSeverity(Severity::Error) => Chord::simple(KeyCode::Char('1')),
             Self::ToggleSeverity(Severity::Warning) => Chord::simple(KeyCode::Char('2')),
             Self::ToggleSeverity(Severity::Info) => Chord::simple(KeyCode::Char('3')),
@@ -155,17 +152,13 @@ impl Verb for BulletinsVerb {
             Self::CycleGroupBy => Chord::shift(KeyCode::Char('G')),
             Self::TogglePause => Chord::shift(KeyCode::Char('P')),
             Self::MuteSource => Chord::shift(KeyCode::Char('M')),
-            Self::CopyMessage => Chord::simple(KeyCode::Char('c')),
             Self::ClearFilters => Chord::shift(KeyCode::Char('R')),
-            Self::OpenSearch => Chord::simple(KeyCode::Char('/')),
             Self::OpenDetail => Chord::simple(KeyCode::Char('i')),
-            Self::Refresh => Chord::simple(KeyCode::Char('r')),
-            Self::SearchNext => Chord::simple(KeyCode::Char('n')),
-            Self::SearchPrev => Chord::shift(KeyCode::Char('N')),
         }
     }
     fn label(self) -> &'static str {
         match self {
+            Self::Common(c) => c.label(),
             Self::ToggleSeverity(Severity::Error) => "toggle error filter",
             Self::ToggleSeverity(Severity::Warning) => "toggle warning filter",
             Self::ToggleSeverity(Severity::Info) => "toggle info filter",
@@ -173,17 +166,13 @@ impl Verb for BulletinsVerb {
             Self::CycleGroupBy => "cycle group-by mode",
             Self::TogglePause => "pause / resume auto-scroll",
             Self::MuteSource => "mute selected source",
-            Self::CopyMessage => "copy raw message to clipboard",
             Self::ClearFilters => "clear all filters",
-            Self::OpenSearch => "open text search",
             Self::OpenDetail => "open detail modal",
-            Self::Refresh => "refresh",
-            Self::SearchNext => "next match",
-            Self::SearchPrev => "previous match",
         }
     }
     fn hint(self) -> &'static str {
         match self {
+            Self::Common(c) => c.hint(),
             Self::ToggleSeverity(Severity::Error) => "err",
             Self::ToggleSeverity(Severity::Warning) => "warn",
             Self::ToggleSeverity(Severity::Info) => "info",
@@ -191,18 +180,14 @@ impl Verb for BulletinsVerb {
             Self::CycleGroupBy => "group",
             Self::TogglePause => "pause",
             Self::MuteSource => "mute",
-            Self::CopyMessage => "copy",
             Self::ClearFilters => "clear",
-            Self::OpenSearch => "find",
             Self::OpenDetail => "info",
-            Self::Refresh => "refresh",
-            Self::SearchNext => "next",
-            Self::SearchPrev => "prev",
         }
     }
     fn priority(self) -> u8 {
         match self {
-            Self::OpenSearch | Self::TogglePause => 80,
+            Self::Common(c) => c.priority(),
+            Self::TogglePause => 80,
             Self::ClearFilters => 60,
             _ => 40,
         }
@@ -214,7 +199,7 @@ impl Verb for BulletinsVerb {
     fn enabled(self, ctx: &HintContext<'_>) -> bool {
         match self {
             Self::OpenDetail => !ctx.state.bulletins.ring.is_empty(),
-            Self::SearchNext | Self::SearchPrev => ctx
+            Self::Common(CommonVerb::SearchNext) | Self::Common(CommonVerb::SearchPrev) => ctx
                 .state
                 .bulletins
                 .detail_modal
@@ -235,13 +220,13 @@ impl Verb for BulletinsVerb {
             Self::CycleGroupBy,
             Self::TogglePause,
             Self::MuteSource,
-            Self::CopyMessage,
+            Self::Common(CommonVerb::Copy),
             Self::ClearFilters,
-            Self::OpenSearch,
+            Self::Common(CommonVerb::OpenSearch),
             Self::OpenDetail,
-            Self::Refresh,
-            Self::SearchNext,
-            Self::SearchPrev,
+            Self::Common(CommonVerb::Refresh),
+            Self::Common(CommonVerb::SearchNext),
+            Self::Common(CommonVerb::SearchPrev),
         ]
     }
 }

@@ -376,12 +376,15 @@ mod tests {
     // Keep the existing noop / data-event tests:
     #[test]
     fn overview_handle_verb_is_noop() {
-        use crate::input::{BulletinsVerb, ViewVerb};
+        use crate::input::{BulletinsVerb, CommonVerb, ViewVerb};
         let mut s = fresh_state();
         s.current_tab = ViewId::Overview;
         assert!(
-            OverviewHandler::handle_verb(&mut s, ViewVerb::Bulletins(BulletinsVerb::Refresh))
-                .is_none()
+            OverviewHandler::handle_verb(
+                &mut s,
+                ViewVerb::Bulletins(BulletinsVerb::Common(CommonVerb::Refresh))
+            )
+            .is_none()
         );
         assert!(OverviewHandler::handle_focus(&mut s, FocusAction::Descend).is_some());
     }

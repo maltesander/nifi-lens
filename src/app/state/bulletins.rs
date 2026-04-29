@@ -3,7 +3,7 @@
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 
 use super::{AppState, UpdateResult, ViewKeyHandler};
-use crate::input::{BulletinsVerb, FocusAction, GoTarget, Severity, ViewVerb};
+use crate::input::{BulletinsVerb, CommonVerb, FocusAction, GoTarget, Severity, ViewVerb};
 
 /// Zero-sized dispatch struct for the Bulletins tab.
 pub(crate) struct BulletinsHandler;
@@ -25,7 +25,7 @@ impl ViewKeyHandler for BulletinsHandler {
             BulletinsVerb::CycleGroupBy => state.bulletins.cycle_group_mode(),
             BulletinsVerb::TogglePause => state.bulletins.toggle_pause(),
             BulletinsVerb::MuteSource => state.bulletins.mute_selected_source(),
-            BulletinsVerb::CopyMessage => {
+            BulletinsVerb::Common(CommonVerb::Copy) => {
                 let msg = state.bulletins.modal_copy_message().or_else(|| {
                     state
                         .bulletins
@@ -42,15 +42,22 @@ impl ViewKeyHandler for BulletinsHandler {
                 }
             }
             BulletinsVerb::ClearFilters => state.bulletins.clear_filters(),
-            BulletinsVerb::OpenSearch => state.bulletins.enter_text_input_mode(),
+            BulletinsVerb::Common(CommonVerb::OpenSearch) => {
+                state.bulletins.enter_text_input_mode()
+            }
             BulletinsVerb::OpenDetail => {
                 state.bulletins.open_detail_modal();
             }
             // Bulletins auto-refreshes; verb kept for parity but no state mutation.
-            BulletinsVerb::Refresh => {}
+            BulletinsVerb::Common(CommonVerb::Refresh) => {}
             // SearchNext/SearchPrev are only active when the modal is open; they
             // are routed through handle_modal_verb and never reach this path.
-            BulletinsVerb::SearchNext | BulletinsVerb::SearchPrev => {}
+            BulletinsVerb::Common(CommonVerb::SearchNext)
+            | BulletinsVerb::Common(CommonVerb::SearchPrev) => {}
+            // Close: bulletins doesn't use Esc as a top-level verb (Esc cancels
+            // text input or closes the detail modal via FocusAction::Ascend);
+            // this arm exists only to make the match exhaustive.
+            BulletinsVerb::Common(CommonVerb::Close) => {}
         }
         Some(UpdateResult {
             redraw: true,
@@ -173,10 +180,10 @@ fn handle_modal_verb(state: &mut AppState, verb: ViewVerb) -> Option<UpdateResul
         _ => return Some(UpdateResult::default()),
     };
     match bv {
-        BulletinsVerb::OpenSearch => state.bulletins.modal_search_open(),
-        BulletinsVerb::SearchNext => state.bulletins.modal_search_cycle_next(),
-        BulletinsVerb::SearchPrev => state.bulletins.modal_search_cycle_prev(),
-        BulletinsVerb::CopyMessage => {
+        BulletinsVerb::Common(CommonVerb::OpenSearch) => state.bulletins.modal_search_open(),
+        BulletinsVerb::Common(CommonVerb::SearchNext) => state.bulletins.modal_search_cycle_next(),
+        BulletinsVerb::Common(CommonVerb::SearchPrev) => state.bulletins.modal_search_cycle_prev(),
+        BulletinsVerb::Common(CommonVerb::Copy) => {
             if let Some(msg) = state.bulletins.modal_copy_message() {
                 let preview: String = msg.chars().take(40).collect();
                 match state.copy_to_clipboard(msg) {
@@ -187,7 +194,8 @@ fn handle_modal_verb(state: &mut AppState, verb: ViewVerb) -> Option<UpdateResul
         }
         // Everything else is swallowed while the modal is open — no
         // filter toggles, no pause, no group cycle. OpenDetail is a
-        // no-op (already open). Refresh is a no-op.
+        // no-op (already open). Refresh / Close are no-ops here (Close
+        // is handled by FocusAction::Ascend).
         _ => {}
     }
     Some(UpdateResult {
