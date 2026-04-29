@@ -574,6 +574,57 @@ fn error_is_standalone_409(err: &NifiLensError) -> bool {
         || debug_repr.contains("Only a node connected to a cluster")
 }
 
+#[cfg(test)]
+mod standalone_409_tests {
+    use super::*;
+
+    /// Construct a `NifiLensError::ClusterNodesFailed` whose source's
+    /// debug repr contains the given substring. This mimics the shape the
+    /// real fetcher sees from `nifi-rust-client`.
+    fn err_with_debug(substring: &str) -> NifiLensError {
+        // A simple error wrapper whose Debug impl emits the substring.
+        #[derive(Debug)]
+        struct StubError(String);
+        impl std::fmt::Display for StubError {
+            fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+                write!(f, "{}", self.0)
+            }
+        }
+        impl std::error::Error for StubError {}
+        NifiLensError::ClusterNodesFailed {
+            context: "test".into(),
+            source: Box::new(StubError(substring.to_string())),
+        }
+    }
+
+    #[test]
+    fn matches_literal_409() {
+        let err = err_with_debug("HTTP 409 Conflict");
+        assert!(error_is_standalone_409(&err));
+    }
+
+    #[test]
+    fn matches_not_clustered_variant_name() {
+        let err = err_with_debug("NotClustered");
+        assert!(error_is_standalone_409(&err));
+    }
+
+    #[test]
+    fn matches_canonical_message_text() {
+        // Exact text NiFi 2.6.0 returns; nifi-rust-client 0.11.0 maps
+        // this to `NotFound` (no 409 in repr) so the message-text matcher
+        // is the only path that catches it.
+        let err = err_with_debug("Only a node connected to a cluster can process this request.");
+        assert!(error_is_standalone_409(&err));
+    }
+
+    #[test]
+    fn does_not_match_unrelated_error() {
+        let err = err_with_debug("connection refused");
+        assert!(!error_is_standalone_409(&err));
+    }
+}
+
 /// Fan-out fetch: one `/process-groups/{id}/connections` call per PG,
 /// executed concurrently with at most `concurrency` in-flight requests.
 /// Per-PG errors are passed through — the caller

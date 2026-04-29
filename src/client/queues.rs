@@ -106,7 +106,6 @@ pub async fn get_flowfile(
 ///
 /// `Some(v)` where `v > 0` → `Duration::from_millis(v as u64)`.
 /// `Some(0)`, `Some(negative)`, and `None` → `Duration::ZERO`.
-#[allow(dead_code)] // Used by later tasks (queue-listing worker).
 pub(crate) fn ms_to_duration(ms: Option<i64>) -> std::time::Duration {
     match ms {
         Some(v) if v > 0 => std::time::Duration::from_millis(v as u64),
