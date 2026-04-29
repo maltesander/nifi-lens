@@ -8,6 +8,7 @@
 use std::time::Duration;
 
 use nifi_rust_client::dynamic::{DynamicClient, types};
+use nifi_rust_client::wait;
 
 use crate::error::{Result, SeederError};
 use crate::fixture::parameter_contexts::{BROKEN_USD_RATE, HEALTHY_USD_RATE};
@@ -111,41 +112,22 @@ pub async fn apply_break(
             message: "parameter update request has no id".into(),
         })?;
 
-    // Poll until complete or timeout.
-    let timeout = Duration::from_secs(60);
-    let started = std::time::Instant::now();
-    loop {
-        let status = client
-            .parametercontexts()
-            .get_parameter_context_update(orders_context_id, &request_id)
-            .await
-            .map_err(|e| SeederError::Api {
-                message: "poll parameter update".into(),
-                source: Box::new(e),
-            })?;
-        let complete = status
-            .request
-            .as_ref()
-            .and_then(|r| r.complete)
-            .unwrap_or(false);
-        if complete {
-            break;
-        }
-        if started.elapsed() > timeout {
-            return Err(SeederError::StateTimeout {
-                what: "parameter update".into(),
-                target_state: "complete".into(),
-                elapsed_secs: timeout.as_secs(),
-            });
-        }
-        tokio::time::sleep(Duration::from_millis(500)).await;
-    }
-
-    // Best-effort cleanup of the request resource on the server.
-    let _ = client
-        .parametercontexts()
-        .delete_update_request(orders_context_id, &request_id, None)
-        .await;
+    // Poll until complete or timeout. The library helper handles three
+    // edge cases the bespoke loop missed: it inspects `failure_reason`
+    // (so a NiFi-rejected update surfaces as an error rather than a
+    // silent success), it traces best-effort cleanup failures, and it
+    // maps timeouts to NifiError::Timeout. NiFi can stall a parameter
+    // update behind running components, so allow a generous 60s ceiling.
+    let config = wait::WaitConfig {
+        timeout: Duration::from_secs(60),
+        ..Default::default()
+    };
+    wait::parameter_context_update_dynamic(client, orders_context_id, &request_id, config)
+        .await
+        .map_err(|e| SeederError::Api {
+            message: format!("await parameter update {orders_context_id}/{request_id}"),
+            source: Box::new(e),
+        })?;
 
     tracing::info!("usd_rate mutated to {BROKEN_USD_RATE}");
     Ok(())
