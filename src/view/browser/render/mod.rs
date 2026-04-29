@@ -214,6 +214,15 @@ pub(super) fn render_inline_sparkline_strip(
                     .collect(),
                 count_formatter as fn(u64) -> String,
             ),
+            ComponentKind::RemoteProcessGroup => (
+                "threads",
+                series
+                    .buckets
+                    .iter()
+                    .map(|b| b.active_threads.unwrap_or(0))
+                    .collect(),
+                count_formatter as fn(u64) -> String,
+            ),
             ComponentKind::ControllerService | ComponentKind::Port => return,
         };
 
