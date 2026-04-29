@@ -405,6 +405,17 @@ pub enum NifiLensError {
     /// See `ClientBuildFailed` for the boxed-source rationale; callers
     /// must box explicitly.
     #[snafu(display(
+        "failed to fetch remote process group {id:?} detail for context {context:?}: {source}"
+    ))]
+    RemoteProcessGroupDetailFailed {
+        context: String,
+        id: String,
+        source: Box<dyn std::error::Error + Send + Sync>,
+    },
+
+    /// See `ClientBuildFailed` for the boxed-source rationale; callers
+    /// must box explicitly.
+    #[snafu(display(
         "failed to fetch version-control information for PG {pg_id:?} in context {context:?}: {source}"
     ))]
     VersionInformationFailed {
