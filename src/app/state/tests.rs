@@ -1860,6 +1860,7 @@ mod queue_listing_reducer_tests {
         use crate::app::state::PendingIntent;
         use crate::app::state::ViewKeyHandler;
         use crate::input::BrowserQueueVerb;
+        use crate::input::CommonVerb;
         use crate::input::ViewVerb;
         use crate::view::browser::state::queue_listing::{QueueListingRow, QueueListingState};
         use std::time::Duration;
@@ -1883,7 +1884,7 @@ mod queue_listing_reducer_tests {
 
         let result = crate::app::state::browser::BrowserHandler::handle_verb(
             &mut state,
-            ViewVerb::BrowserQueue(BrowserQueueVerb::Refresh),
+            ViewVerb::BrowserQueue(BrowserQueueVerb::Common(CommonVerb::Refresh)),
         );
         let result = result.expect("BrowserQueue verb produced an UpdateResult");
         assert!(
@@ -2016,7 +2017,7 @@ mod queue_listing_reducer_tests {
     #[test]
     fn cancel_verb_cascades_prompt_filter_focus() {
         use crate::app::state::ViewKeyHandler;
-        use crate::input::{BrowserQueueVerb, ViewVerb};
+        use crate::input::{BrowserQueueVerb, CommonVerb, ViewVerb};
         use crate::view::browser::state::queue_listing::QueueListingState;
 
         let mut state = fresh_state();
@@ -2029,7 +2030,7 @@ mod queue_listing_reducer_tests {
         // 1st Cancel: closes the prompt; listing_focused stays true.
         let _ = crate::app::state::browser::BrowserHandler::handle_verb(
             &mut state,
-            ViewVerb::BrowserQueue(BrowserQueueVerb::Cancel),
+            ViewVerb::BrowserQueue(BrowserQueueVerb::Common(CommonVerb::Close)),
         );
         assert!(
             state
@@ -2055,7 +2056,7 @@ mod queue_listing_reducer_tests {
             .set_filter(Some("foo".into()));
         let _ = crate::app::state::browser::BrowserHandler::handle_verb(
             &mut state,
-            ViewVerb::BrowserQueue(BrowserQueueVerb::Cancel),
+            ViewVerb::BrowserQueue(BrowserQueueVerb::Common(CommonVerb::Close)),
         );
         assert!(
             state
@@ -2075,7 +2076,7 @@ mod queue_listing_reducer_tests {
         // 3rd Cancel: drops listing focus.
         let _ = crate::app::state::browser::BrowserHandler::handle_verb(
             &mut state,
-            ViewVerb::BrowserQueue(BrowserQueueVerb::Cancel),
+            ViewVerb::BrowserQueue(BrowserQueueVerb::Common(CommonVerb::Close)),
         );
         assert!(
             !state.browser.listing_focused,

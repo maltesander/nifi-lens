@@ -1750,7 +1750,7 @@ fn handle_browser_queue_verb(
     use crate::intent::CrossLink;
 
     match verb {
-        BrowserQueueVerb::Refresh => {
+        BrowserQueueVerb::Common(CommonVerb::Refresh) => {
             let Some(listing) = state.browser.queue_listing.as_mut() else {
                 return UpdateResult::default();
             };
@@ -1867,7 +1867,7 @@ fn handle_browser_queue_verb(
             }
         }
 
-        BrowserQueueVerb::Cancel => {
+        BrowserQueueVerb::Common(CommonVerb::Close) => {
             // `Esc` cascade: close filter prompt → clear committed filter
             // → drop listing focus.  Returns a default UpdateResult when
             // nothing changed so that Esc can fall through to the outer
@@ -1889,6 +1889,13 @@ fn handle_browser_queue_verb(
                 ..Default::default()
             }
         }
+
+        BrowserQueueVerb::Common(
+            CommonVerb::Copy
+            | CommonVerb::OpenSearch
+            | CommonVerb::SearchNext
+            | CommonVerb::SearchPrev,
+        ) => UpdateResult::default(),
     }
 }
 

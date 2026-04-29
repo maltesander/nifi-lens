@@ -241,7 +241,7 @@ pub struct BrowserState {
     /// Whether the queue-listing panel currently holds keyboard focus.
     /// `false` on construction and reset to `false` on every
     /// selection-change. Flipped to `true` by `BrowserQueueVerb::FocusListing`
-    /// (Tab) and back to `false` by `BrowserQueueVerb::Cancel` (Esc) — wired
+    /// (Tab) and back to `false` by `BrowserQueueVerb::Common(CommonVerb::Close)` (Esc) — wired
     /// in T15.
     pub listing_focused: bool,
     /// Open sparkline state for the current Browser selection.

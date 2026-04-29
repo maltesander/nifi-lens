@@ -109,17 +109,14 @@ pub enum BrowserVerb {
 /// connection-detail right pane's flowfile listing (post-Tab from the tree).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum BrowserQueueVerb {
+    Common(CommonVerb),
     /// Tab — focus the listing rows from tree focus. Reused on Esc to
     /// detect when the active focus state should drop back to the tree.
     FocusListing,
     PeekAttributes,
     TraceLineage,
     CopyUuid,
-    Refresh,
     Filter,
-    /// Esc — cascades: clears the active filter prompt, then clears
-    /// the committed filter, then drops listing focus.
-    Cancel,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -299,35 +296,32 @@ impl Verb for BrowserVerb {
 impl Verb for BrowserQueueVerb {
     fn chord(self) -> Chord {
         match self {
+            Self::Common(c) => c.chord(),
             Self::FocusListing => Chord::simple(KeyCode::Tab),
             Self::PeekAttributes => Chord::simple(KeyCode::Char('i')),
             Self::TraceLineage => Chord::simple(KeyCode::Char('t')),
             Self::CopyUuid => Chord::simple(KeyCode::Char('c')),
-            Self::Refresh => Chord::simple(KeyCode::Char('r')),
             Self::Filter => Chord::simple(KeyCode::Char('/')),
-            Self::Cancel => Chord::simple(KeyCode::Esc),
         }
     }
     fn label(self) -> &'static str {
         match self {
+            Self::Common(c) => c.label(),
             Self::FocusListing => "focus listing",
             Self::PeekAttributes => "peek attributes",
             Self::TraceLineage => "trace flowfile lineage",
             Self::CopyUuid => "copy flowfile uuid",
-            Self::Refresh => "refresh listing",
             Self::Filter => "filter by filename",
-            Self::Cancel => "cancel filter / drop listing focus",
         }
     }
     fn hint(self) -> &'static str {
         match self {
+            Self::Common(c) => c.hint(),
             Self::FocusListing => "focus list",
             Self::PeekAttributes => "peek",
             Self::TraceLineage => "trace",
             Self::CopyUuid => "copy",
-            Self::Refresh => "refresh",
             Self::Filter => "filter",
-            Self::Cancel => "back",
         }
     }
     fn priority(self) -> u8 {
@@ -345,9 +339,9 @@ impl Verb for BrowserQueueVerb {
             Self::PeekAttributes,
             Self::TraceLineage,
             Self::CopyUuid,
-            Self::Refresh,
+            Self::Common(CommonVerb::Refresh),
             Self::Filter,
-            Self::Cancel,
+            Self::Common(CommonVerb::Close),
         ]
     }
 }
