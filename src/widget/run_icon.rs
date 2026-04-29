@@ -12,6 +12,53 @@ pub fn processor_run_icon(run_status: &str) -> (char, Style) {
     crate::client::status::ProcessorStatus::from_wire(run_status).icon()
 }
 
+/// Tree-row prefix glyph for a Remote Process Group.
+///
+/// `▶` accent for `transmission_status == "Transmitting"`, `■` muted
+/// otherwise. Anything other than `"Transmitting"` (including the
+/// empty string before the first snapshot lands) renders as the muted
+/// square — we deliberately don't try to interpret intermediate
+/// states that NiFi does not document.
+pub fn transmission_icon(transmission_status: &str) -> (char, ratatui::style::Style) {
+    if transmission_status == "Transmitting" {
+        ('▶', crate::theme::accent())
+    } else {
+        ('■', crate::theme::muted())
+    }
+}
+
+#[cfg(test)]
+mod transmission_tests {
+    use super::*;
+    use ratatui::style::Color;
+
+    #[test]
+    fn transmission_icon_transmitting_returns_accent_play_glyph() {
+        let (ch, style) = transmission_icon("Transmitting");
+        assert_eq!(ch, '▶');
+        assert_eq!(
+            style.fg,
+            Some(crate::theme::accent().fg.unwrap_or(Color::Reset))
+        );
+    }
+
+    #[test]
+    fn transmission_icon_not_transmitting_returns_muted_square() {
+        let (ch, style) = transmission_icon("Not Transmitting");
+        assert_eq!(ch, '■');
+        assert_eq!(
+            style.fg,
+            Some(crate::theme::muted().fg.unwrap_or(Color::Reset))
+        );
+    }
+
+    #[test]
+    fn transmission_icon_unknown_string_returns_muted_square() {
+        let (ch, _) = transmission_icon("");
+        assert_eq!(ch, '■');
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
