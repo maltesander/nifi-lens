@@ -20,13 +20,13 @@
 //!   transform/out-apac        -> sink-apac/in-apac           (parent)
 //!   transform/out-failed      -> deadletter/in-failed        (parent)
 //!
-//! `seed` returns the ID of the orders parameter context so phase
-//! 4's `--break-after` mutation can target it.
+//! Mutation of the orders parameter context for `--break-after` is
+//! wired by `fixture::seed` (Task 13); see `orders::break_::apply_break`.
 //!
 //! Module-level allow(dead_code) covers the multi-task build-up: the
 //! submodule stubs return SeederError::Invariant until tasks 6-12 fill
-//! them in. The wiring into fixture::seed lands in Task 13. Removed
-//! incrementally as each task fills its submodule.
+//! them in. Remove this attribute in Task 13 once `fixture::seed` calls
+//! `orders::seed` and every field/function becomes reachable.
 #![allow(dead_code)]
 
 pub mod break_; // `break` is a Rust keyword; use `break_`
@@ -43,7 +43,7 @@ use crate::entities::{make_processor, props};
 use crate::error::Result;
 use crate::fixture::common::{
     create_child_pg, create_connection_between, create_connection_in_pg, create_output_port,
-    start_output_port, start_processor, wait_for_valid,
+    create_processor, start_output_port, start_processor, wait_for_valid,
 };
 use crate::fixture::custom_text_property_key;
 use crate::fixture::parameter_contexts::{self, OrdersContextIds};
@@ -161,10 +161,9 @@ async fn build_ingest(
     let pg_id = create_child_pg(client, orders_pg_id, "ingest").await?;
     parameter_contexts::bind(client, &pg_id, &contexts.platform_id).await?;
 
-    let gen_id = create_processor_local(
+    let gen_id = create_processor(
         client,
         &pg_id,
-        "GenerateFlowFile",
         make_processor(
             "GenerateFlowFile",
             "org.apache.nifi.processors.standard.GenerateFlowFile",
@@ -177,6 +176,7 @@ async fn build_ingest(
             Some("10 sec"),
             vec![],
         ),
+        "GenerateFlowFile",
     )
     .await?;
 
@@ -202,15 +202,4 @@ async fn build_ingest(
         pg_id,
         raw_orders_port_id,
     })
-}
-
-/// Local thin wrapper that mirrors `common::create_processor` but accepts the
-/// processor name as a separate arg for cleaner call sites.
-async fn create_processor_local(
-    client: &DynamicClient,
-    pg_id: &str,
-    name: &str,
-    body: nifi_rust_client::dynamic::types::ProcessorEntity,
-) -> Result<String> {
-    crate::fixture::common::create_processor(client, pg_id, body, name).await
 }
