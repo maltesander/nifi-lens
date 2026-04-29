@@ -19,7 +19,7 @@ pub fn processor_run_icon(run_status: &str) -> (char, Style) {
 /// empty string before the first snapshot lands) renders as the muted
 /// square — we deliberately don't try to interpret intermediate
 /// states that NiFi does not document.
-pub fn transmission_icon(transmission_status: &str) -> (char, ratatui::style::Style) {
+pub fn transmission_icon(transmission_status: &str) -> (char, Style) {
     if transmission_status == "Transmitting" {
         ('▶', crate::theme::accent())
     } else {
@@ -28,41 +28,37 @@ pub fn transmission_icon(transmission_status: &str) -> (char, ratatui::style::St
 }
 
 #[cfg(test)]
-mod transmission_tests {
+mod tests {
     use super::*;
-    use ratatui::style::Color;
+    use crate::theme;
 
     #[test]
     fn transmission_icon_transmitting_returns_accent_play_glyph() {
         let (ch, style) = transmission_icon("Transmitting");
         assert_eq!(ch, '▶');
-        assert_eq!(
-            style.fg,
-            Some(crate::theme::accent().fg.unwrap_or(Color::Reset))
-        );
+        assert_eq!(style, crate::theme::accent());
     }
 
     #[test]
     fn transmission_icon_not_transmitting_returns_muted_square() {
         let (ch, style) = transmission_icon("Not Transmitting");
         assert_eq!(ch, '■');
-        assert_eq!(
-            style.fg,
-            Some(crate::theme::muted().fg.unwrap_or(Color::Reset))
-        );
+        assert_eq!(style, crate::theme::muted());
     }
 
     #[test]
-    fn transmission_icon_unknown_string_returns_muted_square() {
-        let (ch, _) = transmission_icon("");
+    fn transmission_icon_unknown_empty_string_returns_muted_square() {
+        let (ch, style) = transmission_icon("");
         assert_eq!(ch, '■');
+        assert_eq!(style, crate::theme::muted());
     }
-}
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::theme;
+    #[test]
+    fn transmission_icon_unknown_nonempty_string_returns_muted_square() {
+        let (ch, style) = transmission_icon("Validating");
+        assert_eq!(ch, '■');
+        assert_eq!(style, crate::theme::muted());
+    }
 
     #[test]
     fn processor_icon_running_is_green_filled_circle() {
