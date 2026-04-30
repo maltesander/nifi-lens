@@ -1,7 +1,6 @@
 //! Fixture topology definitions.
 
 pub mod backpressure;
-pub mod bulky;
 pub mod common;
 pub mod diff;
 pub mod invalid;
@@ -63,7 +62,6 @@ pub async fn seed(
     // OLD fixtures (still active so unmigrated tests keep working).
     backpressure::seed(client, &marker_pg_id).await?;
     invalid::seed(client, &marker_pg_id).await?;
-    bulky::seed(client, &marker_pg_id).await?;
     diff::seed(client, &marker_pg_id, detected_version).await?;
     versioned::seed(client, &marker_pg_id, &registry_ids, detected_version).await?;
     parameterized::seed_parameterized_pipeline(client, &marker_pg_id, &pc_ids, detected_version)
