@@ -1,15 +1,11 @@
 //! Fixture topology definitions.
 
 pub mod backpressure;
-pub mod bulky;
-pub mod diff;
-pub mod healthy;
+pub mod common;
 pub mod invalid;
-pub mod noisy;
-pub mod parameterized;
-pub mod payload;
+pub mod orders;
+pub mod parameter_contexts;
 pub mod registry;
-pub mod remote;
 pub mod services;
 pub mod versioned;
 
@@ -22,7 +18,11 @@ use crate::marker::FIXTURE_MARKER_NAME;
 /// Top-level seed entry point. Creates the marker PG and populates it
 /// with the full fixture topology. Assumes the cluster has already been
 /// nuke-and-repaved (or is fresh).
-pub async fn seed(client: &DynamicClient, detected_version: &semver::Version) -> Result<()> {
+pub async fn seed(
+    client: &DynamicClient,
+    detected_version: &semver::Version,
+    break_after: std::time::Duration,
+) -> Result<()> {
     tracing::info!("ensuring registry-client and fixture bucket");
     let registry_ids = registry::seed(client).await?;
 
@@ -47,19 +47,26 @@ pub async fn seed(client: &DynamicClient, detected_version: &semver::Version) ->
             message: "fixture marker PG has no id".into(),
         })?;
 
-    tracing::info!("seeding parameter contexts");
-    let pc_ids = parameterized::seed_parameter_contexts(client).await?;
+    tracing::info!("seeding orders parameter contexts");
+    let orders_ctx = parameter_contexts::seed(client).await?;
 
-    healthy::seed(client, &marker_pg_id, &service_ids, detected_version).await?;
-    noisy::seed(client, &marker_pg_id).await?;
+    // OLD fixtures (still active so unmigrated tests keep working).
     backpressure::seed(client, &marker_pg_id).await?;
     invalid::seed(client, &marker_pg_id).await?;
-    bulky::seed(client, &marker_pg_id).await?;
-    diff::seed(client, &marker_pg_id, detected_version).await?;
     versioned::seed(client, &marker_pg_id, &registry_ids, detected_version).await?;
-    parameterized::seed_parameterized_pipeline(client, &marker_pg_id, &pc_ids, detected_version)
-        .await?;
-    remote::seed(client, &marker_pg_id).await?;
+
+    // NEW orders-pipeline.
+    orders::seed(
+        client,
+        &marker_pg_id,
+        &orders_ctx,
+        &service_ids,
+        detected_version,
+    )
+    .await?;
+
+    // Phase 8: --break-after sleep + parameter mutation.
+    orders::break_::apply_break(client, &orders_ctx.orders_id, break_after).await?;
 
     tracing::info!("fixture seed complete");
     Ok(())

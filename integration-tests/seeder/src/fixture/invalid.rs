@@ -13,7 +13,7 @@ use nifi_rust_client::dynamic::DynamicClient;
 
 use crate::entities::{make_processor, props};
 use crate::error::{Result, SeederError};
-use crate::fixture::healthy::{create_child_pg, create_processor};
+use crate::fixture::common::{create_child_pg, create_processor};
 use crate::state::poll_until;
 
 pub async fn seed(client: &DynamicClient, parent_pg_id: &str) -> Result<()> {

@@ -1,6 +1,6 @@
 //! Integration test for the status-history client helper against the
 //! live `nifilens-fixture-v8` cluster. Verifies that the seeder's
-//! healthy-pipeline ConvertRecord processor returns at least one bucket
+//! orders-pipeline/transform ConvertRecord-csv2json processor returns at least one bucket
 //! after a brief warm-up — exercising the `/flow/{type}/{id}/status/history`
 //! dispatcher path on both fixture NiFi versions.
 //!
@@ -37,12 +37,41 @@ fn it_context(version: &str) -> ResolvedContext {
     }
 }
 
-async fn find_processor_id_by_name(client: &NifiClient, proc_name: &str) -> Option<String> {
-    let snap = client.root_pg_status().await.ok()?;
-    snap.nodes
-        .iter()
-        .find(|n| matches!(n.kind, NodeKind::Processor) && n.name == proc_name)
-        .map(|n| n.id.clone())
+fn find_processor_id_by_name(
+    nodes: &[nifi_lens::client::RawNode],
+    proc_name: &str,
+    target_pg_name: &str,
+) -> Option<String> {
+    // Split the target_pg by "/" to handle nested paths like "orders-pipeline/transform"
+    let pg_parts: Vec<&str> = target_pg_name.split('/').collect();
+
+    for (i, node) in nodes.iter().enumerate() {
+        if node.kind != NodeKind::Processor || node.name != proc_name {
+            continue;
+        }
+
+        // Walk up the parent chain and collect all parent names
+        let mut parent_names = Vec::new();
+        let mut cursor = i;
+        while let Some(p) = nodes[cursor].parent_idx {
+            cursor = p;
+            if matches!(nodes[cursor].kind, NodeKind::ProcessGroup) {
+                parent_names.push(nodes[cursor].name.as_str());
+            }
+        }
+
+        // Reverse to get the path from root to parent
+        parent_names.reverse();
+
+        // Check if the parent path ends with our target pg path
+        if parent_names.len() >= pg_parts.len() {
+            let start = parent_names.len() - pg_parts.len();
+            if parent_names[start..] == *pg_parts {
+                return Some(node.id.clone());
+            }
+        }
+    }
+    None
 }
 
 #[tokio::test(flavor = "current_thread")]
@@ -59,9 +88,21 @@ async fn integration_sparkline_status_history_returns_buckets() {
             .await
             .unwrap_or_else(|e| panic!("connect to {version} failed: {e:?}"));
 
-        let proc_id = find_processor_id_by_name(&client, "ConvertRecord")
+        let snapshot = client
+            .root_pg_status()
             .await
-            .unwrap_or_else(|| panic!("fixture ConvertRecord not found on {version}"));
+            .unwrap_or_else(|e| panic!("root_pg_status on {version} failed: {e:?}"));
+
+        let proc_id = find_processor_id_by_name(
+            &snapshot.nodes,
+            "ConvertRecord-csv2json",
+            "orders-pipeline/transform",
+        )
+        .unwrap_or_else(|| {
+            panic!(
+                "fixture ConvertRecord-csv2json in orders-pipeline/transform not found on {version}"
+            )
+        });
 
         let series = status_history(&client, ComponentKind::Processor, &proc_id)
             .await
@@ -71,7 +112,7 @@ async fn integration_sparkline_status_history_returns_buckets() {
         // processor; we don't assert specific counts (depends on traffic).
         assert!(
             !series.buckets.is_empty(),
-            "expected at least one status_history bucket for ConvertRecord on {version}"
+            "expected at least one status_history bucket for ConvertRecord-csv2json on {version}"
         );
     }
 }

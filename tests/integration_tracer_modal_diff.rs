@@ -1,13 +1,20 @@
 //! Live-cluster test for the Tracer content viewer modal's diff feature.
 //!
-//! Walks the three record processors in the `diff-pipeline` fixture
-//! (UpdateRecord-json, ConvertRecord, UpdateRecord-csv) and asserts,
-//! for each one's latest provenance event:
+//! Walks four record processors in the `orders-pipeline` fixture and
+//! asserts, for each one's latest provenance event:
 //!
 //! 1. Both input and output content claims exist.
 //! 2. The input and output bodies differ byte-wise (so the Tracer diff
-//!    tab would show non-empty hunks for the same-mime stages).
-//! 3. The content matches the expected format (JSON or CSV).
+//!    tab would show non-empty hunks for the same-format stages).
+//! 3. The content matches the expected format (JSON, CSV, Parquet, or Avro).
+//!
+//! Stages exercised:
+//!
+//! - `transform/UpdateRecord-cancel-old` — JSON ↔ JSON (PENDING → CANCELLED).
+//! - `transform/ConvertRecord-csv2json` — CSV → JSON (mime mismatch; the
+//!   Tracer diff tab is grayed out for this stage).
+//! - `sink-us/UpdateRecord-parquet-tag` — Parquet ↔ Parquet (adds audit_id).
+//! - `sink-apac/UpdateRecord-avro-tag` — Avro ↔ Avro (adds audit_id).
 //!
 //! This exercises the end-to-end shape of the diff-tab eligibility
 //! gate on a real NiFi cluster — mime match, size under the 512 KiB
@@ -26,7 +33,12 @@ use nifi_lens::error::NifiLensError;
 mod common;
 use common::versions::{FIXTURE_VERSIONS, context_for, port_for};
 
-const FIRST_CHUNK: usize = 512 * 1024; // same as MODAL_CHUNK_BYTES
+// Match the lens's MODAL_CHUNK_BYTES (8 MiB) so the test fetches the
+// same range the diff modal would. With smaller chunks, columnar
+// formats like Parquet can show byte-identical leading portions even
+// when the full file differs (the status column we mutate sits in a
+// later column chunk).
+const FIRST_CHUNK: usize = 8 * 1024 * 1024;
 
 async fn make_client(version: &str, username: &str, password: &str, ca_path: &str) -> NifiClient {
     let ctx = ResolvedContext {
@@ -49,40 +61,52 @@ async fn make_client(version: &str, username: &str, password: &str, ca_path: &st
         .unwrap_or_else(|e| panic!("connect to {version} failed: {e:?}"))
 }
 
+/// Walk the browser tree and return the component `id` of the first
+/// `Processor` node whose `name` matches `processor_name` and whose parent
+/// chain ends with the PG path `pg_path` (slash-separated, root-to-leaf).
+///
+/// Examples:
+/// - `pg_path = "transform"` matches any processor whose nearest PG ancestor is
+///   named `transform` (single-segment match).
+/// - `pg_path = "orders-pipeline/transform"` matches only processors whose
+///   parent chain ends with `… orders-pipeline -> transform`.
+///
+/// Multi-segment matching is required when a child-PG name like `transform`
+/// might be shared between unrelated top-level pipelines.
 fn find_processor_by_name_in_pg(
     nodes: &[nifi_lens::client::RawNode],
-    pg_name: &str,
+    pg_path: &str,
     processor_name: &str,
 ) -> Option<String> {
-    let matching_pg_indices: Vec<usize> = nodes
-        .iter()
-        .enumerate()
-        .filter(|(_, n)| n.kind == NodeKind::ProcessGroup && n.name == pg_name)
-        .map(|(i, _)| i)
-        .collect();
+    let pg_parts: Vec<&str> = pg_path.split('/').collect();
 
     for (i, node) in nodes.iter().enumerate() {
         if node.kind != NodeKind::Processor || node.name != processor_name {
             continue;
         }
+
+        // Collect the chain of PG ancestor names, leaf-to-root.
+        let mut ancestor_names: Vec<&str> = Vec::new();
         let mut cursor = i;
-        loop {
-            if matching_pg_indices.contains(&cursor) {
-                return Some(node.id.clone());
+        while let Some(p) = nodes[cursor].parent_idx {
+            cursor = p;
+            if matches!(nodes[cursor].kind, NodeKind::ProcessGroup) {
+                ancestor_names.push(nodes[cursor].name.as_str());
             }
-            match nodes[cursor].parent_idx {
-                Some(p) => cursor = p,
-                None => break,
+        }
+        // Reverse to root-to-leaf so we can suffix-match against pg_parts.
+        ancestor_names.reverse();
+
+        if ancestor_names.len() >= pg_parts.len() {
+            let start = ancestor_names.len() - pg_parts.len();
+            if ancestor_names[start..] == *pg_parts {
+                return Some(node.id.clone());
             }
         }
     }
     None
 }
 
-/// Poll `latest_events` on `component_id` for up to two minutes waiting
-/// for at least one event. Returns `None` if the cluster hasn't produced
-/// anything yet (e.g., fixture just booted) — callers skip the
-/// assertion in that case.
 /// Hex-dump the first `n` bytes of `bytes` for diagnostic panic messages.
 fn hex_dump(bytes: &[u8], n: usize) -> String {
     use std::fmt::Write as _;
@@ -210,6 +234,32 @@ async fn diff_pipeline_events_are_diffable_against_all_fixture_versions() {
     let ca_path =
         std::env::var("NIFILENS_IT_CA_CERT_PATH").expect("NIFILENS_IT_CA_CERT_PATH must be set");
 
+    // Validators are shape-checks against the first 4 KiB of input
+    // bytes. They reject events whose content claims have been GC'd
+    // and now hold unrelated bytes from sibling pipelines.
+    //
+    // The orders-pipeline payload is a CSV of order rows. The CSV
+    // header includes "order_id" and "ORD-" appears as a row prefix
+    // (e.g. `ORD-0000001,…`). After ConvertRecord-csv2json the same
+    // tokens appear inside JSON fields, so a single substring check
+    // for `ORD-` works across both CSV and JSON sides — combined with
+    // the leading-byte shape check this is sufficient.
+    let json_validator = |bytes: &[u8]| {
+        std::str::from_utf8(bytes)
+            .map(|s| {
+                let t = s.trim_start();
+                (t.starts_with('[') || t.starts_with('{')) && s.contains("ORD-")
+            })
+            .unwrap_or(false)
+    };
+    let csv_validator = |bytes: &[u8]| {
+        std::str::from_utf8(bytes)
+            .map(|s| s.contains("order_id") || s.contains("ORD-"))
+            .unwrap_or(false)
+    };
+    let parquet_validator = |bytes: &[u8]| bytes.starts_with(b"PAR1");
+    let avro_validator = |bytes: &[u8]| bytes.starts_with(b"Obj\x01");
+
     for &version in FIXTURE_VERSIONS {
         eprintln!("--- diff_pipeline_events running against NiFi {version} ---");
 
@@ -220,154 +270,202 @@ async fn diff_pipeline_events_are_diffable_against_all_fixture_versions() {
             .await
             .unwrap_or_else(|e| panic!("root_pg_status on {version} failed: {e:?}"));
 
-        // 1. UpdateRecord-json: JSON ↔ JSON (same mime, diffable).
-        // Validate the input is the diff-pipeline sensor JSON array
-        // (starts with `[` and contains a SENSOR- record). This rejects
-        // events whose content claims have been GC'd and now hold
-        // unrelated bytes from sibling pipelines.
-        let json_validator = |bytes: &[u8]| {
-            std::str::from_utf8(bytes)
-                .map(|s| s.trim_start().starts_with('[') && s.contains("SENSOR-"))
-                .unwrap_or(false)
-        };
-        if let Some(upd_json_id) =
-            find_processor_by_name_in_pg(&snapshot.nodes, "diff-pipeline", "UpdateRecord-json")
-            && let Some(event_id) = wait_for_event(
-                &client,
-                &upd_json_id,
-                version,
-                "UpdateRecord-json",
-                json_validator,
-            )
-            .await
+        // 1. transform/UpdateRecord-cancel-old: JSON ↔ JSON (same mime,
+        //    diffable). The processor flips PENDING → CANCELLED on ~1/4
+        //    records.
+        if let Some(upd_json_id) = find_processor_by_name_in_pg(
+            &snapshot.nodes,
+            "orders-pipeline/transform",
+            "UpdateRecord-cancel-old",
+        ) && let Some(event_id) = wait_for_event(
+            &client,
+            &upd_json_id,
+            version,
+            "UpdateRecord-cancel-old",
+            json_validator,
+        )
+        .await
             && let Some((input, output)) =
-                fetch_both_sides(&client, event_id, version, "UpdateRecord-json").await
+                fetch_both_sides(&client, event_id, version, "UpdateRecord-cancel-old").await
         {
             assert!(
                 !input.is_empty() && !output.is_empty(),
-                "UpdateRecord-json: both sides must have content on {version}"
+                "UpdateRecord-cancel-old: both sides must have content on {version}"
             );
             assert_ne!(
                 input, output,
-                "UpdateRecord-json: input and output must differ (status was uppercased) on {version}"
+                "UpdateRecord-cancel-old: input and output must differ (PENDING → CANCELLED) on {version}"
             );
             let input_s = std::str::from_utf8(&input)
-                .unwrap_or_else(|_| panic!("UpdateRecord-json input not UTF-8 on {version}"));
-            let output_s = std::str::from_utf8(&output)
-                .unwrap_or_else(|_| panic!("UpdateRecord-json output not UTF-8 on {version}"));
+                .unwrap_or_else(|_| panic!("UpdateRecord-cancel-old input not UTF-8 on {version}"));
+            let output_s = std::str::from_utf8(&output).unwrap_or_else(|_| {
+                panic!("UpdateRecord-cancel-old output not UTF-8 on {version}")
+            });
             let input_trim = input_s.trim_start();
             let output_trim = output_s.trim_start();
             assert!(
                 input_trim.starts_with('[') || input_trim.starts_with('{'),
-                "UpdateRecord-json input should parse as JSON on {version} (got: {:?}…)",
+                "UpdateRecord-cancel-old input should parse as JSON on {version} (got: {:?}…)",
                 &input_trim.get(..40).unwrap_or(input_trim)
             );
             assert!(
                 output_trim.starts_with('[') || output_trim.starts_with('{'),
-                "UpdateRecord-json output should parse as JSON on {version}"
+                "UpdateRecord-cancel-old output should parse as JSON on {version}"
             );
-            // The /status field was "ok" or "warn" in the payload;
-            // UpdateRecord-json maps it through toUpper().
+            // The /status field is mapped PENDING → CANCELLED on ~1/4
+            // records; the output must contain at least one CANCELLED
+            // status string.
             assert!(
-                output_s.contains("OK") || output_s.contains("WARN"),
-                "UpdateRecord-json output should contain uppercased status on {version}"
+                output_s.contains("CANCELLED"),
+                "UpdateRecord-cancel-old output should contain CANCELLED status on {version}"
             );
         } else {
-            eprintln!("  UpdateRecord-json: preconditions unmet — skipping on {version}");
+            eprintln!("  UpdateRecord-cancel-old: preconditions unmet — skipping on {version}");
         }
 
-        // 2. ConvertRecord: JSON ↔ CSV (mime mismatch; exercises the
-        //    diff-disabled path at the Tracer level). Same validator
-        //    as UpdateRecord-json: input is the JSON sensor array.
-        if let Some(convert_id) =
-            find_processor_by_name_in_pg(&snapshot.nodes, "diff-pipeline", "ConvertRecord")
-            && let Some(event_id) = wait_for_event(
-                &client,
-                &convert_id,
-                version,
-                "ConvertRecord",
-                json_validator,
-            )
-            .await
+        // 2. transform/ConvertRecord-csv2json: CSV → JSON (mime mismatch;
+        //    exercises the diff-disabled path at the Tracer level).
+        //    Input is CSV (with `order_id` header), output is JSON.
+        if let Some(convert_id) = find_processor_by_name_in_pg(
+            &snapshot.nodes,
+            "orders-pipeline/transform",
+            "ConvertRecord-csv2json",
+        ) && let Some(event_id) = wait_for_event(
+            &client,
+            &convert_id,
+            version,
+            "ConvertRecord-csv2json",
+            csv_validator,
+        )
+        .await
             && let Some((input, output)) =
-                fetch_both_sides(&client, event_id, version, "ConvertRecord").await
+                fetch_both_sides(&client, event_id, version, "ConvertRecord-csv2json").await
         {
             assert!(
                 !input.is_empty() && !output.is_empty(),
-                "ConvertRecord: both sides must have content on {version}"
+                "ConvertRecord-csv2json: both sides must have content on {version}"
             );
             let input_s = std::str::from_utf8(&input)
-                .unwrap_or_else(|_| panic!("ConvertRecord input not UTF-8 on {version}"));
+                .unwrap_or_else(|_| panic!("ConvertRecord-csv2json input not UTF-8 on {version}"));
             let output_s = std::str::from_utf8(&output)
-                .unwrap_or_else(|_| panic!("ConvertRecord output not UTF-8 on {version}"));
-            let input_trim = input_s.trim_start();
+                .unwrap_or_else(|_| panic!("ConvertRecord-csv2json output not UTF-8 on {version}"));
+            // CSV input should have a header row (commas + newlines)
+            // and contain the `order_id` column.
             assert!(
-                input_trim.starts_with('[') || input_trim.starts_with('{'),
-                "ConvertRecord input should be JSON on {version}"
+                input_s.contains(',') && input_s.contains('\n'),
+                "ConvertRecord-csv2json input should be CSV-shaped on {version}"
             );
-            // CSV output should have a header row (comma-delimited tokens)
-            // followed by at least one data row; if nothing else, it should
-            // contain commas and newlines.
             assert!(
-                output_s.contains(',') && output_s.contains('\n'),
-                "ConvertRecord output should be CSV-shaped on {version}"
+                input_s.contains("order_id"),
+                "ConvertRecord-csv2json input should contain CSV header `order_id` on {version}"
+            );
+            // JSON output should parse as JSON (array or object).
+            let output_trim = output_s.trim_start();
+            assert!(
+                output_trim.starts_with('[') || output_trim.starts_with('{'),
+                "ConvertRecord-csv2json output should be JSON on {version} (got: {:?}…)",
+                &output_trim.get(..40).unwrap_or(output_trim)
             );
         } else {
-            eprintln!("  ConvertRecord: preconditions unmet — skipping on {version}");
+            eprintln!("  ConvertRecord-csv2json: preconditions unmet — skipping on {version}");
         }
 
-        // 3. UpdateRecord-csv: CSV ↔ CSV (same mime, diffable).
-        // Validator: input is CSV with the sensor header.
-        let csv_validator = |bytes: &[u8]| {
-            std::str::from_utf8(bytes)
-                .map(|s| s.contains("SENSOR-") && s.contains(','))
-                .unwrap_or(false)
-        };
-        if let Some(upd_csv_id) =
-            find_processor_by_name_in_pg(&snapshot.nodes, "diff-pipeline", "UpdateRecord-csv")
-            && let Some(event_id) = wait_for_event(
-                &client,
-                &upd_csv_id,
-                version,
-                "UpdateRecord-csv",
-                csv_validator,
-            )
-            .await
+        // 3. sink-us/UpdateRecord-parquet-tag: Parquet ↔ Parquet (same
+        //    format, exercises the Tracer diff-tab eligibility gate
+        //    on Parquet content). The processor mutates an existing
+        //    `/status` field by appending "-AUDITED" — schema-compatible
+        //    so the writer (which inherits the reader's schema)
+        //    preserves the change, producing byte-different output.
+        //
+        //    Sink stages may have few or zero events if the upstream
+        //    fx-rate stage was broken before flowfiles reached the
+        //    sinks. Re-seed with `--break-after 5m` if this skips.
+        if let Some(upd_parquet_id) = find_processor_by_name_in_pg(
+            &snapshot.nodes,
+            "orders-pipeline/sink-us",
+            "UpdateRecord-parquet-tag",
+        ) && let Some(event_id) = wait_for_event(
+            &client,
+            &upd_parquet_id,
+            version,
+            "UpdateRecord-parquet-tag",
+            parquet_validator,
+        )
+        .await
             && let Some((input, output)) =
-                fetch_both_sides(&client, event_id, version, "UpdateRecord-csv").await
+                fetch_both_sides(&client, event_id, version, "UpdateRecord-parquet-tag").await
         {
             assert!(
                 !input.is_empty() && !output.is_empty(),
-                "UpdateRecord-csv: both sides must have content on {version}"
+                "UpdateRecord-parquet-tag: both sides must have content on {version}"
+            );
+            assert!(
+                input.starts_with(b"PAR1"),
+                "UpdateRecord-parquet-tag input should start with Parquet magic on {version}; \
+                 first 64 bytes (hex): {}",
+                hex_dump(&input, 64)
+            );
+            assert!(
+                output.starts_with(b"PAR1"),
+                "UpdateRecord-parquet-tag output should start with Parquet magic on {version}; \
+                 first 64 bytes (hex): {}",
+                hex_dump(&output, 64)
             );
             assert_ne!(
                 input, output,
-                "UpdateRecord-csv: input and output must differ (status lowercased) on {version}"
-            );
-            let input_s = std::str::from_utf8(&input).unwrap_or_else(|e| {
-                panic!(
-                    "UpdateRecord-csv input not UTF-8 on {version}: {e}; \
-                     first 64 bytes (hex): {}",
-                    hex_dump(&input, 64)
-                )
-            });
-            let output_s = std::str::from_utf8(&output).unwrap_or_else(|e| {
-                panic!(
-                    "UpdateRecord-csv output not UTF-8 on {version}: {e}; \
-                     first 64 bytes (hex): {}",
-                    hex_dump(&output, 64)
-                )
-            });
-            assert!(
-                input_s.contains(',') && input_s.contains('\n'),
-                "UpdateRecord-csv input should be CSV-shaped on {version}"
-            );
-            assert!(
-                output_s.contains(',') && output_s.contains('\n'),
-                "UpdateRecord-csv output should be CSV-shaped on {version}"
+                "UpdateRecord-parquet-tag should mutate /status on {version} \
+                 producing byte-different output"
             );
         } else {
-            eprintln!("  UpdateRecord-csv: preconditions unmet — skipping on {version}");
+            eprintln!("  UpdateRecord-parquet-tag: preconditions unmet — skipping on {version}");
+        }
+
+        // 4. sink-apac/UpdateRecord-avro-tag: Avro ↔ Avro (same format,
+        //    exercises the Tracer diff-tab eligibility gate on Avro
+        //    content). Same as the Parquet stage: mutates an existing
+        //    /status field (append "-AUDITED") so output is byte-
+        //    different from input.
+        //
+        //    Like sink-us, this stage may have no events if the
+        //    upstream fx-rate broke too early.
+        if let Some(upd_avro_id) = find_processor_by_name_in_pg(
+            &snapshot.nodes,
+            "orders-pipeline/sink-apac",
+            "UpdateRecord-avro-tag",
+        ) && let Some(event_id) = wait_for_event(
+            &client,
+            &upd_avro_id,
+            version,
+            "UpdateRecord-avro-tag",
+            avro_validator,
+        )
+        .await
+            && let Some((input, output)) =
+                fetch_both_sides(&client, event_id, version, "UpdateRecord-avro-tag").await
+        {
+            assert!(
+                !input.is_empty() && !output.is_empty(),
+                "UpdateRecord-avro-tag: both sides must have content on {version}"
+            );
+            assert!(
+                input.starts_with(b"Obj\x01"),
+                "UpdateRecord-avro-tag input should start with Avro magic on {version}; \
+                 first 64 bytes (hex): {}",
+                hex_dump(&input, 64)
+            );
+            assert!(
+                output.starts_with(b"Obj\x01"),
+                "UpdateRecord-avro-tag output should start with Avro magic on {version}; \
+                 first 64 bytes (hex): {}",
+                hex_dump(&output, 64)
+            );
+            assert_ne!(
+                input, output,
+                "UpdateRecord-avro-tag should mutate /status on {version} \
+                 producing byte-different output"
+            );
+        } else {
+            eprintln!("  UpdateRecord-avro-tag: preconditions unmet — skipping on {version}");
         }
     }
 }

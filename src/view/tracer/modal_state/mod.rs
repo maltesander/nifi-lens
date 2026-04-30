@@ -143,7 +143,15 @@ pub struct ContentModalState {
 // ── Content viewer modal reducers ─────────────────────────────────────────────
 
 /// Byte size of a single streaming fetch chunk.
-pub const MODAL_CHUNK_BYTES: usize = 512 * 1024;
+///
+/// 8 MiB — large enough that typical record-format flowfiles
+/// (text / JSON / Parquet / Avro at the few-MiB scale produced by
+/// the integration fixture) load in a single round-trip, so the
+/// diff modal can decode and compare both sides without depending
+/// on scroll-triggered follow-up fetches. The per-side ceilings
+/// (`[tracer.ceiling]`) still bound total bytes loaded; this only
+/// controls how those bytes are paged in.
+pub const MODAL_CHUNK_BYTES: usize = 8 * crate::bytes::MIB as usize;
 
 /// One pending fetch request — the reducer returns these instead of
 /// spawning directly so `AppState` code can route through the

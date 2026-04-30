@@ -2,23 +2,56 @@
 //!
 //! Gated with `#[ignore]` — only runs via `./integration-tests/run.sh`
 //! which boots the Docker fixture. The test submits a lineage query for a
-//! well-known fixture flowfile UUID (seeded by `nifilens-fixture-seeder`),
-//! polls until the query finishes, asserts that at least one event is
-//! returned, then cleans up via `delete_lineage`.
+//! flowfile from the `orders-pipeline/transform` processors, polls until the
+//! query finishes, asserts that at least one event is returned, then cleans
+//! up via `delete_lineage`.
 
-use nifi_lens::client::NifiClient;
+use nifi_lens::client::events::{ProvenancePollResult, ProvenanceQuery};
 use nifi_lens::client::tracer::LineagePoll;
+use nifi_lens::client::{NifiClient, NodeKind};
 use nifi_lens::config::{ResolvedAuth, ResolvedContext, VersionStrategy};
 
 #[path = "common/mod.rs"]
 mod common;
 use common::versions::{FIXTURE_VERSIONS, context_for, port_for};
 
-/// A UUID that will never exist in a real cluster, used to verify that the
-/// lineage API is reachable and returns a valid (empty) result set rather
-/// than an error. `nifilens-fixture-seeder` may not produce stable flowfile
-/// UUIDs, so we test the round-trip rather than a specific event count.
-const PROBE_UUID: &str = "00000000-0000-0000-0000-000000000000";
+/// Walk the browser tree and return the component `id` of the first
+/// `Processor` node whose `name` matches `processor_name` and whose parent
+/// chain ends with the PG path `pg_path` (slash-separated, root-to-leaf).
+fn find_processor_by_name_in_pg(
+    nodes: &[nifi_lens::client::RawNode],
+    pg_path: &str,
+    processor_name: &str,
+) -> Option<String> {
+    let pg_parts: Vec<&str> = pg_path.split('/').collect();
+
+    for (i, node) in nodes.iter().enumerate() {
+        if node.kind != NodeKind::Processor || node.name != processor_name {
+            continue;
+        }
+
+        // Collect the chain of PG ancestor names, leaf-to-root.
+        let mut ancestor_names: Vec<&str> = Vec::new();
+        let mut cursor = i;
+        while let Some(p) = nodes[cursor].parent_idx {
+            cursor = p;
+            if matches!(nodes[cursor].kind, NodeKind::ProcessGroup) {
+                ancestor_names.push(nodes[cursor].name.as_str());
+            }
+        }
+        // Reverse to root-to-leaf so we can suffix-match against pg_parts.
+        ancestor_names.reverse();
+
+        if ancestor_names.len() >= pg_parts.len() {
+            let start = ancestor_names.len() - pg_parts.len();
+            if ancestor_names[start..] == *pg_parts {
+                return Some(node.id.clone());
+            }
+        }
+    }
+
+    None
+}
 
 #[tokio::test(flavor = "current_thread")]
 #[ignore]
@@ -51,15 +84,83 @@ async fn integration_tracer_lineage_happy_path() {
             .await
             .unwrap_or_else(|e| panic!("connect to {version} failed: {e:?}"));
 
-        // 1. Submit a lineage query for the probe UUID.
+        // 1. Fetch the root PG status to locate a processor in orders-pipeline/transform.
+        let pg_snapshot = client
+            .root_pg_status()
+            .await
+            .unwrap_or_else(|e| panic!("root_pg_status on {version} failed: {e:?}"));
+
+        let processor_id = find_processor_by_name_in_pg(
+            &pg_snapshot.nodes,
+            "orders-pipeline/transform",
+            "UpdateRecord-cancel-old",
+        )
+        .unwrap_or_else(|| {
+            panic!("UpdateRecord-cancel-old not found in orders-pipeline/transform on {version}")
+        });
+
+        eprintln!("  processor_id = {processor_id}");
+
+        // 2. Submit a provenance query to find a flowfile UUID from the processor.
+        let prov_query = ProvenanceQuery {
+            component_id: Some(processor_id.clone()),
+            flow_file_uuid: None,
+            start_time_iso: None,
+            end_time_iso: None,
+            max_results: 10,
+        };
+
+        let prov_handle = client
+            .submit_provenance_query(&prov_query)
+            .await
+            .unwrap_or_else(|e| panic!("submit_provenance_query on {version} failed: {e:?}"));
+
+        eprintln!("  provenance_query_id = {}", prov_handle.query_id);
+
+        // 3. Poll the provenance query until finished to get a flowfile UUID.
+        let flowfile_uuid = {
+            let mut uuid: Option<String> = None;
+            for attempt in 0..20 {
+                let poll = client
+                    .poll_provenance_query(&prov_handle)
+                    .await
+                    .unwrap_or_else(|e| {
+                        panic!("poll_provenance_query attempt {attempt} on {version} failed: {e:?}")
+                    });
+
+                match poll {
+                    ProvenancePollResult::Finished { events, .. } => {
+                        if let Some(event) = events.first() {
+                            uuid = Some(event.flow_file_uuid.clone());
+                        }
+                        break;
+                    }
+                    ProvenancePollResult::Running { percent } => {
+                        eprintln!("  provenance attempt {attempt}: {percent}% …");
+                        tokio::time::sleep(tokio::time::Duration::from_millis(500)).await;
+                    }
+                }
+            }
+            uuid.unwrap_or_else(|| panic!("No provenance events found for processor on {version}"))
+        };
+
+        eprintln!("  flowfile_uuid = {flowfile_uuid}");
+
+        // 4. Clean up the provenance query.
+        client
+            .delete_provenance_query(&prov_handle)
+            .await
+            .unwrap_or_else(|e| panic!("delete_provenance_query on {version} failed: {e:?}"));
+
+        // 5. Submit a lineage query for the extracted flowfile UUID.
         let (query_id, cluster_node_id) = client
-            .submit_lineage(PROBE_UUID)
+            .submit_lineage(&flowfile_uuid)
             .await
             .unwrap_or_else(|e| panic!("submit_lineage on {version} failed: {e:?}"));
 
-        eprintln!("  query_id = {query_id}, cluster_node_id = {cluster_node_id:?}");
+        eprintln!("  lineage_query_id = {query_id}, cluster_node_id = {cluster_node_id:?}");
 
-        // 2. Poll until finished (max 20 attempts × 500 ms = 10 s).
+        // 6. Poll until finished (max 20 attempts × 500 ms = 10 s).
         let snapshot = {
             let mut snapshot = None;
             for attempt in 0..20 {
@@ -90,15 +191,17 @@ async fn integration_tracer_lineage_happy_path() {
             snapshot.percent_completed
         );
 
-        // 3. The probe UUID does not exist in the fixture, so the event list
-        //    may be empty — that is fine. We assert that the query finished
-        //    (which we enforced above) and that the API round-trip succeeded.
+        // 7. Assert the query finished and returned at least one event.
         assert!(
             snapshot.finished,
             "snapshot.finished must be true on {version}"
         );
+        assert!(
+            !snapshot.events.is_empty(),
+            "snapshot.events must not be empty on {version} (expected lineage chain)"
+        );
 
-        // 4. Clean up.
+        // 8. Clean up the lineage query.
         client
             .delete_lineage(&query_id, cluster_node_id.as_deref())
             .await

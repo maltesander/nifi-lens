@@ -1,6 +1,6 @@
 //! Integration test for the action-history paginator against the live
 //! `nifilens-fixture-v8` cluster. Verifies that the seeder's initial
-//! setup creates auditable actions on the healthy-pipeline ConvertRecord
+//! setup creates auditable actions on the orders-pipeline ConvertRecord-csv2json
 //! processor and that `flow_actions_paginator` returns them filtered by
 //! `sourceId`.
 //!
@@ -63,12 +63,14 @@ async fn integration_action_history_paginator_returns_actions_filtered_by_source
             .await
             .unwrap_or_else(|e| panic!("connect to {version} failed: {e:?}"));
 
-        // The seeder creates exactly one ConvertRecord under
-        // healthy-pipeline/enrich. Configuring it during seeding produces
+        // The seeder creates exactly one ConvertRecord-csv2json under
+        // orders-pipeline/transform. Configuring it during seeding produces
         // at least one Configure action attributable to the processor.
-        let proc_id = find_processor_id_by_name(&client, "ConvertRecord")
+        let proc_id = find_processor_id_by_name(&client, "ConvertRecord-csv2json")
             .await
-            .unwrap_or_else(|| panic!("fixture ConvertRecord processor not found on {version}"));
+            .unwrap_or_else(|| {
+                panic!("fixture ConvertRecord-csv2json processor not found on {version}")
+            });
 
         let mut p = flow_actions_paginator(&client, &proc_id, 100);
         let page = p
@@ -76,12 +78,12 @@ async fn integration_action_history_paginator_returns_actions_filtered_by_source
             .await
             .unwrap_or_else(|e| panic!("flow_actions_paginator on {version} failed: {e:?}"))
             .unwrap_or_else(|| {
-                panic!("expected at least one action page for ConvertRecord on {version}")
+                panic!("expected at least one action page for ConvertRecord-csv2json on {version}")
             });
 
         assert!(
             !page.is_empty(),
-            "expected at least one action recorded against ConvertRecord on {version}"
+            "expected at least one action recorded against ConvertRecord-csv2json on {version}"
         );
 
         // Every returned action must reference the requested processor.

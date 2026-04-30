@@ -1,8 +1,9 @@
 //! Integration tests for the Browser tab: CS tree membership, CS
-//! referencing-components, port detail. All gated on `#[ignore]` — run
-//! via `./integration-tests/run.sh` or `cargo test --test
-//! integration_browser -- --ignored` after bringing up the Docker
-//! fixture. Loops over every version in `FIXTURE_VERSIONS`.
+//! referencing-components, port detail, top-level fixture roster. All
+//! gated on `#[ignore]` — run via `./integration-tests/run.sh` or
+//! `cargo test --test integration_browser -- --ignored` after bringing
+//! up the Docker fixture. Loops over every version in
+//! `FIXTURE_VERSIONS`.
 //!
 //! Task 6 of the central-cluster-store refactor retired
 //! `NifiClient::browser_tree`; these tests now exercise the pair of
@@ -108,6 +109,91 @@ async fn integration_browser_cs_detail_reports_referencing_components() {
         assert!(
             found,
             "at least one fixture CS on {version} must have referencing components"
+        );
+    }
+}
+
+/// Pins the post-Phase-9 fixture roster: 6 top-level PGs under the
+/// marker. Phases 5-8 of the orders-pipeline rework added
+/// `orders-pipeline` + `remote-targets` alongside legacy fixtures;
+/// Phase 9 deleted healthy/noisy/bulky/diff/parameterized/remote.
+/// What remains: the `orders-pipeline` centerpiece, the
+/// `remote-targets` RPG-receive subtree, and four standalone fixtures
+/// retained for state-encoding (`invalid`, `backpressure`,
+/// `versioned-clean`, `versioned-modified`).
+#[tokio::test(flavor = "current_thread")]
+#[ignore]
+async fn integration_browser_lists_expected_top_level_fixture_pgs() {
+    const FIXTURE_MARKER: &str = "nifilens-fixture-v8";
+    const REQUIRED_TOP_LEVEL_PGS: &[&str] = &[
+        // Centerpiece + RPG-receive subtree from the orders rework.
+        "orders-pipeline",
+        "remote-targets",
+        // Retained standalone fixtures (each encodes a state hard to
+        // reach mid-narrative, so they stay separate from orders).
+        "invalid-pipeline",
+        "backpressure-pipeline",
+        "versioned-clean",
+        "versioned-modified",
+    ];
+
+    for &version in FIXTURE_VERSIONS {
+        eprintln!(
+            "--- integration_browser_lists_expected_top_level_fixture_pgs \
+             running against NiFi {version} ---"
+        );
+
+        let ctx = it_context(version);
+        let client = NifiClient::connect(&ctx)
+            .await
+            .unwrap_or_else(|e| panic!("connect to {version} failed: {e:?}"));
+
+        let snap = client
+            .root_pg_status()
+            .await
+            .unwrap_or_else(|e| panic!("root_pg_status on {version} failed: {e:?}"));
+
+        let marker_idx = snap
+            .nodes
+            .iter()
+            .position(|n| matches!(n.kind, NodeKind::ProcessGroup) && n.name == FIXTURE_MARKER)
+            .unwrap_or_else(|| {
+                panic!("fixture marker PG `{FIXTURE_MARKER}` not present on {version}")
+            });
+
+        let top_level: Vec<&str> = snap
+            .nodes
+            .iter()
+            .filter(|n| {
+                matches!(n.kind, NodeKind::ProcessGroup) && n.parent_idx == Some(marker_idx)
+            })
+            .map(|n| n.name.as_str())
+            .collect();
+
+        eprintln!(
+            "  marker `{FIXTURE_MARKER}` on {version} has {} top-level PG(s): {:?}",
+            top_level.len(),
+            top_level
+        );
+
+        for required in REQUIRED_TOP_LEVEL_PGS {
+            assert!(
+                top_level.contains(required),
+                "expected top-level PG `{required}` under `{FIXTURE_MARKER}` on {version}; \
+                 found {top_level:?}"
+            );
+        }
+
+        // Phase 7 leaves both legacy and new fixtures coexisting (12
+        // PGs); Phase 9 will trim to 6. A loose `>= REQUIRED.len()`
+        // bound keeps the test honest without locking in incidental
+        // extras.
+        assert!(
+            top_level.len() >= REQUIRED_TOP_LEVEL_PGS.len(),
+            "expected at least {} top-level PGs under `{FIXTURE_MARKER}` on {version}, \
+             got {} ({top_level:?})",
+            REQUIRED_TOP_LEVEL_PGS.len(),
+            top_level.len()
         );
     }
 }

@@ -36,6 +36,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   24 cells of identity-inner width so narrow terminals keep the
   identity panel readable.
 
+### Changed
+
+- Tracer content modal chunk size raised from 512 KiB to 8 MiB
+  (`MODAL_CHUNK_BYTES`). Typical record-format flowfiles (text / JSON
+  / Parquet / Avro at the few-MiB scale) now load in a single
+  round-trip, so the diff modal can compute its diff without
+  depending on scroll-driven follow-up fetches that don't fire on
+  an empty body.
+- Integration test fixture reworked into a single `orders-pipeline`
+  centerpiece (ingest → transform → regional sinks + deadletter)
+  with a 5-context parameter hierarchy and a `--break-after` seeder
+  flag that controls when the demo's headline parameter mutation
+  lands. Replaces the previous focused-pipeline set
+  (healthy/noisy/bulky/diff/parameterized/remote); standalone
+  fixtures retained where state encoding requires it
+  (invalid, backpressure, versioned-clean, versioned-modified).
+
 ## [0.8.1] — 2026-04-27
 
 ### Fixed

@@ -750,69 +750,49 @@ integration-tests/nifilens-config.toml --context dev-nifi-2-9-0`.
 (`nifilens-fixture-v8`) is already present.
 
 **Fixture inventory** — top-level marker PG `nifilens-fixture-v8`
-contains ten PGs, two parameter contexts, four top-level CSes:
+contains 6 child PGs, 5 parameter contexts, 4 root-level CSes.
 
-- PGs: `healthy-pipeline` (with nested `ingest`/`enrich`),
-  `noisy-pipeline`, `backpressure-pipeline`, `invalid-pipeline`,
-  `bulky-pipeline`, `diff-pipeline`, `versioned-clean`,
-  `versioned-modified`, `parameterized-pipeline`, `remote-pipeline`.
-- Parameter contexts: `fixture-pc-base` (`kafka_bootstrap`,
-  `retry_max`, sensitive `db_password`) and `fixture-pc-prod`
-  (inherits base, overrides `retry_max`, adds `region`).
-  `parameterized-pipeline` is bound to `fixture-pc-prod`.
-- CSes: `fixture-json-reader` ENABLED, `fixture-json-writer` ENABLED,
-  `fixture-csv-reader` DISABLED, `fixture-broken-writer`
-  INVALID/DISABLED.
+- Centerpiece: `orders-pipeline/` — `ingest` → `transform` → fan-out
+  to `sink-eu`, `sink-us`, `sink-apac`, `deadletter`. Plus a sibling
+  `remote-targets/` subtree with two S2S-receivable input ports.
+  Headline failure narrative: `transform/UpdateRecord-fx-rate` reads
+  `#{usd_rate}`; the seeder mutates that parameter to `"oops"` after
+  topology start (controlled by `--break-after`), routing every
+  flowfile to `deadletter` and producing the audit/bulletin/queue
+  evidence the demo investigates.
+- Retained standalones (each encodes a state hard to reach
+  mid-narrative): `invalid-pipeline`, `backpressure-pipeline`,
+  `versioned-clean`, `versioned-modified`.
+- Parameter contexts (3-tier inheritance): `fixture-pc-platform` →
+  `fixture-pc-orders` → `fixture-pc-region-{eu,us,apac}`. Bindings:
+  `ingest`→platform (depth 1), `transform`→orders (depth 2), each
+  regional sink→its `region-*` (depth 3). `usd_rate` lives on
+  `fixture-pc-orders`.
+- CSes (root-level): `fixture-json-reader`/`-writer` ENABLED (consumed
+  by `transform/`); `fixture-csv-reader` DISABLED and
+  `fixture-broken-writer` INVALID/DISABLED — both kept purely as
+  modal-rendering exhibits, not referenced by any processor. Format-
+  specific Parquet/Avro CSes are scoped inside `sink-us`/`sink-apac`.
+- Diff coverage: `transform/UpdateRecord-cancel-old` and
+  `mark-deleted` (JSON↔JSON), `transform/ConvertRecord-csv2json`
+  (JSON↔CSV grayed-out), `sink-us/UpdateRecord-parquet-tag`
+  (Parquet↔Parquet), `sink-apac/UpdateRecord-avro-tag` (Avro↔Avro).
+  Note: NiFi often reports `inputContentClaim == outputContentClaim`
+  on `CONTENT_MODIFIED` even when bytes differ — always fetch both
+  sides.
 
-What each pipeline exercises:
+`--break-after <duration>` (CLI flag on the seeder) controls the
+sleep between topology setup and the `usd_rate` mutation. Default
+`0s` for CI; longer (`5m`, `30m`) for live demos so the healthy state
+is observable before the break lands. The mutation is idempotent
+(value-gated), so re-runs against an already-broken fixture are
+no-ops.
 
-- `healthy-pipeline/enrich` — `ConvertRecord` (referencing
-  `fixture-json-reader`/`-writer`) → `UpdateAttribute-enrich` →
-  `UpdateAttribute-cleanup` → `LogAttribute-INFO`. Exercises
-  CS-referencing coverage on all NiFi versions including 2.6.0.
-- `parameterized-pipeline` — bound to `fixture-pc-prod`. Contains
-  `LogAttribute-parameterized` (`Log Payload = "connecting to
-  #{kafka_bootstrap}"`; `Log Prefix = "##{literal_text}"` escape —
-  must NOT be annotated) and `UpdateAttribute-parameterized` with
-  dynamic `broker = "#{kafka_bootstrap}"` and `max_retries =
-  "#{retry_max}"`. Exercises `#{name}` cross-link annotations and
-  the parameter-context modal (`p`).
-- `versioned-clean` / `versioned-modified` — committed to a Registry
-  bucket on seed; `versioned-modified` then has one property mutated
-  locally so it shows `[MODIFIED]` (or `[STALE+MOD]` after a
-  registry-side update) drift, exercising the version-control modal.
-- `bulky-pipeline` — ~1.5 MiB random-text flowfiles at low rate,
-  content for Tracer streaming/truncation testing.
-- `diff-pipeline` — generates ~180 KiB structured JSON flowfiles
-  (1000 sensor records from embedded `diff_payload.json`) and
-  exercises the Tracer diff tab via three sink chains:
-  JSON↔CSV (`UpdateRecord-json` → `ConvertRecord` →
-  `UpdateRecord-csv` → `LogAttribute-INFO`; mid-stage produces
-  JSON↔JSON and CSV↔CSV diffs, JSON↔CSV stage grayed out), and
-  Parquet/Avro chains (`ConvertRecord-{fmt}` → `UpdateRecord-{fmt}`
-  → `UpdateRecord-{fmt}-mark-deleted` → `LogAttribute-{fmt}`).
-  `UpdateRecord-{fmt}` rewrites WARN status rows (≈⅓ records);
-  `UpdateRecord-{fmt}-mark-deleted` rewrites `/id` on
-  `SENSOR-0500…0999` to `DELETED-5xx…9xx` (≈½). Both emit
-  `CONTENT_MODIFIED` with same-format input/output claims. Note:
-  NiFi often reports `inputContentClaim == outputContentClaim` on
-  `CONTENT_MODIFIED` even when bytes differ — claim ID is a logical
-  handle, not a content hash. Always fetch both sides. Owns scoped
-  CSes (`diff-{json,csv,parquet,avro}-{reader,writer}`,
-  `diff-csv-writer-out`).
-
-- `remote-pipeline` — two RPGs (one transmitting, one idle) targeting
-  the floor NiFi's site-to-site URL. Exercises the RPG tree node,
-  Identity pane, sparkline, action-history modal, and Overview
-  Components row.
-
-All fixture pipelines work on the 2.6.0 floor. Some NiFi processor
-*property keys* drift between minor versions even when display names
-are stable — setting a property by display name when the real key
-differs silently turns it into a dynamic attribute. The seeder
-handles known cases via `fixture::custom_text_property_key(version)`
-and similar helpers; bumping the marker name invalidates stale
-fixtures automatically.
+Some NiFi processor *property keys* drift between minor versions
+even when display names are stable — setting a property by display
+name when the real key differs silently turns it into a dynamic
+attribute. The seeder handles known cases via
+`fixture::custom_text_property_key(version)` and similar helpers.
 
 ### Bumping the NiFi ceiling version
 

@@ -5,17 +5,20 @@
 //! These tests exercise the data path — `browser_remote_process_group_detail`
 //! and `status_history(ComponentKind::RemoteProcessGroup, ...)` — not the
 //! UI surface (which is covered by snapshot/wiremock tests at the unit
-//! level). The fixture must contain the seeder's `remote-pipeline` PG with
-//! two RPGs (see `integration-tests/seeder/src/fixture/remote.rs`):
-//!   - one set to TRANSMITTING (`transmissionStatus = "Transmitting"`).
-//!   - one left in default STOPPED state (`transmissionStatus = "NotTransmitting"`).
+//! level). The fixture must contain the seeder's orders-pipeline with
+//! two regional sinks owning RPGs (see
+//! `integration-tests/seeder/src/fixture/orders/`):
+//!   - `orders-pipeline/sink-eu/rpg-eu` — TRANSMITTING.
+//!   - `orders-pipeline/sink-apac/rpg-apac` — left in default STOPPED state
+//!     (`transmissionStatus = "NotTransmitting"`).
 //!
-//! Lookup is by `transmissionStatus`, NOT by user-given name. NiFi
-//! discards the user-supplied `name` on RPG creation and replaces it
-//! with the target's flow name (always `"NiFi Flow"` in our fixture
-//! since both RPGs target the floor NiFi). The two RPGs are otherwise
-//! indistinguishable from the API surface — only their transmission
-//! state differs.
+//! Lookup is scoped by parent PG (`sink-eu` / `sink-apac`), NOT by the
+//! RPG's own name. NiFi discards the user-supplied `name` on RPG
+//! creation and replaces it with the target's flow name (always
+//! `"NiFi Flow"` in our fixture since both RPGs target the floor NiFi),
+//! so user-supplied `rpg-eu` / `rpg-apac` names are not visible from
+//! the API. Scoping by parent PG also disambiguates from any other
+//! RPGs that may coexist in the cluster during fixture migration.
 //!
 //! Gated on `#[ignore]` — run via `./integration-tests/run.sh` or
 //! `cargo test --test integration_remote_process_groups -- --ignored`
@@ -49,33 +52,59 @@ fn it_context(version: &str) -> ResolvedContext {
     }
 }
 
-/// Resolve an RPG by `transmissionStatus` from the recursive root status
-/// snapshot. NiFi overwrites the RPG's user-given name with the target's
-/// flow name on create, so the two fixture RPGs both report `name =
-/// "NiFi Flow"` and can only be told apart by their transmission state.
-async fn find_rpg_id_by_transmission_status(
+/// Resolve the unique RPG owned by a named PG under the orders-pipeline
+/// subtree (`nifilens-fixture-v8 → orders-pipeline → <sink_pg_name>`).
+///
+/// Returns the RPG node's id and its observed `transmissionStatus`. Each
+/// regional sink PG (`sink-eu`, `sink-apac`) owns exactly one RPG in the
+/// fixture, so a single lookup unambiguously identifies the target. We
+/// scope by parent PG because NiFi overwrites the user-given RPG name
+/// (`rpg-eu`, `rpg-apac`) with the target's flow name on create, leaving
+/// PG path as the only stable identifier.
+async fn find_orders_rpg_under_sink(
     client: &NifiClient,
-    transmission_status: &str,
-) -> Option<String> {
+    sink_pg_name: &str,
+) -> Option<(String, String)> {
     let snap = client.root_pg_status().await.ok()?;
-    snap.nodes
+
+    // marker → orders-pipeline → <sink_pg_name>: locate the sink PG by
+    // its parent chain so we don't accidentally match a same-named PG
+    // elsewhere in the cluster.
+    let nodes = &snap.nodes;
+    let marker_idx = nodes.iter().position(|n| {
+        matches!(n.kind, NodeKind::ProcessGroup) && n.name == "nifilens-fixture-v8"
+    })?;
+    let orders_idx = nodes.iter().position(|n| {
+        matches!(n.kind, NodeKind::ProcessGroup)
+            && n.name == "orders-pipeline"
+            && n.parent_idx == Some(marker_idx)
+    })?;
+    let sink_idx = nodes.iter().position(|n| {
+        matches!(n.kind, NodeKind::ProcessGroup)
+            && n.name == sink_pg_name
+            && n.parent_idx == Some(orders_idx)
+    })?;
+    let sink_pg_id = nodes[sink_idx].id.clone();
+
+    nodes
         .iter()
-        .find(|n| {
-            matches!(n.kind, NodeKind::RemoteProcessGroup)
-                && match &n.status_summary {
-                    NodeStatusSummary::RemoteProcessGroup {
-                        transmission_status: ts,
-                        ..
-                    } => ts == transmission_status,
-                    _ => false,
-                }
+        .find_map(|n| match (&n.kind, &n.status_summary) {
+            (
+                NodeKind::RemoteProcessGroup,
+                NodeStatusSummary::RemoteProcessGroup {
+                    transmission_status,
+                    ..
+                },
+            ) if n.group_id == sink_pg_id => Some((n.id.clone(), transmission_status.clone())),
+            _ => None,
         })
-        .map(|n| n.id.clone())
 }
 
 const TRANSMITTING: &str = "Transmitting";
 const NOT_TRANSMITTING: &str = "NotTransmitting";
 const REMOTE_TARGET_URI: &str = "https://nifi-2-6-0:8443/nifi";
+const SINK_EU: &str = "sink-eu";
+const SINK_APAC: &str = "sink-apac";
 
 #[tokio::test(flavor = "current_thread")]
 #[ignore]
@@ -87,9 +116,13 @@ async fn live_rpg_detail_returns_target_uri_and_ports() {
             .await
             .unwrap_or_else(|e| panic!("connect to {version} failed: {e:?}"));
 
-        let rpg_id = find_rpg_id_by_transmission_status(&client, TRANSMITTING)
+        let (rpg_id, transmission_status) = find_orders_rpg_under_sink(&client, SINK_EU)
             .await
-            .unwrap_or_else(|| panic!("no Transmitting RPG found on {version}"));
+            .unwrap_or_else(|| panic!("no RPG under orders-pipeline/{SINK_EU} on {version}"));
+        assert_eq!(
+            transmission_status, TRANSMITTING,
+            "orders-pipeline/{SINK_EU} RPG must be Transmitting on {version}"
+        );
 
         let detail = client
             .browser_remote_process_group_detail(&rpg_id)
@@ -127,9 +160,9 @@ async fn live_rpg_status_history_endpoint_is_callable() {
             .await
             .unwrap_or_else(|e| panic!("connect to {version} failed: {e:?}"));
 
-        let rpg_id = find_rpg_id_by_transmission_status(&client, TRANSMITTING)
+        let (rpg_id, _transmission_status) = find_orders_rpg_under_sink(&client, SINK_EU)
             .await
-            .unwrap_or_else(|| panic!("no Transmitting RPG found on {version}"));
+            .unwrap_or_else(|| panic!("no RPG under orders-pipeline/{SINK_EU} on {version}"));
 
         // The endpoint must be callable and the reducer must succeed.
         // We do NOT assert non-empty buckets because the fixture RPG
@@ -153,9 +186,13 @@ async fn live_idle_rpg_detail_reports_not_transmitting() {
             .await
             .unwrap_or_else(|e| panic!("connect to {version} failed: {e:?}"));
 
-        let rpg_id = find_rpg_id_by_transmission_status(&client, NOT_TRANSMITTING)
+        let (rpg_id, transmission_status) = find_orders_rpg_under_sink(&client, SINK_APAC)
             .await
-            .unwrap_or_else(|| panic!("no NotTransmitting RPG found on {version}"));
+            .unwrap_or_else(|| panic!("no RPG under orders-pipeline/{SINK_APAC} on {version}"));
+        assert_eq!(
+            transmission_status, NOT_TRANSMITTING,
+            "orders-pipeline/{SINK_APAC} RPG must be NotTransmitting on {version}"
+        );
 
         let detail = client
             .browser_remote_process_group_detail(&rpg_id)

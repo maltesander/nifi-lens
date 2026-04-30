@@ -1,0 +1,16 @@
+[package]
+name = "gen-orders-payload"
+version = "0.0.0"
+edition = "2024"
+rust-version = "1.88"
+publish = false
+description = "Generates the deterministic orders_payload.csv asset for the integration test fixture."
+license = "Apache-2.0"
+
+[[bin]]
+name = "gen-orders-payload"
+path = "src/main.rs"
+
+[dependencies]
+rand = "0.10"
+rand_chacha = "0.10"

@@ -151,6 +151,17 @@ async fn create_and_enable_cs(
     Ok(id)
 }
 
+/// Public version of `create_and_enable_cs` for use by `orders` modules
+/// that need to create scoped (PG-local) controller services.
+pub async fn create_and_enable_cs_inline(
+    client: &DynamicClient,
+    parent_pg_id: &str,
+    name: &str,
+    cs_type: &str,
+) -> Result<String> {
+    create_and_enable_cs(client, parent_pg_id, name, cs_type).await
+}
+
 async fn create_disabled_csv_reader(client: &DynamicClient, parent_pg_id: &str) -> Result<()> {
     tracing::info!("creating fixture-csv-reader (leave DISABLED)");
     let body = make_controller_service(
