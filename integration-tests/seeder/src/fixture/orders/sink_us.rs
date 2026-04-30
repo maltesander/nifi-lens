@@ -98,11 +98,20 @@ pub async fn seed(
         make_processor(
             "UpdateRecord-parquet-tag",
             "org.apache.nifi.processors.standard.UpdateRecord",
+            // Overwrite the existing /status field with a literal
+            // "AUDITED-PARQUET" tag. We mutate an existing schema
+            // field rather than adding a new one (e.g. /audit_id)
+            // because ParquetRecordSetWriter inherits the reader's
+            // schema and silently drops new fields — the output
+            // would be byte-equal to input and produce nothing for
+            // the diff modal. UpdateRecord's default replacement
+            // strategy is "Literal Value", which means EL-with-field-
+            // reference (`${field.value:append(...)}`) silently no-ops;
+            // a plain literal forces the rewrite.
             props(&[
                 ("Record Reader", &parquet_reader_id),
                 ("Record Writer", &parquet_writer_id),
-                // Add a synthesized audit_id field.
-                ("/audit_id", "${UUID()}"),
+                ("/status", "AUDITED-PARQUET"),
             ]),
             None,
             vec!["failure"],

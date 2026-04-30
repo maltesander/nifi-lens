@@ -33,7 +33,12 @@ use nifi_lens::error::NifiLensError;
 mod common;
 use common::versions::{FIXTURE_VERSIONS, context_for, port_for};
 
-const FIRST_CHUNK: usize = 512 * 1024; // same as MODAL_CHUNK_BYTES
+// Match the lens's MODAL_CHUNK_BYTES (8 MiB) so the test fetches the
+// same range the diff modal would. With smaller chunks, columnar
+// formats like Parquet can show byte-identical leading portions even
+// when the full file differs (the status column we mutate sits in a
+// later column chunk).
+const FIRST_CHUNK: usize = 8 * 1024 * 1024;
 
 async fn make_client(version: &str, username: &str, password: &str, ca_path: &str) -> NifiClient {
     let ctx = ResolvedContext {
@@ -367,13 +372,10 @@ async fn diff_pipeline_events_are_diffable_against_all_fixture_versions() {
 
         // 3. sink-us/UpdateRecord-parquet-tag: Parquet ↔ Parquet (same
         //    format, exercises the Tracer diff-tab eligibility gate
-        //    on Parquet content). The processor sets `/audit_id =
-        //    ${UUID()}`; the Parquet writer uses an inherited schema,
-        //    so the new field may be dropped on serialization, leaving
-        //    input bytes byte-equal to output bytes. The diff modal
-        //    still gates on format match + size — empty hunks are a
-        //    valid render path. We assert format magic on both sides
-        //    and warn (do not fail) on byte equality.
+        //    on Parquet content). The processor mutates an existing
+        //    `/status` field by appending "-AUDITED" — schema-compatible
+        //    so the writer (which inherits the reader's schema)
+        //    preserves the change, producing byte-different output.
         //
         //    Sink stages may have few or zero events if the upstream
         //    fx-rate stage was broken before flowfiles reached the
@@ -409,23 +411,20 @@ async fn diff_pipeline_events_are_diffable_against_all_fixture_versions() {
                  first 64 bytes (hex): {}",
                 hex_dump(&output, 64)
             );
-            if input == output {
-                eprintln!(
-                    "  UpdateRecord-parquet-tag: input == output on {version} \
-                     (writer schema dropped the synthesized audit_id field — \
-                     diff-tab eligibility still satisfied)"
-                );
-            }
+            assert_ne!(
+                input, output,
+                "UpdateRecord-parquet-tag should mutate /status on {version} \
+                 producing byte-different output"
+            );
         } else {
             eprintln!("  UpdateRecord-parquet-tag: preconditions unmet — skipping on {version}");
         }
 
         // 4. sink-apac/UpdateRecord-avro-tag: Avro ↔ Avro (same format,
         //    exercises the Tracer diff-tab eligibility gate on Avro
-        //    content). Same caveat as the Parquet stage: the writer's
-        //    inherited schema may drop the synthesized `audit_id`
-        //    field, leaving bytes equal. We assert format magic on
-        //    both sides and warn (do not fail) on byte equality.
+        //    content). Same as the Parquet stage: mutates an existing
+        //    /status field (append "-AUDITED") so output is byte-
+        //    different from input.
         //
         //    Like sink-us, this stage may have no events if the
         //    upstream fx-rate broke too early.
@@ -460,13 +459,11 @@ async fn diff_pipeline_events_are_diffable_against_all_fixture_versions() {
                  first 64 bytes (hex): {}",
                 hex_dump(&output, 64)
             );
-            if input == output {
-                eprintln!(
-                    "  UpdateRecord-avro-tag: input == output on {version} \
-                     (writer schema dropped the synthesized audit_id field — \
-                     diff-tab eligibility still satisfied)"
-                );
-            }
+            assert_ne!(
+                input, output,
+                "UpdateRecord-avro-tag should mutate /status on {version} \
+                 producing byte-different output"
+            );
         } else {
             eprintln!("  UpdateRecord-avro-tag: preconditions unmet — skipping on {version}");
         }

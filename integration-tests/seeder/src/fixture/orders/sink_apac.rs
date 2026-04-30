@@ -104,10 +104,18 @@ pub async fn seed(
         make_processor(
             "UpdateRecord-avro-tag",
             "org.apache.nifi.processors.standard.UpdateRecord",
+            // Overwrite the existing /status field with a literal
+            // "AUDITED-AVRO" tag. Mutating an existing schema field
+            // rather than adding a new one (e.g. /audit_id) because
+            // AvroRecordSetWriter inherits the reader's schema and
+            // silently drops new fields. UpdateRecord's default
+            // replacement strategy is "Literal Value", so EL-with-
+            // field-reference no-ops — a plain literal forces the
+            // rewrite.
             props(&[
                 ("Record Reader", &avro_reader_id),
                 ("Record Writer", &avro_writer_id),
-                ("/audit_id", "${UUID()}"),
+                ("/status", "AUDITED-AVRO"),
             ]),
             None,
             vec!["failure"],
