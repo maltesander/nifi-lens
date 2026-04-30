@@ -47,9 +47,13 @@
 
 ![Browser tab](assets/screenshots/browser_version.png)
 
-**Browser** — Parameter-contexts: "Where does this parameter come from?"
+**Browser** — Parameter contexts: "Where does this parameter come from?"
 
 ![Browser tab](assets/screenshots/browser_parameter.png)
+
+**Browser** — Action history: "Which user modified this component?"
+
+![Browser tab](assets/screenshots/browser_actions.png)
 
 **Events** — Provenance search and detail: "What just happened across the cluster?"
 
