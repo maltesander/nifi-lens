@@ -147,9 +147,19 @@ pub async fn seed(
                 ("Record Writer", &service_ids.json_writer_id),
                 // THE BREAKING STAGE
                 // RecordPath multiply on a numeric field by a parameter EL.
-                // When `#{usd_rate}` resolves to "oops", multiplication fails
-                // and the flowfile routes to `failure` (out-failed -> deadletter).
-                ("/subtotal_usd", "${field.value:multiply(#{usd_rate})}"),
+                // `:toNumber()` throws when `#{usd_rate}` resolves to a
+                // non-numeric value (e.g. `"oops"` after `break_::apply_break`),
+                // routing the whole flowfile to `failure`. The `failure`
+                // relationship is wired to TWO downstream connections below
+                // — `deadletter` (where LogAttribute-WARN fires bulletins) and
+                // `tag-retries` (so the cloned flowfile continues down the
+                // main path to the sinks). NiFi clones a flowfile across
+                // multi-connection relationships, so we get bulletins AND
+                // sinks keep receiving traffic.
+                (
+                    "/subtotal_usd",
+                    "${field.value:multiply(#{usd_rate}:toNumber())}",
+                ),
             ]),
             None,
             vec![], // Do NOT auto-terminate `failure` — we route it.
@@ -284,7 +294,7 @@ pub async fn seed(
         vec!["success"],
     )
     .await?;
-    // fx-rate failure -> out-failed
+    // fx-rate failure -> out-failed (deadletter exhibit + bulletin source)
     create_connection_in_pg(
         client,
         &pg_id,
@@ -292,6 +302,24 @@ pub async fn seed(
         "PROCESSOR",
         &out_failed_port_id,
         "OUTPUT_PORT",
+        vec!["failure"],
+    )
+    .await?;
+    // fx-rate failure -> tag_retries (cloned: keeps the main path alive)
+    //
+    // NiFi clones a flowfile across multiple connections that share the same
+    // source-relationship pair. By wiring `failure` to BOTH `out-failed`
+    // (above) and `tag_retries` (here), every failed flowfile is duplicated:
+    // one copy goes to the deadletter for logging+visualization, another
+    // continues down the main flow to the regional sinks. Without this,
+    // turning `usd_rate` non-numeric would starve the sinks entirely.
+    create_connection_in_pg(
+        client,
+        &pg_id,
+        &fx_rate_id,
+        "PROCESSOR",
+        &tag_retries_id,
+        "PROCESSOR",
         vec!["failure"],
     )
     .await?;

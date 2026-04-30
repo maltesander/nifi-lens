@@ -65,7 +65,7 @@ pub async fn seed(
     )
     .await?;
 
-    // Phase 8: --break-after sleep + parameter mutation.
+    // --break-after sleep + three-step parameter mutation.
     orders::break_::apply_break(client, &orders_ctx.orders_id, break_after).await?;
 
     tracing::info!("fixture seed complete");

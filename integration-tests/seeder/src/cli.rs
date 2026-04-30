@@ -23,8 +23,8 @@ pub struct Args {
     #[arg(long, value_name = "LEVEL", default_value = "info")]
     pub log_level: String,
 
-    /// Sleep this long after seeding the topology before mutating the
-    /// `usd_rate` parameter context value. Default `0s` for CI; longer
+    /// Sleep this long after seeding the topology before running the
+    /// three-step `usd_rate` mutation sequence. Default `0s` for CI; longer
     /// (e.g. `5m`) for live demo capture so the "before" state is
     /// observable.
     #[arg(long, value_name = "DURATION", default_value = "0s",

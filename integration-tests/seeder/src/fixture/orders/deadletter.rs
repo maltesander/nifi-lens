@@ -1,13 +1,22 @@
-//! deadletter/ — captures failed flowfiles from transform/UpdateRecord-fx-rate.
+//! deadletter/ — captures cloned copies of failed flowfiles from
+//! transform/UpdateRecord-fx-rate.
 //!
 //! Stages:
 //!   in-failed (input port)
 //!   LogAttribute-WARN (auto-terminate success)
 //!
-//! No parameter-context binding — pure logging consumer. Once the FX-rate
-//! parameter is broken (phase 8), every transform output that fails routes
-//! here, producing WARN bulletins on the LogAttribute. The connection's
-//! queue retains the failed flowfiles for content-modal inspection.
+//! No parameter-context binding — pure logging consumer. Once the fx-rate
+//! parameter is broken (after `break_::apply_break` runs), the fx-rate
+//! `:toNumber()` call throws and every flowfile routes to `failure`. The
+//! `failure` relationship is wired to two downstream connections (this
+//! deadletter and tag-retries), so NiFi clones each failed flowfile: one
+//! copy lands here for logging+visualization, another continues down the
+//! main flow so the regional sinks keep receiving traffic.
+//!
+//! The LogAttribute-WARN here logs at WARN, which is at NiFi's default
+//! bulletin threshold, so each cloned-failure flowfile produces a WARN
+//! bulletin visible on the bulletin board. The connection's queue retains
+//! the failed flowfiles for content-modal inspection.
 
 use nifi_rust_client::dynamic::DynamicClient;
 

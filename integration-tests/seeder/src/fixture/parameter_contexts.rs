@@ -30,13 +30,25 @@ pub struct OrdersContextIds {
     pub region_apac_id: String,
 }
 
-/// Initial healthy value of `usd_rate`. After phase 8 of seeding this
-/// becomes `BROKEN_USD_RATE`.
+/// Initial healthy value of `usd_rate`. `break_::apply_break` mutates this
+/// through a three-step sequence (clear → `INTERMEDIATE_USD_RATE` →
+/// `BROKEN_USD_RATE`) so the action-history modal shows a "developer
+/// struggled and left it broken" narrative rather than a single mutation.
 pub const HEALTHY_USD_RATE: &str = "1.0827";
 
-/// Post-mutation broken value. Non-numeric on purpose — UpdateRecord's
-/// RecordPath multiplication routes every flowfile to `failure` at
-/// runtime when `#{usd_rate}` resolves to this.
+/// Mid-sequence "tested rate" set on step 2 of the three-step break. Numeric
+/// on purpose — during the brief window between step 2 and step 3 the
+/// pipeline runs cleanly with a real (if wrong) rate. This makes the audit
+/// history visibly show a "looks fine" interlude before the final break.
+pub const INTERMEDIATE_USD_RATE: &str = "0.95";
+
+/// Final broken value set on step 3 of the three-step break. Non-numeric on
+/// purpose — `UpdateRecord-fx-rate`'s RecordPath uses `:toNumber()`, which
+/// throws on this and routes the flowfile to `failure`. The `failure`
+/// relationship is wired to two downstream connections (deadletter +
+/// tag-retries), so NiFi clones the failed flowfile: one copy fires WARN
+/// bulletins via the deadletter LogAttribute, the other continues down the
+/// main flow to the regional sinks.
 pub const BROKEN_USD_RATE: &str = "oops";
 
 pub async fn seed(client: &DynamicClient) -> Result<OrdersContextIds> {
@@ -126,9 +138,7 @@ pub async fn seed(client: &DynamicClient) -> Result<OrdersContextIds> {
 }
 
 /// Bind `pg_id` to `context_id`. GET the current entity for its revision,
-/// then PUT a minimal patch. Pulled from parameterized.rs and kept here
-/// because the orders flow needs it after the parameterized module is
-/// deleted in phase 9.
+/// then PUT a minimal patch.
 pub async fn bind(client: &DynamicClient, pg_id: &str, context_id: &str) -> Result<()> {
     let current = client
         .processgroups()
@@ -248,6 +258,11 @@ mod tests {
         // guards against accidentally swapping HEALTHY_USD_RATE and
         // BROKEN_USD_RATE during edits.
         assert!(HEALTHY_USD_RATE.parse::<f64>().is_ok());
+    }
+
+    #[test]
+    fn intermediate_usd_rate_is_numeric() {
+        assert!(INTERMEDIATE_USD_RATE.parse::<f64>().is_ok());
     }
 
     #[test]
