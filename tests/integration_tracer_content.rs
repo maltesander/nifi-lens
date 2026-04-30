@@ -11,11 +11,6 @@ use std::time::Duration;
 
 use nifi_lens::client::tracer::ContentSide;
 use nifi_lens::client::{NifiClient, NodeKind};
-
-/// 1 MiB cap used by this integration test to exercise the Range-header truncation path.
-/// The bulky-pipeline fixture generates 1.5 MiB flowfiles, so this cap is guaranteed to
-/// produce a truncated response.
-const BULKY_CAP_BYTES: usize = 1 << 20;
 use nifi_lens::config::{ResolvedAuth, ResolvedContext, VersionStrategy};
 use nifi_lens::error::NifiLensError;
 
@@ -23,17 +18,15 @@ use nifi_lens::error::NifiLensError;
 mod common;
 use common::versions::{FIXTURE_VERSIONS, context_for, port_for};
 
-/// Expected full size of a `bulky-pipeline` flowfile: 1536 KB in bytes.
-const BULKY_FULL_BYTES: usize = 1536 * 1024; // 1_572_864
+/// Expected full size of an `orders-pipeline/ingest/GenerateFlowFile` flowfile.
+/// The seeder embeds the entire `orders_payload.csv` asset (~822 KiB) as the
+/// processor's Custom Text, so emitted flowfiles are exactly that many bytes.
+/// Source of truth: `integration-tests/seeder/assets/orders_payload.csv` size.
+const ORDERS_FULL_BYTES: usize = 841_894;
 
-/// Component-id of the `noisy-pipeline` generate-flowfile processor seeded by
-/// `nifilens-fixture-seeder`. The integration fixture always seeds this
-/// processor so there should be recent provenance events available.
-///
-/// If this ID drifts with future fixture versions the test will receive an
-/// empty event list and skip the content fetch, but will not fail — the
-/// assertion only fires on transport errors.
-const NOISY_COMPONENT_ID: &str = "fixture-noisy-generate";
+/// Cap used by the truncation path test. Smaller than `ORDERS_FULL_BYTES`
+/// so the Range-header truncation path is exercised.
+const ORDERS_CAP_BYTES: usize = 512 * 1024; // 524_288, < 822 KiB
 
 #[tokio::test(flavor = "current_thread")]
 #[ignore]
@@ -48,15 +41,35 @@ async fn integration_tracer_content_text_render() {
 
         let client = make_client(version, &username, &password, &ca_path).await;
 
-        // 1. Fetch the latest provenance events for the probe component.
-        //    NiFi 2.6.0 returns 404 when the component is no longer part of
-        //    the flow (or was never seeded). Treat this as a skip, not a
-        //    failure — the test is about content fetch, not latest-events.
-        let snapshot = match client.latest_events(NOISY_COMPONENT_ID, 20).await {
+        // 1. Discover the orders-pipeline/transform/ConvertRecord-csv2json
+        //    processor — a running record-shaped stage that always produces
+        //    fresh provenance events shortly after seeding.
+        let snap = client
+            .root_pg_status()
+            .await
+            .unwrap_or_else(|e| panic!("root_pg_status on {version} failed: {e:?}"));
+        let component_id = match find_processor_by_name_in_pg(
+            &snap.nodes,
+            "orders-pipeline/transform",
+            "ConvertRecord-csv2json",
+        ) {
+            Some(id) => id,
+            None => {
+                eprintln!(
+                    "  orders-pipeline/transform/ConvertRecord-csv2json not found on {version} — skipping"
+                );
+                continue;
+            }
+        };
+
+        // 2. Fetch the latest provenance events for the probe component.
+        //    NiFi 2.6.0 may return 404 when no events are cached yet; treat
+        //    that as a skip — the test is about content fetch, not events.
+        let snapshot = match client.latest_events(&component_id, 20).await {
             Ok(s) => s,
             Err(NifiLensError::LatestProvenanceEventsFailed { .. }) => {
                 eprintln!(
-                    "  latest_events returned error for {NOISY_COMPONENT_ID} on {version} — skipping"
+                    "  latest_events returned error for {component_id} on {version} — skipping"
                 );
                 continue;
             }
@@ -83,7 +96,7 @@ async fn integration_tracer_content_text_render() {
             .cloned();
 
         let Some(summary) = event_with_content else {
-            eprintln!("  no events for {NOISY_COMPONENT_ID} on {version} — skipping content fetch");
+            eprintln!("  no events for {component_id} on {version} — skipping content fetch");
             continue;
         };
 
@@ -119,37 +132,45 @@ async fn integration_tracer_content_text_render() {
 
 /// Walk the browser tree and return the component `id` of the first
 /// `Processor` node whose `name` matches `processor_name` and whose parent
-/// chain contains a PG named `pg_name`. Returns `None` if no match is found
-/// (the fixture may not include this pipeline on the given NiFi version).
+/// chain ends with the PG path `pg_path` (slash-separated, root-to-leaf).
+///
+/// Examples:
+/// - `pg_path = "ingest"` matches any processor whose nearest PG ancestor is
+///   named `ingest` (single-segment match).
+/// - `pg_path = "orders-pipeline/transform"` matches only processors whose
+///   parent chain ends with `… orders-pipeline -> transform`.
+///
+/// Multi-segment matching is required when a child-PG name like `ingest`
+/// is shared between unrelated top-level pipelines (e.g. legacy
+/// `healthy-pipeline/ingest` vs new `orders-pipeline/ingest`).
 fn find_processor_by_name_in_pg(
     nodes: &[nifi_lens::client::RawNode],
-    pg_name: &str,
+    pg_path: &str,
     processor_name: &str,
 ) -> Option<String> {
-    // Build a quick index: node index → parent index.
-    // Find all PG nodes whose name matches `pg_name`.
-    let matching_pg_indices: Vec<usize> = nodes
-        .iter()
-        .enumerate()
-        .filter(|(_, n)| n.kind == NodeKind::ProcessGroup && n.name == pg_name)
-        .map(|(i, _)| i)
-        .collect();
+    let pg_parts: Vec<&str> = pg_path.split('/').collect();
 
-    // For each processor node, check whether any ancestor is one of the
-    // matching PGs.
     for (i, node) in nodes.iter().enumerate() {
         if node.kind != NodeKind::Processor || node.name != processor_name {
             continue;
         }
-        // Walk the parent chain.
+
+        // Collect the chain of PG ancestor names, leaf-to-root.
+        let mut ancestor_names: Vec<&str> = Vec::new();
         let mut cursor = i;
-        loop {
-            if matching_pg_indices.contains(&cursor) {
-                return Some(node.id.clone());
+        while let Some(p) = nodes[cursor].parent_idx {
+            cursor = p;
+            if matches!(nodes[cursor].kind, NodeKind::ProcessGroup) {
+                ancestor_names.push(nodes[cursor].name.as_str());
             }
-            match nodes[cursor].parent_idx {
-                Some(p) => cursor = p,
-                None => break,
+        }
+        // Reverse to root-to-leaf so we can suffix-match against pg_parts.
+        ancestor_names.reverse();
+
+        if ancestor_names.len() >= pg_parts.len() {
+            let start = ancestor_names.len() - pg_parts.len();
+            if ancestor_names[start..] == *pg_parts {
+                return Some(node.id.clone());
             }
         }
     }
@@ -178,27 +199,33 @@ async fn make_client(version: &str, username: &str, password: &str, ca_path: &st
         .unwrap_or_else(|e| panic!("connect to {version} failed: {e:?}"))
 }
 
-/// Integration test: a bulky-pipeline event content fetch is truncated at
-/// `BULKY_CAP_BYTES` when a cap is given, and returns the full body when
-/// fetched without a cap.
+/// Integration test: an orders-pipeline/ingest/GenerateFlowFile event content
+/// fetch is truncated at `ORDERS_CAP_BYTES` when a cap is given, and returns
+/// the full body when fetched without a cap.
 ///
-/// The `bulky-pipeline` fixture generates 1536 KB (1_572_864 byte) flowfiles
-/// every 30 seconds, which exceeds `BULKY_CAP_BYTES` (1 MiB). This test
-/// verifies the Range-header truncation path end-to-end.
+/// `orders-pipeline/ingest/GenerateFlowFile` emits the embedded
+/// `orders_payload.csv` (~822 KiB) on every iteration. `ORDERS_CAP_BYTES`
+/// (512 KiB) sits well below that, so the Range-header truncation path is
+/// exercised end-to-end.
 #[tokio::test(flavor = "current_thread")]
 #[ignore]
-async fn bulky_event_content_is_truncated_with_cap() {
+async fn orders_ingest_event_content_is_truncated_with_cap() {
     let username = std::env::var("NIFILENS_IT_USERNAME").expect("NIFILENS_IT_USERNAME must be set");
     let password = std::env::var("NIFILENS_IT_PASSWORD").expect("NIFILENS_IT_PASSWORD must be set");
     let ca_path =
         std::env::var("NIFILENS_IT_CA_CERT_PATH").expect("NIFILENS_IT_CA_CERT_PATH must be set");
 
     for &version in FIXTURE_VERSIONS {
-        eprintln!("--- bulky_event_content_is_truncated_with_cap against NiFi {version} ---");
+        eprintln!(
+            "--- orders_ingest_event_content_is_truncated_with_cap against NiFi {version} ---"
+        );
 
         let client = make_client(version, &username, &password, &ca_path).await;
 
-        // 1. Discover the GenerateFlowFile processor ID inside bulky-pipeline.
+        // 1. Discover the GenerateFlowFile processor ID inside
+        //    orders-pipeline/ingest. The helper matches any processor whose
+        //    parent chain contains a PG named "ingest"; that name is unique
+        //    inside the marker subtree.
         let snapshot = client
             .root_pg_status()
             .await
@@ -206,23 +233,28 @@ async fn bulky_event_content_is_truncated_with_cap() {
 
         let component_id = match find_processor_by_name_in_pg(
             &snapshot.nodes,
-            "bulky-pipeline",
+            "orders-pipeline/ingest",
             "GenerateFlowFile",
         ) {
             Some(id) => id,
             None => {
-                eprintln!("  bulky-pipeline/GenerateFlowFile not found on {version} — skipping");
+                eprintln!(
+                    "  orders-pipeline/ingest/GenerateFlowFile not found on {version} — skipping"
+                );
                 continue;
             }
         };
         eprintln!("  GenerateFlowFile id={component_id}");
 
-        // 2. Poll for events with a retry loop — the 30-second schedule means
+        // 2. Poll for events with a retry loop — the 10-second schedule means
         //    events may not be present on a freshly-booted cluster.
+        //    GenerateFlowFile emits CREATE (output content available); other
+        //    event types like DROP carry only metadata and would fail the
+        //    truncation assertion. Filter for CREATE.
         //    Retry every 10 seconds for up to 2 minutes.
         let poll_deadline = std::time::Instant::now() + Duration::from_secs(120);
         let event_id = loop {
-            let snap = match client.latest_events(&component_id, 5).await {
+            let snap = match client.latest_events(&component_id, 20).await {
                 Ok(s) => s,
                 Err(NifiLensError::LatestProvenanceEventsFailed { .. }) => {
                     eprintln!(
@@ -233,34 +265,37 @@ async fn bulky_event_content_is_truncated_with_cap() {
                 Err(other) => panic!("latest_events on {version} failed: {other:?}"),
             };
 
-            if let Some(first) = snap.events.first() {
+            if let Some(create) = snap.events.iter().find(|e| e.event_type == "CREATE") {
                 eprintln!(
-                    "  found {} events; using event_id={}",
+                    "  found {} events; using CREATE event_id={}",
                     snap.events.len(),
-                    first.event_id
+                    create.event_id
                 );
-                break Some(first.event_id);
+                break Some(create.event_id);
             }
 
             if std::time::Instant::now() >= poll_deadline {
-                eprintln!("  no bulky events after 2 min on {version} — skipping");
+                eprintln!("  no orders ingest CREATE events after 2 min on {version} — skipping");
                 break None;
             }
-            eprintln!("  no events yet; retrying in 10 s …");
+            eprintln!(
+                "  no CREATE event yet ({} candidate events); retrying in 10 s …",
+                snap.events.len()
+            );
             tokio::time::sleep(Duration::from_secs(10)).await;
         };
 
         let Some(event_id) = event_id else { continue };
 
-        // 3a. Capped fetch: expect exactly BULKY_CAP_BYTES with truncated=true.
+        // 3a. Capped fetch: expect exactly ORDERS_CAP_BYTES with truncated=true.
         match client
-            .provenance_content(event_id, ContentSide::Output, Some(BULKY_CAP_BYTES))
+            .provenance_content(event_id, ContentSide::Output, Some(ORDERS_CAP_BYTES))
             .await
         {
             Ok(cs) => {
                 assert_eq!(
-                    cs.bytes_fetched, BULKY_CAP_BYTES,
-                    "capped fetch should return exactly BULKY_CAP_BYTES on {version}"
+                    cs.bytes_fetched, ORDERS_CAP_BYTES,
+                    "capped fetch should return exactly ORDERS_CAP_BYTES on {version}"
                 );
                 assert!(
                     cs.truncated,
@@ -280,15 +315,15 @@ async fn bulky_event_content_is_truncated_with_cap() {
             Err(other) => panic!("capped content fetch on {version} failed: {other:?}"),
         }
 
-        // 3b. Uncapped fetch: expect the full BULKY_FULL_BYTES with truncated=false.
+        // 3b. Uncapped fetch: expect the full ORDERS_FULL_BYTES with truncated=false.
         match client
             .provenance_content(event_id, ContentSide::Output, None)
             .await
         {
             Ok(cs) => {
                 assert_eq!(
-                    cs.bytes_fetched, BULKY_FULL_BYTES,
-                    "uncapped fetch should return the full {BULKY_FULL_BYTES} bytes on {version}"
+                    cs.bytes_fetched, ORDERS_FULL_BYTES,
+                    "uncapped fetch should return the full {ORDERS_FULL_BYTES} bytes on {version}"
                 );
                 assert!(
                     !cs.truncated,
@@ -309,25 +344,27 @@ async fn bulky_event_content_is_truncated_with_cap() {
     }
 }
 
-/// Integration test: `UpdateAttribute-cleanup` in `healthy-pipeline/enrich`
-/// deletes the `fixture.ingest.timestamp` attribute. A provenance event on
-/// that processor should expose an `AttributeTriple` with
-/// `previous: Some(_)` and `current: None` for that key.
+/// Integration test: `UpdateAttribute-tag-retries` in
+/// `orders-pipeline/transform` ADDS the `_max_retries` attribute (sourced
+/// from the `#{retry_max}` parameter). A provenance event on that processor
+/// should expose an `AttributeTriple` with `previous: None` and
+/// `current: Some(_)` for that key — the additive-attribute analogue of the
+/// legacy delete-attribute coverage.
 #[tokio::test(flavor = "current_thread")]
 #[ignore]
-async fn cleanup_processor_reports_deleted_attribute() {
+async fn tag_retries_processor_reports_added_attribute() {
     let username = std::env::var("NIFILENS_IT_USERNAME").expect("NIFILENS_IT_USERNAME must be set");
     let password = std::env::var("NIFILENS_IT_PASSWORD").expect("NIFILENS_IT_PASSWORD must be set");
     let ca_path =
         std::env::var("NIFILENS_IT_CA_CERT_PATH").expect("NIFILENS_IT_CA_CERT_PATH must be set");
 
     for &version in FIXTURE_VERSIONS {
-        eprintln!("--- cleanup_processor_reports_deleted_attribute against NiFi {version} ---");
+        eprintln!("--- tag_retries_processor_reports_added_attribute against NiFi {version} ---");
 
         let client = make_client(version, &username, &password, &ca_path).await;
 
-        // 1. Discover the UpdateAttribute-cleanup processor ID inside the
-        //    enrich child PG of healthy-pipeline.
+        // 1. Discover the UpdateAttribute-tag-retries processor ID inside
+        //    the transform child PG of orders-pipeline.
         let snapshot = client
             .root_pg_status()
             .await
@@ -335,20 +372,22 @@ async fn cleanup_processor_reports_deleted_attribute() {
 
         let component_id = match find_processor_by_name_in_pg(
             &snapshot.nodes,
-            "enrich",
-            "UpdateAttribute-cleanup",
+            "orders-pipeline/transform",
+            "UpdateAttribute-tag-retries",
         ) {
             Some(id) => id,
             None => {
-                eprintln!("  enrich/UpdateAttribute-cleanup not found on {version} — skipping");
+                eprintln!(
+                    "  orders-pipeline/transform/UpdateAttribute-tag-retries not found on {version} — skipping"
+                );
                 continue;
             }
         };
-        eprintln!("  UpdateAttribute-cleanup id={component_id}");
+        eprintln!("  UpdateAttribute-tag-retries id={component_id}");
 
-        // 2. Fetch the latest events for the cleanup processor. The healthy
-        //    pipeline runs at 1 s, so events should appear quickly after seeding.
-        //    If the event list is empty, skip (lenient, same as the existing test).
+        // 2. Fetch the latest events for the tag-retries processor.
+        //    If the event list is empty, skip (lenient — orders-pipeline runs
+        //    at 10s and the FX-rate stage may have broken upstream flow).
         let snap = match client.latest_events(&component_id, 5).await {
             Ok(s) => s,
             Err(NifiLensError::LatestProvenanceEventsFailed { .. }) => {
@@ -359,7 +398,7 @@ async fn cleanup_processor_reports_deleted_attribute() {
         };
 
         let Some(summary) = snap.events.first().cloned() else {
-            eprintln!("  no events for UpdateAttribute-cleanup on {version} — skipping");
+            eprintln!("  no events for UpdateAttribute-tag-retries on {version} — skipping");
             continue;
         };
         eprintln!(
@@ -368,7 +407,7 @@ async fn cleanup_processor_reports_deleted_attribute() {
             summary.event_id
         );
 
-        // 3. Fetch the full event detail and check for the deleted attribute.
+        // 3. Fetch the full event detail and check for the added attribute.
         let detail = match client.get_provenance_event(summary.event_id).await {
             Ok(d) => d,
             Err(NifiLensError::ProvenanceEventFetchFailed { .. }) => {
@@ -381,16 +420,13 @@ async fn cleanup_processor_reports_deleted_attribute() {
             Err(other) => panic!("get_provenance_event on {version} failed: {other:?}"),
         };
 
-        // 4. Assert: the `fixture.ingest.timestamp` attribute must appear with
-        //    a non-None previous value and a None current value (i.e. deleted).
-        let attr = detail
-            .attributes
-            .iter()
-            .find(|a| a.key == "fixture.ingest.timestamp");
+        // 4. Assert: the `_max_retries` attribute must appear with
+        //    a None previous value and a Some current value (i.e. added).
+        let attr = detail.attributes.iter().find(|a| a.key == "_max_retries");
 
         let Some(attr) = attr else {
             panic!(
-                "attribute 'fixture.ingest.timestamp' not found in event {} on {version}; \
+                "attribute '_max_retries' not found in event {} on {version}; \
                  attributes present: {:?}",
                 summary.event_id,
                 detail.attributes.iter().map(|a| &a.key).collect::<Vec<_>>()
@@ -398,14 +434,14 @@ async fn cleanup_processor_reports_deleted_attribute() {
         };
 
         assert!(
-            attr.previous.is_some(),
-            "fixture.ingest.timestamp should have a previous value on {version}"
+            attr.previous.is_none(),
+            "_max_retries should have no previous value on {version}, \
+             got previous={:?}",
+            attr.previous
         );
         assert!(
-            attr.current.is_none(),
-            "fixture.ingest.timestamp should be deleted (current=None) on {version}, \
-             got current={:?}",
-            attr.current
+            attr.current.is_some(),
+            "_max_retries should be added (current=Some) on {version}"
         );
 
         eprintln!(
