@@ -113,41 +113,28 @@ async fn integration_browser_cs_detail_reports_referencing_components() {
     }
 }
 
-/// Phase 7 fixture rework adds `orders-pipeline` and `remote-targets`
-/// alongside the legacy top-level fixtures (`healthy-pipeline`,
-/// `noisy-pipeline`, `backpressure-pipeline`, `invalid-pipeline`,
-/// `bulky-pipeline`, `diff-pipeline`, `versioned-clean`,
-/// `versioned-modified`, `parameterized-pipeline`, `remote-pipeline`).
-/// Both sets coexist under the marker PG (`nifilens-fixture-v8`)
-/// during migration; Phase 9 retires most of the legacy set.
-///
-/// This test pins the current fixture roster: 12 top-level PGs under
-/// the marker, including `orders-pipeline` + `remote-targets`. The
-/// count drops to 6 in Phase 9 and the assertion will need a follow-up
-/// at that point.
+/// Pins the post-Phase-9 fixture roster: 6 top-level PGs under the
+/// marker. Phases 5-8 of the orders-pipeline rework added
+/// `orders-pipeline` + `remote-targets` alongside legacy fixtures;
+/// Phase 9 deleted healthy/noisy/bulky/diff/parameterized/remote.
+/// What remains: the `orders-pipeline` centerpiece, the
+/// `remote-targets` RPG-receive subtree, and four standalone fixtures
+/// retained for state-encoding (`invalid`, `backpressure`,
+/// `versioned-clean`, `versioned-modified`).
 #[tokio::test(flavor = "current_thread")]
 #[ignore]
 async fn integration_browser_lists_expected_top_level_fixture_pgs() {
     const FIXTURE_MARKER: &str = "nifilens-fixture-v8";
-    // Required top-level PGs under the marker. Phase 7 adds the new
-    // `orders-pipeline` and `remote-targets` PGs alongside legacy
-    // fixtures; we pin both new PGs by name so the rework can't
-    // silently regress.
     const REQUIRED_TOP_LEVEL_PGS: &[&str] = &[
-        // Legacy fixtures (most retired in Phase 9).
-        "healthy-pipeline",
-        "noisy-pipeline",
-        "backpressure-pipeline",
-        "invalid-pipeline",
-        "bulky-pipeline",
-        "diff-pipeline",
-        "versioned-clean",
-        "versioned-modified",
-        "parameterized-pipeline",
-        "remote-pipeline",
-        // Phase 7 additions.
+        // Centerpiece + RPG-receive subtree from the orders rework.
         "orders-pipeline",
         "remote-targets",
+        // Retained standalone fixtures (each encodes a state hard to
+        // reach mid-narrative, so they stay separate from orders).
+        "invalid-pipeline",
+        "backpressure-pipeline",
+        "versioned-clean",
+        "versioned-modified",
     ];
 
     for &version in FIXTURE_VERSIONS {
