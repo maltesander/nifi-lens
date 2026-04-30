@@ -4,7 +4,6 @@ pub mod backpressure;
 pub mod bulky;
 pub mod common;
 pub mod diff;
-pub mod healthy;
 pub mod invalid;
 pub mod noisy;
 pub mod orders;
@@ -63,7 +62,6 @@ pub async fn seed(
     let pc_ids = parameterized::seed_parameter_contexts(client).await?;
 
     // OLD fixtures (still active so unmigrated tests keep working).
-    healthy::seed(client, &marker_pg_id, &service_ids, detected_version).await?;
     noisy::seed(client, &marker_pg_id).await?;
     backpressure::seed(client, &marker_pg_id).await?;
     invalid::seed(client, &marker_pg_id).await?;
