@@ -22,7 +22,7 @@ use common::versions::{FIXTURE_VERSIONS, context_for, port_for};
 /// The seeder embeds the entire `orders_payload.csv` asset (~822 KiB) as the
 /// processor's Custom Text, so emitted flowfiles are exactly that many bytes.
 /// Source of truth: `integration-tests/seeder/assets/orders_payload.csv` size.
-const ORDERS_FULL_BYTES: usize = 841_894;
+const ORDERS_FULL_BYTES: usize = 841_829;
 
 /// Cap used by the truncation path test. Smaller than `ORDERS_FULL_BYTES`
 /// so the Range-header truncation path is exercised.

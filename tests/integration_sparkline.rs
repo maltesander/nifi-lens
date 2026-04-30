@@ -1,8 +1,15 @@
 //! Integration test for the status-history client helper against the
 //! live `nifilens-fixture-v8` cluster. Verifies that the seeder's
-//! orders-pipeline/transform ConvertRecord-csv2json processor returns at least one bucket
+//! orders-pipeline/transform UpdateRecord-fx-rate processor returns at least one bucket
 //! after a brief warm-up — exercising the `/flow/{type}/{id}/status/history`
 //! dispatcher path on both fixture NiFi versions.
+//!
+//! `UpdateRecord-fx-rate` is on the headline traffic path
+//! (`ingest → transform → deadletter` after the seeder breaks `usd_rate`), so
+//! it gets a bucket on the first 1-min snapshot tick regardless of cluster
+//! timing. Passive diff-exhibit processors like `ConvertRecord-csv2json`
+//! never see flowfiles and can be empty in clustered NiFi for several
+//! snapshot intervals.
 //!
 //! Gated on `#[ignore]` — run via `./integration-tests/run.sh` or
 //! `cargo test --test integration_sparkline -- --ignored` after
@@ -95,24 +102,37 @@ async fn integration_sparkline_status_history_returns_buckets() {
 
         let proc_id = find_processor_id_by_name(
             &snapshot.nodes,
-            "ConvertRecord-csv2json",
+            "UpdateRecord-fx-rate",
             "orders-pipeline/transform",
         )
         .unwrap_or_else(|| {
             panic!(
-                "fixture ConvertRecord-csv2json in orders-pipeline/transform not found on {version}"
+                "fixture UpdateRecord-fx-rate in orders-pipeline/transform not found on {version}"
             )
         });
 
-        let series = status_history(&client, ComponentKind::Processor, &proc_id)
-            .await
-            .unwrap_or_else(|e| panic!("status_history on {version} failed: {e:?}"));
+        // NiFi flushes the component-status repository every
+        // `nifi.components.status.snapshot.frequency` (default 1 min).
+        // On the 2-node 2.9.0 cluster the first bucket can take up to a
+        // full snapshot interval after seeding — poll instead of asserting
+        // immediately.
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(90);
+        let series = loop {
+            let series = status_history(&client, ComponentKind::Processor, &proc_id)
+                .await
+                .unwrap_or_else(|e| panic!("status_history on {version} failed: {e:?}"));
+            if !series.buckets.is_empty() {
+                break series;
+            }
+            if std::time::Instant::now() >= deadline {
+                break series;
+            }
+            tokio::time::sleep(std::time::Duration::from_secs(5)).await;
+        };
 
-        // NiFi reports at least one bucket immediately on a freshly-seeded
-        // processor; we don't assert specific counts (depends on traffic).
         assert!(
             !series.buckets.is_empty(),
-            "expected at least one status_history bucket for ConvertRecord-csv2json on {version}"
+            "expected at least one status_history bucket for UpdateRecord-fx-rate on {version} within 90s"
         );
     }
 }
