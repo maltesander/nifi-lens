@@ -12,6 +12,7 @@ use ratatui::style::Modifier;
 use ratatui::text::{Line, Span};
 use ratatui::widgets::Paragraph;
 
+use crate::bytes::{KIB, format_bytes};
 use crate::theme;
 use crate::view::tracer::state::{ContentModalState, ContentModalTab, Diffable, NotDiffableReason};
 
@@ -608,9 +609,7 @@ fn short_iso(iso: &str) -> String {
 
 fn size_ui(n: Option<u64>) -> String {
     match n {
-        Some(n) if n >= 1024 * 1024 => format!("{:.1} MiB", n as f64 / 1_048_576.0),
-        Some(n) if n >= 1024 => format!("{:.1} KiB", n as f64 / 1024.0),
-        Some(n) => format!("{} B", n),
+        Some(n) => format_bytes(n),
         None => "—".into(),
     }
 }
@@ -621,8 +620,8 @@ fn delta_ui(i: Option<u64>, o: Option<u64>) -> String {
             let d = o as i128 - i as i128;
             let sign = if d >= 0 { "+" } else { "-" };
             let abs = d.unsigned_abs();
-            if abs >= 1024 {
-                format!("{}{:.1} KiB", sign, abs as f64 / 1024.0)
+            if abs >= u128::from(KIB) {
+                format!("{}{:.1} KiB", sign, abs as f64 / KIB as f64)
             } else {
                 format!("{}{} B", sign, abs)
             }
