@@ -27,7 +27,7 @@ use crate::state::poll_until;
 pub const REMOTE_TARGET_URI: &str = "https://nifi-2-6-0:8443/nifi";
 
 /// POST a new RPG under `parent_pg_id` targeting the floor NiFi's S2S
-/// endpoint. Mirrors `fixture::remote::create_remote_process_group`.
+/// endpoint.
 pub async fn create_remote_process_group(
     client: &DynamicClient,
     parent_pg_id: &str,

@@ -8,7 +8,6 @@ pub mod parameter_contexts;
 pub mod parameterized;
 pub mod payload;
 pub mod registry;
-pub mod remote;
 pub mod services;
 pub mod versioned;
 
@@ -64,7 +63,6 @@ pub async fn seed(
     versioned::seed(client, &marker_pg_id, &registry_ids, detected_version).await?;
     parameterized::seed_parameterized_pipeline(client, &marker_pg_id, &pc_ids, detected_version)
         .await?;
-    remote::seed(client, &marker_pg_id).await?;
 
     // NEW orders-pipeline.
     orders::seed(
