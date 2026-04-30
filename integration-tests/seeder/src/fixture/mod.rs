@@ -5,7 +5,6 @@ pub mod bulky;
 pub mod common;
 pub mod diff;
 pub mod invalid;
-pub mod noisy;
 pub mod orders;
 pub mod parameter_contexts;
 pub mod parameterized;
@@ -62,7 +61,6 @@ pub async fn seed(
     let pc_ids = parameterized::seed_parameter_contexts(client).await?;
 
     // OLD fixtures (still active so unmigrated tests keep working).
-    noisy::seed(client, &marker_pg_id).await?;
     backpressure::seed(client, &marker_pg_id).await?;
     invalid::seed(client, &marker_pg_id).await?;
     bulky::seed(client, &marker_pg_id).await?;
