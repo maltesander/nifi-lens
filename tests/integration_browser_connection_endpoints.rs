@@ -1,5 +1,5 @@
 //! Integration test: verify connection endpoint IDs are populated for
-//! every connection inside `orders-pipeline/transform`. Task 6 of the
+//! every connection inside `orders-pipeline/transform`. The
 //! central-cluster-store refactor moved the per-PG `/connections`
 //! fan-out from `browser_tree` into
 //! `ClusterStore::spawn_connections_by_pg`; this test exercises the

@@ -54,7 +54,7 @@ fn load_fixture(name: &str) -> serde_json::Value {
 
 #[tokio::test]
 async fn root_pg_status_parses_nested_pgs_into_flat_node_list() {
-    // Task 6 of the central-cluster-store refactor moved the flat
+    // The central-cluster-store refactor moved the flat
     // arena build-out off `browser_tree` and onto `root_pg_status`:
     // the recursive walker fills `RootPgStatusSnapshot.nodes` so the
     // Browser reducer can rebuild its arena straight from the cluster
@@ -283,7 +283,7 @@ async fn root_pg_status_error_is_mapped_to_typed_nifilens_error() {
 
 #[tokio::test]
 async fn controller_services_snapshot_groups_members_by_parent_group_id() {
-    // Task 6: the old `browser_tree` test
+    // The old `browser_tree` test
     // `browser_tree_includes_controller_services_under_owning_pgs`
     // asserted that CS rows were arena-attached under their owning
     // PG. That splicing now happens in the Browser reducer via
@@ -405,7 +405,7 @@ async fn browser_port_detail_parses_input_port() {
     assert_eq!(d.concurrent_tasks, 3);
 }
 
-// Task 6 removed `browser_tree_cs_fetch_failure_is_non_fatal`: the
+// `browser_tree_cs_fetch_failure_is_non_fatal` has been removed: the
 // "CS-only failure is non-fatal" contract now lives in
 // `EndpointState::Failed.last_ok` semantics in `ClusterSnapshot`. The
 // two endpoints are fetched independently by the cluster store; the

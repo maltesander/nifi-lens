@@ -105,7 +105,7 @@ pub enum NodeStatusSummary {
 /// Endpoint IDs for every connection in a single process group, keyed
 /// by connection id. Produced by the `ClusterStore` connections-by-PG
 /// fetcher (one snapshot entry per PG) and merged into the browser
-/// arena by the view reducer in Task 6.
+/// arena by the view reducer.
 ///
 /// The nested `ConnectionEndpointIds` carries one connection's
 /// `(source_id, destination_id)` pair.

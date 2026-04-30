@@ -5,7 +5,7 @@
 //! up the Docker fixture. Loops over every version in
 //! `FIXTURE_VERSIONS`.
 //!
-//! Task 6 of the central-cluster-store refactor retired
+//! The central-cluster-store refactor retired
 //! `NifiClient::browser_tree`; these tests now exercise the pair of
 //! endpoints (`root_pg_status` for the arena skeleton +
 //! `controller_services_snapshot` for CS identity) that the reducer

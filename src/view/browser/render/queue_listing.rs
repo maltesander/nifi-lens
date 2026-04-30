@@ -1,7 +1,6 @@
 //! Renderer for the connection-detail flowfile listing panel. Pure
 //! function over `&QueueListingState`. Composed by
-//! `render::connection::render` (Task 18) when the selection is a
-//! Connection node.
+//! `render::connection::render` when the selection is a Connection node.
 
 use std::time::Duration;
 

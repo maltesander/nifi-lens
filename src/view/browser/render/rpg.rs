@@ -23,9 +23,7 @@
 //! ```
 //!
 //! The Identity panel reserves the right-half sparkline strip via
-//! `super::render_identity_panel_with_sparkline` — Task 12 lights it
-//! up; until then the strip surfaces the standard `loading…`
-//! placeholder.
+//! `super::render_identity_panel_with_sparkline`.
 //!
 //! Input/Output port tables are display-only (read-only `v0.1`); the
 //! `RemotePortSummary` rows are not part of the Browser arena and

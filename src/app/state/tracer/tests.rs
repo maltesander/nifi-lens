@@ -8,7 +8,7 @@ use std::time::SystemTime;
 
 // Note: 'i'/'o' are no longer bound in Lineage mode (use ←/→ tab cycling instead).
 // The old tests that verified 'i'/'o' banner behavior have been removed.
-// io_letters_no_longer_bound (in Task 15 tests) verifies they are true no-ops.
+// `io_letters_no_longer_bound` verifies they are true no-ops.
 
 #[test]
 fn tracer_lineage_row_nav_uses_arrows_only_no_jk() {
@@ -151,7 +151,7 @@ fn tracer_latest_events_row_nav_uses_arrows_only_no_jk() {
     assert!(sel < before, "Up still works");
 }
 
-// ── Task 15 helpers ───────────────────────────────────────────────────────
+// ── Helpers ───────────────────────────────────────────────────────────────
 
 /// Seeds a Lineage state with a loaded event detail that has BOTH input
 /// and output available. The detail pane focus is on Attributes.
@@ -246,7 +246,7 @@ fn seed_tracer_with_output_only(s: &mut crate::app::state::AppState) {
     }));
 }
 
-// ── Task 15 tests ─────────────────────────────────────────────────────────
+// ── Tests ─────────────────────────────────────────────────────────────────
 
 #[test]
 fn right_cycles_detail_tabs() {

@@ -45,7 +45,7 @@ impl ViewKeyHandler for BrowserHandler {
         };
         match bv {
             BrowserVerb::Common(CommonVerb::Refresh) => {
-                // Task 6: Browser's arena is rebuilt from the cluster
+                // Browser's arena is rebuilt from the cluster
                 // snapshot, so the old per-worker force-tick oneshot is
                 // gone. Force-refresh now nudges every endpoint the
                 // arena depends on — each per-endpoint `Notify` wakes

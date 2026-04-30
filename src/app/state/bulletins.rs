@@ -324,7 +324,7 @@ mod tests {
     use crossterm::event::{KeyCode, KeyModifiers};
 
     /// Merge the given bulletins into the cluster-owned ring and mirror
-    /// them into `state.bulletins` via `redraw_bulletins` — the Task 7
+    /// them into `state.bulletins` via `redraw_bulletins` — the
     /// equivalent of the old `BulletinsPayload` data-event path.
     fn apply_bulletins(state: &mut AppState, bulletins: Vec<BulletinSnapshot>) {
         use crate::cluster::snapshot::FetchMeta;

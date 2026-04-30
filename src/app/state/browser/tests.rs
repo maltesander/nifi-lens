@@ -198,7 +198,7 @@ fn on_browser_tab_left_on_expanded_pg_collapses() {
 
 #[test]
 fn on_browser_tab_r_force_notifies_cluster_endpoints() {
-    // Task 6: Browser's arena is rebuilt from the cluster snapshot,
+    // Browser's arena is rebuilt from the cluster snapshot,
     // so `r` no longer consumes a per-worker oneshot. Instead it
     // calls `cluster.force(...)` for every endpoint the arena
     // depends on; each of those `Arc<Notify>`s wakes its sleeping
@@ -670,7 +670,7 @@ fn tree_nav_uses_arrows_only_no_jk() {
 }
 
 // -----------------------------------------------------------------------
-// Helpers for Task 11-14 tests
+// Helpers for focus-cycle / arrow-nav / copy / cross-link tests
 // -----------------------------------------------------------------------
 
 /// AppState with current_tab = Browser, selection on the "gen" Processor
@@ -682,7 +682,7 @@ fn fresh_browser_on_processor() -> (AppState, crate::config::Config) {
 }
 
 // -----------------------------------------------------------------------
-// Task 11: Focus cycle — Enter=descend, Right/Left=section, Esc=ascend
+// Focus cycle — Enter=descend, Right/Left=section, Esc=ascend
 // -----------------------------------------------------------------------
 
 #[test]
@@ -771,7 +771,7 @@ fn enter_on_pg_does_not_enter_section_focus() {
 }
 
 // -----------------------------------------------------------------------
-// Task 12: Arrow-key row nav inside focused sections
+// Arrow-key row nav inside focused sections
 // -----------------------------------------------------------------------
 
 /// AppState with selection on the "gen" Processor (arena 1, visible 1)
@@ -860,7 +860,7 @@ fn down_inside_focused_properties_clamps_at_max() {
 }
 
 // -----------------------------------------------------------------------
-// Task 13: c copy in focused sections
+// `c` copy in focused sections
 // -----------------------------------------------------------------------
 
 #[test]
@@ -920,7 +920,7 @@ fn c_lazily_initializes_and_reuses_persistent_clipboard_handle() {
 }
 
 // -----------------------------------------------------------------------
-// Task 14: t cross-link on focused bulletin rows
+// `t` cross-link on focused bulletin rows
 // -----------------------------------------------------------------------
 
 /// AppState with selection on "gen" Processor, a populated NodeDetail, and
@@ -1146,7 +1146,7 @@ fn enter_on_focused_pg_child_groups_drills_in() {
 }
 
 // -----------------------------------------------------------------------
-// Task 14: New typed-verb / typed-focus tests
+// Typed-verb / typed-focus tests
 // -----------------------------------------------------------------------
 
 /// Seed a browser with a single Processor (gen, arena 1) and set
@@ -1332,7 +1332,7 @@ fn breadcrumb_mode_no_longer_triggered_by_b() {
 }
 
 // -----------------------------------------------------------------------
-// Task 7: NextPane/PrevPane cycle Tree → Section{0..n} → Tree
+// NextPane/PrevPane cycle Tree → Section{0..n} → Tree
 // -----------------------------------------------------------------------
 
 #[test]
@@ -3292,7 +3292,7 @@ fn open_action_history_verb_noop_when_disabled() {
 }
 
 // -----------------------------------------------------------------------
-// Task 13: reducer arms for ActionHistoryPage / ActionHistoryError
+// Reducer arms for ActionHistoryPage / ActionHistoryError
 // -----------------------------------------------------------------------
 
 #[test]

@@ -89,13 +89,13 @@ pub struct ContentClaimSummary {
 
 // Re-export so callers say `state::queue_listing::QueueListingHandle`. The
 // struct lives in `worker.rs` so the Drop-DELETE impl can sit alongside the
-// worker that constructs it (Task 5 fills out the body).
+// worker that constructs it.
 pub use crate::view::browser::worker::QueueListingHandle;
 
 impl QueueListingState {
     /// Construct a fresh state for a connection that just became
     /// selected. Worker spawn + handle attachment happens in
-    /// `BrowserState`'s selection-change reducer (Task 13).
+    /// `BrowserState`'s selection-change reducer.
     pub fn pending(queue_id: String, queue_name: String) -> Self {
         Self {
             queue_id,

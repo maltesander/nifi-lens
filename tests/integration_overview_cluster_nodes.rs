@@ -38,7 +38,7 @@ fn resolved_ctx(version: &str) -> ResolvedContext {
     }
 }
 
-/// Task 24 — 2-node 2.9.0 cluster.
+/// 2-node 2.9.0 cluster.
 ///
 /// Fetches `/controller/cluster` once against the cluster fixture.
 /// Asserts: snapshot has 2 rows, exactly one holds the Primary role,
@@ -87,7 +87,7 @@ async fn integration_overview_cluster_nodes_populated_2_9_0() {
     }
 }
 
-/// Task 25 — Standalone 2.6.0.
+/// Standalone 2.6.0.
 ///
 /// Fetches `/controller/cluster` against a non-clustered NiFi. The
 /// raw client wrapper surfaces the 409 as an error (the fetcher task

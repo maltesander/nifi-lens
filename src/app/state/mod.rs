@@ -509,7 +509,6 @@ pub enum Modal {
     /// Per-node detail popup opened from the Overview Nodes panel.
     NodeDetail(Box<crate::client::overview::NodeHealthRow>),
     /// Cross-tab goto menu — shown when `AppAction::Goto` resolves to multiple targets.
-    /// Full render logic is added in Task 11; this variant is a stub so Task 10 compiles.
     GotoMenu(crate::widget::goto_menu::GotoMenuState),
 }
 
@@ -1181,8 +1180,8 @@ fn update_inner(state: &mut AppState, event: AppEvent, config: &Config) -> Updat
         // (`src/app/mod.rs::run`) which owns `tx`; the reducer never
         // sees them. These arms exist only to keep `update_inner`
         // exhaustive and provide a graceful no-op if that invariant
-        // ever slips. Task 1 keeps both arms inert — Tasks 3/5/7 may
-        // trigger view-level reducer work on `ClusterChanged`.
+        // ever slips. View-level reducer work on `ClusterChanged` is
+        // dispatched elsewhere; both arms here remain inert.
         AppEvent::ClusterUpdate(_) | AppEvent::ClusterChanged(_) => UpdateResult {
             redraw: false,
             intent: None,
@@ -1487,7 +1486,6 @@ fn handle_key(state: &mut AppState, key: KeyEvent, config: &Config) -> UpdateRes
             }
         }
         InputEvent::App(AppAction::Paste) | InputEvent::App(AppAction::Cut) => {
-            // Properly wired in Task 12 via text-input bypass
             return UpdateResult::default();
         }
         InputEvent::Focus(action) => {

@@ -1,4 +1,4 @@
-//! Per-view verb enums. Each implements `Verb` in Task 6+.
+//! Per-view verb enums. Each implements `Verb`.
 
 use crate::input::{Chord, HintContext, Verb};
 use crossterm::event::KeyCode;
@@ -636,8 +636,8 @@ impl Verb for VersionControlModalVerb {
     }
     fn enabled(self, _ctx: &HintContext<'_>) -> bool {
         // Modal is the dispatch gate — chords only fire when the
-        // keymap is in modal mode (Task 19 wires the gate). Always
-        // return true here; dispatch suppresses outside the modal.
+        // keymap is in modal mode. Always return true here; dispatch
+        // suppresses outside the modal.
         true
     }
     fn all() -> &'static [Self] {
@@ -859,7 +859,7 @@ impl Verb for ActionHistoryModalVerb {
 }
 
 /// Per-flowfile peek modal-scoped verbs. Shadows outer-tab keys via
-/// the keymap shadow gate while the modal is open (Task 9 wires the gate).
+/// the keymap shadow gate while the modal is open.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum BrowserPeekVerb {
     Common(CommonVerb),

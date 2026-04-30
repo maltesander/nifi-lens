@@ -297,7 +297,7 @@ fn modal_hints(modal: &Modal) -> Vec<crate::widget::hint_bar::HintSpan> {
             action: Cow::Borrowed("close"),
             enabled: true,
         }],
-        // Task 11 adds full hint spans for the goto menu.
+        // Full hint spans for the goto menu.
         Modal::GotoMenu(_) => vec![
             HintSpan {
                 key: Cow::Borrowed("\u{2191}/\u{2193}"),
