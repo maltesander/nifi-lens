@@ -8,7 +8,10 @@ mod fixture;
 mod marker;
 mod state;
 
+use std::time::{Duration, Instant};
+
 use clap::Parser as _;
+use nifi_rust_client::NifiError;
 use tracing_subscriber::EnvFilter;
 
 use crate::cli::Args;
@@ -94,6 +97,8 @@ async fn run(args: Args) -> Result<(), SeederError> {
         "connected successfully"
     );
 
+    wait_for_cluster_ready(&client).await?;
+
     if args.skip_if_seeded
         && let Some(id) = marker::find_marker(&client).await?
     {
@@ -105,6 +110,87 @@ async fn run(args: Args) -> Result<(), SeederError> {
     fixture::seed(&client, client.detected_version(), args.break_after).await?;
 
     Ok(())
+}
+
+/// Polls `/flow/cluster/summary` until the deployment is fully ready.
+///
+/// Earlier iterations of this gate tried to whack-a-mole the various
+/// transient 4xx/5xx responses NiFi emits during cluster startup —
+/// "is initializing", "Cannot replicate", "no nodes are connected" —
+/// each on a different status code. `/flow/cluster/summary` collapses
+/// that into one deterministic signal:
+///
+///   - standalone (`clustered: false`)             → ready immediately
+///   - cluster fully formed (`connected == total`) → ready
+///   - cluster forming (counts mismatch)           → wait
+///   - FC still initializing (409)                 → wait (transient)
+///
+/// Other errors (auth, network, unexpected status) propagate immediately.
+async fn wait_for_cluster_ready(client: &nifi_lens::client::NifiClient) -> Result<(), SeederError> {
+    const TIMEOUT: Duration = Duration::from_secs(180);
+    const POLL: Duration = Duration::from_secs(2);
+
+    let started = Instant::now();
+    let mut announced = false;
+    let mut last_announce = String::new();
+
+    loop {
+        let elapsed = started.elapsed();
+        match client.flow().get_cluster_summary().await {
+            Ok(dto) => {
+                let clustered = dto.clustered.unwrap_or(false);
+                if !clustered {
+                    if announced {
+                        tracing::info!(elapsed_secs = elapsed.as_secs(), "NiFi ready");
+                    }
+                    return Ok(());
+                }
+                let connected = dto.connected_node_count.unwrap_or(0);
+                let total = dto.total_node_count.unwrap_or(0);
+                if total > 0 && connected == total {
+                    if announced {
+                        tracing::info!(
+                            elapsed_secs = elapsed.as_secs(),
+                            connected,
+                            total,
+                            "cluster fully formed",
+                        );
+                    }
+                    return Ok(());
+                }
+                let reason = format!("cluster forming: {connected}/{total} nodes connected");
+                if reason != last_announce {
+                    tracing::info!("{reason}; waiting...");
+                    last_announce = reason;
+                    announced = true;
+                }
+            }
+            Err(NifiError::Conflict { message }) => {
+                if message.as_str() != last_announce {
+                    tracing::info!(reason = %message, "cluster not ready; waiting...");
+                    last_announce = message;
+                    announced = true;
+                }
+            }
+            Err(other) => {
+                return Err(SeederError::Api {
+                    message: "probing /flow/cluster/summary".into(),
+                    source: Box::new(other),
+                });
+            }
+        }
+
+        if started.elapsed() >= TIMEOUT {
+            return Err(SeederError::Api {
+                message: format!(
+                    "timed out after {}s waiting for cluster readiness",
+                    TIMEOUT.as_secs()
+                ),
+                source: Box::new(std::io::Error::other(last_announce)),
+            });
+        }
+        tokio::time::sleep(POLL).await;
+    }
 }
 
 #[cfg(test)]

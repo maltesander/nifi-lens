@@ -15,6 +15,7 @@
 
 use std::time::Duration;
 
+use nifi_rust_client::NifiError;
 use nifi_rust_client::dynamic::{DynamicClient, types};
 
 use crate::entities::make_connection;
@@ -183,18 +184,55 @@ pub async fn connect_processor_to_remote_input_port(
         "REMOTE_INPUT_PORT",
         vec!["success"],
     );
-    client
-        .processgroups()
-        .create_connection(parent_pg_id, &body)
-        .await
-        .map_err(|e| SeederError::Api {
-            message: format!(
-                "create connection from processor {src_processor_id} to RPG {rpg_id} \
-                 port {remote_input_port_name} (mapping {mapping_id})"
-            ),
-            source: Box::new(e),
-        })?;
-    Ok(())
+
+    // On clustered NiFi, the RPG's port mapping has been discovered on the
+    // node that processed our preceding GET, but the coordinator's replicated
+    // create_connection POST may hit another node before that node has
+    // replicated the RPG state — yielding a 409 "Unable to find the specified
+    // destination". Retry the POST briefly to absorb the propagation window.
+    const MAX_ATTEMPTS: u32 = 10;
+    const BACKOFF: Duration = Duration::from_secs(1);
+    let mut last_err: Option<NifiError> = None;
+    for attempt in 1..=MAX_ATTEMPTS {
+        match client
+            .processgroups()
+            .create_connection(parent_pg_id, &body)
+            .await
+        {
+            Ok(_) => return Ok(()),
+            Err(NifiError::Conflict { message })
+                if message.contains("Unable to find the specified destination") =>
+            {
+                tracing::debug!(
+                    attempt,
+                    rpg_id,
+                    remote_input_port_name,
+                    "RPG destination not yet replicated to all cluster nodes; retrying",
+                );
+                last_err = Some(NifiError::Conflict { message });
+                tokio::time::sleep(BACKOFF).await;
+            }
+            Err(e) => {
+                return Err(SeederError::Api {
+                    message: format!(
+                        "create connection from processor {src_processor_id} to RPG {rpg_id} \
+                         port {remote_input_port_name} (mapping {mapping_id})"
+                    ),
+                    source: Box::new(e),
+                });
+            }
+        }
+    }
+    Err(SeederError::Api {
+        message: format!(
+            "create connection from processor {src_processor_id} to RPG {rpg_id} \
+             port {remote_input_port_name} (mapping {mapping_id}): destination still \
+             unresolved after {MAX_ATTEMPTS} attempts"
+        ),
+        source: Box::new(last_err.unwrap_or(NifiError::Conflict {
+            message: "Unable to find the specified destination".into(),
+        })),
+    })
 }
 
 // ---------------------------------------------------------------------------
