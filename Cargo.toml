@@ -29,7 +29,6 @@ arboard = "3"
 arrow = { version = "58", default-features = false, features = ["json"] }
 bytes = "1"
 clap = { version = "4", features = ["derive"] }
-color-eyre = "0.6"
 crossterm = "0.29"
 directories = "6"
 futures = "0.3"

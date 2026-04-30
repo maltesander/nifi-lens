@@ -146,7 +146,9 @@ defense-in-depth.
 
 - **Library-style modules** (`config`, `client`, `intent`): `snafu`
   to match `nifi-rust-client`.
-- **Application edge**: `color-eyre` for pretty crash reports.
+- **Application edge**: errors bubble up to `lib::run()`, which prints
+  to stderr and returns a non-zero `ExitCode`. No pretty crash
+  formatter is currently installed.
 - **In-TUI errors**: transient status-line banner with optional
   detail modal (`Enter` expand, `Esc` dismiss). Never written to
   stdout while the TUI is active — it corrupts the terminal.
