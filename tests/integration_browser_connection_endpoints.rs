@@ -43,8 +43,7 @@ fn it_context(version: &str) -> ResolvedContext {
 }
 
 /// Resolve a PG id by walking the arena and matching the slash-separated
-/// suffix of the PG's full path-from-root. Mirrors the helper used by
-/// the other orders-pipeline integration tests (see Tasks 18-22).
+/// suffix of the PG's full path-from-root.
 fn find_pg_id_by_path(nodes: &[RawNode], target_pg_path: &str) -> Option<String> {
     let parts: Vec<&str> = target_pg_path.split('/').collect();
 

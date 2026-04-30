@@ -113,14 +113,10 @@ async fn integration_browser_cs_detail_reports_referencing_components() {
     }
 }
 
-/// Pins the post-Phase-9 fixture roster: 6 top-level PGs under the
-/// marker. Phases 5-8 of the orders-pipeline rework added
-/// `orders-pipeline` + `remote-targets` alongside legacy fixtures;
-/// Phase 9 deleted healthy/noisy/bulky/diff/parameterized/remote.
-/// What remains: the `orders-pipeline` centerpiece, the
-/// `remote-targets` RPG-receive subtree, and four standalone fixtures
-/// retained for state-encoding (`invalid`, `backpressure`,
-/// `versioned-clean`, `versioned-modified`).
+/// Pins the current fixture roster: 6 top-level PGs under the marker.
+/// The `orders-pipeline` centerpiece, the `remote-targets` RPG-receive
+/// subtree, and four standalone fixtures retained for state-encoding
+/// (`invalid`, `backpressure`, `versioned-clean`, `versioned-modified`).
 #[tokio::test(flavor = "current_thread")]
 #[ignore]
 async fn integration_browser_lists_expected_top_level_fixture_pgs() {
@@ -184,10 +180,9 @@ async fn integration_browser_lists_expected_top_level_fixture_pgs() {
             );
         }
 
-        // Phase 7 leaves both legacy and new fixtures coexisting (12
-        // PGs); Phase 9 will trim to 6. A loose `>= REQUIRED.len()`
-        // bound keeps the test honest without locking in incidental
-        // extras.
+        // Loose `>= REQUIRED.len()` bound tolerates incidental extras
+        // (e.g. user-added PGs against a live cluster) without
+        // weakening the required-set assertion above.
         assert!(
             top_level.len() >= REQUIRED_TOP_LEVEL_PGS.len(),
             "expected at least {} top-level PGs under `{FIXTURE_MARKER}` on {version}, \

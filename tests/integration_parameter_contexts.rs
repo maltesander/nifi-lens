@@ -66,11 +66,8 @@ fn it_context(version: &str) -> ResolvedContext {
 }
 
 /// Resolve a PG id by walking the arena and matching the slash-separated
-/// suffix of the PG's full path-from-root. Mirrors the helper used by the
-/// other orders-pipeline integration tests (Tasks 18-22). Required because
-/// the legacy `parameterized-pipeline` fixture still exists alongside the
-/// orders-pipeline (Phase 9 deletes it), and there are now multiple PGs
-/// whose names alone are ambiguous in nested fixtures (e.g. `transform`).
+/// suffix of the PG's full path-from-root. Names alone are ambiguous in
+/// nested fixtures (e.g. `transform` appears inside `orders-pipeline/`).
 fn find_pg_id_by_path(nodes: &[RawNode], target_pg_path: &str) -> Option<String> {
     let parts: Vec<&str> = target_pg_path.split('/').collect();
 
@@ -571,9 +568,8 @@ async fn bindings_map_inverted_shows_orders_pipeline_binders() {
         };
 
         // Each context's binder set must contain the expected orders-pipeline
-        // child PG. We don't assert exact equality — the parameterized-pipeline
-        // legacy fixture still co-exists alongside (Phase 9 deletes it) and
-        // may also bind to one of these contexts.
+        // child PG. We don't assert exact equality so user-added PGs against
+        // a live cluster don't break the test.
         let cases: &[(&str, &str)] = &[
             ("fixture-pc-platform", "ingest"),
             ("fixture-pc-orders", "transform"),
