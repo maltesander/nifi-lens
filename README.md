@@ -15,6 +15,8 @@
 - [Features](#features)
 - [Install](#install)
 - [Quick Start](#quick-start)
+- [Compatibility](#compatibility)
+- [Limitations](#limitations)
 - [Flags](#flags)
 - [Required NiFi permissions](#required-nifi-permissions)
 - [Core Components](#core-components)
@@ -146,6 +148,27 @@ While cluster fetchers are still booting, the status bar shows an
 `init: X/11 endpoints ready` chip. The chip disappears once every
 endpoint has produced its first snapshot (success or graceful
 failure both count). On a slow cluster it may take 10–20 seconds.
+
+## Compatibility
+
+`nifi-lens` targets Apache NiFi 2.x via `nifi-rust-client`'s `dynamic`
+feature, so one binary works against every supported minor version.
+The integration fixture exercises both ends of the support window:
+NiFi **2.6.0** (the floor — never dropped) and **2.9.0** (the
+current ceiling). Versions in between work by API compatibility but
+are not exercised in CI; report issues against the closest tested
+version.
+
+## Limitations
+
+v0.x is **read-only by design**. The TUI never starts, stops, or
+modifies any cluster resource. Other intentional omissions in the
+current line:
+
+- No per-node repository drill-in (only aggregate sysdiag).
+- No processor-thread leaderboard.
+- No queue time-to-full predictions.
+- No write-side actions (start/stop, enable/disable, empty queue).
 
 ## Flags
 
@@ -363,7 +386,27 @@ Drift filters (PG-only):
 | `←`          | Collapse folder or ascend to parent                    |
 | `p`          | Open Parameter Context modal (PG selected) / Properties modal (processor or CS selected) |
 | `m`          | Show version control (versioned PG only)               |
+| `a`          | Open action history modal (UUID-bearing components)    |
 | `c`          | Copy the selected node's id                            |
+
+#### Queue listing panel
+
+When a Connection with queued flowfiles is selected, the lower half
+of its detail pane lists up to 100 flowfiles. `Tab` focuses the list;
+inside it: `i` peek full attributes, `t` trace lineage, `c` copy
+flowfile UUID, `/` filter by filename, `Esc` returns focus to the tree.
+
+#### Action history modal
+
+| Key                        | Action                                      |
+|----------------------------|---------------------------------------------|
+| `↑↓` / `PgUp` / `PgDn`     | Scroll body (auto-loads more pages)         |
+| `Home` / `End`             | Jump to top / bottom                        |
+| `Enter`                    | Expand the selected event                   |
+| `/`                        | Open substring search                       |
+| `n` / `N`                  | Next / previous search match                |
+| `c`                        | Copy the selected row as TSV                |
+| `Esc`                      | Close the modal                             |
 
 ### Events
 
@@ -470,6 +513,7 @@ cluster_nodes               = "5s"
 connections_by_pg           = "15s"
 version_control             = "30s"
 parameter_context_bindings  = "30s"
+status_history              = "30s"   # selection-scoped sparkline cadence
 about                       = "5m"
 tls_certs                   = "1h"
 max_interval                = "60s"
