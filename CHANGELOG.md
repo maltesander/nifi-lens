@@ -44,6 +44,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   round-trip, so the diff modal can compute its diff without
   depending on scroll-driven follow-up fetches that don't fire on
   an empty body.
+- Tracer content JSON pretty-print no longer blocks the UI thread.
+  Per-chunk classification renders plain UTF-8 incrementally; the
+  pretty-print pass runs once off-thread (`spawn_blocking`) when the
+  side is fully loaded. The reformatter switches from a
+  `serde_json::Value` round-trip to a streaming `serde_transcode`
+  pipeline, eliminating the per-object allocation pass — roughly 3×
+  faster in release, much wider in debug. **Object key order is now
+  preserved** (the `Value`-based path alphabetised through `BTreeMap`).
 - Integration test fixture reworked into a single `orders-pipeline`
   centerpiece (ingest → transform → regional sinks + deadletter)
   with a 5-context parameter hierarchy and a `--break-after` seeder

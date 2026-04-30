@@ -501,6 +501,24 @@ ceilings via `[tracer.ceiling]` nested table (keys: `text`, `tabular`,
 The legacy `modal_streaming_ceiling` flat key is honored for one
 release with a deprecation warn.
 
+Per-chunk classification uses
+`classify_text_or_hex_no_pretty` (UTF-8 check + hex fallback,
+no JSON parse) so chunk arrivals don't block the UI thread
+reformatting an in-progress buffer. JSON pretty-print runs **once**
+off-thread when the side is fully loaded, mirroring the tabular
+decode pipeline: `take_pending_json_pretty` → reducer emits
+`PendingIntent::PrettyPrintJson` → dispatcher
+`spawn_blocking(pretty_print_json)` → `TracerPayload::JsonPrettyPrinted`
+→ `apply_json_pretty_result`. `pretty_print_json` uses
+`serde_transcode` to pipe a `Deserializer` directly into a
+`Serializer::pretty`, avoiding the `serde_json::Value` round-trip
+(roughly 3× faster in release, much wider in debug; key side effect
+is that **object key order is preserved**, where the prior
+`Value`-based path alphabetised through `BTreeMap`). Tabular and
+JSON-pretty are mutually exclusive — tabular is detected by magic
+bytes, JSON by the `looks_like_json` ASCII sniff (`{` or `[` first
+non-whitespace byte).
+
 Diff mode is bounded by `[tracer.ceiling] diff` and uses
 `similar::TextDiff::from_lines` with 3-line context. Diff
 eligibility: both sides available, MIME pair matches the allowlist

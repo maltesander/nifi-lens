@@ -350,6 +350,23 @@ pub async fn run(
                         )));
                     });
                 }
+                PendingIntent::PrettyPrintJson {
+                    event_id,
+                    side,
+                    bytes,
+                } => {
+                    let tx = tx.clone();
+                    tokio::task::spawn_blocking(move || {
+                        let pretty = crate::client::tracer::pretty_print_json(&bytes);
+                        let _ = tx.try_send(AppEvent::Data(crate::event::ViewPayload::Tracer(
+                            crate::event::TracerPayload::JsonPrettyPrinted {
+                                event_id,
+                                side,
+                                pretty,
+                            },
+                        )));
+                    });
+                }
                 PendingIntent::SpawnVersionControlModalFetch { pg_id } => {
                     let h = crate::view::browser::worker::spawn_version_control_modal_fetch(
                         client.clone(),

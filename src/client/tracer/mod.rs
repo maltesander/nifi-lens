@@ -620,7 +620,10 @@ impl NifiClient {
 
 pub mod content;
 
-pub use content::{classify_content, decode_avro, decode_parquet, detect_tabular_format};
+pub use content::{
+    classify_content, classify_text_or_hex_no_pretty, decode_avro, decode_parquet,
+    detect_tabular_format, looks_like_json, pretty_print_json,
+};
 
 /// Converts lineage graph nodes into a chronological list of event summaries.
 ///

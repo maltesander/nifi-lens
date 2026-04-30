@@ -283,6 +283,15 @@ pub enum TracerPayload {
         side: crate::client::ContentSide,
         render: crate::client::tracer::ContentRender,
     },
+    /// Result of an off-thread JSON pretty-print (`serde_transcode` +
+    /// `Serializer::pretty`) spawned via `tokio::task::spawn_blocking`.
+    /// `pretty` is `None` when the bytes did not parse as JSON. The
+    /// UI-task handler calls `apply_json_pretty_result`.
+    JsonPrettyPrinted {
+        event_id: i64,
+        side: crate::client::ContentSide,
+        pretty: Option<String>,
+    },
 }
 
 /// Payload variants pushed from the Events tab worker back into the UI loop.

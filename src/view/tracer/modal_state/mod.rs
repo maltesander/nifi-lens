@@ -71,6 +71,12 @@ pub struct SideBuffer {
     /// races in (rare; only possible if the modal is reopened mid-
     /// stream).
     pub in_flight_decode: bool,
+    /// Set to `true` when a `spawn_blocking` JSON pretty-print is in
+    /// flight. Cleared when the `JsonPrettyPrinted` event lands.
+    /// Mutually exclusive with `in_flight_decode` (tabular content
+    /// has magic bytes; JSON pretty applies only to non-tabular
+    /// UTF-8 content).
+    pub in_flight_pretty: bool,
 }
 
 #[derive(Debug, Clone)]
@@ -341,15 +347,19 @@ pub fn apply_modal_chunk_with_ceiling(
     }
     // For tabular content (detected by magic bytes) we defer decode to
     // fetch completion and run it off-thread via `spawn_blocking`.
-    // Text / Hex content stays synchronous — it is cheap and enables
-    // incremental rendering.
+    // Text / Hex content stays synchronous on the cheap path
+    // (`classify_text_or_hex_no_pretty` — UTF-8 check + hex fallback,
+    // no JSON parse) so chunk arrivals don't block the UI thread
+    // reformatting an in-progress buffer. JSON pretty-print runs
+    // once off-thread when the side is fully loaded — see
+    // `take_pending_json_pretty`.
     let is_tabular = crate::client::tracer::detect_tabular_format(&buf.loaded).is_some();
     if is_tabular {
         // Leave `decoded` as-is (Empty until the off-thread decode lands).
         // The caller (state/mod.rs) will read `in_flight_decode` after this
         // call and spawn the decode when `fully_loaded || ceiling_hit`.
     } else {
-        buf.decoded = crate::client::tracer::classify_content(buf.loaded.clone());
+        buf.decoded = crate::client::tracer::classify_text_or_hex_no_pretty(buf.loaded.clone());
     }
     if eof && !buf.fully_loaded {
         buf.fully_loaded = true;
@@ -418,6 +428,89 @@ pub fn apply_tabular_decode_result(
     buf.in_flight_decode = false;
     buf.decoded = render;
     modal.diff_cache = None;
+}
+
+/// Mirror of [`take_pending_tabular_decode`] for JSON pretty-print.
+///
+/// Returns `Some((event_id, side, bytes))` when ALL of:
+/// - the modal is open with a matching `event_id`
+/// - the side buffer is non-tabular UTF-8 text rendered without
+///   pretty-printing yet (`Text { pretty_printed: false }`)
+/// - the loaded bytes pass the cheap `looks_like_json` sniff
+/// - the side is now fully loaded (EOF or ceiling hit)
+/// - no pretty-print is already in flight for this side
+///
+/// Sets `in_flight_pretty = true` on the buffer before returning so
+/// the caller can unconditionally spawn without a second check.
+pub fn take_pending_json_pretty(
+    state: &mut TracerState,
+    event_id: i64,
+    side: crate::client::ContentSide,
+) -> Option<(i64, crate::client::ContentSide, Vec<u8>)> {
+    let modal = state.content_modal.as_mut()?;
+    if modal.event_id != event_id {
+        return None;
+    }
+    let buf = match side {
+        crate::client::ContentSide::Input => &mut modal.input,
+        crate::client::ContentSide::Output => &mut modal.output,
+    };
+    if !buf.fully_loaded && !buf.ceiling_hit {
+        return None;
+    }
+    if buf.in_flight_pretty {
+        return None;
+    }
+    if !matches!(
+        buf.decoded,
+        crate::client::tracer::ContentRender::Text {
+            pretty_printed: false,
+            ..
+        }
+    ) {
+        return None;
+    }
+    if !crate::client::tracer::looks_like_json(&buf.loaded) {
+        return None;
+    }
+    buf.in_flight_pretty = true;
+    Some((event_id, side, buf.loaded.clone()))
+}
+
+/// Apply the result of an off-thread JSON pretty-print onto the modal.
+///
+/// `pretty` is `Some(text)` when the bytes round-tripped successfully
+/// through `serde_transcode`, and `None` when the bytes did not parse
+/// as a single JSON document (in which case the existing plain-text
+/// render stays). Drops the result when the modal closed, switched
+/// events, or the side is no longer expecting one.
+pub fn apply_json_pretty_result(
+    state: &mut TracerState,
+    event_id: i64,
+    side: crate::client::ContentSide,
+    pretty: Option<String>,
+) {
+    let Some(modal) = state.content_modal.as_mut() else {
+        return;
+    };
+    if modal.event_id != event_id {
+        return;
+    }
+    let buf = match side {
+        crate::client::ContentSide::Input => &mut modal.input,
+        crate::client::ContentSide::Output => &mut modal.output,
+    };
+    if !buf.in_flight_pretty {
+        return;
+    }
+    buf.in_flight_pretty = false;
+    if let Some(text) = pretty {
+        buf.decoded = crate::client::tracer::ContentRender::Text {
+            text,
+            pretty_printed: true,
+        };
+        modal.diff_cache = None;
+    }
 }
 
 pub fn apply_modal_chunk_failed(

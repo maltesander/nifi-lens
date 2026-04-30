@@ -788,6 +788,14 @@ pub enum PendingIntent {
         side: crate::client::ContentSide,
         bytes: Vec<u8>,
     },
+    /// Spawn an off-thread JSON pretty-print via
+    /// `tokio::task::spawn_blocking`. The dispatcher calls
+    /// `pretty_print_json` and emits `TracerPayload::JsonPrettyPrinted`.
+    PrettyPrintJson {
+        event_id: i64,
+        side: crate::client::ContentSide,
+        bytes: Vec<u8>,
+    },
     /// Spawn the Browser version-control modal's one-shot
     /// identity+diff fetch worker. The handle is stored on
     /// `BrowserState.version_modal_handle` and aborted on close /
@@ -997,8 +1005,11 @@ fn update_inner(state: &mut AppState, event: AppEvent, config: &Config) -> Updat
                         requested_len,
                         &cfg,
                     );
-                    // For tabular content, check whether a deferred off-thread
-                    // decode should be spawned now that the buffer is complete.
+                    // Defer off-thread work to fetch completion. Tabular
+                    // (Parquet/Avro) decode and JSON pretty-print are
+                    // mutually exclusive — the tabular check matches
+                    // magic bytes, the JSON check matches non-tabular
+                    // UTF-8 starting with `{` or `[`.
                     let decode_intent = crate::view::tracer::state::take_pending_tabular_decode(
                         &mut state.tracer,
                         event_id,
@@ -1008,6 +1019,20 @@ fn update_inner(state: &mut AppState, event: AppEvent, config: &Config) -> Updat
                         event_id: eid,
                         side: s,
                         bytes,
+                    })
+                    .or_else(|| {
+                        crate::view::tracer::state::take_pending_json_pretty(
+                            &mut state.tracer,
+                            event_id,
+                            side,
+                        )
+                        .map(|(eid, s, bytes)| {
+                            PendingIntent::PrettyPrintJson {
+                                event_id: eid,
+                                side: s,
+                                bytes,
+                            }
+                        })
                     });
                     // Recompute diffability and (lazily) populate the
                     // diff cache after every chunk — independent of the
@@ -1038,6 +1063,30 @@ fn update_inner(state: &mut AppState, event: AppEvent, config: &Config) -> Updat
                         render,
                     );
                     // Re-evaluate diff eligibility now that decoded is populated.
+                    if let Some(modal) = state.tracer.content_modal.as_mut() {
+                        crate::view::tracer::state::resolve_and_cache_diff(modal, &cfg);
+                    }
+                    state.last_refresh = Instant::now();
+                    UpdateResult {
+                        redraw: true,
+                        intent: None,
+                        tracer_followup: None,
+                        sparkline_followup: None,
+                        queue_listing_followup: None,
+                    }
+                }
+                crate::event::TracerPayload::JsonPrettyPrinted {
+                    event_id,
+                    side,
+                    pretty,
+                } => {
+                    let cfg = state.tracer_config.ceiling.clone();
+                    crate::view::tracer::state::apply_json_pretty_result(
+                        &mut state.tracer,
+                        event_id,
+                        side,
+                        pretty,
+                    );
                     if let Some(modal) = state.tracer.content_modal.as_mut() {
                         crate::view::tracer::state::resolve_and_cache_diff(modal, &cfg);
                     }

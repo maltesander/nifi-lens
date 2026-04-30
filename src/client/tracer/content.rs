@@ -94,6 +94,63 @@ where
     }
 }
 
+/// Cheap "could this be JSON?" sniff: returns true iff the first
+/// non-ASCII-whitespace byte is `{` or `[`. Avoids handing 2 MiB of
+/// CSV / NDJSON / plain prose to the JSON parser only to fail.
+pub fn looks_like_json(bytes: &[u8]) -> bool {
+    bytes
+        .iter()
+        .find(|b| !b.is_ascii_whitespace())
+        .is_some_and(|b| matches!(b, b'{' | b'['))
+}
+
+/// Streaming JSON pretty-printer. Avoids the `serde_json::Value`
+/// round-trip — pipes a `Deserializer` directly into a
+/// `Serializer::pretty` via `serde_transcode`. For 2 MiB of nested
+/// JSON this is roughly an order of magnitude faster than the
+/// `from_str::<Value>` + `to_string_pretty` path because no
+/// intermediate object/array allocations happen.
+///
+/// Returns `None` when `bytes` does not parse as a single JSON
+/// document.
+pub fn pretty_print_json(bytes: &[u8]) -> Option<String> {
+    if !looks_like_json(bytes) {
+        return None;
+    }
+    let mut deser = serde_json::Deserializer::from_slice(bytes);
+    let mut buf: Vec<u8> = Vec::with_capacity(bytes.len() + bytes.len() / 4);
+    let mut ser = serde_json::Serializer::pretty(&mut buf);
+    serde_transcode::transcode(&mut deser, &mut ser).ok()?;
+    String::from_utf8(buf).ok()
+}
+
+/// Cheap classifier used by the per-chunk reducer path: returns
+/// `Text { pretty_printed: false }` for valid UTF-8 and a `Hex` head
+/// for non-UTF-8. Skips the JSON parse so streaming chunk arrivals
+/// don't block the UI thread reformatting a buffer that is about to
+/// be reformatted again on the next chunk.
+///
+/// The full `classify_content` (which includes JSON pretty-print and
+/// tabular decoding) runs once off-thread when the side buffer is
+/// fully loaded.
+pub fn classify_text_or_hex_no_pretty(bytes: Vec<u8>) -> ContentRender {
+    if bytes.is_empty() {
+        return ContentRender::Empty;
+    }
+    match String::from_utf8(bytes) {
+        Ok(text) => ContentRender::Text {
+            text,
+            pretty_printed: false,
+        },
+        Err(err) => {
+            let bytes = err.into_bytes();
+            ContentRender::Hex {
+                first_4k: hex_dump(&bytes[..bytes.len().min(4096)]),
+            }
+        }
+    }
+}
+
 /// Today's classifier body, extracted so [`classify_content`] can call
 /// it after the magic-byte sniff fails.
 fn classify_text_or_hex(bytes: Vec<u8>) -> ContentRender {
@@ -101,21 +158,16 @@ fn classify_text_or_hex(bytes: Vec<u8>) -> ContentRender {
         return ContentRender::Empty;
     }
     match String::from_utf8(bytes) {
-        Ok(text) => {
-            let pretty = serde_json::from_str::<serde_json::Value>(&text)
-                .and_then(|v| serde_json::to_string_pretty(&v))
-                .ok();
-            match pretty {
-                Some(p) if p != text => ContentRender::Text {
-                    text: p,
-                    pretty_printed: true,
-                },
-                _ => ContentRender::Text {
-                    text,
-                    pretty_printed: false,
-                },
-            }
-        }
+        Ok(text) => match pretty_print_json(text.as_bytes()) {
+            Some(p) if p != text => ContentRender::Text {
+                text: p,
+                pretty_printed: true,
+            },
+            _ => ContentRender::Text {
+                text,
+                pretty_printed: false,
+            },
+        },
         Err(err) => {
             let bytes = err.into_bytes();
             ContentRender::Hex {

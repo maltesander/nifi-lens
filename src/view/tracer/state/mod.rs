@@ -665,6 +665,7 @@ pub fn apply_payload(state: &mut TracerState, payload: TracerPayload) -> Option<
         TracerPayload::ModalChunkFailed { .. } => None,
         // Handled upstream in state/mod.rs before reaching apply_payload.
         TracerPayload::ContentDecoded { .. } => None,
+        TracerPayload::JsonPrettyPrinted { .. } => None,
     }
 }
 

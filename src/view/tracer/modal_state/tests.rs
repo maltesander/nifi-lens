@@ -507,6 +507,7 @@ fn text_buffer(t: &str) -> SideBuffer {
         last_error: None,
         effective_ceiling: None,
         in_flight_decode: false,
+        in_flight_pretty: false,
     }
 }
 
@@ -625,6 +626,7 @@ fn diffable_no_mime_both_empty_fully_loaded_is_no_differences() {
         last_error: None,
         effective_ceiling: None,
         in_flight_decode: false,
+        in_flight_pretty: false,
     };
     assert_eq!(
         resolve_diffable(&header, &empty, &empty, &default_ceiling()),
@@ -1248,6 +1250,7 @@ fn resolve_and_cache_diff_uses_pretty_printed_text_for_json() {
         last_error: None,
         effective_ceiling: None,
         in_flight_decode: false,
+        in_flight_pretty: false,
     };
     modal.output = SideBuffer {
         loaded: output_compact,
@@ -1258,6 +1261,7 @@ fn resolve_and_cache_diff_uses_pretty_printed_text_for_json() {
         last_error: None,
         effective_ceiling: None,
         in_flight_decode: false,
+        in_flight_pretty: false,
     };
 
     resolve_and_cache_diff(&mut modal, &default_ceiling());
