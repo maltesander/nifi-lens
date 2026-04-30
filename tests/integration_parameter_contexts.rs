@@ -4,23 +4,41 @@
 //!
 //! These tests exercise the data path — `parameter_context_bindings_batch`,
 //! `fetch_chain`, `browser_processor_detail` — not the TUI surface (which is
-//! covered by snapshot tests at the unit level). The fixture must contain two
-//! parameter contexts and one process group created by the seeder's
-//! `fixture::parameterized` module:
+//! covered by snapshot tests at the unit level). The fixture must contain
+//! the orders-pipeline 5-context hierarchy created by the seeder's
+//! `fixture::parameter_contexts` module:
 //!
-//!   - `fixture-pc-base`: `kafka_bootstrap`, `retry_max=3`, sensitive
-//!     `db_password`.
-//!   - `fixture-pc-prod`: `retry_max=5` (override), `region`; inherits base.
-//!   - `parameterized-pipeline`: bound to `fixture-pc-prod`.
-//!   - `LogAttribute-parameterized`: `Log Payload = "connecting to
-//!     #{kafka_bootstrap}"`, `Log Prefix = "##{literal_text}"`.
+//!   - `fixture-pc-platform` (root):   `kafka_bootstrap`,
+//!     `audit_log_endpoint`, sensitive `db_password`.
+//!   - `fixture-pc-orders` (inherits platform):  `usd_rate`,
+//!     `region_filter="EU,US,APAC"`, `currency_default="USD"`,
+//!     `retry_max="5"`.
+//!   - `fixture-pc-region-eu` (inherits orders): `region_filter="EU"`
+//!     (override), `compliance_tag="GDPR-2024"`.
+//!   - `fixture-pc-region-us` (inherits orders): `region_filter="US"`
+//!     (override), `compliance_tag="SOC2"`.
+//!   - `fixture-pc-region-apac` (inherits orders):
+//!     `region_filter="APAC"` (override), `compliance_tag="PDPA-2023"`.
+//!
+//! Bindings (from `orders/mod.rs`):
+//!   - `orders-pipeline/ingest`     → `fixture-pc-platform`     (depth 1)
+//!   - `orders-pipeline/transform`  → `fixture-pc-orders`       (depth 2)
+//!   - `orders-pipeline/sink-eu`    → `fixture-pc-region-eu`    (depth 3)
+//!   - `orders-pipeline/sink-us`    → `fixture-pc-region-us`    (depth 3)
+//!   - `orders-pipeline/sink-apac`  → `fixture-pc-region-apac`  (depth 3)
+//!
+//! Note: when the fixture is seeded with `--break-after 0s`, the orders
+//! `usd_rate` parameter is mutated from `"1.0827"` to `"oops"` — the
+//! headline failure narrative. These tests therefore avoid asserting on
+//! `usd_rate`'s value (only its presence) so they pass against either
+//! state.
 //!
 //! The marker PG is `nifilens-fixture-v8`.
 
 use std::sync::Arc;
 
 use nifi_lens::client::parameter_context::{ChainFetchResult, fetch_chain};
-use nifi_lens::client::{NifiClient, NodeKind};
+use nifi_lens::client::{NifiClient, NodeKind, RawNode};
 use nifi_lens::config::{ResolvedAuth, ResolvedContext, VersionStrategy};
 use tokio::sync::RwLock;
 
@@ -47,38 +65,71 @@ fn it_context(version: &str) -> ResolvedContext {
     }
 }
 
-/// Find a process group by name from the recursive root status snapshot.
-async fn find_pg_id_by_name(client: &NifiClient, pg_name: &str) -> Option<String> {
-    let snap = client.root_pg_status().await.ok()?;
-    snap.nodes
+/// Resolve a PG id by walking the arena and matching the slash-separated
+/// suffix of the PG's full path-from-root. Mirrors the helper used by the
+/// other orders-pipeline integration tests (Tasks 18-22). Required because
+/// the legacy `parameterized-pipeline` fixture still exists alongside the
+/// orders-pipeline (Phase 9 deletes it), and there are now multiple PGs
+/// whose names alone are ambiguous in nested fixtures (e.g. `transform`).
+fn find_pg_id_by_path(nodes: &[RawNode], target_pg_path: &str) -> Option<String> {
+    let parts: Vec<&str> = target_pg_path.split('/').collect();
+
+    for (i, node) in nodes.iter().enumerate() {
+        if node.kind != NodeKind::ProcessGroup {
+            continue;
+        }
+
+        let mut chain = vec![node.name.as_str()];
+        let mut cursor = i;
+        while let Some(p) = nodes[cursor].parent_idx {
+            cursor = p;
+            if matches!(nodes[cursor].kind, NodeKind::ProcessGroup) {
+                chain.push(nodes[cursor].name.as_str());
+            }
+        }
+        chain.reverse();
+
+        if chain.len() >= parts.len() {
+            let start = chain.len() - parts.len();
+            if chain[start..] == parts[..] {
+                return Some(node.id.clone());
+            }
+        }
+    }
+    None
+}
+
+/// Find a processor by its parent PG path-suffix and processor name.
+/// Mirrors the slash-separated path lookup used by the other
+/// orders-pipeline integration tests so we never hit the legacy
+/// `parameterized-pipeline` processor of the same name.
+fn find_processor_id_by_path(
+    nodes: &[RawNode],
+    parent_pg_path: &str,
+    proc_name: &str,
+) -> Option<String> {
+    let parent_id = find_pg_id_by_path(nodes, parent_pg_path)?;
+    nodes
         .iter()
-        .find(|n| matches!(n.kind, NodeKind::ProcessGroup) && n.name == pg_name)
+        .find(|n| {
+            matches!(n.kind, NodeKind::Processor) && n.name == proc_name && n.group_id == parent_id
+        })
         .map(|n| n.id.clone())
 }
 
-/// Find a processor by name from the recursive root status snapshot.
-async fn find_processor_id_by_name(client: &NifiClient, proc_name: &str) -> Option<String> {
-    let snap = client.root_pg_status().await.ok()?;
-    snap.nodes
-        .iter()
-        .find(|n| matches!(n.kind, NodeKind::Processor) && n.name == proc_name)
-        .map(|n| n.id.clone())
-}
-
-// ─── Test 1: bindings batch finds parameterized-pipeline bound to pc-prod ────
+// ─── Test 1: bindings batch reports orders-pipeline/transform → pc-orders ────
 
 #[tokio::test(flavor = "current_thread")]
 #[ignore]
-async fn parameter_context_bindings_batch_reports_parameterized_pipeline_binding() {
+async fn parameter_context_bindings_batch_reports_orders_transform_binding() {
     for &version in FIXTURE_VERSIONS {
-        eprintln!("--- parameter_context_bindings_batch on NiFi {version} ---");
+        eprintln!("--- bindings_batch on NiFi {version} ---");
 
         let ctx = it_context(version);
         let client = NifiClient::connect(&ctx)
             .await
             .unwrap_or_else(|e| panic!("connect to {version} failed: {e:?}"));
 
-        // Collect all PG ids from the fixture.
         let snap = client
             .root_pg_status()
             .await
@@ -93,79 +144,79 @@ async fn parameter_context_bindings_batch_reports_parameterized_pipeline_binding
             .parameter_context_bindings_batch(&all_pg_ids, 4)
             .await;
 
-        // Find the parameterized-pipeline PG id.
-        let pg_id = find_pg_id_by_name(&client, "parameterized-pipeline")
-            .await
-            .unwrap_or_else(|| panic!("parameterized-pipeline PG not found on {version}"));
+        // Verify all five orders-pipeline child PGs are bound to the
+        // expected parameter context. This exercises the full chain-depth
+        // matrix (1 / 2 / 3) in one batch call.
+        let expected: &[(&str, &str)] = &[
+            ("orders-pipeline/ingest", "fixture-pc-platform"),
+            ("orders-pipeline/transform", "fixture-pc-orders"),
+            ("orders-pipeline/sink-eu", "fixture-pc-region-eu"),
+            ("orders-pipeline/sink-us", "fixture-pc-region-us"),
+            ("orders-pipeline/sink-apac", "fixture-pc-region-apac"),
+        ];
+        for (pg_path, expected_ctx_name) in expected {
+            let pg_id = find_pg_id_by_path(&snap.nodes, pg_path)
+                .unwrap_or_else(|| panic!("fixture {pg_path} PG not found on {version}"));
 
-        // The map must contain an entry for this PG with a non-None binding.
-        let binding = map
-            .by_pg_id
-            .get(&pg_id)
-            .unwrap_or_else(|| {
-                panic!(
-                    "parameterized-pipeline pg_id={pg_id} not in bindings map on {version}; \
-                     map has {} entries",
-                    map.by_pg_id.len()
-                )
-            })
-            .as_ref()
-            .unwrap_or_else(|| {
-                panic!(
-                    "parameterized-pipeline has None binding on {version}; expected fixture-pc-prod"
-                )
-            });
+            let binding = map
+                .by_pg_id
+                .get(&pg_id)
+                .unwrap_or_else(|| {
+                    panic!(
+                        "{pg_path} pg_id={pg_id} not in bindings map on {version}; \
+                         map has {} entries",
+                        map.by_pg_id.len()
+                    )
+                })
+                .as_ref()
+                .unwrap_or_else(|| {
+                    panic!("{pg_path} has None binding on {version}; expected {expected_ctx_name}")
+                });
 
-        assert_eq!(
-            binding.name, "fixture-pc-prod",
-            "parameterized-pipeline must be bound to fixture-pc-prod on {version}, \
-             got {:?}",
-            binding.name
-        );
+            assert_eq!(
+                binding.name, *expected_ctx_name,
+                "{pg_path} must be bound to {expected_ctx_name} on {version}, got {:?}",
+                binding.name
+            );
+        }
     }
 }
 
-// ─── Test 2: fetch_chain resolves two-context chain with correct parameters ──
+// ─── Test 2: fetch_chain resolves the depth-2 chain for transform ────────────
 
 #[tokio::test(flavor = "current_thread")]
 #[ignore]
-async fn fetch_chain_resolves_prod_base_chain_for_parameterized_pipeline() {
+async fn fetch_chain_resolves_orders_platform_chain_for_transform() {
     for &version in FIXTURE_VERSIONS {
-        eprintln!("--- fetch_chain resolves prod+base chain on NiFi {version} ---");
+        eprintln!("--- fetch_chain depth-2 (orders→platform) on NiFi {version} ---");
 
         let ctx = it_context(version);
         let client = NifiClient::connect(&ctx)
             .await
             .unwrap_or_else(|e| panic!("connect to {version} failed: {e:?}"));
 
-        // Find parameterized-pipeline and its bound context.
         let snap = client
             .root_pg_status()
             .await
             .unwrap_or_else(|e| panic!("root_pg_status on {version} failed: {e:?}"));
-        let all_pg_ids: Vec<String> = snap.process_group_ids.clone();
 
         let map = client
-            .parameter_context_bindings_batch(&all_pg_ids, 4)
+            .parameter_context_bindings_batch(&snap.process_group_ids, 4)
             .await;
 
-        let pg_id = find_pg_id_by_name(&client, "parameterized-pipeline")
-            .await
-            .unwrap_or_else(|| panic!("parameterized-pipeline not found on {version}"));
+        let pg_id = find_pg_id_by_path(&snap.nodes, "orders-pipeline/transform")
+            .unwrap_or_else(|| panic!("orders-pipeline/transform not found on {version}"));
 
-        let binding = map
+        let bound_id = map
             .by_pg_id
             .get(&pg_id)
             .and_then(|b| b.as_ref())
-            .unwrap_or_else(|| panic!("parameterized-pipeline has no binding on {version}"));
+            .unwrap_or_else(|| panic!("orders-pipeline/transform has no binding on {version}"))
+            .id
+            .clone();
 
-        let bound_id = binding.id.clone();
-
-        // Resolve the chain.
         let arc_client = Arc::new(RwLock::new(client));
-        let result = fetch_chain(arc_client, &bound_id).await;
-
-        let nodes = match result {
+        let nodes = match fetch_chain(arc_client, &bound_id).await {
             ChainFetchResult::Loaded(n) => n,
             ChainFetchResult::BoundFailed(e) => {
                 panic!("fetch_chain BoundFailed on {version}: {e}")
@@ -175,61 +226,59 @@ async fn fetch_chain_resolves_prod_base_chain_for_parameterized_pipeline() {
         assert_eq!(
             nodes.len(),
             2,
-            "expected two nodes in the chain (prod + base) on {version}, got {}; \
+            "expected two nodes in the chain (orders + platform) on {version}, got {}; \
              nodes: {:?}",
             nodes.len(),
             nodes.iter().map(|n| &n.name).collect::<Vec<_>>()
         );
 
-        // First node must be fixture-pc-prod (directly bound).
-        let prod = &nodes[0];
+        let orders = &nodes[0];
         assert_eq!(
-            prod.name, "fixture-pc-prod",
-            "first chain node must be fixture-pc-prod on {version}, got {:?}",
-            prod.name
+            orders.name, "fixture-pc-orders",
+            "first chain node must be fixture-pc-orders on {version}, got {:?}",
+            orders.name
         );
         assert!(
-            prod.fetch_error.is_none(),
-            "prod node has fetch_error on {version}"
+            orders.fetch_error.is_none(),
+            "orders node has fetch_error on {version}"
         );
-        // Prod defines: retry_max=5, region=eu-west-1.
-        assert!(
-            prod.parameters.iter().any(|p| p.name == "retry_max"),
-            "fixture-pc-prod must define retry_max on {version}"
-        );
-        assert!(
-            prod.parameters.iter().any(|p| p.name == "region"),
-            "fixture-pc-prod must define region on {version}"
-        );
+        // Orders defines: usd_rate, region_filter, currency_default, retry_max.
+        // We assert presence rather than value because `usd_rate` is mutated
+        // to "oops" by `--break-after`; checking presence stays stable.
+        for expected in ["usd_rate", "region_filter", "currency_default", "retry_max"] {
+            assert!(
+                orders.parameters.iter().any(|p| p.name == expected),
+                "fixture-pc-orders must define {expected} on {version}"
+            );
+        }
 
-        // Second node must be fixture-pc-base (ancestor).
-        let base = &nodes[1];
+        let platform = &nodes[1];
         assert_eq!(
-            base.name, "fixture-pc-base",
-            "second chain node must be fixture-pc-base on {version}, got {:?}",
-            base.name
+            platform.name, "fixture-pc-platform",
+            "second chain node must be fixture-pc-platform on {version}, got {:?}",
+            platform.name
         );
         assert!(
-            base.fetch_error.is_none(),
-            "base node has fetch_error on {version}"
+            platform.fetch_error.is_none(),
+            "platform node has fetch_error on {version}"
         );
-        // Base defines: kafka_bootstrap, retry_max=3, db_password (sensitive).
-        assert!(
-            base.parameters.iter().any(|p| p.name == "kafka_bootstrap"),
-            "fixture-pc-base must define kafka_bootstrap on {version}"
-        );
+        // Platform defines: kafka_bootstrap, audit_log_endpoint, db_password.
+        for expected in ["kafka_bootstrap", "audit_log_endpoint", "db_password"] {
+            assert!(
+                platform.parameters.iter().any(|p| p.name == expected),
+                "fixture-pc-platform must define {expected} on {version}"
+            );
+        }
     }
 }
 
-// ─── Test 3: retry_max is overridden (shadowed) in the resolved flat list ────
+// ─── Test 3: fetch_chain resolves the depth-3 chain for sink-eu ──────────────
 
 #[tokio::test(flavor = "current_thread")]
 #[ignore]
-async fn resolved_chain_retry_max_is_overridden_by_prod() {
-    use nifi_lens::view::browser::state::parameter_context_modal::resolve;
-
+async fn fetch_chain_resolves_depth_three_chain_for_sink_eu() {
     for &version in FIXTURE_VERSIONS {
-        eprintln!("--- resolved chain override check on NiFi {version} ---");
+        eprintln!("--- fetch_chain depth-3 (region-eu→orders→platform) on NiFi {version} ---");
 
         let ctx = it_context(version);
         let client = NifiClient::connect(&ctx)
@@ -240,19 +289,121 @@ async fn resolved_chain_retry_max_is_overridden_by_prod() {
             .root_pg_status()
             .await
             .unwrap_or_else(|e| panic!("root_pg_status on {version} failed: {e:?}"));
+
         let map = client
             .parameter_context_bindings_batch(&snap.process_group_ids, 4)
             .await;
 
-        let pg_id = find_pg_id_by_name(&client, "parameterized-pipeline")
-            .await
-            .unwrap_or_else(|| panic!("parameterized-pipeline not found on {version}"));
+        let pg_id = find_pg_id_by_path(&snap.nodes, "orders-pipeline/sink-eu")
+            .unwrap_or_else(|| panic!("orders-pipeline/sink-eu not found on {version}"));
 
         let bound_id = map
             .by_pg_id
             .get(&pg_id)
             .and_then(|b| b.as_ref())
-            .unwrap_or_else(|| panic!("no binding on {version}"))
+            .unwrap_or_else(|| panic!("sink-eu has no binding on {version}"))
+            .id
+            .clone();
+
+        let arc_client = Arc::new(RwLock::new(client));
+        let nodes = match fetch_chain(arc_client, &bound_id).await {
+            ChainFetchResult::Loaded(n) => n,
+            ChainFetchResult::BoundFailed(e) => {
+                panic!("fetch_chain BoundFailed on {version}: {e}")
+            }
+        };
+
+        assert_eq!(
+            nodes.len(),
+            3,
+            "expected three nodes in the chain (region-eu + orders + platform) on \
+             {version}, got {}; nodes: {:?}",
+            nodes.len(),
+            nodes.iter().map(|n| &n.name).collect::<Vec<_>>()
+        );
+
+        // BFS order: directly-bound first.
+        assert_eq!(
+            nodes[0].name, "fixture-pc-region-eu",
+            "chain[0] on {version} must be fixture-pc-region-eu, got {:?}",
+            nodes[0].name
+        );
+        assert_eq!(
+            nodes[1].name, "fixture-pc-orders",
+            "chain[1] on {version} must be fixture-pc-orders, got {:?}",
+            nodes[1].name
+        );
+        assert_eq!(
+            nodes[2].name, "fixture-pc-platform",
+            "chain[2] on {version} must be fixture-pc-platform, got {:?}",
+            nodes[2].name
+        );
+
+        for n in &nodes {
+            assert!(
+                n.fetch_error.is_none(),
+                "{} has fetch_error on {version}",
+                n.name
+            );
+        }
+
+        // Region-eu defines region_filter (override) + compliance_tag.
+        let region = &nodes[0];
+        for expected in ["region_filter", "compliance_tag"] {
+            assert!(
+                region.parameters.iter().any(|p| p.name == expected),
+                "fixture-pc-region-eu must define {expected} on {version}"
+            );
+        }
+
+        // Spot-check the compliance_tag value — this distinguishes the
+        // three regional contexts from each other.
+        let compliance = region
+            .parameters
+            .iter()
+            .find(|p| p.name == "compliance_tag")
+            .expect("compliance_tag must be present in region-eu");
+        assert_eq!(
+            compliance.value.as_deref(),
+            Some("GDPR-2024"),
+            "fixture-pc-region-eu compliance_tag value mismatch on {version}, got {:?}",
+            compliance.value
+        );
+    }
+}
+
+// ─── Test 4: region_filter is overridden at depth 3 (the [O] flag) ───────────
+
+#[tokio::test(flavor = "current_thread")]
+#[ignore]
+async fn resolved_chain_region_filter_is_overridden_by_region_eu() {
+    use nifi_lens::view::browser::state::parameter_context_modal::resolve;
+
+    for &version in FIXTURE_VERSIONS {
+        eprintln!("--- region_filter override at depth-3 on NiFi {version} ---");
+
+        let ctx = it_context(version);
+        let client = NifiClient::connect(&ctx)
+            .await
+            .unwrap_or_else(|e| panic!("connect to {version} failed: {e:?}"));
+
+        let snap = client
+            .root_pg_status()
+            .await
+            .unwrap_or_else(|e| panic!("root_pg_status on {version} failed: {e:?}"));
+
+        let map = client
+            .parameter_context_bindings_batch(&snap.process_group_ids, 4)
+            .await;
+
+        let pg_id = find_pg_id_by_path(&snap.nodes, "orders-pipeline/sink-eu")
+            .unwrap_or_else(|| panic!("orders-pipeline/sink-eu not found on {version}"));
+
+        let bound_id = map
+            .by_pg_id
+            .get(&pg_id)
+            .and_then(|b| b.as_ref())
+            .unwrap_or_else(|| panic!("sink-eu has no binding on {version}"))
             .id
             .clone();
 
@@ -264,40 +415,47 @@ async fn resolved_chain_retry_max_is_overridden_by_prod() {
 
         let resolved = resolve(&nodes, None);
 
-        // retry_max must be won by prod (value "5") and shadowed by base (value "3").
-        let retry = resolved
+        // region_filter must be won by region-eu (value "EU") and shadowed
+        // by orders (value "EU,US,APAC"). The override at depth-3 is the
+        // headline coverage for the [O] flag UX in the parameter-context
+        // modal.
+        let region = resolved
             .iter()
-            .find(|r| r.winner.name == "retry_max")
-            .unwrap_or_else(|| panic!("retry_max not in resolved list on {version}"));
+            .find(|r| r.winner.name == "region_filter")
+            .unwrap_or_else(|| panic!("region_filter not in resolved list on {version}"));
 
         assert_eq!(
-            retry.winner.value.as_deref(),
-            Some("5"),
-            "retry_max winner value must be 5 (prod) on {version}, got {:?}",
-            retry.winner.value
+            region.winner.value.as_deref(),
+            Some("EU"),
+            "region_filter winner value must be EU (region-eu) on {version}, got {:?}",
+            region.winner.value
         );
         assert_eq!(
-            retry.winner_context, "fixture-pc-prod",
-            "retry_max winner_context must be fixture-pc-prod on {version}, got {:?}",
-            retry.winner_context
+            region.winner_context, "fixture-pc-region-eu",
+            "region_filter winner_context must be fixture-pc-region-eu on {version}, got {:?}",
+            region.winner_context
         );
         assert_eq!(
-            retry.shadowed.len(),
+            region.shadowed.len(),
             1,
-            "retry_max must have exactly one shadowed entry (base) on {version}"
+            "region_filter must have exactly one shadowed entry (orders) on {version}; \
+             got: {:?}",
+            region.shadowed.iter().map(|(_, n)| n).collect::<Vec<_>>()
         );
         assert_eq!(
-            retry.shadowed[0].1, "fixture-pc-base",
-            "retry_max shadowed entry must be from fixture-pc-base on {version}"
+            region.shadowed[0].1, "fixture-pc-orders",
+            "region_filter shadowed entry must be from fixture-pc-orders on {version}"
         );
-        assert!(
-            !retry.shadowed.is_empty(),
-            "retry_max must have shadowed entry — confirming [O] flag"
+        assert_eq!(
+            region.shadowed[0].0.value.as_deref(),
+            Some("EU,US,APAC"),
+            "region_filter shadowed value must be EU,US,APAC on {version}, got {:?}",
+            region.shadowed[0].0.value
         );
     }
 }
 
-// ─── Test 4: db_password is sensitive — value withheld by fetch_chain ────────
+// ─── Test 5: db_password is sensitive — value withheld by fetch_chain ────────
 
 #[tokio::test(flavor = "current_thread")]
 #[ignore]
@@ -320,9 +478,12 @@ async fn resolved_chain_db_password_is_sensitive_and_value_withheld() {
             .parameter_context_bindings_batch(&snap.process_group_ids, 4)
             .await;
 
-        let pg_id = find_pg_id_by_name(&client, "parameterized-pipeline")
-            .await
-            .unwrap_or_else(|| panic!("parameterized-pipeline not found on {version}"));
+        // Resolve through the transform binding so `db_password` is
+        // reached via the orders→platform inheritance edge — that's
+        // the chain-depth-2 sensitive-resolution path the fixture is
+        // designed to exercise.
+        let pg_id = find_pg_id_by_path(&snap.nodes, "orders-pipeline/transform")
+            .unwrap_or_else(|| panic!("orders-pipeline/transform not found on {version}"));
 
         let bound_id = map
             .by_pg_id
@@ -355,14 +516,20 @@ async fn resolved_chain_db_password_is_sensitive_and_value_withheld() {
              got {:?}",
             pwd.winner.value
         );
+        // Sourced from the platform tier (chain-depth-2 from transform).
+        assert_eq!(
+            pwd.winner_context, "fixture-pc-platform",
+            "db_password winner_context must be fixture-pc-platform on {version}, got {:?}",
+            pwd.winner_context
+        );
     }
 }
 
-// ─── Test 5: used-by inverted map lists parameterized-pipeline for pc-prod ───
+// ─── Test 6: used-by inverted map for the orders-pipeline contexts ───────────
 
 #[tokio::test(flavor = "current_thread")]
 #[ignore]
-async fn bindings_map_inverted_shows_parameterized_pipeline_uses_pc_prod() {
+async fn bindings_map_inverted_shows_orders_pipeline_binders() {
     for &version in FIXTURE_VERSIONS {
         eprintln!("--- inverted bindings (used-by) check on NiFi {version} ---");
 
@@ -380,8 +547,8 @@ async fn bindings_map_inverted_shows_parameterized_pipeline_uses_pc_prod() {
             .parameter_context_bindings_batch(&snap.process_group_ids, 4)
             .await;
 
-        // Build an inverted map: context_name → Vec<pg_name>
-        // We need PG names as well, so pair id→name from the snap.
+        // Build an `pg_id → name` lookup so we can phrase the assertion
+        // failure messages with PG names.
         let pg_name_by_id: std::collections::HashMap<String, String> = snap
             .nodes
             .iter()
@@ -389,123 +556,124 @@ async fn bindings_map_inverted_shows_parameterized_pipeline_uses_pc_prod() {
             .map(|n| (n.id.clone(), n.name.clone()))
             .collect();
 
-        // For fixture-pc-prod, at least one bound PG must be "parameterized-pipeline".
-        let pc_prod_binders: Vec<&str> = map
-            .by_pg_id
-            .iter()
-            .filter_map(|(pg_id, binding)| {
-                let b = binding.as_ref()?;
-                if b.name == "fixture-pc-prod" {
-                    pg_name_by_id.get(pg_id).map(|n| n.as_str())
-                } else {
-                    None
-                }
-            })
-            .collect();
+        let collect_binders = |ctx_name: &str| -> Vec<&str> {
+            map.by_pg_id
+                .iter()
+                .filter_map(|(pg_id, binding)| {
+                    let b = binding.as_ref()?;
+                    if b.name == ctx_name {
+                        pg_name_by_id.get(pg_id).map(|n| n.as_str())
+                    } else {
+                        None
+                    }
+                })
+                .collect()
+        };
 
-        assert!(
-            pc_prod_binders.contains(&"parameterized-pipeline"),
-            "fixture-pc-prod must have parameterized-pipeline as a binder on {version}; \
-             actual binders: {pc_prod_binders:?}"
-        );
+        // Each context's binder set must contain the expected orders-pipeline
+        // child PG. We don't assert exact equality — the parameterized-pipeline
+        // legacy fixture still co-exists alongside (Phase 9 deletes it) and
+        // may also bind to one of these contexts.
+        let cases: &[(&str, &str)] = &[
+            ("fixture-pc-platform", "ingest"),
+            ("fixture-pc-orders", "transform"),
+            ("fixture-pc-region-eu", "sink-eu"),
+            ("fixture-pc-region-us", "sink-us"),
+            ("fixture-pc-region-apac", "sink-apac"),
+        ];
+        for (ctx_name, expected_pg_name) in cases {
+            let binders = collect_binders(ctx_name);
+            assert!(
+                binders.contains(expected_pg_name),
+                "{ctx_name} must have {expected_pg_name} as a binder on {version}; \
+                 actual binders: {binders:?}"
+            );
+        }
     }
 }
 
-// ─── Test 6: Log Payload property contains #{kafka_bootstrap} ────────────────
+// ─── Test 7: processor property contains a #{...} parameter reference ────────
 
 #[tokio::test(flavor = "current_thread")]
 #[ignore]
-async fn processor_log_payload_property_contains_param_reference() {
-    for &version in FIXTURE_VERSIONS {
-        eprintln!("--- Log Payload param-ref check on NiFi {version} ---");
-
-        let ctx = it_context(version);
-        let client = NifiClient::connect(&ctx)
-            .await
-            .unwrap_or_else(|e| panic!("connect to {version} failed: {e:?}"));
-
-        let proc_id = find_processor_id_by_name(&client, "LogAttribute-parameterized")
-            .await
-            .unwrap_or_else(|| panic!("LogAttribute-parameterized not found on {version}"));
-
-        let detail = client
-            .browser_processor_detail(&proc_id)
-            .await
-            .unwrap_or_else(|e| panic!("browser_processor_detail on {version} failed: {e:?}"));
-
-        // Verify the "Log Payload" property contains the #{kafka_bootstrap} reference.
-        let log_payload = detail
-            .properties
-            .iter()
-            .find(|(key, _)| key == "Log Payload")
-            .map(|(_, v)| v.as_str())
-            .unwrap_or_else(|| {
-                panic!(
-                    "Log Payload property not found on LogAttribute-parameterized on {version}; \
-                     properties: {:?}",
-                    detail.properties.iter().map(|(k, _)| k).collect::<Vec<_>>()
-                )
-            });
-
-        assert!(
-            log_payload.contains("#{kafka_bootstrap}"),
-            "Log Payload must contain #{{kafka_bootstrap}} on {version}, got: {log_payload:?}"
-        );
-    }
-}
-
-// ─── Test 7: Log Prefix property is the escape case — no #{...} reference ────
-
-#[tokio::test(flavor = "current_thread")]
-#[ignore]
-async fn processor_log_prefix_property_is_escape_not_param_reference() {
+async fn processor_property_contains_param_reference() {
     use nifi_lens::view::browser::render::{ParamRefScan, scan_param_refs};
 
     for &version in FIXTURE_VERSIONS {
-        eprintln!("--- Log Prefix escape check on NiFi {version} ---");
+        eprintln!("--- param-ref check on UpdateAttribute-tag-retries on NiFi {version} ---");
 
         let ctx = it_context(version);
         let client = NifiClient::connect(&ctx)
             .await
             .unwrap_or_else(|e| panic!("connect to {version} failed: {e:?}"));
 
-        let proc_id = find_processor_id_by_name(&client, "LogAttribute-parameterized")
+        let snap = client
+            .root_pg_status()
             .await
-            .unwrap_or_else(|| panic!("LogAttribute-parameterized not found on {version}"));
+            .unwrap_or_else(|e| panic!("root_pg_status on {version} failed: {e:?}"));
+
+        // `UpdateAttribute-tag-retries` lives in `orders-pipeline/transform`
+        // and carries three dynamic properties that reference parameters:
+        // `_max_retries = "#{retry_max}"` (orders-tier),
+        // `_audit_endpoint = "#{audit_log_endpoint}"` (platform-tier,
+        // resolved via the orders→platform inheritance edge), and
+        // `region_filter = "#{region_filter}"` (orders-tier; gets
+        // overridden in regional contexts at downstream sinks).
+        let proc_id = find_processor_id_by_path(
+            &snap.nodes,
+            "orders-pipeline/transform",
+            "UpdateAttribute-tag-retries",
+        )
+        .unwrap_or_else(|| {
+            panic!(
+                "UpdateAttribute-tag-retries not found in orders-pipeline/transform on {version}"
+            )
+        });
 
         let detail = client
             .browser_processor_detail(&proc_id)
             .await
             .unwrap_or_else(|e| panic!("browser_processor_detail on {version} failed: {e:?}"));
 
-        // NiFi 2.6.0 uses "Log prefix" (lower-case p); 2.8.0+ uses "Log Prefix".
-        // Accept either casing by doing a case-insensitive search.
-        let log_prefix_value = detail
-            .properties
-            .iter()
-            .find(|(key, _)| key.eq_ignore_ascii_case("Log Prefix"))
-            .map(|(_, v)| v.as_str())
-            .unwrap_or_else(|| {
-                panic!(
-                    "Log Prefix property not found on LogAttribute-parameterized on {version}; \
-                     properties: {:?}",
-                    detail.properties.iter().map(|(k, _)| k).collect::<Vec<_>>()
-                )
-            });
+        // Verify each of the three referencing properties carries a
+        // `#{...}` param ref in its raw stored value AND that
+        // `scan_param_refs` agrees (the scanner is what drives the
+        // trailing `→` cross-link annotation in the Browser detail
+        // panel).
+        let expected: &[(&str, &str)] = &[
+            ("_max_retries", "#{retry_max}"),
+            ("_audit_endpoint", "#{audit_log_endpoint}"),
+            ("region_filter", "#{region_filter}"),
+        ];
 
-        // The stored value is "##{literal_text}" — the escape sequence.
-        assert!(
-            log_prefix_value.starts_with("##"),
-            "Log Prefix must be an escape (##{{...}}) on {version}, got: {log_prefix_value:?}"
-        );
+        for (prop_name, needle) in expected {
+            let value = detail
+                .properties
+                .iter()
+                .find(|(key, _)| key == prop_name)
+                .map(|(_, v)| v.as_str())
+                .unwrap_or_else(|| {
+                    panic!(
+                        "{prop_name} property not found on UpdateAttribute-tag-retries on \
+                         {version}; properties: {:?}",
+                        detail.properties.iter().map(|(k, _)| k).collect::<Vec<_>>()
+                    )
+                });
 
-        // The param-ref scanner must report None — no cross-link annotation expected.
-        let scan = scan_param_refs(log_prefix_value);
-        assert_eq!(
-            scan,
-            ParamRefScan::None,
-            "scan_param_refs must return None for the escape #{{{{literal_text}}}} on {version}; \
-             got: {scan:?}"
-        );
+            assert!(
+                value.contains(needle),
+                "{prop_name} must contain {needle} on {version}, got: {value:?}"
+            );
+
+            // The scanner must NOT return `None`/`Escaped` — these are
+            // legitimate `#{name}` references and must drive the
+            // cross-link annotation.
+            let scan = scan_param_refs(value);
+            assert!(
+                !matches!(scan, ParamRefScan::None),
+                "scan_param_refs must not be None for property {prop_name}={value:?} on {version}; \
+                 got: {scan:?}"
+            );
+        }
     }
 }
