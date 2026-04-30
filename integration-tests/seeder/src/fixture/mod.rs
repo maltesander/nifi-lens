@@ -5,8 +5,6 @@ pub mod common;
 pub mod invalid;
 pub mod orders;
 pub mod parameter_contexts;
-pub mod parameterized;
-pub mod payload;
 pub mod registry;
 pub mod services;
 pub mod versioned;
@@ -49,20 +47,13 @@ pub async fn seed(
             message: "fixture marker PG has no id".into(),
         })?;
 
-    // NEW orders-pipeline parameter contexts (alongside old fixture-pc-base/-prod).
     tracing::info!("seeding orders parameter contexts");
     let orders_ctx = parameter_contexts::seed(client).await?;
-
-    // OLD parameterized parameter contexts (still seeded for now; deleted in phase 9).
-    tracing::info!("seeding legacy parameter contexts");
-    let pc_ids = parameterized::seed_parameter_contexts(client).await?;
 
     // OLD fixtures (still active so unmigrated tests keep working).
     backpressure::seed(client, &marker_pg_id).await?;
     invalid::seed(client, &marker_pg_id).await?;
     versioned::seed(client, &marker_pg_id, &registry_ids, detected_version).await?;
-    parameterized::seed_parameterized_pipeline(client, &marker_pg_id, &pc_ids, detected_version)
-        .await?;
 
     // NEW orders-pipeline.
     orders::seed(
