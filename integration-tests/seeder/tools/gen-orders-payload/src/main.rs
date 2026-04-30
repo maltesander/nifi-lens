@@ -8,7 +8,7 @@
 //!     > integration-tests/seeder/assets/orders_payload.csv
 //! ```
 
-use rand::{Rng, SeedableRng};
+use rand::{RngExt, SeedableRng};
 use rand_chacha::ChaCha8Rng;
 use std::fmt::Write as _;
 
@@ -38,25 +38,25 @@ fn main() {
     for i in 1..=RECORD_COUNT {
         let region_idx = i % REGIONS.len();
         let (region, currency) = REGIONS[region_idx];
-        let qty: u32 = rng.gen_range(1..=5);
-        let price_cents: u32 = rng.gen_range(500..=9999);
+        let qty: u32 = rng.random_range(1..=5);
+        let price_cents: u32 = rng.random_range(500..=9999);
         let unit_price = price_cents as f64 / 100.0;
         let subtotal = unit_price * qty as f64;
         // Type the index as u8 (matching the original `b'A' + ...`) so the
         // rand crate's sampling consumes the same number of RNG bytes —
         // otherwise indexing into SKU_LETTERS infers usize and shifts the
         // whole stream off the committed asset.
-        let sku_idx: u8 = rng.gen_range(0..26);
+        let sku_idx: u8 = rng.random_range(0..26);
         let sku_letter = SKU_LETTERS[sku_idx as usize] as char;
-        let sku_num: u32 = rng.gen_range(0..1000);
-        let cust: u32 = rng.gen_range(0..100_000);
-        let status = STATUSES[rng.gen_range(0..STATUSES.len())];
+        let sku_num: u32 = rng.random_range(0..1000);
+        let cust: u32 = rng.random_range(0..100_000);
+        let status = STATUSES[rng.random_range(0..STATUSES.len())];
         // Spread over ~14 days ending 2026-04-28.
-        let day_offset: u32 = rng.gen_range(0..14);
+        let day_offset: u32 = rng.random_range(0..14);
         let day = 28 - day_offset;
-        let hour: u32 = rng.gen_range(0..24);
-        let minute: u32 = rng.gen_range(0..60);
-        let second: u32 = rng.gen_range(0..60);
+        let hour: u32 = rng.random_range(0..24);
+        let minute: u32 = rng.random_range(0..60);
+        let second: u32 = rng.random_range(0..60);
 
         writeln!(
             &mut out,
