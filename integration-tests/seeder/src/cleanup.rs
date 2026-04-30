@@ -36,6 +36,9 @@ pub async fn nuke_and_repave(client: &DynamicClient) -> Result<()> {
     tracing::info!("nuke-and-repave: disabling controller services");
     disable_all_controller_services(client).await?;
 
+    tracing::info!("nuke-and-repave: stopping transmitting RPGs");
+    stop_all_rpgs_recursively(client, "root").await?;
+
     tracing::info!("nuke-and-repave: deleting child process groups");
     delete_all_child_pgs(client).await?;
 
@@ -138,10 +141,200 @@ async fn stop_all_under_root(client: &DynamicClient) -> Result<()> {
             source: Box::new(e),
         })?;
 
-    // No polling here — the subsequent delete calls will reject if any
-    // component is still in a non-terminal state, and the error message
-    // will identify the offender.
+    // The bulk schedule_components call doesn't tear down NiFi's internal
+    // Site-to-Site receive plumbing for input ports with allow_remote_access
+    // = true. NiFi creates an internal "receive" connection (not visible
+    // via /connections/) whose destination is the receive port; if the
+    // port stays RUNNING, the parent PG cannot be deleted (409
+    // "Destination of Connection X is running"). Walking the tree and
+    // stopping every input/output port via its own /run-status endpoint
+    // forces NiFi to tear down the internal plumbing too.
+    tokio::time::sleep(Duration::from_secs(2)).await;
+    stop_all_ports_recursively(client, "root").await?;
     Ok(())
+}
+
+/// Recursively walk every PG under `pg_id` and explicitly stop each
+/// input/output port via its own `/run-status` endpoint. Best-effort —
+/// failures (e.g. already stopped) are logged at debug and skipped.
+fn stop_all_ports_recursively<'a>(
+    client: &'a DynamicClient,
+    pg_id: &'a str,
+) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<()>> + Send + 'a>> {
+    Box::pin(async move {
+        // Recurse into child PGs first (depth-first) so a child's S2S
+        // receive plumbing is dismantled before its parent's delete.
+        let entity = client
+            .processgroups()
+            .get_process_groups(pg_id)
+            .await
+            .map_err(|e| SeederError::Api {
+                message: format!("list child PGs of {pg_id} for port-stop walk"),
+                source: Box::new(e),
+            })?;
+        for child in entity.process_groups.unwrap_or_default() {
+            let Some(child_id) = child
+                .component
+                .as_ref()
+                .and_then(|c| c.id.clone())
+                .or_else(|| child.id.clone())
+            else {
+                continue;
+            };
+            stop_all_ports_recursively(client, &child_id).await?;
+        }
+
+        // Stop input ports in this PG.
+        let inputs = client
+            .processgroups()
+            .get_input_ports(pg_id)
+            .await
+            .map_err(|e| SeederError::Api {
+                message: format!("list input ports of {pg_id}"),
+                source: Box::new(e),
+            })?;
+        for port in inputs.input_ports.unwrap_or_default() {
+            let Some(port_id) = port
+                .component
+                .as_ref()
+                .and_then(|c| c.id.clone())
+                .or_else(|| port.id.clone())
+            else {
+                continue;
+            };
+            let mut body = types::PortRunStatusEntity::default();
+            body.state = Some("STOPPED".to_string());
+            body.revision = port.revision.clone();
+            if let Err(e) = client.inputports().update_run_status(&port_id, &body).await {
+                tracing::debug!(%port_id, error = %e, "input port stop failed (may already be stopped)");
+            }
+        }
+
+        // Stop output ports in this PG.
+        let outputs = client
+            .processgroups()
+            .get_output_ports(pg_id)
+            .await
+            .map_err(|e| SeederError::Api {
+                message: format!("list output ports of {pg_id}"),
+                source: Box::new(e),
+            })?;
+        for port in outputs.output_ports.unwrap_or_default() {
+            let Some(port_id) = port
+                .component
+                .as_ref()
+                .and_then(|c| c.id.clone())
+                .or_else(|| port.id.clone())
+            else {
+                continue;
+            };
+            let mut body = types::PortRunStatusEntity::default();
+            body.state = Some("STOPPED".to_string());
+            body.revision = port.revision.clone();
+            if let Err(e) = client
+                .outputports()
+                .update_run_status(&port_id, &body)
+                .await
+            {
+                tracing::debug!(%port_id, error = %e, "output port stop failed (may already be stopped)");
+            }
+        }
+
+        Ok(())
+    })
+}
+
+/// Recursively walk every PG under `pg_id` and set `transmitting=false`
+/// on each Remote Process Group. An RPG with `transmitting=true` keeps
+/// its internal input-port mapping in a "running" state; the mapping is
+/// the destination of an internal `PROCESSOR -> REMOTE_INPUT_PORT`
+/// connection (not visible via `/connections/`). Cascade-delete of the
+/// parent PG fails with 409 "Destination of Connection X is running"
+/// where X is the mapping's id. The bulk `schedule_components(STOPPED)`
+/// call doesn't reach RPG transmission state — only the per-RPG
+/// `/run-status` endpoint does. Stop them explicitly here.
+fn stop_all_rpgs_recursively<'a>(
+    client: &'a DynamicClient,
+    pg_id: &'a str,
+) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<()>> + Send + 'a>> {
+    Box::pin(async move {
+        let entity = client
+            .processgroups()
+            .get_process_groups(pg_id)
+            .await
+            .map_err(|e| SeederError::Api {
+                message: format!("list child PGs of {pg_id} for RPG-stop walk"),
+                source: Box::new(e),
+            })?;
+        for child in entity.process_groups.unwrap_or_default() {
+            let Some(child_id) = child
+                .component
+                .as_ref()
+                .and_then(|c| c.id.clone())
+                .or_else(|| child.id.clone())
+            else {
+                continue;
+            };
+            stop_all_rpgs_recursively(client, &child_id).await?;
+        }
+
+        let rpgs = client
+            .processgroups()
+            .get_remote_process_groups(pg_id)
+            .await
+            .map_err(|e| SeederError::Api {
+                message: format!("list RPGs of {pg_id}"),
+                source: Box::new(e),
+            })?;
+        for rpg in rpgs.remote_process_groups.unwrap_or_default() {
+            let transmitting = rpg
+                .component
+                .as_ref()
+                .and_then(|c| c.transmitting)
+                .unwrap_or(false);
+            if !transmitting {
+                continue;
+            }
+            let Some(rpg_id) = rpg
+                .component
+                .as_ref()
+                .and_then(|c| c.id.clone())
+                .or_else(|| rpg.id.clone())
+            else {
+                continue;
+            };
+
+            // Re-fetch revision — the bulk schedule_components above may
+            // have advanced it.
+            let current = client
+                .remoteprocessgroups()
+                .get_remote_process_group(&rpg_id)
+                .await
+                .map_err(|e| SeederError::Api {
+                    message: format!("get RPG {rpg_id} for revision"),
+                    source: Box::new(e),
+                })?;
+            let revision = current.revision.unwrap_or_default();
+
+            let mut body = types::RemotePortRunStatusEntity::default();
+            body.revision = Some(revision);
+            body.state = Some(
+                types::RemotePortRunStatusEntityState::Stopped
+                    .as_str()
+                    .to_string(),
+            );
+
+            if let Err(e) = client
+                .remoteprocessgroups()
+                .update_remote_process_group_run_status(&rpg_id, &body)
+                .await
+            {
+                tracing::debug!(%rpg_id, error = %e, "stop RPG failed (may already be stopped)");
+            }
+        }
+
+        Ok(())
+    })
 }
 
 async fn disable_all_controller_services(client: &DynamicClient) -> Result<()> {
@@ -220,54 +413,102 @@ async fn disable_all_controller_services(client: &DynamicClient) -> Result<()> {
 }
 
 async fn delete_all_child_pgs(client: &DynamicClient) -> Result<()> {
-    let entity = client
-        .processgroups()
-        .get_process_groups("root")
-        .await
-        .map_err(|e| SeederError::Api {
-            message: "list root child PGs".into(),
-            source: Box::new(e),
-        })?;
+    // Multi-pass delete handles the race between `schedule_components(STOPPED)`
+    // (fire-and-forget) and the per-PG remove call: NiFi rejects deletion of
+    // a PG whose connections' destination ports/processors are still
+    // transitioning from RUNNING to STOPPED with "Destination of Connection
+    // X is running". The error is transient — within a few hundred ms the
+    // stop propagates cluster-wide. Each pass refetches the surviving PGs
+    // and retries; if a pass makes no progress we surface the last error.
+    const MAX_PASSES: usize = 12;
+    const STALL_THRESHOLD: usize = 4; // consecutive passes with no progress
+    let mut last_error: Option<Box<dyn std::error::Error + Send + Sync>> = None;
+    let mut stalled = 0usize;
 
-    let pgs = entity.process_groups.unwrap_or_default();
-    for pg in pgs {
-        let Some(id) = pg
-            .component
-            .as_ref()
-            .and_then(|c| c.id.clone())
-            .or_else(|| pg.id.clone())
-        else {
-            continue;
-        };
-
-        // Empty all connections under this PG before deleting — NiFi
-        // refuses to delete PGs whose connections still have queued
-        // flowfiles (e.g. the backpressure fixture queue). The
-        // empty-all-connections request is fire-and-forget; flowfiles
-        // drop within ~100ms.
-        if let Err(e) = client
+    for attempt in 0..MAX_PASSES {
+        let entity = client
             .processgroups()
-            .create_empty_all_connections_request(&id)
-            .await
-        {
-            tracing::debug!(%id, error = %e, "empty-all-connections request failed; continuing");
-        }
-
-        let version = pg
-            .revision
-            .as_ref()
-            .and_then(|r| r.version)
-            .map(|v| v.to_string());
-        client
-            .processgroups()
-            .remove_process_group(&id, version.as_deref(), None, None)
+            .get_process_groups("root")
             .await
             .map_err(|e| SeederError::Api {
-                message: format!("delete process group {id}"),
+                message: "list root child PGs".into(),
                 source: Box::new(e),
             })?;
+
+        let pgs = entity.process_groups.unwrap_or_default();
+        if pgs.is_empty() {
+            return Ok(());
+        }
+
+        let mut progress = false;
+        for pg in pgs {
+            let Some(id) = pg
+                .component
+                .as_ref()
+                .and_then(|c| c.id.clone())
+                .or_else(|| pg.id.clone())
+            else {
+                continue;
+            };
+
+            // Empty all connections under this PG before deleting — NiFi
+            // refuses to delete PGs whose connections still have queued
+            // flowfiles (e.g. the backpressure fixture queue). The
+            // empty-all-connections request is fire-and-forget; flowfiles
+            // drop within ~100ms.
+            if let Err(e) = client
+                .processgroups()
+                .create_empty_all_connections_request(&id)
+                .await
+            {
+                tracing::debug!(%id, error = %e, "empty-all-connections request failed; continuing");
+            }
+
+            let version = pg
+                .revision
+                .as_ref()
+                .and_then(|r| r.version)
+                .map(|v| v.to_string());
+            match client
+                .processgroups()
+                .remove_process_group(&id, version.as_deref(), None, None)
+                .await
+            {
+                Ok(_) => {
+                    progress = true;
+                }
+                Err(e) => {
+                    tracing::debug!(%id, error = %e, "delete PG retry; component still stopping");
+                    last_error = Some(Box::new(e));
+                }
+            }
+        }
+
+        if progress {
+            stalled = 0;
+        } else {
+            stalled += 1;
+            if stalled >= STALL_THRESHOLD {
+                return Err(SeederError::Api {
+                    message: format!(
+                        "delete child PGs (no progress on {STALL_THRESHOLD} consecutive passes; \
+                         last attempt was pass {attempt})"
+                    ),
+                    source: last_error
+                        .unwrap_or_else(|| Box::new(std::io::Error::other("no error captured"))),
+                });
+            }
+        }
+
+        // Pause before the next pass — gives NiFi time to propagate the
+        // stop across the cluster before we retry survivors.
+        tokio::time::sleep(Duration::from_secs(1)).await;
     }
-    Ok(())
+
+    Err(SeederError::Api {
+        message: format!("delete child PGs (exceeded {MAX_PASSES} passes)"),
+        source: last_error.unwrap_or_else(|| Box::new(std::io::Error::other("no error captured"))),
+    })
 }
 
 async fn delete_all_root_controller_services(client: &DynamicClient) -> Result<()> {

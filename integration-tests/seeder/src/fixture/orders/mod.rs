@@ -38,7 +38,7 @@ use crate::entities::{make_processor, props};
 use crate::error::Result;
 use crate::fixture::common::{
     create_child_pg, create_connection_between, create_connection_in_pg, create_output_port,
-    create_processor, start_output_port, start_processor, wait_for_valid,
+    create_processor, start_input_port, start_output_port, start_processor, wait_for_valid,
 };
 use crate::fixture::custom_text_property_key;
 use crate::fixture::parameter_contexts::{self, OrdersContextIds};
@@ -136,7 +136,25 @@ pub async fn seed(
     )
     .await?;
 
-    tracing::info!("orders-pipeline topology seeded; ports & processors started by sub-modules");
+    // Start every cross-PG border port AFTER cross-PG wiring is in place.
+    // NiFi rejects start_input_port on a port with no incoming parent-level
+    // connection ("Port has no incoming connections"), and likewise for
+    // output ports lacking outgoing parent-level connections; the child
+    // seed functions therefore intentionally leave their border ports
+    // STOPPED. Order: terminal consumers first (downstream-first), then
+    // intermediate ports, then the source.
+    start_input_port(client, &sink_eu.in_port_id).await?;
+    start_input_port(client, &sink_us.in_port_id).await?;
+    start_input_port(client, &sink_apac.in_port_id).await?;
+    start_input_port(client, &deadletter.in_port_id).await?;
+    start_output_port(client, &transform.out_eu_port_id).await?;
+    start_output_port(client, &transform.out_us_port_id).await?;
+    start_output_port(client, &transform.out_apac_port_id).await?;
+    start_output_port(client, &transform.out_failed_port_id).await?;
+    start_input_port(client, &transform.incoming_port_id).await?;
+    start_output_port(client, &ingest.raw_orders_port_id).await?;
+
+    tracing::info!("orders-pipeline topology seeded and border ports started");
     Ok(())
 }
 
@@ -188,8 +206,11 @@ async fn build_ingest(
     )
     .await?;
 
-    // Start downstream first.
-    start_output_port(client, &raw_orders_port_id).await?;
+    // raw-orders output port intentionally NOT started here — it would
+    // fail validation ("no outgoing connections") since the parent-level
+    // ingest -> transform connection doesn't exist yet. orders::seed
+    // wires the cross-PG connections and starts every border port at
+    // the end.
     wait_for_valid(client, &gen_id, "GenerateFlowFile").await?;
     start_processor(client, &gen_id).await?;
 

@@ -13,8 +13,8 @@ use nifi_rust_client::dynamic::DynamicClient;
 use crate::entities::{make_processor, props};
 use crate::error::Result;
 use crate::fixture::common::{
-    create_child_pg, create_connection_in_pg, create_input_port, create_processor,
-    start_input_port, start_processor, wait_for_valid,
+    create_child_pg, create_connection_in_pg, create_input_port, create_processor, start_processor,
+    wait_for_valid,
 };
 use crate::fixture::orders::shared::{
     connect_processor_to_remote_input_port, create_remote_process_group, set_rpg_transmitting,
@@ -81,7 +81,9 @@ pub async fn seed(
 
     wait_for_valid(client, &tag_id, "UpdateAttribute-tag-region").await?;
     start_processor(client, &tag_id).await?;
-    start_input_port(client, &in_port_id).await?;
+    // in-eu input port intentionally not started here — the parent-level
+    // transform/out-eu -> sink-eu/in-eu connection is wired by orders::seed
+    // afterwards, which also starts every border port.
 
     tracing::info!(%pg_id, %rpg_id, "sink-eu seeded (RPG TRANSMITTING)");
     Ok(SinkEuIds { pg_id, in_port_id })

@@ -353,7 +353,7 @@ fn content_modal_opens_with_active_side_loading() {
     assert_eq!(fired.len(), 1);
     assert_eq!(fired[0].side, ContentSide::Input);
     assert_eq!(fired[0].offset, 0);
-    assert_eq!(fired[0].len, 524_288);
+    assert_eq!(fired[0].len, MODAL_CHUNK_BYTES);
 }
 
 #[test]

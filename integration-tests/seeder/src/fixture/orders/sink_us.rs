@@ -12,8 +12,8 @@ use nifi_rust_client::dynamic::DynamicClient;
 use crate::entities::{make_processor, props};
 use crate::error::Result;
 use crate::fixture::common::{
-    create_child_pg, create_connection_in_pg, create_input_port, create_processor,
-    start_input_port, start_processor, wait_for_valid,
+    create_child_pg, create_connection_in_pg, create_input_port, create_processor, start_processor,
+    wait_for_valid,
 };
 use crate::fixture::parameter_contexts::{self, OrdersContextIds};
 use crate::fixture::services::create_and_enable_cs_inline;
@@ -175,7 +175,8 @@ pub async fn seed(
         wait_for_valid(client, id, name).await?;
         start_processor(client, id).await?;
     }
-    start_input_port(client, &in_port_id).await?;
+    // in-us input port intentionally not started here — orders::seed
+    // wires the parent-level connection and starts border ports.
 
     Ok(SinkUsIds { pg_id, in_port_id })
 }

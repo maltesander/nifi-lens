@@ -75,7 +75,11 @@ pub async fn apply_break(
 
     // Build a parameter-context update entity carrying just the one mutated
     // parameter. NiFi diffs against the current state and only acts on the
-    // delta.
+    // delta — but the inheritance chain must be repeated explicitly: a
+    // missing `inherited_parameter_contexts` field is interpreted as
+    // "clear inheritance", which would try to remove every parameter
+    // inherited from fixture-pc-platform and fail with a 409 when any of
+    // those is referenced by a running component.
     let mut new_param_dto = types::ParameterDto::default();
     new_param_dto.name = Some("usd_rate".to_string());
     new_param_dto.value = Some(BROKEN_USD_RATE.to_string());
@@ -87,6 +91,10 @@ pub async fn apply_break(
     let mut update_dto = types::ParameterContextDto::default();
     update_dto.id = Some(orders_context_id.to_string());
     update_dto.parameters = Some(vec![new_param]);
+    update_dto.inherited_parameter_contexts = current
+        .component
+        .as_ref()
+        .and_then(|c| c.inherited_parameter_contexts.clone());
 
     let mut entity = types::ParameterContextEntity::default();
     entity.id = Some(orders_context_id.to_string());

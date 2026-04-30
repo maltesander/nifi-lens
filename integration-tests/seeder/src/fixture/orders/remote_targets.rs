@@ -9,11 +9,10 @@
 
 use nifi_rust_client::dynamic::DynamicClient;
 
-use crate::entities::{make_processor, props};
-use crate::error::Result;
+use crate::entities::{make_port, make_processor, props};
+use crate::error::{Result, SeederError};
 use crate::fixture::common::{
-    create_connection_in_pg, create_input_port, create_processor, start_input_port,
-    start_processor, wait_for_valid,
+    create_connection_in_pg, create_processor, start_input_port, start_processor, wait_for_valid,
 };
 
 pub async fn seed(client: &DynamicClient, pg_id: &str) -> Result<(String, String)> {
@@ -26,7 +25,32 @@ pub async fn seed(client: &DynamicClient, pg_id: &str) -> Result<(String, String
 }
 
 async fn build_target(client: &DynamicClient, pg_id: &str, port_name: &str) -> Result<String> {
-    let port_id = create_input_port(client, pg_id, port_name).await?;
+    // Nested input ports inside a child PG normally need a parent-level
+    // incoming connection to start (NiFi rejects start_input_port with
+    // "Port has no incoming connections" otherwise). Setting
+    // allow_remote_access = true marks the port as a Site-to-Site receive
+    // endpoint — S2S provides the implicit input source, so NiFi both
+    // exposes the port for RPG discovery via handshake AND allows it to
+    // start without local incoming wiring.
+    let mut body = make_port(port_name);
+    if let Some(component) = body.component.as_mut() {
+        component.allow_remote_access = Some(true);
+    }
+    let created = client
+        .processgroups()
+        .create_input_port(pg_id, &body)
+        .await
+        .map_err(|e| SeederError::Api {
+            message: format!("create remote-accessible input port {port_name}"),
+            source: Box::new(e),
+        })?;
+    let port_id = created
+        .component
+        .and_then(|c| c.id)
+        .or(created.id)
+        .ok_or_else(|| SeederError::Invariant {
+            message: format!("input port {port_name} has no id"),
+        })?;
     let log_id = create_processor(
         client,
         pg_id,

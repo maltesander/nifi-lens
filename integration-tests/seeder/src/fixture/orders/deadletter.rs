@@ -14,8 +14,8 @@ use nifi_rust_client::dynamic::DynamicClient;
 use crate::entities::{make_processor, props};
 use crate::error::Result;
 use crate::fixture::common::{
-    create_child_pg, create_connection_in_pg, create_input_port, create_processor,
-    start_input_port, start_processor, wait_for_valid,
+    create_child_pg, create_connection_in_pg, create_input_port, create_processor, start_processor,
+    wait_for_valid,
 };
 
 pub struct DeadletterIds {
@@ -56,7 +56,8 @@ pub async fn seed(client: &DynamicClient, orders_pg_id: &str) -> Result<Deadlett
 
     wait_for_valid(client, &log_id, "LogAttribute-WARN").await?;
     start_processor(client, &log_id).await?;
-    start_input_port(client, &in_port_id).await?;
+    // in-failed input port intentionally not started here — orders::seed
+    // wires the parent-level connection and starts border ports.
 
     Ok(DeadletterIds { pg_id, in_port_id })
 }

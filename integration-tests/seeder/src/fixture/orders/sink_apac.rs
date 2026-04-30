@@ -14,8 +14,8 @@ use nifi_rust_client::dynamic::DynamicClient;
 use crate::entities::{make_processor, props};
 use crate::error::Result;
 use crate::fixture::common::{
-    create_child_pg, create_connection_in_pg, create_input_port, create_processor,
-    start_input_port, start_processor, wait_for_valid,
+    create_child_pg, create_connection_in_pg, create_input_port, create_processor, start_processor,
+    wait_for_valid,
 };
 use crate::fixture::orders::shared::{
     connect_processor_to_remote_input_port, create_remote_process_group,
@@ -163,7 +163,8 @@ pub async fn seed(
         wait_for_valid(client, id, name).await?;
         start_processor(client, id).await?;
     }
-    start_input_port(client, &in_port_id).await?;
+    // in-apac input port intentionally not started here — orders::seed
+    // wires the parent-level connection and starts border ports.
 
     tracing::info!(%pg_id, %rpg_id, "sink-apac seeded (RPG idle)");
     Ok(SinkApacIds { pg_id, in_port_id })

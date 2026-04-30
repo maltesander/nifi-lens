@@ -20,7 +20,7 @@ use crate::entities::{make_processor, props};
 use crate::error::Result;
 use crate::fixture::common::{
     self, create_connection_in_pg, create_input_port, create_output_port, create_processor,
-    start_input_port, start_output_port, start_processor, wait_for_valid,
+    start_processor, wait_for_valid,
 };
 use crate::fixture::parameter_contexts::{self, OrdersContextIds};
 use crate::fixture::services::{self, ServiceIds};
@@ -164,9 +164,30 @@ pub async fn seed(
         make_processor(
             "UpdateAttribute-tag-retries",
             "org.apache.nifi.processors.attributes.UpdateAttribute",
+            // _audit_endpoint references a parameter from the platform
+            // tier (resolved via the orders -> platform inheritance chain
+            // — exercises chain-depth-2 cross-link annotation).
+            //
+            // We deliberately do NOT reference #{db_password} here even
+            // though the spec suggested it: NiFi rejects validation on
+            // any non-sensitive property that references a sensitive
+            // parameter ("Cannot reference a Sensitive Parameter from a
+            // non-sensitive property"). UpdateAttribute's dynamic
+            // properties are non-sensitive by descriptor design, so the
+            // sensitive [S] flag's UX coverage stays in the parameter-
+            // context modal where the flag is visible regardless of
+            // processor references.
+            // Also set a `region_filter` flowfile attribute by resolving
+            // the parameter — the downstream RouteOnAttribute reads
+            // `${region_filter}` (NiFi EL flowfile-attribute syntax),
+            // not `#{region_filter}` (parameter syntax). At the
+            // transform tier the parameter resolves to "EU,US,APAC",
+            // so all three regional predicates match and NiFi clones
+            // the flowfile to all three regional output ports.
             props(&[
                 ("_max_retries", "#{retry_max}"),
-                ("_secret", "#{db_password}"),
+                ("_audit_endpoint", "#{audit_log_endpoint}"),
+                ("region_filter", "#{region_filter}"),
             ]),
             None,
             vec![],
@@ -327,11 +348,10 @@ pub async fn seed(
     )
     .await?;
 
-    // Start downstream-first.
-    start_output_port(client, &out_eu_port_id).await?;
-    start_output_port(client, &out_us_port_id).await?;
-    start_output_port(client, &out_apac_port_id).await?;
-    start_output_port(client, &out_failed_port_id).await?;
+    // Border ports (incoming-orders + the four out-* ports) are NOT
+    // started here — they need the cross-PG wiring orders::seed adds
+    // afterwards. orders::seed starts every border port once the
+    // parent-level connections are in place.
     for (id, name) in [
         (&route_id, "RouteOnAttribute-region"),
         (&tag_retries_id, "UpdateAttribute-tag-retries"),
@@ -344,7 +364,6 @@ pub async fn seed(
         wait_for_valid(client, id, name).await?;
         start_processor(client, id).await?;
     }
-    start_input_port(client, &incoming_port_id).await?;
 
     Ok(TransformIds {
         pg_id,
