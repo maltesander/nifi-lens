@@ -22,12 +22,6 @@
 //!
 //! Mutation of the orders parameter context for `--break-after` is
 //! wired by `fixture::seed` (Task 13); see `orders::break_::apply_break`.
-//!
-//! Module-level allow(dead_code) covers the multi-task build-up: the
-//! submodule stubs return SeederError::Invariant until tasks 6-12 fill
-//! them in. Remove this attribute in Task 13 once `fixture::seed` calls
-//! `orders::seed` and every field/function becomes reachable.
-#![allow(dead_code)]
 
 pub mod break_; // `break` is a Rust keyword; use `break_`
 pub mod deadletter;

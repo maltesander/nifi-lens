@@ -25,7 +25,11 @@ use crate::marker::FIXTURE_MARKER_NAME;
 /// Top-level seed entry point. Creates the marker PG and populates it
 /// with the full fixture topology. Assumes the cluster has already been
 /// nuke-and-repaved (or is fresh).
-pub async fn seed(client: &DynamicClient, detected_version: &semver::Version) -> Result<()> {
+pub async fn seed(
+    client: &DynamicClient,
+    detected_version: &semver::Version,
+    break_after: std::time::Duration,
+) -> Result<()> {
     tracing::info!("ensuring registry-client and fixture bucket");
     let registry_ids = registry::seed(client).await?;
 
@@ -50,9 +54,15 @@ pub async fn seed(client: &DynamicClient, detected_version: &semver::Version) ->
             message: "fixture marker PG has no id".into(),
         })?;
 
-    tracing::info!("seeding parameter contexts");
+    // NEW orders-pipeline parameter contexts (alongside old fixture-pc-base/-prod).
+    tracing::info!("seeding orders parameter contexts");
+    let orders_ctx = parameter_contexts::seed(client).await?;
+
+    // OLD parameterized parameter contexts (still seeded for now; deleted in phase 9).
+    tracing::info!("seeding legacy parameter contexts");
     let pc_ids = parameterized::seed_parameter_contexts(client).await?;
 
+    // OLD fixtures (still active so unmigrated tests keep working).
     healthy::seed(client, &marker_pg_id, &service_ids, detected_version).await?;
     noisy::seed(client, &marker_pg_id).await?;
     backpressure::seed(client, &marker_pg_id).await?;
@@ -63,6 +73,19 @@ pub async fn seed(client: &DynamicClient, detected_version: &semver::Version) ->
     parameterized::seed_parameterized_pipeline(client, &marker_pg_id, &pc_ids, detected_version)
         .await?;
     remote::seed(client, &marker_pg_id).await?;
+
+    // NEW orders-pipeline.
+    orders::seed(
+        client,
+        &marker_pg_id,
+        &orders_ctx,
+        &service_ids,
+        detected_version,
+    )
+    .await?;
+
+    // Phase 8: --break-after sleep + parameter mutation.
+    orders::break_::apply_break(client, &orders_ctx.orders_id, break_after).await?;
 
     tracing::info!("fixture seed complete");
     Ok(())
