@@ -15,9 +15,7 @@
 //! ```
 //!
 //! The middle region shows the empty-state help text when there are
-//! no results and no active query. Task 10 lays the filter bar + empty
-//! state + running/failed placeholders; Tasks 11 and 12 add the real
-//! results list and detail pane.
+//! no results and no active query.
 
 use std::time::SystemTime;
 

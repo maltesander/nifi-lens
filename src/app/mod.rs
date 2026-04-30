@@ -92,7 +92,7 @@ pub async fn run(
         // send a follow-up `ClusterChanged` via `tx`. Intercept those
         // variants here, apply them to `AppState.cluster`, and fan out
         // `ClusterChanged` on the same channel so view reducers can
-        // re-derive (Task 1 is a no-op; Tasks 3/5/7 wire reducers).
+        // re-derive.
         let event = match event {
             AppEvent::ClusterUpdate(update) => {
                 let endpoint = state.cluster.apply_update(update);
@@ -120,11 +120,10 @@ pub async fn run(
                 use crate::cluster::ClusterEndpoint;
                 // Overview cares about eight cluster endpoints (all read-
                 // model fields plus Bulletins for the sparkline +
-                // noisy-components leaderboard). Task 8 added
-                // ControllerStatus, SystemDiagnostics, and About —
-                // previously Overview-worker-owned. Task 16/17 adds
-                // ClusterNodes for the per-node membership join.
-                // Task 15 adds TlsCerts for per-node cert expiry.
+                // noisy-components leaderboard), including
+                // ControllerStatus, SystemDiagnostics, About, ClusterNodes
+                // for the per-node membership join, and TlsCerts for
+                // per-node cert expiry.
                 let affects_overview = matches!(
                     endpoint,
                     ClusterEndpoint::RootPgStatus
@@ -136,7 +135,7 @@ pub async fn run(
                         | ClusterEndpoint::ClusterNodes
                         | ClusterEndpoint::TlsCerts
                 );
-                // `VersionControl` is intentionally NOT in this set — Task 13 wires it
+                // `VersionControl` is intentionally NOT in this set — it is wired
                 // via a separate `affects_browser_version_control` flag that triggers
                 // the cheap `redraw_version_control` re-stamp (FlowIndex.version_state)
                 // rather than a full arena rebuild.

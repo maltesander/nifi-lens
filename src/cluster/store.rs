@@ -1,6 +1,5 @@
-//! The central store. Task 1 ships the skeleton: type, empty fetcher
-//! spawn list, shutdown. Later tasks (2–8) add one fetch task per
-//! endpoint.
+//! The central store: owns one fetch task per endpoint and orchestrates
+//! their lifecycle (spawn, force-refresh, shutdown).
 
 use std::sync::Arc;
 

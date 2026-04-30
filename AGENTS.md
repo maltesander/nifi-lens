@@ -3,15 +3,14 @@
 ## Project Overview
 
 `nifi-lens` is a keyboard-driven terminal UI for observing and debugging
-Apache NiFi 2.x clusters. It is powered by
-[`nifi-rust-client`](https://docs.rs/nifi-rust-client) used exclusively via
-the `dynamic` feature, so one binary works against every supported NiFi
-version. v0.1 is read-only, multi-cluster (kubeconfig-style context
-switching), and forensics-focused — explicitly a *lens*, not a canvas
-replacement.
+Apache NiFi 2.x clusters, powered by
+[`nifi-rust-client`](https://docs.rs/nifi-rust-client) via the `dynamic`
+feature so one binary works against every supported NiFi version. v0.x
+is read-only, multi-cluster (kubeconfig-style context switching), and
+forensics-focused — explicitly a *lens*, not a canvas replacement.
 
-Top-level tabs (in order): **Overview**, **Bulletins**, **Browser**,
-**Events**, **Tracer**.
+Top-level tabs: **Overview**, **Bulletins**, **Browser**, **Events**,
+**Tracer**.
 
 ## Repository Layout
 
@@ -60,12 +59,10 @@ nifi-lens/
 - **View-local workers** handle on-demand detail fetches (Browser
   `/processors/{id}`, Tracer provenance queries, Events content
   fetches). Spawned on tab activation, cancelled on tab switch via
-  `WorkerRegistry` (`src/app/worker.rs`) holding at most one
-  `JoinHandle<()>`. The same registry drives `cluster.subscribe(...)`
-  / `unsubscribe(...)` on tab change. Workers run via
-  `tokio::task::spawn_local` on the main-thread `LocalSet` (wired in
-  `src/lib.rs`) because `nifi-rust-client` dynamic traits return
-  `!Send` futures.
+  `WorkerRegistry` (`src/app/worker.rs`); the same registry drives
+  `cluster.subscribe(...)` / `unsubscribe(...)` on tab change. Workers
+  run via `tokio::task::spawn_local` on the main-thread `LocalSet`
+  because `nifi-rust-client` dynamic traits return `!Send` futures.
 - **Intent dispatcher** handles one-shot actions (trace a UUID, drill
   into a PG, fetch event content, submit a provenance query). Tasks
   push results back via the same channel.
@@ -132,21 +129,22 @@ exists partly to surface and drive those library improvements. See
 
 ### Intent pipeline
 
-All user actions route through a single `Intent` enum and a
-dispatcher. Write variants exist from day one so a later write-capable
-build doesn't require restructuring, but no key binding constructs
-them in v0.1 and `IntentDispatcher::handle_pure` returns
+All user actions route through a single `Intent` enum and a dispatcher.
+Write variants exist from day one (so a later write-capable build does
+not require restructuring), but no key binding constructs them in
+v0.x and `IntentDispatcher::handle_pure` returns
 `NifiLensError::WriteIntentRefused` for every write variant. The
 `--allow-writes` CLI flag is `#[arg(hide = true)]` and `lib.rs`
-rejects it at startup with a clear "writes not implemented" error
-before the runtime spins up — the dispatcher guard is
-defense-in-depth.
+rejects it at startup before the runtime spins up — the dispatcher
+guard is defense-in-depth.
 
 ### Error handling
 
 - **Library-style modules** (`config`, `client`, `intent`): `snafu`
   to match `nifi-rust-client`.
-- **Application edge**: `color-eyre` for pretty crash reports.
+- **Application edge**: errors bubble up to `lib::run()`, which prints
+  to stderr and returns a non-zero `ExitCode`. No pretty crash
+  formatter is currently installed.
 - **In-TUI errors**: transient status-line banner with optional
   detail modal (`Enter` expand, `Esc` dismiss). Never written to
   stdout while the TUI is active — it corrupts the terminal.
@@ -213,45 +211,30 @@ helpers" for reusable layout / modal / filter_bar / scroll helpers.
 
 ### Logging
 
-`tracing` + `tracing-subscriber` + `tracing-appender` write a
-daily-rotated log via `directories::ProjectDirs`:
-
-- Linux: `$XDG_STATE_HOME/nifilens/` (or `~/.local/state/nifilens/`)
-- macOS: `~/Library/Caches/nifilens/`
-- Windows: `%LOCALAPPDATA%\nifilens\cache\`
-
-Filename: `nifilens.log.YYYY-MM-DD` (per
-`tracing_appender::rolling::daily`). Follow the current day:
-
-```bash
-tail -f "$(ls -t ~/.local/state/nifilens/nifilens.log.* | head -1)"
-```
-
-Rotation is purely date-based (no automatic size pruning). Log
-directory is mode `0700` on Unix.
+`tracing` + `tracing-subscriber` + `tracing-appender` write a daily-rotated
+log under `directories::ProjectDirs` (Linux: `$XDG_STATE_HOME/nifilens/`;
+macOS: `~/Library/Caches/nifilens/`; Windows: `%LOCALAPPDATA%\nifilens\cache\`).
+Filename `nifilens.log.YYYY-MM-DD`; rotation is date-based (no automatic
+size pruning); directory is mode `0700` on Unix.
 
 Level resolution (highest precedence first): `--log-level`, `--debug`
 (= debug), `NIFILENS_LOG`, `RUST_LOG`, default `info`. Filter applies
 to the `nifi_lens` target; library logs need their own directive.
-
 **Never** writes to stdout/stderr while the TUI is active.
 
 ### Overview Components panel
 
 3-row aligned `Components` table: **Process groups** / **Processors**
-/ **Controller services**. Each row carries a total plus per-type
-detail (per-state counts for processors and CSes; version-sync
-drift plus input/output port counts for PGs). PG row collapses its
-versioning
-slot to `all in sync` when no PG is stale/locally-modified/sync-failed;
-otherwise expands to three numeric slots. Display-only — no focus.
+/ **Controller services**, each with a total plus per-type detail
+(state counts for processors and CSes; version-sync drift + port
+counts for PGs). PG version slot collapses to `all in sync` when no
+PG is stale/locally-modified/sync-failed. Display-only — no focus.
 
 Data sources: processor / PG / port counts from `root_pg_status`;
 version-sync from `controller_status`; CS counts from
-`ClusterEndpoint::ControllerServices` running
-`get_controller_services_from_group("root", false, true, false, None)`.
-That fetch is **non-fatal** — failure degrades the CS row to a
-`cs list unavailable` chip while other rows still render.
+`ClusterEndpoint::ControllerServices`. The CS fetch is **non-fatal**
+— failure degrades the row to a `cs list unavailable` chip while
+the rest still render.
 
 ### Overview Nodes panel
 
@@ -264,13 +247,12 @@ return 409 on `/controller/cluster`; the fetcher transparently
 serves an empty snapshot and the panel degrades to 4-col.
 
 `error_is_standalone_409` (`cluster/fetcher_tasks.rs`) detects this
-via the error's debug repr, matching three markers: literal
-`"409"`, explicit `NotClustered` variant, OR the canonical NiFi
-message text "Only a node connected to a cluster". The third
-matcher is necessary because `nifi-rust-client` 0.11.0 maps NiFi
-2.6.0's 409 to a `NotFound` whose debug repr contains the message
-but not the status code. If any match, the fetcher serves an empty
-snapshot; otherwise the endpoint shows `Failed`.
+via the error's debug repr, matching `"409"`, the `NotClustered`
+variant, or the canonical NiFi message "Only a node connected to a
+cluster" (the last is needed because some `nifi-rust-client` versions
+map the 409 to `NotFound` without the status code in the repr). On
+match the fetcher serves an empty snapshot; otherwise the endpoint
+shows `Failed`.
 
 Detail modal (`Enter` on a node): four-quadrant dashboard —
 identity header (badge + status + roles + heartbeat age + node_id +
@@ -343,83 +325,54 @@ Multi-ref values (`#{a}#{b}`) annotate but open without a preselect.
 
 ### Remote Process Groups
 
-Snapshot data for RPGs piggybacks the `RootPgStatus` recursive walk —
-`walk_pg_nodes` emits `NodeKind::RemoteProcessGroup` leaves under their
-parent PG using the snapshot's `remoteProcessGroupStatusSnapshots`.
-On-demand detail is fetched via
-`client.remoteprocessgroups().get_remote_process_group(id)` (wired
-through `BrowserViewWorker` on selection). Sparkline data comes from
-`flow().get_remote_process_group_status_history(id)` (same periodic
-worker as other kinds).
+RPGs ride on the `RootPgStatus` recursive walk
+(`remoteProcessGroupStatusSnapshots` produces `NodeKind::RemoteProcessGroup`
+leaves under their parent PG). On-demand detail and sparkline history
+go through the same view-local worker as other kinds.
 
-Tree row prefix glyph: `▶` in accent style for `TRANSMITTING` status,
-`■` muted otherwise (`widget::run_icon::transmission_icon`). Body shows
-the RPG name followed by a `→ target_uri` chip. There is no ports count
-chip on the tree row — port counts are only available from the on-demand
-detail, not the snapshot.
+Tree row glyph (`widget::run_icon::transmission_icon`): `▶` accent for
+`TRANSMITTING`, `■` muted otherwise; body shows name + `→ target_uri`
+chip. Identity pane lists name, parent PG (cross-link), target URI
+(prefers plural `targetUris`, falls back to legacy `target_uri`),
+target-secure flag, transport protocol, transmission/validation
+status. Below the header: optional Validation errors sub-panel
+(capped at `layout::VALIDATION_ERROR_ROWS_MAX`), then Input ports
+and Output ports tables. Tab/Shift+Tab cycle the focusable sub-panels
+(validation errors → input ports → output ports); `c` copies the
+focused row. Port rows are not arena nodes — Enter does not descend.
 
-Identity pane (rendered by the RPG render arm in `src/view/browser/`):
-header rows for name, parent PG (cross-link `→` resolves via
-`resolve_id`), target URI (prefers the newer plural `targetUris` field,
-falls back to the legacy singular `target_uri`), target-secure flag,
-transport protocol, transmission status, and validation status. A
-Validation errors sub-panel appears below the header only when errors
-are present; row count capped at `layout::VALIDATION_ERROR_ROWS_MAX`.
-Below that, an Input ports table and an Output ports table list the
-remote ports the target NiFi exposes. Detail fetches flow through the
-global `IntentOutcome` banner on failure — no inline `last_error` chip
-in the Identity header yet.
+Sparkline rows: `recv` (`receivedCount`), `sent` (`sentCount`),
+`rate` (`totalBytesPerSecond`). NiFi does not expose `activeThreads`
+for RPGs.
 
-Detail focus: Validation errors (when present), Input ports, and
-Output ports are focusable sub-panels — `Tab` / `Shift+Tab` cycle
-through them in that order via the standard `DetailFocus::Section`
-pipeline. `↑`/`↓` move the row cursor inside the focused panel; `c`
-copies the highlighted row (port name or validation message). Port
-rows are not arena nodes, so `Enter` does not descend; the Identity
-pane is not focusable.
+`connections_by_pg` reducer detects `REMOTE_INPUT_PORT` /
+`REMOTE_OUTPUT_PORT` connectables and writes the parent RPG's
+`group_id` (not the port UUID) into the connection's endpoints, so
+`BrowserState::resolve_id` cross-links to the RPG arena entry.
 
-Sparkline strip: three rows — `recv` (flowfiles received:
-`receivedCount` metric) / `sent` (flowfiles sent: `sentCount`) /
-`rate` (aggregate throughput: `totalBytesPerSecond`). NiFi does not
-emit an `activeThreads` metric for RPGs (confirmed against live data in
-Task 22); the third row is rate, not threads.
-
-Cross-link wiring: the `connections_by_pg` reducer detects
-`REMOTE_INPUT_PORT` / `REMOTE_OUTPUT_PORT` connectables and writes the
-parent RPG's `group_id` (not the port UUID) into the connection's
-`source_id` / `destination_id`. `BrowserState::resolve_id` then
-resolves the trailing `→` on connection endpoint rows to the RPG arena
-entry via the standard linear scan on `state.nodes`.
-
-Overview Components panel: a fourth `Remote PGs` row shows
-snapshot-derived `total / TRANSMIT / NOT-TX` slots (data from
-`RemoteProcessGroupCounts` inside `RootPgStatusSnapshot`).
-
-Fuzzy-find: `:rpg` filter alias narrows the `FlowIndex` corpus to
-RPG entries before nucleo scoring. RPGs are included in the index via
-the standard `apply_tree_snapshot` path; folders are still excluded.
+Overview Components has a `Remote PGs` row sourced from
+`RemoteProcessGroupCounts`. Fuzzy-find `:rpg` narrows the index to
+RPG entries.
 
 ### Bulletins ring buffer & detail modal
 
 Rolling in-memory window capped by `[bulletins] ring_size`
-(default 5000, range 100..=100_000; ~1–2 MB at default). Bulletins
-fetcher polls `flow_api().get_bulletin_board(after, limit=1000)`
-on `[polling.cluster] bulletins` (default 5s), dedups via the
-monotonic `id` cursor, drops from the front when over capacity.
+(default 5000, range 100..=100_000; ~1–2 MB at default). Fetcher polls
+`flow_api().get_bulletin_board(after, limit=1000)` on `[polling.cluster]
+bulletins` (default 5s), dedups via the monotonic `id` cursor, drops
+from the front at capacity.
 
-Rows are additionally deduplicated by `(source_id, message_stem)`
-— the reducer strips NiFi's `ComponentName[id=<uuid>]` prefix and
-normalizes dynamic `[...]` regions before hashing, so repeating
-errors collapse into a single row with `×N` count. Grouping mode
-cycled by `Shift+G` (`source+msg` / `source` / `off`). `g`
-triggers `AppAction::Jump` (cross-tab jump menu).
+Reducer additionally dedupes by `(source_id, message_stem)`: strips
+NiFi's `ComponentName[id=<uuid>]` prefix and normalises dynamic
+`[...]` regions, so repeating errors collapse into one row with
+`×N` count. `Shift+G` cycles grouping (`source+msg` / `source` / `off`);
+`g` triggers `AppAction::Jump`.
 
-`i` opens a full-screen **detail modal** with the full raw message.
-`Enter` is intentionally a no-op inside (committing search used to
-fall through to a Browser jump; use `g` on the main tab). The
-modal lives as `BulletinsState::detail_modal` (not an app-wide
-`Modal`); `open_detail_modal` snapshots `GroupKey` + `GroupDetails`
-so subsequent ring mutations don't disturb it.
+`i` opens the **detail modal** (full raw message). `Enter` is
+intentionally a no-op inside the modal. State lives on
+`BulletinsState::detail_modal` (not an app-wide `Modal`);
+`open_detail_modal` snapshots `GroupKey` + `GroupDetails` so subsequent
+ring mutations don't disturb it.
 
 ### Action history modal
 
@@ -444,88 +397,66 @@ row as TSV.
 
 ### Sparkline strip
 
-The Browser detail identity panel for processor / PG / connection
-rows includes a 3-line inline sparkline on the right half. Backed
-by `src/client/history.rs::status_history` which dispatches to the
-generated `get_*_status_history` functions and reduces
-`StatusHistoryEntity` to a metric-keyed `StatusHistorySeries`.
+The Browser detail identity panel for processor / PG / connection /
+RPG rows includes a 3-line inline sparkline on the right half. Backed
+by `src/client/history.rs::status_history`, which dispatches to the
+generated `get_*_status_history` functions and reduces to a
+metric-keyed `StatusHistorySeries`.
 
-State on `BrowserState::sparkline: Option<SparklineState>` plus
-`sparkline_handle: Option<JoinHandle<()>>`, re-created on every
-selection change to a supported kind via
-`AppState::refresh_sparkline_for_selection` (emits
-`PendingIntent::SpawnSparklineFetchLoop`). Selection changes to CS /
-Port / Folder tear down both. Worker
-(`spawn_sparkline_fetch_loop`) loops on
-`config.polling.cluster.status_history` (default `30s`); 404 maps
-to `AppEvent::SparklineEndpointMissing` (sticky per selection);
-other errors `warn!` and continue.
+State on `BrowserState::sparkline` + a `JoinHandle<()>`, re-created
+on every selection change to a supported kind via
+`AppState::refresh_sparkline_for_selection`. Selection changes to
+CS / Port / Folder tear down both. Worker loops on
+`config.polling.cluster.status_history` (default `30s`); 404 maps to
+`SparklineEndpointMissing` (sticky per selection); other errors
+`warn!` and continue. Reducer arms apply each emit only when
+`(kind, id)` matches the active selection (defends against stale
+emits between worker abort and exit).
 
-`reduce_status_history` reads `statusHistory.aggregateSnapshots`
-first; when empty (NiFi clustered mode often returns
-`aggregateSnapshots: []` and ships per-node series under
-`nodeSnapshots` without recomputing the aggregate), the reducer
-sums `nodeSnapshots[*].statusSnapshots` across nodes per
-timestamp. Emits one `tracing::debug!` per fetch distinguishing
-the two paths. Reducer arms in `app::state::update_inner` apply
-each emit only when `(kind, id)` matches the active selection —
-defends against stale emits between worker abort and exit.
-`UpdateResult` carries a `sparkline_followup: Option<PendingIntent>`
-that selection-change paths fold in alongside the primary intent.
+`reduce_status_history` reads `aggregateSnapshots` first, then falls
+back to summing `nodeSnapshots[*].statusSnapshots` across nodes per
+timestamp (NiFi clustered mode often returns an empty aggregate).
 
-Render via `widget::sparkline::render_sparkline_row` (label, glyphs,
-`peak N` suffix), three rows per kind: processor — in/out/task
-time; PG — in/out/queue count; connection — in/out/queue count;
-RPG — recv/sent/rate (`totalBytesPerSecond`).
+Three rows per kind: processor — in / out / task time; PG — in / out
+/ queue count; connection — in / out / queue count; RPG — recv / sent
+/ rate (`totalBytesPerSecond`).
 
-Layout is **content-driven, not percentage-driven**: renderer measures
-the natural rendered width of identity lines, places them on the left
-at exactly that width, leaves a 2-cell gap (`SPARKLINE_GAP_COLS`),
-gives the rest to the strip. Strip suppressed entirely when remainder
-is below `SPARKLINE_MIN_RIGHT_HALF_WIDTH` (12 cells). Sizing the left
-to actual content prevents the mid-truncation overlap
-(`5 iloading…`) the percentage split produced. No focus, no chord.
+Layout is **content-driven**: renderer measures identity-line width,
+places lines flush left, leaves a 2-cell gap (`SPARKLINE_GAP_COLS`),
+gives the remainder to the strip; suppressed entirely when remainder
+< `SPARKLINE_MIN_RIGHT_HALF_WIDTH` (12 cells). No focus, no chord.
 
 ### Tracer content viewer modal
 
 Full-screen modal opened with `i` on the Tracer Content sub-tab.
-State on `AppState.tracer.content_modal: Option<ContentModalState>`.
-While open the modal's `Verb::all()` drives the footer hint strip and
-help section, and the keymap shadows outer-tab keys.
+State on `AppState.tracer.content_modal`. While open the modal's
+`Verb::all()` drives the footer hint strip and the keymap shadows
+outer-tab keys.
 
-Streaming: `provenance_content_range(event_id, side, offset, len)`
-fetches 512 KiB chunks. A reducer auto-fires the next chunk when the
+Streaming via `provenance_content_range(event_id, side, offset, len)`
+in 512 KiB chunks; reducer auto-fires the next chunk when the
 viewport bottom comes within 100 lines of the decoded tail. Per-side
-ceilings via `[tracer.ceiling]` nested table (keys: `text`, `tabular`,
+ceilings live under `[tracer.ceiling]` (keys: `text`, `tabular`,
 `diff`; defaults `4 MiB` / `64 MiB` / `16 MiB`; `"0"` → unbounded).
-The legacy `modal_streaming_ceiling` flat key is honored for one
-release with a deprecation warn.
 
-Per-chunk classification uses
-`classify_text_or_hex_no_pretty` (UTF-8 check + hex fallback,
-no JSON parse) so chunk arrivals don't block the UI thread
-reformatting an in-progress buffer. JSON pretty-print runs **once**
-off-thread when the side is fully loaded, mirroring the tabular
-decode pipeline: `take_pending_json_pretty` → reducer emits
-`PendingIntent::PrettyPrintJson` → dispatcher
-`spawn_blocking(pretty_print_json)` → `TracerPayload::JsonPrettyPrinted`
-→ `apply_json_pretty_result`. `pretty_print_json` uses
-`serde_transcode` to pipe a `Deserializer` directly into a
-`Serializer::pretty`, avoiding the `serde_json::Value` round-trip
-(roughly 3× faster in release, much wider in debug; key side effect
-is that **object key order is preserved**, where the prior
-`Value`-based path alphabetised through `BTreeMap`). Tabular and
-JSON-pretty are mutually exclusive — tabular is detected by magic
-bytes, JSON by the `looks_like_json` ASCII sniff (`{` or `[` first
+Per-chunk classification uses `classify_text_or_hex_no_pretty` (UTF-8
+check + hex fallback, no JSON parse) so chunk arrivals don't block
+the UI thread. JSON pretty-print runs **once** off-thread when the
+side is fully loaded, dispatched the same way as tabular decode
+(reducer emits `PendingIntent::PrettyPrintJson` → `spawn_blocking` →
+`TracerPayload::JsonPrettyPrinted`). `pretty_print_json` uses
+`serde_transcode` to stream `Deserializer` → `Serializer::pretty`,
+avoiding the `serde_json::Value` round-trip — **object key order is
+preserved**. Tabular and JSON-pretty are mutually exclusive: tabular
+detected by magic bytes, JSON by `looks_like_json` (`{` or `[` first
 non-whitespace byte).
 
-Diff mode is bounded by `[tracer.ceiling] diff` and uses
-`similar::TextDiff::from_lines` with 3-line context. Diff
-eligibility: both sides available, MIME pair matches the allowlist
-(or UTF-8 fallback when neither declares MIME), declared size ≤ diff
-ceiling per side, non-identical bytes. `Ctrl+↓`/`Ctrl+↑` navigate
-changed regions; the hunk header (`@@ input Lx · output Ly @@`)
-appends `· N changes`.
+Diff mode bounded by `[tracer.ceiling] diff`, using
+`similar::TextDiff::from_lines` with 3-line context. Eligibility:
+both sides available, MIME pair in the allowlist (or UTF-8 fallback
+when neither declares MIME), per-side size ≤ diff ceiling,
+non-identical bytes. `Ctrl+↓` / `Ctrl+↑` navigate changes; hunk
+header `@@ input Lx · output Ly @@` appends `· N changes`.
 
 Search primitives (`MatchSpan`, `SearchState`, `compute_matches`)
 are shared with the Bulletins detail modal via `src/widget/search.rs`.
@@ -534,24 +465,21 @@ are shared with the Bulletins detail modal via `src/widget/search.rs`.
 
 `ContentRender::Tabular { format, schema_summary, body, decoded_bytes,
 truncated }` is produced when `classify_content` sees `PAR1` or
-`Obj\x01` magic. Decoders in `src/client/tracer/content.rs`:
-`decode_parquet` via `ParquetRecordBatchReaderBuilder` +
-`arrow::json::LineDelimitedWriter`; `decode_avro` via
-`apache_avro::Reader` + `from_value::<serde_json::Value>`. Decoder
-errors are caught inside `classify_content`, logged at `warn!`,
-surfaced as `Hex` — classifier signature stays infallible.
+`Obj\x01` magic. Decoders live in `src/client/tracer/content.rs`
+(Parquet via `ParquetRecordBatchReaderBuilder` +
+`arrow::json::LineDelimitedWriter`; Avro via `apache_avro::Reader`).
+Decoder errors are caught inside `classify_content`, logged at
+`warn!`, and surfaced as `Hex` — the classifier signature stays
+infallible.
 
-**Per-side ceiling** is resolved after the first chunk arrives
-(reducer sniffs magic, records on `SideBuffer.effective_ceiling`).
-Parquet's footer lives at EOF, so a ceiling-hit fetch cannot decode
-and falls back to `Hex` with a chip (`parquet truncated at N MiB
-— raise [tracer.ceiling] tabular or use "s" to save`). Avro is
-streamable and degrades via `truncated = true`.
+**Per-side ceiling** resolves after the first chunk arrives (reducer
+sniffs magic, records on `SideBuffer.effective_ceiling`). Parquet's
+footer lives at EOF, so a ceiling-hit fetch falls back to `Hex` with
+a chip; Avro is streamable and degrades via `truncated = true`.
 
-**Diff:** Tabular sides diff iff their `format` tags match. Diff
-input is `Tabular::body`; schema lines do not contribute hunks. The
-`diff` ceiling caps per-side input. Fixture chains live under
-`diff-pipeline` (see "Integration test fixture").
+**Diff:** tabular sides diff iff their `format` tags match. Diff
+input is `Tabular::body`; schema lines do not contribute hunks; the
+`diff` ceiling caps per-side input.
 
 ### Poll intervals
 
@@ -581,31 +509,26 @@ than inline `Color::*`/`Modifier::*` constructors.
 
 Shared helpers:
 
-- `src/widget/modal.rs` — `MIN_WIDTH` / `MIN_HEIGHT` constants,
-  `render_too_small()` size-gate helper, `render_verb_hint_strip<V:
-  Verb>()` footer hint strip. Used by every full-screen modal.
+- `src/widget/modal.rs` — `MIN_WIDTH` / `MIN_HEIGHT`,
+  `render_too_small()`, `render_verb_hint_strip<V: Verb>()`. Used by
+  every full-screen modal.
 - `src/widget/scroll.rs` — `VerticalScrollState` /
-  `BidirectionalScrollState` primitives composed by every full-screen
-  modal (scroll-by / page-up-down / jump-top-bottom / horizontal
-  math; callers hold dimensions and drive the widget).
+  `BidirectionalScrollState` (scroll, page, jump, horizontal math).
 - `src/widget/filter_bar.rs` — `FilterChip` + `build_chip_line` for
   horizontal chip rows (Events + Bulletins top rows).
 - `src/widget/search.rs` — `SearchState` + `compute_matches`, shared
   by every search-capable modal.
 - `src/layout.rs` — `split_header_body_footer` / `split_two_rows` /
   `split_two_cols`.
-- `src/bytes.rs` — `KIB` / `MIB` / `GIB` constants plus
-  `FIXTURE_HEAP_*` test baselines. Prefer over raw `N * 1024 * 1024`.
-- `src/client/status.rs` — `ProcessorStatus` +
-  `ControllerServiceState` typed enums. Use `from_wire(&str)` and
-  `style()` / `badge_style()` / `referencing_style()` / `icon()`
-  rather than matching on raw strings.
-- `src/timestamp.rs` — `format_age(Option<Duration>)` for
-  `SystemTime`-derived ages and `format_age_secs(u64)` for
-  already-computed second counts.
-- `src/test_support.rs` — `fresh_state` / `tiny_config`,
-  `default_fetch_duration()`, `test_backend(height)` (with
-  `TEST_BACKEND_WIDTH` / `_SHORT` / `_MEDIUM` / `_TALL` constants).
+- `src/bytes.rs` — `KIB` / `MIB` / `GIB` + `format_bytes` /
+  `format_bytes_int`. Prefer over raw `N * 1024 * 1024`.
+- `src/client/status.rs` — `ProcessorStatus` /
+  `ControllerServiceState` typed enums; use `from_wire`, `style`,
+  `icon`, etc. rather than matching raw strings.
+- `src/timestamp.rs` — `format_age` / `format_age_secs`.
+- `src/test_support.rs` — `fresh_state`, `tiny_config`,
+  `default_fetch_duration`, `test_backend(height)` and the
+  `TEST_BACKEND_*` width constants.
 
 Folders in the Browser tree are a **reducer-only** construct. The
 client walker emits a flat list of CS / queue / port / processor
@@ -632,17 +555,14 @@ resolve `parent` UUIDs to the owning PG's name display-only.
 
 Selected-relationships on connections are intentionally not surfaced
 in the processor Connections section: that data lives on
-`ConnectionDTO` (fetched by `browser_connection_detail`), not on
-the status snapshot the tree walker reads.
+`ConnectionDTO` (fetched by `browser_connection_detail`), not on the
+status snapshot the tree walker reads.
 
-Connection endpoint IDs (`source_id` / `destination_id` on
-`NodeStatusSummary::Connection`) are NOT populated by the recursive
-status endpoint — NiFi leaves them null on
-`ConnectionStatusSnapshotDto`. `browser_tree` therefore fires a
-parallel `/process-groups/{pg_id}/connections` fetch per PG after
-the status walk (`futures::future::join_all`), builds a
-`connection_id → (source_id, destination_id)` map, and backfills
-Connection rows. Per-PG failures are logged and skipped.
+Connection endpoint IDs are NOT populated by the recursive status
+endpoint — NiFi leaves `source_id` / `destination_id` null on
+`ConnectionStatusSnapshotDto`. The `connections_by_pg` fetcher
+backfills them via parallel per-PG `/process-groups/{id}/connections`
+calls; per-PG failures are logged and skipped.
 
 ### Queue listing panel
 
@@ -653,18 +573,16 @@ flow (`POST /flowfile-queues/{id}/listing-requests` → poll
 `GET /listing-requests/{request_id}` until `finished` → `DELETE`).
 
 State on `BrowserState::queue_listing`, re-spawned on every
-selection change to a Connection with `flow_files_queued > 0`. Its
-`QueueListingHandle` Drop impl fires-and-forgets `DELETE` against
-the recorded request id so server resources are freed regardless of
-how navigation away happens. NiFi's listing-request TTL is the
-safety net if Drop misses.
+selection change to a Connection with `flow_files_queued > 0`.
+`QueueListingHandle::drop` fires-and-forgets `DELETE` against the
+recorded request id to free server resources on any navigation; NiFi's
+listing-request TTL is the safety net if Drop misses.
 
-NiFi caps the listing at 100 rows server-side. `total > 100` shows
+NiFi caps the listing at 100 rows server-side; `total > 100` shows
 a `[100 / N]` truncation chip. Modal verbs (`BrowserQueueVerb`,
 `BrowserPeekVerb`) shadow outer-tab keys. Polling cadence is 500 ms
-(not user-configurable); `[browser] queue_listing_timeout` (default
-30s) and `queue_listing_age_warning` (default 5m, `0s` disables)
-are configurable.
+(not user-configurable); `[browser] queue_listing_timeout` (30s) and
+`queue_listing_age_warning` (5m, `0s` disables) are configurable.
 
 ### Fuzzy Find
 
@@ -767,47 +685,34 @@ integration-tests/nifilens-config.toml --context dev-nifi-2-9-0`.
 `--skip-if-seeded` makes re-runs a no-op when the fixture marker PG
 (`nifilens-fixture-v8`) is already present.
 
-**Fixture inventory** — top-level marker PG `nifilens-fixture-v8`
-contains 6 child PGs, 5 parameter contexts, 4 root-level CSes.
+**Fixture shape** — top-level marker PG `nifilens-fixture-v8` holds
+6 child PGs (`orders-pipeline/` centerpiece + `remote-targets/`
+sibling + four standalones for hard-to-reach states:
+`invalid-pipeline`, `backpressure-pipeline`, `versioned-clean`,
+`versioned-modified`), 5 parameter contexts in a 3-tier inheritance
+chain (`fixture-pc-platform` → `fixture-pc-orders` →
+`fixture-pc-region-{eu,us,apac}`), and 4 root-level CSes (two ENABLED
+JSON reader/writer used by `transform/`, two DISABLED/INVALID kept
+as modal-rendering exhibits). See `integration-tests/seeder/src/fixture/`
+for the authoritative layout.
 
-- Centerpiece: `orders-pipeline/` — `ingest` → `transform` → fan-out
-  to `sink-eu`, `sink-us`, `sink-apac`, `deadletter`. Plus a sibling
-  `remote-targets/` subtree with two S2S-receivable input ports.
-  Headline failure narrative: `transform/UpdateRecord-fx-rate` reads
-  `#{usd_rate}`; the seeder mutates that parameter to `"oops"` after
-  topology start (controlled by `--break-after`), routing every
-  flowfile to `deadletter` and producing the audit/bulletin/queue
-  evidence the demo investigates.
-- Retained standalones (each encodes a state hard to reach
-  mid-narrative): `invalid-pipeline`, `backpressure-pipeline`,
-  `versioned-clean`, `versioned-modified`.
-- Parameter contexts (3-tier inheritance): `fixture-pc-platform` →
-  `fixture-pc-orders` → `fixture-pc-region-{eu,us,apac}`. Bindings:
-  `ingest`→platform (depth 1), `transform`→orders (depth 2), each
-  regional sink→its `region-*` (depth 3). `usd_rate` lives on
-  `fixture-pc-orders`.
-- CSes (root-level): `fixture-json-reader`/`-writer` ENABLED (consumed
-  by `transform/`); `fixture-csv-reader` DISABLED and
-  `fixture-broken-writer` INVALID/DISABLED — both kept purely as
-  modal-rendering exhibits, not referenced by any processor. Format-
-  specific Parquet/Avro CSes are scoped inside `sink-us`/`sink-apac`.
-- Diff coverage: `transform/UpdateRecord-cancel-old` and
-  `mark-deleted` (JSON↔JSON), `transform/ConvertRecord-csv2json`
-  (JSON↔CSV grayed-out), `sink-us/UpdateRecord-parquet-tag`
-  (Parquet↔Parquet), `sink-apac/UpdateRecord-avro-tag` (Avro↔Avro).
-  Note: NiFi often reports `inputContentClaim == outputContentClaim`
-  on `CONTENT_MODIFIED` even when bytes differ — always fetch both
-  sides.
+**Headline narrative**: `transform/UpdateRecord-fx-rate` reads
+`#{usd_rate}` from `fixture-pc-orders`; the seeder mutates that
+parameter to `"oops"` after topology start (controlled by
+`--break-after`), routing every flowfile to `deadletter` and
+producing the audit / bulletin / queue evidence the demo investigates.
+Default `--break-after 0s` for CI; longer (`5m`, `30m`) for live
+demos. Mutation is value-gated and idempotent.
 
-`--break-after <duration>` (CLI flag on the seeder) controls the
-sleep between topology setup and the `usd_rate` mutation. Default
-`0s` for CI; longer (`5m`, `30m`) for live demos so the healthy state
-is observable before the break lands. The mutation is idempotent
-(value-gated), so re-runs against an already-broken fixture are
-no-ops.
+**Diff coverage**: JSON↔JSON (`UpdateRecord-cancel-old`,
+`mark-deleted`), JSON↔CSV grayed-out (`ConvertRecord-csv2json`),
+Parquet↔Parquet (`sink-us/UpdateRecord-parquet-tag`), Avro↔Avro
+(`sink-apac/UpdateRecord-avro-tag`). NiFi often reports
+`inputContentClaim == outputContentClaim` on `CONTENT_MODIFIED` even
+when bytes differ — always fetch both sides.
 
 Some NiFi processor *property keys* drift between minor versions
-even when display names are stable — setting a property by display
+even when display names are stable; setting a property by display
 name when the real key differs silently turns it into a dynamic
 attribute. The seeder handles known cases via
 `fixture::custom_text_property_key(version)` and similar helpers.
@@ -832,56 +737,47 @@ NiFi.
 
 Releases are driven by
 [`cargo-release`](https://crates.io/crates/cargo-release) via
-`release/release.sh`, a thin passthrough wrapper.
-**`cargo-release` is dry-run by default**; `--execute` performs the
-release.
+`release/release.sh`, a thin passthrough wrapper. **`cargo-release` is
+dry-run by default**; pass `--execute` to perform the release.
 
-| Command | Effect |
-|---|---|
-| `release/release.sh patch` | Dry-run a patch release. |
-| `release/release.sh minor` | Dry-run a minor release. |
-| `release/release.sh major` | Dry-run a major release. |
-| `release/release.sh patch --execute` | Bump version, rewrite `CHANGELOG.md`, commit, tag, push. |
+```bash
+release/release.sh patch              # dry-run
+release/release.sh patch --execute    # bump version, rewrite CHANGELOG, commit, tag, push
+```
 
-The release commit updates `Cargo.toml` `version`, `Cargo.lock`
-(cascades), and `CHANGELOG.md` (`## [Unreleased]` becomes `## [X.Y.Z]
-— YYYY-MM-DD`; fresh `## [Unreleased]` inserted above; compare link
-at the bottom rewritten).
+The release commit updates `Cargo.toml` `version`, `Cargo.lock`, and
+`CHANGELOG.md` (`## [Unreleased]` → `## [X.Y.Z] — YYYY-MM-DD`, fresh
+`## [Unreleased]` inserted, compare link rewritten).
 
-After the tag is pushed, two workflows fire on every `v*.*.*` tag:
+Two workflows fire on every `v*.*.*` tag:
 
-1. `publish-crate.yml` — verifies tag matches `Cargo.toml`, runs
-   the full check suite, `cargo publish`es to crates.io using
+1. `publish-crate.yml` — verifies tag matches `Cargo.toml`, runs the
+   full check suite, `cargo publish`es to crates.io using
    `CARGO_REGISTRY_TOKEN`.
 2. `release.yml` — autogenerated by cargo-dist. Builds per-target
-   archives for Linux (x86_64/aarch64, gnu+musl), macOS
-   (x86_64/aarch64), Windows (x86_64); uploads them plus shell /
-   PowerShell installers and a Homebrew formula to a GitHub Release;
-   writes notes from the `## [X.Y.Z]` CHANGELOG section.
+   archives (Linux x86_64/aarch64 gnu+musl, macOS x86_64/aarch64,
+   Windows x86_64); uploads them plus shell / PowerShell installers
+   and a Homebrew formula to a GitHub Release; writes notes from the
+   `## [X.Y.Z]` CHANGELOG section.
 
-The local machine never publishes. `cargo-release` is configured
-with `publish = false` so `CARGO_REGISTRY_TOKEN` lives only in GitHub.
+The local machine never publishes; `cargo-release` is configured with
+`publish = false` so `CARGO_REGISTRY_TOKEN` lives only in GitHub.
 
 ### cargo-dist configuration
 
-Configured in `dist-workspace.toml` and `Cargo.toml`'s
-`[profile.dist]`. Never hand-edit `release.yml` — it's regenerated.
-To change targets / installers / cargo-dist version: edit
-`dist-workspace.toml`, run `dist generate` (cargo-dist ≥ 0.28; binary
-is `dist`), commit the regenerated workflow alongside the config.
+Configured in `dist-workspace.toml` and `Cargo.toml`'s `[profile.dist]`.
+**Never hand-edit `release.yml`** — it is regenerated. To change
+targets / installers / cargo-dist version: edit `dist-workspace.toml`,
+run `dist generate` (cargo-dist ≥ 0.28; the binary is `dist`), commit
+the regenerated workflow alongside the config.
 
-Homebrew tap (not yet configured): create
-`maltesander/homebrew-tap`, add `tap` / `formula` keys to
-`dist-workspace.toml`'s `[dist]` table, regenerate, and add a
-`HOMEBREW_TAP_TOKEN` repo secret with `contents: write` on the tap
-repo.
+Homebrew tap (not yet configured): create `maltesander/homebrew-tap`,
+add `tap` / `formula` keys to `dist-workspace.toml`'s `[dist]` table,
+regenerate, and add a `HOMEBREW_TAP_TOKEN` repo secret with
+`contents: write` on the tap repo.
 
-### Installing `cargo-release` and `cargo-dist`
-
-```bash
-cargo install cargo-release --locked
-cargo install cargo-dist --locked   # binary is `dist`
-```
+Install once: `cargo install cargo-release --locked && cargo install
+cargo-dist --locked` (the cargo-dist binary is named `dist`).
 
 ## Documentation Policy
 

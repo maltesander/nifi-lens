@@ -1,6 +1,6 @@
 //! Version-control modal state. Captured at open time from the cluster
 //! snapshot for identity, then asynchronously populated with diff data
-//! by the view-local worker (Task 19).
+//! by the view-local worker.
 
 use crate::client::ComponentDiffSection;
 use crate::cluster::snapshot::VersionControlSummary;

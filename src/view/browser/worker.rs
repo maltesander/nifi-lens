@@ -1,6 +1,6 @@
 //! Browser tab detail worker.
 //!
-//! Task 6 of the central-cluster-store refactor retired the periodic
+//! The central-cluster-store refactor retired the periodic
 //! tree-poll branch: the Browser arena is now rebuilt from
 //! `AppState.cluster.snapshot` whenever `RootPgStatus`,
 //! `ControllerServices`, or `ConnectionsByPg` updates arrive. This
@@ -574,7 +574,7 @@ pub fn spawn_flowfile_peek_fetch(
 /// request id is known) fires `DELETE /flowfile-queues/{q}/listing-requests/{r}`
 /// best-effort on the same `LocalSet` we're already on.
 ///
-/// Constructed by `spawn_queue_listing_fetch` (Task 6); the
+/// Constructed by `spawn_queue_listing_fetch`; the
 /// `new_for_test` constructor exists to exercise Drop semantics
 /// without spinning up the full polling worker.
 pub struct QueueListingHandle {

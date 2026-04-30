@@ -86,15 +86,21 @@ insecure_tls = false
 # accepted as-is.
 #
 # [polling.cluster]
-# root_pg_status      = "10s"   # recursive PG/processor/connection walk
-# controller_services = "10s"   # root-scoped controller services
-# controller_status   = "10s"   # /flow/status aggregate counters
-# system_diagnostics  = "30s"   # /system-diagnostics (nodewise if available)
-# bulletins           = "5s"    # /flow/bulletin-board cursor poll
-# connections_by_pg   = "15s"   # per-PG connection endpoint backfill
-# about               = "5m"    # /flow/about banner info
-# max_interval        = "60s"   # adaptive cap on slow clusters
-# jitter_percent      = 20      # ±20% jitter on each sleep
+# root_pg_status              = "10s"   # recursive PG/processor/connection walk
+# controller_services         = "10s"   # root-scoped controller services
+# controller_status           = "10s"   # /flow/status aggregate counters
+# system_diagnostics          = "30s"   # /system-diagnostics (nodewise if available)
+# bulletins                   = "5s"    # /flow/bulletin-board cursor poll
+# cluster_nodes               = "5s"    # /controller/cluster membership + heartbeat ages
+# tls_certs                   = "1h"    # per-node TLS server-cert expiry probe
+# connections_by_pg           = "15s"   # per-PG connection endpoint backfill
+# version_control             = "30s"   # per-PG /versions/process-groups drift state
+# parameter_context_bindings  = "30s"   # per-PG bound parameter context refs
+# status_history              = "30s"   # selection-scoped sparkline (processor/PG/conn/RPG)
+# about                       = "5m"    # /flow/about banner info
+# max_interval                = "60s"   # adaptive cap on slow clusters
+# jitter_percent              = 20      # ±20% jitter on each sleep
+# batch_concurrency           = 16      # max concurrent in-flight per-PG fan-out requests
 
 # Tracer content modal byte ceilings. "0" disables the ceiling (unbounded).
 [tracer.ceiling]

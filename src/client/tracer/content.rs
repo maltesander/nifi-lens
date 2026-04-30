@@ -604,7 +604,7 @@ mod tests {
     fn decode_avro_small_file_is_not_truncated() {
         // Verifies the happy path leaves `truncated = false`. Triggering
         // `truncated = true` would require building > TABULAR_RECORD_LIMIT
-        // (50 000) records inline; the integration test (Task 22) exercises
+        // (50 000) records inline; the integration test exercises
         // real-world sizing instead.
         let bytes = build_avro_fixture(10);
         let render = decode_avro(&bytes).unwrap();

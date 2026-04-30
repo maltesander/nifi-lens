@@ -395,7 +395,7 @@ mod tests {
         use crate::cluster::snapshot::{EndpointState, FetchMeta};
         use std::time::{Duration, Instant};
 
-        // After Task 8 Overview is store-only. Seeding the cluster
+        // Overview is store-only. Seeding the cluster
         // snapshot directly and invoking the reducer mirrors what the
         // main loop's `ClusterChanged(ControllerStatus)` arm does.
         let mut s = fresh_state();

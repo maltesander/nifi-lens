@@ -216,7 +216,7 @@ pub struct BrowserState {
     pub last_tree_fetched_at: Option<SystemTime>,
     /// Populated by the `WorkerRegistry` when the Browser worker is
     /// spawned. Cleared back to `None` on tab-switch-out so reducer
-    /// pushes become no-ops. Task 13 wires this.
+    /// pushes become no-ops.
     pub detail_tx: Option<mpsc::UnboundedSender<DetailRequest>>,
     /// Which focusable sub-section (if any) holds input focus. Always
     /// reset to `Tree` by `reset_detail_focus`, called from every
@@ -225,7 +225,7 @@ pub struct BrowserState {
     /// Open version-control modal state, if any. `None` while the
     /// modal is closed. Captured at open time from the cluster
     /// snapshot for identity, populated asynchronously with diff data
-    /// by the view-local worker (Task 19).
+    /// by the view-local worker.
     pub version_modal: Option<VersionControlModalState>,
     /// Live worker handle for the version-control modal's diff fetch.
     /// Aborted on `Close` and on `Refresh` (which spawns a new one).
@@ -233,7 +233,7 @@ pub struct BrowserState {
     pub version_modal_handle: Option<crate::app::worker::AbortOnDrop>,
     /// Open parameter-context modal state, if any. `None` while the
     /// modal is closed. Populated asynchronously with chain data by
-    /// the view-local worker (Task 17).
+    /// the view-local worker.
     pub parameter_modal: Option<ParameterContextModalState>,
     /// Live worker handle for the parameter-context modal's chain fetch.
     /// Aborted on `Close` and on `Refresh` (which spawns a new one).
@@ -241,7 +241,7 @@ pub struct BrowserState {
     pub parameter_modal_handle: Option<crate::app::worker::AbortOnDrop>,
     /// Open action-history modal state, if any. `None` when the modal
     /// is closed. Captured at open time, populated asynchronously by
-    /// the view-local worker (Task 11).
+    /// the view-local worker.
     pub action_history_modal: Option<action_history_modal::ActionHistoryModalState>,
     /// Live worker handle for the action-history modal's paginator.
     /// Aborted on close, refresh, tab switch, or selection change.
@@ -519,7 +519,7 @@ impl BrowserState {
 
     /// Open the parameter-context modal for the given PG. Creates a
     /// `Loading` placeholder immediately; the chain is populated
-    /// asynchronously by the view-local worker (Task 17).
+    /// asynchronously by the view-local worker.
     pub fn open_parameter_context_modal(
         &mut self,
         pg_id: String,
@@ -1678,7 +1678,7 @@ pub struct DetailRequest {
 
 /// Envelope the worker wraps around a fetched detail before pushing it
 /// back to the UI task via `AppEvent::Data(ViewPayload::Browser(
-/// BrowserPayload::Detail(...)))`. Task 11 adds the event plumbing.
+/// BrowserPayload::Detail(...)))`.
 #[derive(Debug, Clone)]
 pub struct NodeDetailSnapshot {
     pub arena_idx: usize,
@@ -1687,10 +1687,10 @@ pub struct NodeDetailSnapshot {
     pub detail: NodeDetail,
 }
 
-/// Task 6 of the central-cluster-store refactor: rebuild the Browser
-/// arena from `AppState.cluster.snapshot` instead of from the retired
-/// `browser_tree` worker fetch. Called from the `ClusterChanged` arm of
-/// the main loop whenever `RootPgStatus`, `ControllerServices`, or
+/// Rebuild the Browser arena from `AppState.cluster.snapshot` (the
+/// central-cluster-store refactor replaced the retired `browser_tree`
+/// worker fetch). Called from the `ClusterChanged` arm of the main
+/// loop whenever `RootPgStatus`, `ControllerServices`, or
 /// `ConnectionsByPg` updates arrive.
 ///
 /// - Reads the flat node list from `snap.root_pg_status.latest()`.

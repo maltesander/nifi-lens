@@ -304,9 +304,9 @@ fn snapshot_unhealthy_cluster() {
             queued_display: format!("{}k / 1 MB", 9 + i),
         })
         .collect();
-    // Pre-Task-7 the bulletins rode on the PG-status payload and
-    // drove sparkline+noisy via `apply_payload`. Task 7 moved that
-    // path to `redraw_bulletin_projections` on `&mut AppState`.
+    // Bulletins formerly rode on the PG-status payload and drove
+    // sparkline+noisy via `apply_payload`; that path has moved to
+    // `redraw_bulletin_projections` on `&mut AppState`.
     // This render test drives `OverviewState` directly, so we
     // pre-populate the projections that the reducer would have
     // built, keeping the rendered output stable.

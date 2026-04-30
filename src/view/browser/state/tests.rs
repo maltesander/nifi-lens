@@ -2009,7 +2009,7 @@ fn property_rows_marks_uuid_values_that_resolve() {
 
 #[test]
 fn rebuild_arena_from_cluster_uses_snapshot_root_pg() {
-    // Task 6: Browser rebuilds its arena from `ClusterSnapshot`
+    // Browser rebuilds its arena from `ClusterSnapshot`
     // instead of a dedicated tree fetch. A minimal snapshot with a
     // Ready `root_pg_status` (containing one root PG node) and a
     // default-empty `controller_services` must populate

@@ -1,6 +1,6 @@
 //! Process Group detail renderer.
 //!
-//! Task 6 rewrites PG detail into four nested sub-panels:
+//! PG detail renders as four nested sub-panels:
 //! ` Identity ` (non-focusable Paragraph) and three focusable `Table`
 //! widgets — ` Controller services `, ` Child groups `, ` Recent bulletins `.
 

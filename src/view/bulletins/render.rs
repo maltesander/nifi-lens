@@ -550,7 +550,7 @@ mod tests {
 
     fn seed_state(rows: Vec<BulletinSnapshot>) -> BulletinsState {
         let mut s = BulletinsState::with_capacity(100);
-        // Task 7: the production path populates the ring from the
+        // The production path populates the ring from the
         // cluster snapshot via `redraw_bulletins(&mut AppState)`.
         // Render tests construct `BulletinsState` directly, so we seed
         // the mirror ring by hand AND replicate the auto-scroll

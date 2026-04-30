@@ -1,5 +1,5 @@
 //! Integration test: verify connection endpoint IDs are populated for
-//! every connection inside `orders-pipeline/transform`. Task 6 of the
+//! every connection inside `orders-pipeline/transform`. The
 //! central-cluster-store refactor moved the per-PG `/connections`
 //! fan-out from `browser_tree` into
 //! `ClusterStore::spawn_connections_by_pg`; this test exercises the
@@ -43,8 +43,7 @@ fn it_context(version: &str) -> ResolvedContext {
 }
 
 /// Resolve a PG id by walking the arena and matching the slash-separated
-/// suffix of the PG's full path-from-root. Mirrors the helper used by
-/// the other orders-pipeline integration tests (see Tasks 18-22).
+/// suffix of the PG's full path-from-root.
 fn find_pg_id_by_path(nodes: &[RawNode], target_pg_path: &str) -> Option<String> {
     let parts: Vec<&str> = target_pg_path.split('/').collect();
 

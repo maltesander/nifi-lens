@@ -273,10 +273,10 @@ pub(crate) fn spawn_bulletins(
 /// Fallback is **silent-ish**: it logs a `tracing::warn!` on each
 /// nodewise→aggregate transition (tracked via a local `Option<bool>`) so
 /// log-driven debugging can still see the rollover without spamming on
-/// every steady-state aggregate tick. The pre-Task-8 implementation
+/// every steady-state aggregate tick. An earlier implementation
 /// surfaced the rollover as a transient UI banner via a dedicated
-/// `OverviewPayload::SystemDiagFallback` variant; that banner is
-/// dropped in Task 8 — see the task report.
+/// `OverviewPayload::SystemDiagFallback` variant; that banner has
+/// been dropped.
 pub(crate) fn spawn_system_diagnostics(
     client: Arc<RwLock<NifiClient>>,
     tx: mpsc::Sender<AppEvent>,
@@ -716,7 +716,7 @@ async fn run_parallel(
 
 /// Collapse the raw `ConnectionsEntity` DTO into a
 /// `ConnectionEndpoints` row — a `HashMap<conn_id, ConnectionEndpointIds>`
-/// that the Browser reducer (Task 6) merges into the arena. Connections
+/// that the Browser reducer merges into the arena. Connections
 /// missing an id are dropped; empty DTOs produce an empty map.
 ///
 /// Mirrors the mapping `browser_tree` used to do inline before the

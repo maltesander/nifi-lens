@@ -480,7 +480,7 @@ pub struct RemoteProcessGroupCounts {
 ///
 /// `connections` is sorted descending by `fill_percent` for the Overview
 /// leaderboard; `nodes` is the flat arena-ready DFS walk the Browser tab
-/// rebuilds its tree from (Task 6 of the central-cluster-store refactor —
+/// rebuilds its tree from (the central-cluster-store refactor —
 /// Browser no longer fetches the recursive status itself).
 #[derive(Debug, Clone, Default)]
 pub struct RootPgStatusSnapshot {

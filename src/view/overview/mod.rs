@@ -3,7 +3,7 @@
 //! - `state` holds pure reducers (testable without a terminal).
 //! - `render` draws the snapshot into a ratatui frame.
 //!
-//! Task 8 retired the per-view worker — Overview is now store-only.
+//! The per-view worker has been retired — Overview is now store-only.
 //! Its projections (`root_pg`, `cs_counts`, `controller`, `nodes`,
 //! `repositories_summary`, bulletin sparkline, noisy components,
 //! unhealthy queues) are mirrored from `AppState.cluster.snapshot`

@@ -1,7 +1,6 @@
 //! Helpers used by per-endpoint fetch task loops.
 //!
-//! Task 1 introduces the helpers; Task 9 retrofits all fetch tasks to
-//! use them. Exposed as free functions so each fetcher's control flow
+//! Exposed as free functions so each fetcher's control flow
 //! stays obvious.
 
 use std::sync::atomic::Ordering;

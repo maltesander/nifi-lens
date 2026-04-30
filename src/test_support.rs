@@ -64,7 +64,7 @@ pub(crate) fn fresh_state() -> AppState {
 /// that don't care about the aggregate counts. Populates `nodes` with a
 /// single root PG (id `"root"`, name `"root"`) and mirrors that id into
 /// `process_group_ids` so the connections-by-PG watch channel stays in
-/// sync (Task 5 contract).
+/// sync.
 pub(crate) fn tiny_root_pg_status() -> RootPgStatusSnapshot {
     RootPgStatusSnapshot {
         flow_files_queued: 0,

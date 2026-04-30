@@ -1113,7 +1113,7 @@ fn mute_selected_source_is_a_toggle_on_repress() {
     s.mute_selected_source();
     assert_eq!(s.grouped_view().len(), 1);
     // Navigate back onto src-1 is impossible while muted. Unmute by
-    // API — the handler-side toggle path is covered in Task 6.
+    // API — the handler-side toggle path is covered separately.
     s.mutes.remove("src-1");
     assert_eq!(s.grouped_view().len(), 2);
 }

@@ -40,9 +40,9 @@ pub enum AppEvent {
 
 /// Data delivered from a view's worker task back into the UI loop.
 ///
-/// Task 8 deleted the `Overview` variant — Overview is now a
-/// store-only consumer that reacts to `ClusterChanged` events and
-/// reads projections straight from `state.cluster.snapshot`.
+/// Overview has no variant here — it is a store-only consumer that
+/// reacts to `ClusterChanged` events and reads projections straight
+/// from `state.cluster.snapshot`.
 #[derive(Debug, Clone)]
 pub enum ViewPayload {
     Browser(BrowserPayload),
@@ -53,10 +53,10 @@ pub enum ViewPayload {
 /// Payload sent from the Browser detail worker — a single variant
 /// carrying one completed per-node detail fetch.
 ///
-/// Task 6 of the central-cluster-store refactor removed the `Tree`
-/// variant: the Browser arena is now rebuilt from
-/// `AppState.cluster.snapshot` whenever any of `RootPgStatus`,
-/// `ControllerServices`, or `ConnectionsByPg` updates arrive.
+/// The central-cluster-store refactor removed the `Tree` variant:
+/// the Browser arena is now rebuilt from `AppState.cluster.snapshot`
+/// whenever any of `RootPgStatus`, `ControllerServices`, or
+/// `ConnectionsByPg` updates arrive.
 #[derive(Debug, Clone)]
 pub enum BrowserPayload {
     Detail(Box<crate::view::browser::state::NodeDetailSnapshot>),

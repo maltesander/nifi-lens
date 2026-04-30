@@ -15,6 +15,8 @@
 - [Features](#features)
 - [Install](#install)
 - [Quick Start](#quick-start)
+- [Compatibility](#compatibility)
+- [Limitations](#limitations)
 - [Flags](#flags)
 - [Required NiFi permissions](#required-nifi-permissions)
 - [Core Components](#core-components)
@@ -146,6 +148,27 @@ While cluster fetchers are still booting, the status bar shows an
 `init: X/11 endpoints ready` chip. The chip disappears once every
 endpoint has produced its first snapshot (success or graceful
 failure both count). On a slow cluster it may take 10–20 seconds.
+
+## Compatibility
+
+`nifi-lens` targets Apache NiFi 2.x via `nifi-rust-client`'s `dynamic`
+feature, so one binary works against every supported minor version.
+The integration fixture exercises both ends of the support window:
+NiFi **2.6.0** (the floor — never dropped) and **2.9.0** (the
+current ceiling). Versions in between work by API compatibility but
+are not exercised in CI; report issues against the closest tested
+version.
+
+## Limitations
+
+v0.x is **read-only by design**. The TUI never starts, stops, or
+modifies any cluster resource. Other intentional omissions in the
+current line:
+
+- No per-node repository drill-in (only aggregate sysdiag).
+- No processor-thread leaderboard.
+- No queue time-to-full predictions.
+- No write-side actions (start/stop, enable/disable, empty queue).
 
 ## Flags
 
@@ -291,11 +314,16 @@ input and output.
 shows what's available on the current view. The tables below are a
 reference; you don't need to memorise them.
 
+Baseline navigation is consistent everywhere and the tables don't
+repeat it: `↑` / `↓` / `PgUp` / `PgDn` scroll, `Home` / `End` jump
+to top / bottom, `Esc` closes a modal, `Enter` activates / submits
+the focused thing. Tables list only the chords that go beyond that
+baseline.
+
 ### Global
 
 | Key                 | Action                                           |
 |---------------------|--------------------------------------------------|
-| `↑` / `↓`           | Move row selection                               |
 | `Tab` / `Shift+Tab` | Switch pane                                      |
 | `F1`–`F5`           | Jump directly to a tab                           |
 | `Shift+K`           | Switch active cluster context                    |
@@ -347,13 +375,10 @@ Drift filters (PG-only):
 
 | Key                        | Action                                      |
 |----------------------------|---------------------------------------------|
-| `↑↓` / `PgUp` / `PgDn`     | Scroll body                                 |
-| `Home` / `End`             | Jump to top / bottom                        |
 | `/`                        | Open substring search                       |
 | `n` / `N`                  | Next / previous search match                |
 | `c`                        | Copy the full message to clipboard          |
 | `Enter`                    | Jump to source component in Browser         |
-| `Esc`                      | Close the modal                             |
 
 ### Browser
 
@@ -363,7 +388,26 @@ Drift filters (PG-only):
 | `←`          | Collapse folder or ascend to parent                    |
 | `p`          | Open Parameter Context modal (PG selected) / Properties modal (processor or CS selected) |
 | `m`          | Show version control (versioned PG only)               |
+| `a`          | Open action history modal (UUID-bearing components)    |
 | `c`          | Copy the selected node's id                            |
+
+#### Queue listing panel
+
+When a Connection with queued flowfiles is selected, the lower half
+of its detail pane lists up to 100 flowfiles. `Tab` focuses the list;
+inside it: `i` peek full attributes, `t` trace lineage, `c` copy
+flowfile UUID, `/` filter by filename, `Esc` returns focus to the tree.
+
+#### Action history modal
+
+Pages auto-load as you scroll past the bottom of the loaded tail.
+
+| Key                        | Action                                      |
+|----------------------------|---------------------------------------------|
+| `Enter`                    | Expand the selected event                   |
+| `/`                        | Open substring search                       |
+| `n` / `N`                  | Next / previous search match                |
+| `c`                        | Copy the selected row as TSV                |
 
 ### Events
 
@@ -385,18 +429,17 @@ Drift filters (PG-only):
 
 #### Content viewer modal
 
+The body auto-streams more bytes as you scroll near the loaded tail.
+
 | Key                    | Action                                           |
 |------------------------|--------------------------------------------------|
 | `Tab` / `Shift+Tab`    | Cycle Input → Output → Diff (skips disabled)     |
 | `1` / `2` / `3`        | Jump directly to Input / Output / Diff tab       |
-| `↑↓` / `PgUp` / `PgDn` | Scroll body (auto-streams more bytes near tail)  |
-| `Home` / `End`         | Jump to top / bottom                             |
 | `/`                    | Open substring search                            |
 | `n` / `N`              | Next / previous search match                     |
 | `Ctrl+↓` / `Ctrl+↑`    | Next / previous change (Diff tab only)           |
 | `c`                    | Copy the visible body to clipboard               |
 | `s`                    | Save the full raw content to file (uncapped)     |
-| `Esc`                  | Close the modal                                  |
 
 #### Structured content (JSON, CSV, Parquet, Avro)
 
@@ -470,6 +513,7 @@ cluster_nodes               = "5s"
 connections_by_pg           = "15s"
 version_control             = "30s"
 parameter_context_bindings  = "30s"
+status_history              = "30s"   # selection-scoped sparkline cadence
 about                       = "5m"
 tls_certs                   = "1h"
 max_interval                = "60s"
@@ -609,13 +653,22 @@ docker compose -f integration-tests/docker-compose.yml up -d --wait
 export NIFILENS_IT_PASSWORD=adminpassword123
 cargo run -p nifilens-fixture-seeder -- \
     --config integration-tests/nifilens-config.toml \
+    --context dev-nifi-2-6-0
+cargo run -p nifilens-fixture-seeder -- \
+    --config integration-tests/nifilens-config.toml \
     --context dev-nifi-2-9-0
 cargo run -- --config integration-tests/nifilens-config.toml \
     --context dev-nifi-2-9-0
 ```
 
 The seeder supports `--skip-if-seeded` for idempotent re-runs during
-iteration.
+iteration. Pass `--break-after <duration>` (e.g. `5m`, `30m`) to delay
+the headline failure mutation: the seeder waits, then rewrites
+`fixture-pc-orders/usd_rate` to `"oops"`, which routes every flowfile
+in `orders-pipeline/transform` to `deadletter` and produces the
+audit / bulletin / queue evidence the demo investigates. Default is
+`0s` (immediate); the mutation is value-gated and idempotent, so
+re-running against an already-broken fixture is a no-op.
 
 ## License
 

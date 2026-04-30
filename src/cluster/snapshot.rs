@@ -37,8 +37,7 @@ use nifi_rust_client::dynamic::types::VersionControlInformationDtoState;
 
 /// Metadata about a single fetch — timing, measured duration, and the
 /// adaptive-cadence result that informs the next tick. `next_interval`
-/// is filled in by Task 9 (adaptive cadence); Task 1 sets it equal to
-/// the base interval.
+/// is filled in by the adaptive-cadence helper.
 #[derive(Debug, Clone, Copy)]
 pub struct FetchMeta {
     pub fetched_at: Instant,
