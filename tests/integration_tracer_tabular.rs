@@ -1,12 +1,12 @@
 //! Live-cluster integration test: verifies Parquet/Avro provenance
 //! events decode through the Tracer modal pipeline.
 //!
-//! The `diff-pipeline` fixture seeds two `ConvertRecord` processors whose
-//! output is a Parquet or Avro binary respectively. This test locates each
-//! processor in the arena, waits for a recent provenance event whose output
-//! content decodes to the expected tabular format, and asserts the result
-//! is a `ContentRender::Tabular` with the expected format tag, a non-empty
-//! JSON-Lines body, and a non-empty schema summary.
+//! The `orders-pipeline` fixture seeds Parquet output in the `sink-us`
+//! sink PG and Avro output in the `sink-apac` sink PG. This test locates
+//! the tag processors in each sink, waits for a recent provenance event
+//! whose output content decodes to the expected tabular format, and asserts
+//! the result is a `ContentRender::Tabular` with the expected format tag,
+//! a non-empty JSON-Lines body, and a non-empty schema summary.
 //!
 //! Requires the fixture stack to be running and seeded. Gated on
 //! `--ignored` per the project convention.
@@ -46,31 +46,36 @@ async fn make_client(version: &str, username: &str, password: &str, ca_path: &st
 
 /// Walk the browser-tree arena and return the component `id` of the first
 /// `Processor` node whose name matches `processor_name` and whose parent
-/// chain contains a PG named `pg_name`.
+/// chain matches the slash-separated PG path `pg_path` (e.g., "orders-pipeline/sink-us").
+/// Path matching is suffix-based: any parent chain ending with the path matches.
 fn find_processor_by_name_in_pg(
     nodes: &[nifi_lens::client::RawNode],
-    pg_name: &str,
+    pg_path: &str,
     processor_name: &str,
 ) -> Option<String> {
-    let matching_pg_indices: Vec<usize> = nodes
-        .iter()
-        .enumerate()
-        .filter(|(_, n)| n.kind == NodeKind::ProcessGroup && n.name == pg_name)
-        .map(|(i, _)| i)
-        .collect();
+    let path_parts: Vec<&str> = pg_path.split('/').collect();
 
     for (i, node) in nodes.iter().enumerate() {
         if node.kind != NodeKind::Processor || node.name != processor_name {
             continue;
         }
+
+        // Walk up the parent chain and collect PG names.
+        let mut pg_chain = Vec::new();
         let mut cursor = i;
-        loop {
-            if matching_pg_indices.contains(&cursor) {
-                return Some(node.id.clone());
+        while let Some(p) = nodes[cursor].parent_idx {
+            if nodes[p].kind == NodeKind::ProcessGroup {
+                pg_chain.push(nodes[p].name.as_str());
             }
-            match nodes[cursor].parent_idx {
-                Some(p) => cursor = p,
-                None => break,
+            cursor = p;
+        }
+
+        // Reverse to get top-down order and check if the path matches the suffix.
+        pg_chain.reverse();
+        if pg_chain.len() >= path_parts.len() {
+            let start = pg_chain.len() - path_parts.len();
+            if pg_chain[start..] == path_parts[..] {
+                return Some(node.id.clone());
             }
         }
     }
@@ -179,7 +184,7 @@ async fn parquet_event_decodes_to_tabular_on_each_version() {
 
         let client = make_client(version, &username, &password, &ca_path).await;
 
-        // 1. Locate the ConvertRecord-parquet processor in diff-pipeline.
+        // 1. Locate the UpdateRecord-parquet-tag processor in orders-pipeline/sink-us.
         let snapshot = client
             .root_pg_status()
             .await
@@ -187,25 +192,25 @@ async fn parquet_event_decodes_to_tabular_on_each_version() {
 
         let component_id = match find_processor_by_name_in_pg(
             &snapshot.nodes,
-            "diff-pipeline",
-            "ConvertRecord-parquet",
+            "orders-pipeline/sink-us",
+            "UpdateRecord-parquet-tag",
         ) {
             Some(id) => id,
             None => {
                 eprintln!(
-                    "  ConvertRecord-parquet not found in diff-pipeline on {version} — skipping"
+                    "  UpdateRecord-parquet-tag not found in orders-pipeline/sink-us on {version} — skipping"
                 );
                 continue;
             }
         };
-        eprintln!("  ConvertRecord-parquet id={component_id}");
+        eprintln!("  UpdateRecord-parquet-tag id={component_id}");
 
         // 2. Poll for an event whose output decodes to Parquet.
         let Some(render) = wait_for_tabular_event(
             &client,
             &component_id,
             version,
-            "ConvertRecord-parquet",
+            "UpdateRecord-parquet-tag",
             TabularFormat::Parquet,
         )
         .await
@@ -253,7 +258,7 @@ async fn avro_event_decodes_to_tabular_on_each_version() {
 
         let client = make_client(version, &username, &password, &ca_path).await;
 
-        // 1. Locate the ConvertRecord-avro processor in diff-pipeline.
+        // 1. Locate the UpdateRecord-avro-tag processor in orders-pipeline/sink-apac.
         let snapshot = client
             .root_pg_status()
             .await
@@ -261,25 +266,25 @@ async fn avro_event_decodes_to_tabular_on_each_version() {
 
         let component_id = match find_processor_by_name_in_pg(
             &snapshot.nodes,
-            "diff-pipeline",
-            "ConvertRecord-avro",
+            "orders-pipeline/sink-apac",
+            "UpdateRecord-avro-tag",
         ) {
             Some(id) => id,
             None => {
                 eprintln!(
-                    "  ConvertRecord-avro not found in diff-pipeline on {version} — skipping"
+                    "  UpdateRecord-avro-tag not found in orders-pipeline/sink-apac on {version} — skipping"
                 );
                 continue;
             }
         };
-        eprintln!("  ConvertRecord-avro id={component_id}");
+        eprintln!("  UpdateRecord-avro-tag id={component_id}");
 
         // 2. Poll for an event whose output decodes to Avro.
         let Some(render) = wait_for_tabular_event(
             &client,
             &component_id,
             version,
-            "ConvertRecord-avro",
+            "UpdateRecord-avro-tag",
             TabularFormat::Avro,
         )
         .await
