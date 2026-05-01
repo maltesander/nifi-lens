@@ -85,6 +85,11 @@ pub enum CrossLink {
         pg_id: String,
         preselect: Option<String>,
     },
+    /// From Browser/Tracer `w`: open the Events tab in watch sub-mode
+    /// pre-narrowed to the given component. Read-only. Wired by Tasks
+    /// 20 (Browser) and 21 (Tracer); main-loop apply lands with those
+    /// tasks.
+    OpenWatch { component_id: String },
 }
 
 impl Intent {
@@ -101,6 +106,7 @@ impl Intent {
             Self::Goto(CrossLink::GotoEvents { .. }) => "goto Events",
             Self::Goto(CrossLink::TraceByUuid { .. }) => "trace by uuid",
             Self::Goto(CrossLink::OpenParameterContextModal { .. }) => "open parameter context",
+            Self::Goto(CrossLink::OpenWatch { .. }) => "open watch",
             Self::CancelLineageQuery => "CancelLineageQuery",
             Self::DeleteLineageQuery { .. } => "DeleteLineageQuery",
             Self::LoadEventDetail { .. } => "LoadEventDetail",
@@ -170,6 +176,11 @@ impl IntentDispatcher {
                     preselect: preselect.clone(),
                 }))
             }
+            // OpenWatch is a read-only cross-link; the main-loop apply
+            // is wired by Tasks 20 (Browser) and 21 (Tracer). Until
+            // then, fall through to the dispatcher's NotImplemented
+            // arm — the variant is constructible and dispatch is safe.
+            Intent::Goto(CrossLink::OpenWatch { .. }) => None,
             _ => None,
         }
     }
@@ -474,6 +485,53 @@ mod tests {
             uuid: "abc-123".into(),
         }));
         assert!(outcome.is_none(), "TraceByUuid is not pure; must dispatch");
+    }
+
+    #[test]
+    fn open_watch_intent_constructs_and_destructures() {
+        // Round-trip the component_id through construction + destructure.
+        let intent = Intent::Goto(CrossLink::OpenWatch {
+            component_id: "proc-watch-1".into(),
+        });
+        match intent {
+            Intent::Goto(CrossLink::OpenWatch { component_id }) => {
+                assert_eq!(component_id, "proc-watch-1");
+            }
+            other => panic!("expected Goto(CrossLink::OpenWatch), got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn open_watch_is_observe_only_not_write() {
+        // OpenWatch must live in the read-only set: dispatching it must
+        // never produce WriteIntentRefused.
+        let intent = Intent::Goto(CrossLink::OpenWatch {
+            component_id: "proc-watch-1".into(),
+        });
+        assert!(!intent.is_write(), "OpenWatch must not be a write intent");
+        // handle_pure returns None for cross-links that need the main
+        // loop to apply state (mirroring TraceComponent / TraceByUuid).
+        // Crucially: it must not return Some(Err(WriteIntentRefused)).
+        let result = IntentDispatcher::handle_pure(&intent);
+        match result {
+            None => { /* expected — main loop / dispatcher fallthrough handles it */ }
+            Some(Err(NifiLensError::WriteIntentRefused { .. })) => {
+                panic!("OpenWatch was incorrectly refused as a write intent");
+            }
+            Some(Ok(_)) => { /* also acceptable — pure outcome */ }
+            Some(Err(other)) => panic!("unexpected error from handle_pure: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn open_watch_name_label() {
+        assert_eq!(
+            Intent::Goto(CrossLink::OpenWatch {
+                component_id: "x".into(),
+            })
+            .name(),
+            "open watch"
+        );
     }
 
     #[test]
