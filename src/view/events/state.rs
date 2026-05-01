@@ -1404,4 +1404,83 @@ mod tests {
         assert!(matches!(s.mode, EventsMode::OneShot));
         assert!(s.watch().is_none());
     }
+
+    fn matched_with_attrs(id: i64) -> MatchedEvent {
+        MatchedEvent {
+            summary: ProvenanceEventSummary {
+                event_id: id,
+                event_time_iso: format!("t{id}"),
+                event_type: "SEND".into(),
+                component_id: "c".into(),
+                component_name: "n".into(),
+                component_type: "T".into(),
+                group_id: "g".into(),
+                flow_file_uuid: format!("ff{id}"),
+                relationship: None,
+                details: None,
+            },
+            attrs: vec![AttributeTriple {
+                key: "filename".into(),
+                previous: None,
+                current: Some(format!("file-{id}.json")),
+            }],
+        }
+    }
+
+    #[test]
+    fn pause_watch_flips_status_and_keeps_buffer() {
+        let mut s = EventsState::new();
+        let mut session = empty_session(100);
+        session.buffer.push_back(matched_with_attrs(1));
+        session.status = WatchStatus::Tailing;
+        s.enter_watch_mode(session);
+
+        crate::view::events::pause_watch(&mut s);
+
+        assert!(matches!(s.watch().unwrap().status, WatchStatus::Paused));
+        assert_eq!(s.watch().unwrap().buffer.len(), 1);
+        assert_eq!(s.watch().unwrap().buffer[0].summary.event_id, 1);
+    }
+
+    #[test]
+    fn pause_watch_no_op_when_not_in_watch_mode() {
+        let mut s = EventsState::new();
+        crate::view::events::pause_watch(&mut s);
+        assert!(matches!(s.mode, EventsMode::OneShot));
+    }
+
+    #[test]
+    fn pause_watch_preserves_existing_failed_status() {
+        let mut s = EventsState::new();
+        let mut session = empty_session(100);
+        session.status = WatchStatus::Failed {
+            error: "boom".into(),
+            retry_in: std::time::Duration::from_secs(5),
+        };
+        s.enter_watch_mode(session);
+        crate::view::events::pause_watch(&mut s);
+        // Pause should override Failed → Paused, since the worker is now gone.
+        assert!(matches!(s.watch().unwrap().status, WatchStatus::Paused));
+    }
+
+    #[test]
+    fn resume_watch_promotes_paused_to_waiting() {
+        let mut s = EventsState::new();
+        let mut session = empty_session(100);
+        session.status = WatchStatus::Paused;
+        s.enter_watch_mode(session);
+        crate::view::events::resume_watch(&mut s);
+        assert!(matches!(s.watch().unwrap().status, WatchStatus::Waiting));
+    }
+
+    #[test]
+    fn resume_watch_no_op_when_already_tailing() {
+        let mut s = EventsState::new();
+        let mut session = empty_session(100);
+        session.status = WatchStatus::Tailing;
+        s.enter_watch_mode(session);
+        crate::view::events::resume_watch(&mut s);
+        // Tailing should not be touched by resume.
+        assert!(matches!(s.watch().unwrap().status, WatchStatus::Tailing));
+    }
 }

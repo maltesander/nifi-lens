@@ -52,3 +52,26 @@ pub fn handle_watch_payload(
         _ => { /* not a watch payload */ }
     }
 }
+
+/// Flip the active watch to `Paused`. Call from `WorkerRegistry`
+/// teardown when the user navigates away from the Events tab. The
+/// session (predicate, buffer, cursor) is preserved on `EventsState`
+/// so re-entering the tab can resume from where we left off.
+pub fn pause_watch(state: &mut EventsState) {
+    if let Some(w) = state.watch_mut() {
+        w.status = crate::view::events::state::WatchStatus::Paused;
+    }
+}
+
+/// Flip the active watch back to `Waiting` so the next `WatchTick`
+/// promotes it to `Tailing`. Call after re-spawning the worker on
+/// tab re-entry. No-op when the watch is already in any non-Paused
+/// state — re-entering with a Failed or Tailing watch leaves the
+/// status untouched.
+pub fn resume_watch(state: &mut EventsState) {
+    if let Some(w) = state.watch_mut()
+        && matches!(w.status, crate::view::events::state::WatchStatus::Paused)
+    {
+        w.status = crate::view::events::state::WatchStatus::Waiting;
+    }
+}
