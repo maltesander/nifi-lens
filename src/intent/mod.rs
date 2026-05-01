@@ -176,11 +176,17 @@ impl IntentDispatcher {
                     preselect: preselect.clone(),
                 }))
             }
-            // OpenWatch is a read-only cross-link; the main-loop apply
-            // is wired by Tasks 20 (Browser) and 21 (Tracer). Until
-            // then, fall through to the dispatcher's NotImplemented
-            // arm — the variant is constructible and dispatch is safe.
-            Intent::Goto(CrossLink::OpenWatch { .. }) => None,
+            // OpenWatch is a read-only cross-link. The main-loop reducer
+            // switches tabs and seeds the watch session; the watch worker
+            // is spawned by `WorkerRegistry::ensure` after the tab change
+            // lands (it sees `events.watch().is_some()` and calls
+            // `spawn_watch`). No client work happens here, so the arm is
+            // pure.
+            Intent::Goto(CrossLink::OpenWatch { component_id }) => {
+                Some(Ok(IntentOutcome::EventsWatchLandingOn {
+                    component_id: component_id.clone(),
+                }))
+            }
             _ => None,
         }
     }

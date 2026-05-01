@@ -626,6 +626,31 @@ pub struct WatchSession {
 }
 
 impl WatchSession {
+    /// Build a fresh `WatchSession` pre-narrowed to a single component
+    /// UUID, with an empty predicate and an empty buffer. Used by the
+    /// `w` cross-link from Browser (Task 20) and Tracer (Task 21).
+    ///
+    /// Status starts as `Waiting`; the worker's first successful poll
+    /// promotes it to `Tailing` via the standard reducer arms.
+    /// `buffer_cap` is hardcoded at 2000 here; Task 22 will plumb the
+    /// `[events]` config knob through the call sites.
+    pub fn new_for_component(component_id: String) -> Self {
+        Self {
+            narrow: ProvenanceQuery {
+                component_id: Some(component_id),
+                max_results: 1000,
+                ..Default::default()
+            },
+            predicate: Predicate::default(),
+            predicate_input: String::new(),
+            buffer: VecDeque::new(),
+            buffer_cap: 2000,
+            cursor: None,
+            status: WatchStatus::Waiting,
+            stats: WatchStats::default(),
+        }
+    }
+
     /// Cost guard: refuse to spawn the worker unless the narrow has
     /// at least one of (component, flow-file UUID, non-empty event
     /// types, non-blank start time). `now` is injected to keep the
@@ -677,6 +702,22 @@ impl WatchSession {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn watch_session_new_for_component_seeds_narrow_and_waiting_status() {
+        let session = WatchSession::new_for_component("proc-42".into());
+        assert_eq!(session.narrow.component_id.as_deref(), Some("proc-42"));
+        assert_eq!(session.narrow.max_results, 1000);
+        assert!(session.narrow.flow_file_uuid.is_none());
+        assert!(session.narrow.event_types.is_empty());
+        assert!(session.narrow.start_time_iso.is_none());
+        assert!(session.predicate_input.is_empty());
+        assert!(session.buffer.is_empty());
+        assert_eq!(session.buffer_cap, 2000);
+        assert!(session.cursor.is_none());
+        assert!(matches!(session.status, WatchStatus::Waiting));
+        assert!(WatchSession::can_start(&session.narrow, SystemTime::now()));
+    }
 
     #[test]
     fn events_state_new_is_idle_with_default_filters() {

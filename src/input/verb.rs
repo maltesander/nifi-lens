@@ -103,6 +103,11 @@ pub enum BrowserVerb {
     OpenParameterContext,
     OpenActionHistory,
     ShowVersionControl,
+    /// `w` — cross-link to Events watch sub-mode pre-narrowed to the
+    /// selected component. Active for Processor / ProcessGroup /
+    /// RemoteProcessGroup rows; disabled for the rest (folder /
+    /// connection / port / controller service).
+    Watch,
 }
 
 /// Listing-panel-scoped verbs. Active when focus is inside the
@@ -255,6 +260,7 @@ impl Verb for BrowserVerb {
             Self::OpenParameterContext => Chord::simple(KeyCode::Char('p')),
             Self::OpenActionHistory => Chord::simple(KeyCode::Char('a')),
             Self::ShowVersionControl => Chord::simple(KeyCode::Char('m')),
+            Self::Watch => Chord::simple(KeyCode::Char('w')),
         }
     }
     fn label(self) -> &'static str {
@@ -264,6 +270,7 @@ impl Verb for BrowserVerb {
             Self::OpenParameterContext => "open parameter context",
             Self::OpenActionHistory => "open action history",
             Self::ShowVersionControl => "show version control",
+            Self::Watch => "watch this component",
         }
     }
     fn hint(self) -> &'static str {
@@ -273,6 +280,7 @@ impl Verb for BrowserVerb {
             Self::OpenParameterContext => "param",
             Self::OpenActionHistory => "actions",
             Self::ShowVersionControl => "version",
+            Self::Watch => "watch",
         }
     }
     fn enabled(self, ctx: &HintContext<'_>) -> bool {
@@ -296,6 +304,10 @@ impl Verb for BrowserVerb {
                 ctx.state.current_tab == ViewId::Browser
                     && ctx.state.browser_selection_is_versioned_pg()
             }
+            Self::Watch => {
+                ctx.state.current_tab == ViewId::Browser
+                    && ctx.state.browser.selected_component_id().is_some()
+            }
             _ => true,
         }
     }
@@ -310,6 +322,7 @@ impl Verb for BrowserVerb {
             Self::OpenParameterContext,
             Self::OpenActionHistory,
             Self::ShowVersionControl,
+            Self::Watch,
         ]
     }
 }

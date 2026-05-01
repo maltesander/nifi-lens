@@ -1164,6 +1164,33 @@ impl BrowserState {
         }
     }
 
+    /// Return the UUID for the currently-selected row IF it is a kind
+    /// the Browser `w` watch cross-link supports. Watch is meaningful
+    /// for components that produce provenance events:
+    ///
+    /// - `Processor` — the processor's UUID.
+    /// - `ProcessGroup` — the PG's UUID (NiFi narrows by component_id;
+    ///   the worker tail is per-component, but the user can still
+    ///   target a PG to scope to its descendants via the predicate).
+    /// - `RemoteProcessGroup` — the RPG's UUID.
+    ///
+    /// Other kinds (folder, connection, port, controller service)
+    /// return `None`, suppressing both the chord and the dispatch.
+    pub fn selected_component_id(&self) -> Option<String> {
+        let arena_idx = *self.visible.get(self.selected)?;
+        let node = self.nodes.get(arena_idx)?;
+        match node.kind {
+            NodeKind::Processor | NodeKind::ProcessGroup | NodeKind::RemoteProcessGroup => {
+                Some(node.id.clone())
+            }
+            NodeKind::Connection
+            | NodeKind::ControllerService
+            | NodeKind::InputPort
+            | NodeKind::OutputPort
+            | NodeKind::Folder(_) => None,
+        }
+    }
+
     /// Compute the `(kind, id)` pair for the currently-selected row IF
     /// it's a processor / PG / connection (the only kinds with a
     /// `/status/history` endpoint). Returns `None` for other kinds —

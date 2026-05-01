@@ -199,6 +199,15 @@ pub enum IntentOutcome {
     EventsLandingOn {
         component_id: String,
     },
+    /// Cross-link from Browser/Tracer `w` lands on Events in the Watch
+    /// sub-mode pre-narrowed to the given component. The reducer
+    /// switches tabs, calls `EventsState::enter_watch_mode` with a
+    /// fresh session, and focuses the predicate input. The watch
+    /// worker is spawned by `WorkerRegistry::ensure` on the same loop
+    /// iteration once the tab change lands.
+    EventsWatchLandingOn {
+        component_id: String,
+    },
     /// Parameter-contexts feature: open the parameter-context modal on
     /// Browser scoped to the given PG, optionally pre-selecting a
     /// parameter name. The reducer calls

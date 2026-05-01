@@ -2593,6 +2593,29 @@ fn handle_intent_outcome(
                 queue_listing_followup: None,
             }
         }
+        Ok(IntentOutcome::EventsWatchLandingOn { component_id }) => {
+            // Switch to Events in Watch sub-mode pre-narrowed to the
+            // component; focus the predicate input on entry. The watch
+            // worker is spawned by `WorkerRegistry::ensure` on the next
+            // loop iteration once `events.watch().is_some()`.
+            let anchor = capture_anchor(state);
+            state.history.push(crate::app::history::HistoryEntry {
+                tab: state.current_tab,
+                anchor,
+            });
+            state.current_tab = ViewId::Events;
+            state.close_modal();
+            let session = crate::view::events::state::WatchSession::new_for_component(component_id);
+            state.events.enter_watch_mode(session);
+            state.events.focus_predicate();
+            UpdateResult {
+                redraw: true,
+                intent: None,
+                tracer_followup: None,
+                sparkline_followup: None,
+                queue_listing_followup: None,
+            }
+        }
         Ok(IntentOutcome::OpenParameterContextModalTarget { pg_id, preselect }) => {
             // Look up the PG's display name from the arena; fall back to
             // the bare id if the PG isn't found (race between navigation
