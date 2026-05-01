@@ -138,6 +138,32 @@ pub fn make_port(name: &str) -> types::PortEntity {
     entity
 }
 
+/// Build a `ReportingTaskEntity`.
+///
+/// Same pattern as [`make_controller_service`] — `task_type` is the
+/// fully-qualified Java class name of the reporting task, `properties` is
+/// a flat NiFi property-name -> value map.
+pub fn make_reporting_task(
+    name: &str,
+    task_type: &str,
+    properties: HashMap<String, String>,
+) -> types::ReportingTaskEntity {
+    let mut component = types::ReportingTaskDto::default();
+    component.name = Some(name.to_string());
+    component.r#type = Some(task_type.to_string());
+    if !properties.is_empty() {
+        component.properties = Some(properties.into_iter().map(|(k, v)| (k, Some(v))).collect());
+    }
+
+    let mut revision = types::RevisionDto::default();
+    revision.version = Some(0);
+
+    let mut entity = types::ReportingTaskEntity::default();
+    entity.component = Some(component);
+    entity.revision = Some(revision);
+    entity
+}
+
 /// Build a `ControllerServiceEntity`.
 ///
 /// Same pattern as [`make_processor`] — `cs_type` is the fully-qualified
