@@ -455,10 +455,14 @@ pub fn apply_payload(state: &mut EventsState, payload: crate::event::EventsPaylo
             }
             state.status = EventsQueryStatus::Failed { error };
         }
-        // Watch-mode payloads — reduced in Task 13.
+        // Watch-mode payloads — delegated to the watch reducer in
+        // `crate::view::events::handle_watch_payload`.
         EventsPayload::WatchMatch { .. }
         | EventsPayload::WatchTick { .. }
-        | EventsPayload::WatchFailed { .. } => {}
+        | EventsPayload::WatchFailed { .. } => {
+            let selected = state.selected_row;
+            crate::view::events::handle_watch_payload(state, payload, selected);
+        }
     }
 }
 
@@ -1265,5 +1269,139 @@ mod tests {
             w.predicate_input = "x".into();
         }
         assert_eq!(s.watch().unwrap().predicate_input, "x");
+    }
+
+    use crate::client::AttributeTriple;
+    use crate::event::EventsPayload;
+
+    fn watch_state() -> EventsState {
+        let mut s = EventsState::new();
+        s.enter_watch_mode(WatchSession {
+            narrow: ProvenanceQuery {
+                component_id: Some("c".into()),
+                ..Default::default()
+            },
+            predicate: Predicate::parse("filename =~ /^x/").unwrap(),
+            predicate_input: "filename =~ /^x/".into(),
+            buffer: VecDeque::new(),
+            buffer_cap: 100,
+            cursor: None,
+            status: WatchStatus::Tailing,
+            stats: WatchStats::default(),
+        });
+        s
+    }
+
+    fn summary(id: i64) -> ProvenanceEventSummary {
+        ProvenanceEventSummary {
+            event_id: id,
+            event_time_iso: format!("t{id}"),
+            event_type: "SEND".into(),
+            component_id: "c".into(),
+            component_name: "n".into(),
+            component_type: "T".into(),
+            group_id: "g".into(),
+            flow_file_uuid: format!("ff{id}"),
+            relationship: None,
+            details: None,
+        }
+    }
+
+    #[test]
+    fn handle_watch_match_appends_to_buffer() {
+        let mut s = watch_state();
+        let attrs = vec![AttributeTriple {
+            key: "filename".into(),
+            previous: None,
+            current: Some("xy".into()),
+        }];
+        crate::view::events::handle_watch_payload(
+            &mut s,
+            EventsPayload::WatchMatch {
+                summary: summary(1),
+                attrs,
+            },
+            None,
+        );
+        let watch = s.watch().expect("still in watch mode");
+        assert_eq!(watch.buffer.len(), 1);
+        assert_eq!(watch.buffer.front().unwrap().summary.event_id, 1);
+    }
+
+    #[test]
+    fn handle_watch_tick_updates_stats() {
+        let mut s = watch_state();
+        crate::view::events::handle_watch_payload(
+            &mut s,
+            EventsPayload::WatchTick {
+                events_per_sec_ewma: 12.5,
+                last_poll_latency_ms: 250,
+                scanned: 50,
+                matched: 3,
+                detail_fetch_errors: 1,
+            },
+            None,
+        );
+        let stats = &s.watch().unwrap().stats;
+        assert!((stats.events_per_sec_ewma - 12.5).abs() < f32::EPSILON);
+        assert_eq!(stats.last_poll_latency.unwrap().as_millis(), 250);
+        assert_eq!(stats.detail_fetch_errors, 1);
+    }
+
+    #[test]
+    fn handle_watch_tick_promotes_waiting_to_tailing() {
+        let mut s = watch_state();
+        // Force into Waiting state.
+        if let Some(w) = s.watch_mut() {
+            w.status = WatchStatus::Waiting;
+        }
+        crate::view::events::handle_watch_payload(
+            &mut s,
+            EventsPayload::WatchTick {
+                events_per_sec_ewma: 0.0,
+                last_poll_latency_ms: 100,
+                scanned: 0,
+                matched: 0,
+                detail_fetch_errors: 0,
+            },
+            None,
+        );
+        assert!(matches!(s.watch().unwrap().status, WatchStatus::Tailing));
+    }
+
+    #[test]
+    fn handle_watch_failed_flips_status() {
+        let mut s = watch_state();
+        crate::view::events::handle_watch_payload(
+            &mut s,
+            EventsPayload::WatchFailed {
+                error: "boom".into(),
+                retry_in_ms: 5_000,
+            },
+            None,
+        );
+        match &s.watch().unwrap().status {
+            WatchStatus::Failed { error, retry_in } => {
+                assert_eq!(error, "boom");
+                assert_eq!(retry_in.as_millis(), 5_000);
+            }
+            other => panic!("expected Failed, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn handle_watch_payload_no_op_when_not_in_watch_mode() {
+        let mut s = EventsState::new();
+        // Not in watch mode — payload should be a no-op.
+        crate::view::events::handle_watch_payload(
+            &mut s,
+            EventsPayload::WatchMatch {
+                summary: summary(1),
+                attrs: vec![],
+            },
+            None,
+        );
+        assert!(matches!(s.mode, EventsMode::OneShot));
+        assert!(s.watch().is_none());
     }
 }
