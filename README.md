@@ -419,6 +419,29 @@ Pages auto-load as you scroll past the bottom of the loaded tail.
 |----------------------------------|---------------------------------------------------------|
 | `Shift+D` / `T` / `S` / `U` / `A` | Edit filters (time / type / source / UUID / attribute) |
 | `Enter` (in filter bar)          | Submit the query                                        |
+| `w`                              | Edit the watch predicate (live tail mode)               |
+| `p`                              | Pause / resume the watch                                |
+| `Shift+C`                        | Clear the watch buffer                                  |
+| `Esc` (in predicate)             | Unfocus the predicate input                             |
+
+#### Watch sub-mode
+
+Type a predicate in the Watch strip below the filter bar to switch
+from one-shot search to a live tail. The predicate is an
+AND-of-clauses against flowfile attributes, e.g.:
+
+```text
+filename =~ /^invoice-/ AND mime.type = application/json
+```
+
+Operators: `=`, `!=`, `=~`, `!~` (regex literals are `/.../`). Each
+tail iteration submits a provenance query for new events under the
+current narrow (component / event type / time window), then fetches
+each event's attributes and applies the predicate. The narrow must
+have at least one term — otherwise the watch refuses to start.
+
+`w` on a Browser processor / PG / RPG row or a Tracer event row jumps
+to Events in watch mode, pre-narrowed to that component.
 
 ### Tracer
 
@@ -485,6 +508,13 @@ current_context = "dev"
 [bulletins]
 ring_size = 5000
 
+# Optional: Events tab options.
+[events]
+# Max matches retained in the watch buffer. Default 2000; range 100..=20000.
+watch_buffer_size = 2000
+# Max backoff between watch retry attempts after submit/poll failures.
+watch_retry_max   = "60s"
+
 # Optional: Tracer tab options.
 [tracer.ceiling]
 text    = "4 MiB"     # plain text/hex content per side
@@ -518,6 +548,7 @@ connections_by_pg           = "15s"
 version_control             = "30s"
 parameter_context_bindings  = "30s"
 status_history              = "30s"   # selection-scoped sparkline cadence
+events_tail                 = "2s"    # Events watch sub-mode tail cadence
 about                       = "5m"
 tls_certs                   = "1h"
 max_interval                = "60s"

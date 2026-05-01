@@ -209,6 +209,12 @@ help (Bulletins severity `1`/`2`/`3`; `SearchNext`/`SearchPrev`).
 All seven steps are mechanical. See "Visual language → Shared
 helpers" for reusable layout / modal / filter_bar / scroll helpers.
 
+For a tab that needs a *sub-mode* rather than a new view (mode
+discriminator on existing state, alternate worker, conditional
+layout split, mode-aware `WorkerRegistry` teardown), see the
+Events watch sub-mode for the reference pattern. No new `ViewId`
+variant required.
+
 ### Logging
 
 `tracing` + `tracing-subscriber` + `tracing-appender` write a daily-rotated
@@ -480,6 +486,64 @@ a chip; Avro is streamable and degrades via `truncated = true`.
 **Diff:** tabular sides diff iff their `format` tags match. Diff
 input is `Tabular::body`; schema lines do not contribute hunks; the
 `diff` ceiling caps per-side input.
+
+### Events watch sub-mode
+
+`EventsState` carries a `mode: EventsMode` enum: `OneShot` (existing
+behaviour) or `Watch(WatchSession)`. Mode is implicit — empty
+predicate input = one-shot, populated = watch.
+
+The watch worker (`src/view/events/worker.rs::spawn_watch`) loops:
+submit a provenance query with the user's narrow + a tail cursor,
+poll until finished, fan out `/provenance-events/{id}` per matched
+summary via `buffer_unordered(N)`, apply a client-side
+`Predicate` (`src/client/predicate.rs`) to each detail's attribute
+map, push matches to `WatchSession.buffer` (rolling, capped by
+`[events] watch_buffer_size`).
+
+Predicate grammar: `attr op literal (AND attr op literal)*` with
+`= / != / =~ / !~` operators and `/.../` regex literals. Missing-
+attribute semantics: `=`/`=~` → false, `!=`/`!~` → true. Regexes
+compile at parse time; bad input keeps the previous predicate.
+
+Cost guard: `WatchSession::can_start` requires at least one of
+`component_id`, `flow_file_uuid`, `event_types`, or non-blank
+`start_time_iso` before the worker spawns.
+
+Tab switch is paused-and-resumed. `WorkerRegistry::ensure` aborts
+the worker on tab exit (`pause_watch`), retains the session, and
+re-spawns with the saved `TailCursor` on tab re-entry
+(`resume_watch`). Buffer + predicate + cursor survive the pause;
+no events are missed across it.
+
+Cross-link: lowercase `w` on a Browser processor / PG / RPG row or
+a Tracer event row emits `Intent::Goto(CrossLink::OpenWatch
+{ component_id })`. The reducer arm `EventsWatchLandingOn`
+switches to Events, calls `WatchSession::new_for_component`, and
+focuses the predicate input.
+
+Verbs: `EventsWatchVerb` embeds `Common(CommonVerb)`; chord-only
+additions are `w` (focus predicate), `p` (pause/resume), `Shift+C`
+(clear buffer), `Enter` (commit predicate), `Esc` (unfocus
+predicate). Both `EventsWatchVerb::UnfocusPredicate` and
+`Common(CommonVerb::Close)` map to `Esc`; the events handler
+routes by predicate-input focus state.
+
+A confirm modal (`EventsState::exit_watch_pending`) protects users
+from accidentally discarding a non-empty buffer when leaving watch
+mode (`y` confirms, `n`/`Esc` cancels).
+
+Per-event detail fan-out is bounded by
+`[polling.cluster] batch_concurrency` (default 16). Submit/poll
+errors emit `WatchFailed` and back off 5/10/30/60s; RAII guard
+fires `DELETE /provenance/{id}` on every exit path, identical to
+`spawn_query`.
+
+Config:
+
+- `[polling.cluster] events_tail` (default `2s`, clamped `[100ms, 60s]`)
+- `[events] watch_buffer_size` (default 2000, range `100..=20_000`)
+- `[events] watch_retry_max` (default `60s`)
 
 ### Poll intervals
 
