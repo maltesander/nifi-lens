@@ -416,6 +416,10 @@ pub fn apply_payload(state: &mut EventsState, payload: crate::event::EventsPaylo
             }
             state.status = EventsQueryStatus::Failed { error };
         }
+        // Watch-mode payloads — reduced in Task 13.
+        EventsPayload::WatchMatch { .. }
+        | EventsPayload::WatchTick { .. }
+        | EventsPayload::WatchFailed { .. } => {}
     }
 }
 
