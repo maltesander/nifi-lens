@@ -810,8 +810,8 @@ pub use overview::{
 };
 pub use predicate::{ClauseLiteral, Op, Predicate, PredicateParseError};
 pub use reporting_tasks::{
-    ReportingTaskPropertyDescriptor, ReportingTaskRow, ReportingTaskState, ReportingTasksSnapshot,
-    ValidationStatus,
+    ReportingTaskCounts, ReportingTaskPropertyDescriptor, ReportingTaskRow, ReportingTaskState,
+    ReportingTasksSnapshot, ValidationStatus,
 };
 pub use tls_cert::{CertEntry, NodeCertChain, TlsCertsSnapshot, TlsProbeError};
 pub use tracer::{

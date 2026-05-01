@@ -92,9 +92,61 @@ pub struct ReportingTaskPropertyDescriptor {
     pub default_value: Option<String>,
 }
 
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct ReportingTaskCounts {
+    pub total: usize,
+    pub running: usize,
+    pub stopped: usize,
+    pub invalid: usize,
+}
+
+impl ReportingTasksSnapshot {
+    pub fn counts(&self) -> ReportingTaskCounts {
+        let mut c = ReportingTaskCounts {
+            total: self.tasks.len(),
+            ..ReportingTaskCounts::default()
+        };
+        for t in &self.tasks {
+            if t.validation_status == ValidationStatus::Invalid {
+                c.invalid += 1;
+            }
+            match t.state {
+                ReportingTaskState::Running if t.validation_status == ValidationStatus::Valid => {
+                    c.running += 1;
+                }
+                ReportingTaskState::Stopped | ReportingTaskState::Disabled => {
+                    c.stopped += 1;
+                }
+                ReportingTaskState::Running => {
+                    // running-but-not-valid → does not count toward
+                    // `running`. The `invalid` bucket already reflects it.
+                }
+            }
+        }
+        c
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn row(state: ReportingTaskState, valid: ValidationStatus) -> ReportingTaskRow {
+        ReportingTaskRow {
+            id: "x".into(),
+            name: "x".into(),
+            task_type: "x".into(),
+            state,
+            scheduling_strategy: "TIMER_DRIVEN".into(),
+            scheduling_period: "30s".into(),
+            active_thread_count: 0,
+            validation_status: valid,
+            validation_errors: vec![],
+            comments: None,
+            properties: BTreeMap::new(),
+            descriptors: BTreeMap::new(),
+        }
+    }
 
     #[test]
     fn state_from_wire_known() {
@@ -154,5 +206,27 @@ mod tests {
             ValidationStatus::from_wire("invalid"),
             ValidationStatus::Invalid
         );
+    }
+
+    #[test]
+    fn snapshot_counts_running_stopped_invalid() {
+        let snapshot = ReportingTasksSnapshot {
+            tasks: vec![
+                row(ReportingTaskState::Running, ValidationStatus::Valid),
+                row(ReportingTaskState::Running, ValidationStatus::Valid),
+                row(ReportingTaskState::Stopped, ValidationStatus::Valid),
+                row(ReportingTaskState::Disabled, ValidationStatus::Valid),
+                row(ReportingTaskState::Running, ValidationStatus::Invalid),
+            ],
+            fetched_at: Instant::now(),
+        };
+        let counts = snapshot.counts();
+        assert_eq!(counts.running, 2, "running AND valid only");
+        assert_eq!(counts.stopped, 2, "stopped + disabled");
+        assert_eq!(
+            counts.invalid, 1,
+            "validation_status Invalid is orthogonal to state"
+        );
+        assert_eq!(counts.total, 5);
     }
 }
