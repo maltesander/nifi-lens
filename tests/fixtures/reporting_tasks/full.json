@@ -1,0 +1,117 @@
+{
+  "currentTime": "12:00:00 UTC",
+  "reportingTasks": [
+    {
+      "id": "task-1",
+      "permissions": { "canRead": true, "canWrite": true },
+      "component": {
+        "id": "task-1",
+        "name": "Prometheus Exporter",
+        "type": "org.apache.nifi.reporting.prometheus.PrometheusReportingTask",
+        "state": "RUNNING",
+        "schedulingStrategy": "TIMER_DRIVEN",
+        "schedulingPeriod": "30s",
+        "activeThreadCount": 1,
+        "validationStatus": "VALID",
+        "validationErrors": [],
+        "comments": "metrics endpoint",
+        "properties": {
+          "Metrics Endpoint Port": "9092",
+          "Instance ID": "prod-1",
+          "SSL Context Service": "secret-value-must-be-masked"
+        },
+        "descriptors": {
+          "Metrics Endpoint Port": {
+            "name": "Metrics Endpoint Port",
+            "displayName": "Metrics Endpoint Port",
+            "sensitive": false,
+            "required": true
+          },
+          "Instance ID": {
+            "name": "Instance ID",
+            "displayName": "Instance ID",
+            "sensitive": false,
+            "required": false
+          },
+          "SSL Context Service": {
+            "name": "SSL Context Service",
+            "displayName": "SSL Context Service",
+            "sensitive": true,
+            "required": false
+          }
+        }
+      }
+    },
+    {
+      "id": "task-2",
+      "permissions": { "canRead": true, "canWrite": true },
+      "component": {
+        "id": "task-2",
+        "name": "S2S Bulletin Reporter",
+        "type": "org.apache.nifi.reporting.SiteToSiteBulletinReportingTask",
+        "state": "RUNNING",
+        "schedulingStrategy": "TIMER_DRIVEN",
+        "schedulingPeriod": "1m",
+        "activeThreadCount": 0,
+        "validationStatus": "VALID",
+        "validationErrors": [],
+        "properties": {},
+        "descriptors": {}
+      }
+    },
+    {
+      "id": "task-3",
+      "permissions": { "canRead": true, "canWrite": true },
+      "component": {
+        "id": "task-3",
+        "name": "Memory Monitor",
+        "type": "org.apache.nifi.controller.MonitorMemory",
+        "state": "STOPPED",
+        "schedulingStrategy": "TIMER_DRIVEN",
+        "schedulingPeriod": "5m",
+        "activeThreadCount": 0,
+        "validationStatus": "VALID",
+        "validationErrors": [],
+        "properties": {},
+        "descriptors": {}
+      }
+    },
+    {
+      "id": "task-4",
+      "permissions": { "canRead": true, "canWrite": true },
+      "component": {
+        "id": "task-4",
+        "name": "Disk Monitor",
+        "type": "org.apache.nifi.controller.MonitorDiskUsage",
+        "state": "RUNNING",
+        "schedulingStrategy": "TIMER_DRIVEN",
+        "schedulingPeriod": "5m",
+        "activeThreadCount": 0,
+        "validationStatus": "INVALID",
+        "validationErrors": [
+          "'Threshold' is required",
+          "'Directory Path' refers to a non-existent path"
+        ],
+        "properties": {},
+        "descriptors": {}
+      }
+    },
+    {
+      "id": "task-5",
+      "permissions": { "canRead": true, "canWrite": true },
+      "component": {
+        "id": "task-5",
+        "name": "Status Reporter",
+        "type": "org.apache.nifi.controller.ControllerStatusReportingTask",
+        "state": "DISABLED",
+        "schedulingStrategy": "TIMER_DRIVEN",
+        "schedulingPeriod": "30s",
+        "activeThreadCount": 0,
+        "validationStatus": "VALID",
+        "validationErrors": [],
+        "properties": {},
+        "descriptors": {}
+      }
+    }
+  ]
+}
