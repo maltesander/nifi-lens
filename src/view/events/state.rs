@@ -1,7 +1,8 @@
 //! Pure state for the Events tab.
 
-use crate::client::ProvenanceEventSummary;
-use std::time::SystemTime;
+use crate::client::{AttributeTriple, Predicate, ProvenanceEventSummary, ProvenanceQuery};
+use std::collections::VecDeque;
+use std::time::{Duration, SystemTime};
 
 /// Default provenance query result cap.
 pub(crate) const DEFAULT_RESULT_CAP: u32 = 500;
@@ -420,6 +421,84 @@ pub fn apply_payload(state: &mut EventsState, payload: crate::event::EventsPaylo
         EventsPayload::WatchMatch { .. }
         | EventsPayload::WatchTick { .. }
         | EventsPayload::WatchFailed { .. } => {}
+    }
+}
+
+/// One event that matched the active watch predicate, with its full
+/// attribute map captured at fetch time.
+#[derive(Debug, Clone)]
+pub struct MatchedEvent {
+    pub summary: ProvenanceEventSummary,
+    pub attrs: Vec<AttributeTriple>,
+}
+
+/// Cursor advanced after each tail iteration so the next poll only
+/// returns events strictly newer than what we've already scanned.
+#[derive(Debug, Clone, Copy)]
+pub struct TailCursor {
+    pub last_event_id: i64,
+    pub last_event_time: SystemTime,
+}
+
+/// Status of the watch worker, surfaced as a chip on the Watch strip.
+#[derive(Debug, Clone)]
+pub enum WatchStatus {
+    Tailing,
+    Paused,
+    NarrowRequired,
+    Waiting,
+    Failed { error: String, retry_in: Duration },
+}
+
+/// Rolling stats for the Watch strip.
+#[derive(Debug, Clone, Default)]
+pub struct WatchStats {
+    pub events_per_sec_ewma: f32,
+    pub last_poll_latency: Option<Duration>,
+    pub trimmed_total: u64,
+    pub detail_fetch_errors: u64,
+}
+
+/// Full state for one active watch — predicate, narrow, rolling
+/// buffer, cursor, status. Lives on `EventsState::mode` when the
+/// tab is in watch mode (mode wrapping arrives in Task 9).
+#[derive(Debug)]
+pub struct WatchSession {
+    pub narrow: ProvenanceQuery,
+    pub predicate: Predicate,
+    pub predicate_input: String,
+    pub buffer: VecDeque<MatchedEvent>,
+    pub buffer_cap: usize,
+    pub cursor: Option<TailCursor>,
+    pub status: WatchStatus,
+    pub stats: WatchStats,
+}
+
+impl WatchSession {
+    /// Cost guard: refuse to spawn the worker unless the narrow has
+    /// at least one of (component, flow-file UUID, non-empty event
+    /// types, non-blank start time). `now` is injected to keep the
+    /// function pure for tests and to leave room for a future
+    /// "start_time within 24h" gate (the spec mentions 24h as a UX
+    /// hint; the runtime gate accepts any non-blank start_time as
+    /// deliberate).
+    pub fn can_start(narrow: &ProvenanceQuery, now: SystemTime) -> bool {
+        if narrow.component_id.is_some() {
+            return true;
+        }
+        if narrow.flow_file_uuid.is_some() {
+            return true;
+        }
+        if !narrow.event_types.is_empty() {
+            return true;
+        }
+        if let Some(s) = narrow.start_time_iso.as_deref()
+            && !s.trim().is_empty()
+        {
+            return true;
+        }
+        let _ = now;
+        false
     }
 }
 
@@ -875,6 +954,75 @@ mod tests {
             23,
             "start date must be exactly `MM/dd/yyyy HH:mm:ss UTC`, got {start:?}"
         );
+    }
+
+    use crate::client::ProvenanceQuery;
+    use std::time::{Duration, SystemTime};
+
+    fn empty_query() -> ProvenanceQuery {
+        ProvenanceQuery::default()
+    }
+
+    fn query_with_component() -> ProvenanceQuery {
+        ProvenanceQuery {
+            component_id: Some("abc".into()),
+            ..Default::default()
+        }
+    }
+
+    fn query_with_event_types() -> ProvenanceQuery {
+        ProvenanceQuery {
+            event_types: vec!["DROP".into()],
+            ..Default::default()
+        }
+    }
+
+    #[test]
+    fn watch_session_can_start_requires_a_narrow() {
+        let now = SystemTime::UNIX_EPOCH + Duration::from_secs(1_777_640_000);
+        assert!(!WatchSession::can_start(&empty_query(), now));
+    }
+
+    #[test]
+    fn watch_session_can_start_with_component() {
+        let now = SystemTime::UNIX_EPOCH + Duration::from_secs(1_777_640_000);
+        assert!(WatchSession::can_start(&query_with_component(), now));
+    }
+
+    #[test]
+    fn watch_session_can_start_with_event_types() {
+        let now = SystemTime::UNIX_EPOCH + Duration::from_secs(1_777_640_000);
+        assert!(WatchSession::can_start(&query_with_event_types(), now));
+    }
+
+    #[test]
+    fn watch_session_can_start_with_flow_file_uuid() {
+        let now = SystemTime::UNIX_EPOCH + Duration::from_secs(1_777_640_000);
+        let q = ProvenanceQuery {
+            flow_file_uuid: Some("ff-1".into()),
+            ..Default::default()
+        };
+        assert!(WatchSession::can_start(&q, now));
+    }
+
+    #[test]
+    fn watch_session_can_start_with_explicit_start_time() {
+        let now = SystemTime::UNIX_EPOCH + Duration::from_secs(1_777_640_000);
+        let q = ProvenanceQuery {
+            start_time_iso: Some("2026-04-30T22:00:00Z".into()),
+            ..Default::default()
+        };
+        assert!(WatchSession::can_start(&q, now));
+    }
+
+    #[test]
+    fn watch_session_can_start_rejects_blank_start_time() {
+        let now = SystemTime::UNIX_EPOCH + Duration::from_secs(1_777_640_000);
+        let q = ProvenanceQuery {
+            start_time_iso: Some("   ".into()),
+            ..Default::default()
+        };
+        assert!(!WatchSession::can_start(&q, now));
     }
 
     #[test]
