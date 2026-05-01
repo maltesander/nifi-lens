@@ -433,8 +433,18 @@ impl EventsState {
         }
     }
 
-    /// Accessor for the currently-selected event, if any.
+    /// Accessor for the currently-selected event, if any. Mode-aware:
+    /// in watch mode the rows are rendered newest-first from
+    /// `WatchSession.buffer` (a `VecDeque` with push-back ordering),
+    /// so `selected_row = 0` corresponds to the *last* buffer entry.
+    /// One-shot mode uses the legacy `events` vec directly.
     pub fn selected_event(&self) -> Option<&crate::client::ProvenanceEventSummary> {
+        if let Some(w) = self.watch() {
+            let i = self.selected_row?;
+            let len = w.buffer.len();
+            let idx = len.checked_sub(i + 1)?;
+            return w.buffer.get(idx).map(|m| &m.summary);
+        }
         self.selected_row.and_then(|i| self.events.get(i))
     }
 
@@ -1167,6 +1177,47 @@ mod tests {
         let mut s = EventsState::new();
         s.enter_row_nav();
         assert_eq!(s.selected_row, None);
+    }
+
+    #[test]
+    fn selected_event_in_watch_mode_resolves_through_newest_first() {
+        let mut s = EventsState::new();
+        let mut session = empty_session(100);
+        // Push three events in order; the renderer flips them so the
+        // newest (id=3) is row 0.
+        session.buffer.push_back(matched(1));
+        session.buffer.push_back(matched(2));
+        session.buffer.push_back(matched(3));
+        s.enter_watch_mode(session);
+
+        s.enter_row_nav();
+        assert_eq!(s.selected_row, Some(0));
+        assert_eq!(s.selected_event().unwrap().event_id, 3);
+
+        s.move_selection_down();
+        assert_eq!(s.selected_event().unwrap().event_id, 2);
+
+        s.move_selection_down();
+        assert_eq!(s.selected_event().unwrap().event_id, 1);
+    }
+
+    #[test]
+    fn selected_event_falls_back_to_events_vec_in_oneshot() {
+        let mut s = EventsState::new();
+        s.events.push(ProvenanceEventSummary {
+            event_id: 42,
+            event_time_iso: "t".into(),
+            event_type: "DROP".into(),
+            component_id: "c".into(),
+            component_name: "n".into(),
+            component_type: "T".into(),
+            group_id: "g".into(),
+            flow_file_uuid: "ff".into(),
+            relationship: None,
+            details: None,
+        });
+        s.selected_row = Some(0);
+        assert_eq!(s.selected_event().unwrap().event_id, 42);
     }
 
     #[test]
