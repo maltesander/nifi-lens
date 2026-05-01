@@ -11,6 +11,7 @@
 //! on every `ClusterChanged` variant Overview cares about.
 
 pub mod render;
+pub mod reporting_tasks_modal;
 pub mod state;
 
 use ratatui::Frame;

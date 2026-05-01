@@ -103,6 +103,8 @@ pub struct OverviewState {
     /// is `Loading` or has only ever failed — the renderer
     /// degrades the row to "rt list unavailable" in that case.
     pub reporting_task_counts: Option<crate::client::ReportingTaskCounts>,
+    pub reporting_tasks_modal:
+        Option<crate::view::overview::reporting_tasks_modal::ReportingTasksModalState>,
     pub sparkline: [BulletinBucket; SPARKLINE_MINUTES],
     /// Unix seconds at the start of `sparkline[SPARKLINE_MINUTES-1]` (the
     /// newest bucket). `None` until the first PG-status poll lands. Aligned
