@@ -27,14 +27,19 @@ use ratatui::widgets::Paragraph;
 use time;
 
 use crate::client::events::EventType;
+use crate::client::{AttributeTriple, ProvenanceEventSummary};
 use crate::theme;
 use crate::timestamp::format_age_secs;
-use crate::view::events::state::{EventsQueryStatus, EventsState, FilterField};
+use crate::view::events::state::{EventsMode, EventsQueryStatus, EventsState, FilterField};
 use crate::widget::filter_bar::{FilterChip, build_chip_line};
 use crate::widget::panel::Panel;
 
 const FILTER_BAR_ROWS: u16 = 2;
 const DETAIL_PANE_ROWS: u16 = 8;
+/// Outer height (including borders) of the watch strip when slotted
+/// between the filter bar and the results panel. Mirrors the snapshot
+/// fixture in `widget::watch_strip::tests::snapshot_render`.
+const WATCH_STRIP_ROWS: u16 = 4;
 
 pub fn render(
     frame: &mut Frame,
@@ -51,11 +56,33 @@ pub fn render(
         _ => "  ".to_string(),
     };
 
-    let rows = crate::layout::split_header_body_footer(
-        area,
-        FILTER_BAR_ROWS + 2,  // +2 for panel border
-        DETAIL_PANE_ROWS + 2, // +2 for panel border
-    );
+    let in_watch = matches!(state.mode, EventsMode::Watch(_));
+
+    // In one-shot mode the layout is bit-identical to the legacy
+    // 3-panel split (filters / events / detail). In watch mode a
+    // 4-row watch strip slots between filters and events. The
+    // detail panel is preserved in both modes — in watch it
+    // sources attrs from the focused MatchedEvent.
+    let header_rows = FILTER_BAR_ROWS + 2; // +2 for panel border
+    let footer_rows = DETAIL_PANE_ROWS + 2; // +2 for panel border
+    let constraints: Vec<Constraint> = if in_watch {
+        vec![
+            Constraint::Length(header_rows),
+            Constraint::Length(WATCH_STRIP_ROWS),
+            Constraint::Min(0),
+            Constraint::Length(footer_rows),
+        ]
+    } else {
+        vec![
+            Constraint::Length(header_rows),
+            Constraint::Min(0),
+            Constraint::Length(footer_rows),
+        ]
+    };
+    let rows = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints(constraints)
+        .split(area);
 
     // Filters panel
     let filters_block = Panel::new(" Filters ").into_block();
@@ -63,20 +90,27 @@ pub fn render(
     frame.render_widget(filters_block, rows[0]);
     render_filter_bar(frame, filters_inner, state);
 
+    let (events_area, detail_area) = if in_watch {
+        crate::widget::watch_strip::render(frame, rows[1], state);
+        (rows[2], rows[3])
+    } else {
+        (rows[1], rows[2])
+    };
+
     let now = time::OffsetDateTime::now_utc();
 
     // Events list panel (with age label on the right)
     let list_block = Panel::new(" Events ")
         .right(Line::from(Span::styled(age_label, theme::muted())))
         .into_block();
-    let list_inner = list_block.inner(rows[1]);
-    frame.render_widget(list_block, rows[1]);
+    let list_inner = list_block.inner(events_area);
+    frame.render_widget(list_block, events_area);
     render_body(frame, list_inner, state, now, cfg);
 
     // Detail panel
     let detail_block = Panel::new(" Detail ").into_block();
-    let detail_inner = detail_block.inner(rows[2]);
-    frame.render_widget(detail_block, rows[2]);
+    let detail_inner = detail_block.inner(detail_area);
+    frame.render_widget(detail_block, detail_area);
     render_detail_pane(frame, detail_inner, state, now, cfg);
 }
 
@@ -175,6 +209,17 @@ fn field_chip(label_prefix: &'static str, field: FilterField, state: &EventsStat
     }
 }
 
+/// Returns the events to render in the results table, in display order
+/// (top row first). In one-shot mode this is `state.events`; in watch
+/// mode it's the rolling watch buffer reversed (newest at the top).
+fn rows_for_render(state: &EventsState) -> Vec<&ProvenanceEventSummary> {
+    if let Some(w) = state.watch() {
+        w.buffer.iter().rev().map(|m| &m.summary).collect()
+    } else {
+        state.events.iter().collect()
+    }
+}
+
 fn render_body(
     frame: &mut Frame,
     area: Rect,
@@ -182,7 +227,9 @@ fn render_body(
     now: time::OffsetDateTime,
     cfg: &crate::timestamp::TimestampConfig,
 ) {
-    if matches!(state.status, EventsQueryStatus::Idle) && state.events.is_empty() {
+    let rows = rows_for_render(state);
+    if matches!(state.status, EventsQueryStatus::Idle) && rows.is_empty() && state.watch().is_none()
+    {
         render_empty_state(frame, area);
         return;
     }
@@ -202,23 +249,25 @@ fn render_body(
         frame.render_widget(centered, spot);
         return;
     }
-    // Otherwise (Done with events, or Failed), render the real results list.
-    // On Failed the results list falls through to its empty-state message;
-    // the global footer banner is the single source of truth for the error.
-    render_results_list(frame, area, state, now, cfg);
+    // Otherwise (Done with events, or Failed, or Watch-mode tail),
+    // render the real results list. On Failed the results list falls
+    // through to its empty-state message; the global footer banner
+    // is the single source of truth for the error.
+    render_results_list(frame, area, state, &rows, now, cfg);
 }
 
 fn render_results_list(
     frame: &mut Frame,
     area: Rect,
     state: &EventsState,
+    events: &[&ProvenanceEventSummary],
     now: time::OffsetDateTime,
     cfg: &crate::timestamp::TimestampConfig,
 ) {
     use ratatui::style::Style;
     use ratatui::widgets::{Cell, Row, Table};
 
-    if state.events.is_empty() {
+    if events.is_empty() {
         let centered = Paragraph::new(Span::styled(
             "no events matched the query".to_string(),
             theme::muted(),
@@ -244,8 +293,8 @@ fn render_results_list(
     } else {
         0
     };
-    let end = state.events.len().min(scroll_offset + visible_rows);
-    let window = &state.events[scroll_offset..end];
+    let end = events.len().min(scroll_offset + visible_rows);
+    let window = &events[scroll_offset..end];
 
     let rows: Vec<Row> = window
         .iter()
@@ -358,8 +407,28 @@ fn render_detail_pane(
 ) {
     let inner = area;
 
-    let Some(e) = state.selected_event() else {
-        let hint = if state.events.is_empty() {
+    // In watch mode, resolve the focused event from the watch buffer
+    // (newest-first display order). Attrs come from the same
+    // `MatchedEvent` so the detail pane never needs to re-fetch.
+    let watch_focus: Option<(&ProvenanceEventSummary, &[AttributeTriple])> =
+        state.watch().and_then(|w| {
+            let i = state.selected_row?;
+            let len = w.buffer.len();
+            let idx = len.checked_sub(i + 1)?;
+            w.buffer.get(idx).map(|m| (&m.summary, m.attrs.as_slice()))
+        });
+
+    let (e, attrs): (&ProvenanceEventSummary, Option<&[AttributeTriple]>) = if let Some((s, a)) =
+        watch_focus
+    {
+        (s, Some(a))
+    } else if let Some(s) = state.selected_event() {
+        // One-shot mode: no per-event attrs are eagerly cached;
+        // detail pane stays at its legacy bit-identical shape.
+        (s, None)
+    } else {
+        let empty = state.watch().is_none_or(|w| w.buffer.is_empty()) && (state.events.is_empty());
+        let hint = if empty {
             "".to_string()
         } else {
             "press ↑/↓ to select a row for detail".to_string()
@@ -407,14 +476,24 @@ fn render_detail_pane(
         theme::muted(),
     ));
 
-    let lines = vec![
-        header,
-        Line::from(""),
-        relationship_line,
-        component_line,
-        Line::from(""),
-        hints_line,
-    ];
+    let mut lines = vec![header, Line::from(""), relationship_line, component_line];
+    if let Some(attrs) = attrs.filter(|a| !a.is_empty()) {
+        lines.push(Line::from(""));
+        lines.push(Line::from(Span::styled(
+            "attributes".to_string(),
+            theme::muted(),
+        )));
+        for a in attrs {
+            let value = a.current.as_deref().unwrap_or("(unset)");
+            lines.push(Line::from(vec![
+                Span::raw("  "),
+                Span::styled(format!("{}: ", a.key), theme::muted()),
+                Span::raw(value.to_string()),
+            ]));
+        }
+    }
+    lines.push(Line::from(""));
+    lines.push(hints_line);
     frame.render_widget(Paragraph::new(lines), inner);
 }
 
@@ -542,6 +621,68 @@ mod tests {
                 "events_detail_pane_with_selected_row",
                 render_to_string(&state)
             );
+        });
+    }
+
+    #[test]
+    fn render_watch_mode_with_buffer() {
+        use crate::client::{AttributeTriple, Predicate, ProvenanceEventSummary, ProvenanceQuery};
+        use crate::view::events::state::{MatchedEvent, WatchSession, WatchStats, WatchStatus};
+        use std::collections::VecDeque;
+
+        let mut state = EventsState::new();
+        let mut buffer = VecDeque::new();
+        for id in 1..=3i64 {
+            buffer.push_back(MatchedEvent {
+                summary: ProvenanceEventSummary {
+                    event_id: id,
+                    event_time_iso: "04/30/2026 10:42:08.000 UTC".into(),
+                    event_type: "SEND".into(),
+                    component_id: "abc".into(),
+                    component_name: "UpdateRecord-fx-rate".into(),
+                    component_type: "UpdateRecord".into(),
+                    group_id: "g1".into(),
+                    flow_file_uuid: format!("ff-aaaaaaaa-bbbb-cccc-dddd-{id:012}"),
+                    relationship: None,
+                    details: None,
+                },
+                attrs: vec![
+                    AttributeTriple {
+                        key: "filename".into(),
+                        previous: None,
+                        current: Some(format!("invoice-{id}.json")),
+                    },
+                    AttributeTriple {
+                        key: "mime.type".into(),
+                        previous: None,
+                        current: Some("application/json".into()),
+                    },
+                ],
+            });
+        }
+        state.enter_watch_mode(WatchSession {
+            narrow: ProvenanceQuery {
+                component_id: Some("abc".into()),
+                ..Default::default()
+            },
+            predicate: Predicate::parse("filename =~ /^invoice-/").unwrap(),
+            predicate_input: "filename =~ /^invoice-/".into(),
+            buffer,
+            buffer_cap: 2000,
+            cursor: None,
+            status: WatchStatus::Tailing,
+            stats: WatchStats {
+                events_per_sec_ewma: 12.5,
+                last_poll_latency: Some(std::time::Duration::from_millis(250)),
+                trimmed_total: 0,
+                detail_fetch_errors: 0,
+            },
+        });
+        state.selected_row = Some(0);
+        insta::with_settings!({
+            filters => vec![(r"last \d+[smhd] ago", "last __ ago")],
+        }, {
+            assert_snapshot!("events_watch_mode_with_buffer", render_to_string(&state));
         });
     }
 }
