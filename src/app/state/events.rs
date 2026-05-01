@@ -173,7 +173,7 @@ impl ViewKeyHandler for EventsHandler {
                 FocusAction::PageDown => {
                     // Page down through results: go forward 10 rows.
                     for _ in 0..10 {
-                        let max = state.events.events.len().saturating_sub(1);
+                        let max = state.events.current_row_count().saturating_sub(1);
                         if state.events.selected_row == Some(max) {
                             break;
                         }

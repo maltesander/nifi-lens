@@ -395,10 +395,22 @@ impl EventsState {
         }
     }
 
-    /// Enter Mode B (row navigation). Does nothing if the results list
-    /// is empty.
+    /// Number of rows currently visible in the results table — sourced
+    /// from the watch buffer in `Watch` mode and from the one-shot
+    /// `events` vec otherwise. The two sources never coexist in one
+    /// frame; row-navigation logic uses this to bound `selected_row`
+    /// regardless of the active mode.
+    pub fn current_row_count(&self) -> usize {
+        match self.watch() {
+            Some(w) => w.buffer.len(),
+            None => self.events.len(),
+        }
+    }
+
+    /// Enter Mode B (row navigation). Does nothing if there are no
+    /// rows in the active mode's results source.
     pub fn enter_row_nav(&mut self) {
-        if !self.events.is_empty() {
+        if self.current_row_count() > 0 {
             self.selected_row = Some(0);
         }
     }
@@ -410,7 +422,7 @@ impl EventsState {
 
     pub fn move_selection_down(&mut self) {
         if let Some(idx) = self.selected_row {
-            let max = self.events.len().saturating_sub(1);
+            let max = self.current_row_count().saturating_sub(1);
             self.selected_row = Some((idx + 1).min(max));
         }
     }
@@ -1155,6 +1167,51 @@ mod tests {
         let mut s = EventsState::new();
         s.enter_row_nav();
         assert_eq!(s.selected_row, None);
+    }
+
+    #[test]
+    fn enter_row_nav_in_watch_mode_uses_buffer_not_events_vec() {
+        // Reproduces the bug: when the watch buffer holds matched
+        // events but `state.events` (the one-shot vec) is empty, Tab
+        // / Down → enter_row_nav must still pick up the first watch
+        // row. Before the fix, the empty-check looked at the wrong
+        // source and stayed in filter-bar mode.
+        let mut s = EventsState::new();
+        let mut session = empty_session(100);
+        session.buffer.push_back(matched(1));
+        session.buffer.push_back(matched(2));
+        s.enter_watch_mode(session);
+        // Confirm: one-shot events vec is empty, watch buffer has 2 rows.
+        assert!(s.events.is_empty());
+        assert_eq!(s.current_row_count(), 2);
+
+        s.enter_row_nav();
+        assert_eq!(s.selected_row, Some(0));
+
+        // Down stops at the last buffer row, not at events.len() == 0.
+        s.move_selection_down();
+        assert_eq!(s.selected_row, Some(1));
+        s.move_selection_down();
+        assert_eq!(s.selected_row, Some(1)); // clamped at len-1
+    }
+
+    #[test]
+    fn current_row_count_falls_back_to_events_vec_in_oneshot() {
+        let mut s = EventsState::new();
+        assert_eq!(s.current_row_count(), 0);
+        s.events.push(ProvenanceEventSummary {
+            event_id: 1,
+            event_time_iso: "t".into(),
+            event_type: "SEND".into(),
+            component_id: "c".into(),
+            component_name: "n".into(),
+            component_type: "T".into(),
+            group_id: "g".into(),
+            flow_file_uuid: "ff".into(),
+            relationship: None,
+            details: None,
+        });
+        assert_eq!(s.current_row_count(), 1);
     }
 
     #[test]
