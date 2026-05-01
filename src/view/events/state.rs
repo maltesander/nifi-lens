@@ -500,6 +500,27 @@ impl WatchSession {
         let _ = now;
         false
     }
+
+    /// Append a new matched event to the rolling buffer. If the buffer
+    /// is at `buffer_cap`, drop the oldest — *unless* `focused_row`
+    /// names index 0, in which case drop the second-oldest. This
+    /// prevents the user's cursor from jumping under their finger
+    /// while they investigate a row.
+    ///
+    /// When `buffer_cap` is 1 there is no second-oldest entry to fall
+    /// back to, so the focused row is dropped normally.
+    pub fn push_event(&mut self, ev: MatchedEvent, focused_row: Option<usize>) {
+        if self.buffer.len() >= self.buffer_cap {
+            let trim_idx = if focused_row == Some(0) && self.buffer.len() >= 2 {
+                1
+            } else {
+                0
+            };
+            self.buffer.remove(trim_idx);
+            self.stats.trimmed_total = self.stats.trimmed_total.saturating_add(1);
+        }
+        self.buffer.push_back(ev);
+    }
 }
 
 #[cfg(test)]
@@ -1061,5 +1082,96 @@ mod tests {
         s.enter_row_nav();
         s.leave_row_nav();
         assert_eq!(s.selected_row, None);
+    }
+
+    fn matched(id: i64) -> MatchedEvent {
+        MatchedEvent {
+            summary: ProvenanceEventSummary {
+                event_id: id,
+                event_time_iso: format!("t{id}"),
+                event_type: "SEND".into(),
+                component_id: "c".into(),
+                component_name: "n".into(),
+                component_type: "U".into(),
+                group_id: "g".into(),
+                flow_file_uuid: format!("ff{id}"),
+                relationship: None,
+                details: None,
+            },
+            attrs: vec![],
+        }
+    }
+
+    fn empty_session(buffer_cap: usize) -> WatchSession {
+        WatchSession {
+            narrow: ProvenanceQuery::default(),
+            predicate: Predicate::default(),
+            predicate_input: String::new(),
+            buffer: VecDeque::new(),
+            buffer_cap,
+            cursor: None,
+            status: WatchStatus::Paused,
+            stats: WatchStats::default(),
+        }
+    }
+
+    #[test]
+    fn push_event_appends_when_buffer_has_room() {
+        let mut s = empty_session(3);
+        s.push_event(matched(1), None);
+        s.push_event(matched(2), None);
+        let ids: Vec<i64> = s.buffer.iter().map(|m| m.summary.event_id).collect();
+        assert_eq!(ids, vec![1, 2]);
+        assert_eq!(s.stats.trimmed_total, 0);
+    }
+
+    #[test]
+    fn push_event_trims_oldest_when_full() {
+        let mut s = empty_session(3);
+        for id in 1..=4 {
+            s.push_event(matched(id), None);
+        }
+        let ids: Vec<i64> = s.buffer.iter().map(|m| m.summary.event_id).collect();
+        assert_eq!(ids, vec![2, 3, 4]);
+        assert_eq!(s.stats.trimmed_total, 1);
+    }
+
+    #[test]
+    fn push_event_protects_focused_oldest() {
+        let mut s = empty_session(3);
+        for id in 1..=3 {
+            s.push_event(matched(id), None);
+        }
+        // Buffer is full: [1, 2, 3]; focused index 0 (event 1).
+        s.push_event(matched(4), Some(0));
+        let ids: Vec<i64> = s.buffer.iter().map(|m| m.summary.event_id).collect();
+        // Should drop event 2 (second-oldest) instead of event 1.
+        assert_eq!(ids, vec![1, 3, 4]);
+        assert_eq!(s.stats.trimmed_total, 1);
+    }
+
+    #[test]
+    fn push_event_unfocused_or_other_row_drops_oldest_normally() {
+        let mut s = empty_session(3);
+        for id in 1..=3 {
+            s.push_event(matched(id), None);
+        }
+        // Focused index is 2 (newest) — not the oldest, so normal trim.
+        s.push_event(matched(4), Some(2));
+        let ids: Vec<i64> = s.buffer.iter().map(|m| m.summary.event_id).collect();
+        assert_eq!(ids, vec![2, 3, 4]);
+        assert_eq!(s.stats.trimmed_total, 1);
+    }
+
+    #[test]
+    fn push_event_buffer_cap_one_focused_still_drops_focused() {
+        // Edge case: with buffer_cap = 1, there's no second-oldest to fall
+        // back to — the focused row is the only row, so trim must drop it.
+        let mut s = empty_session(1);
+        s.push_event(matched(1), None);
+        s.push_event(matched(2), Some(0));
+        let ids: Vec<i64> = s.buffer.iter().map(|m| m.summary.event_id).collect();
+        assert_eq!(ids, vec![2]);
+        assert_eq!(s.stats.trimmed_total, 1);
     }
 }
