@@ -1,0 +1,9 @@
+---
+source: src/widget/watch_strip.rs
+assertion_line: 204
+expression: "snapshot_render(&state, 4)"
+---
+"┌ Watch ──────────────────────────────────────────────────────────────────────────────── ● tailing ┐"
+"│> predicate filename =~ /^invoice-/                                                               │"
+"│12.5 ev/s · 0/2000 buf · last 250 ms                                                              │"
+"└──────────────────────────────────────────────────────────────────────────────────────────────────┘"

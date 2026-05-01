@@ -1,0 +1,6 @@
+---
+source: src/widget/watch_strip.rs
+assertion_line: 235
+expression: "format!(\"{}\", term.backend())"
+---
+"watch: filename =~ /^invoic · ● tailing                     "
