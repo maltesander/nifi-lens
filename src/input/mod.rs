@@ -387,6 +387,16 @@ impl KeyMap {
                         }
                     }
                 } else {
+                    // In one-shot mode, accept the EditPredicate chord
+                    // (`w`) so the user can transition into watch mode
+                    // without having to cross-link from Browser/Tracer.
+                    // The dispatcher's EditPredicate arm enters watch
+                    // mode if not already in it.
+                    if chord_matches(EventsWatchVerb::EditPredicate.chord(), key) {
+                        return InputEvent::View(ViewVerb::EventsWatch(
+                            EventsWatchVerb::EditPredicate,
+                        ));
+                    }
                     for &v in EventsVerb::all() {
                         if chord_matches(v.chord(), key) {
                             return InputEvent::View(ViewVerb::Events(v));

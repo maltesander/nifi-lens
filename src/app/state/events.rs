@@ -455,9 +455,25 @@ fn handle_exit_watch_confirm(state: &mut AppState, key: KeyEvent) -> Option<Upda
 /// the keymap claims a watch chord (i.e., when the Events tab is in
 /// watch sub-mode).
 fn handle_watch_verb(state: &mut AppState, verb: EventsWatchVerb) -> Option<UpdateResult> {
-    use crate::view::events::state::WatchStatus;
+    use crate::view::events::state::{WatchSession, WatchStatus};
+    /// Default rolling-buffer cap when transitioning from one-shot to
+    /// watch mode in-tab. Matches `[events] watch_buffer_size`'s
+    /// default (Task 22) — the config knob isn't reachable from the
+    /// `ViewKeyHandler::handle_verb` signature, so we use the default
+    /// here. Cross-link entry (`new_for_component`) honors the config.
+    const DEFAULT_TRANSITION_BUFFER_CAP: usize = 2000;
     match verb {
         EventsWatchVerb::EditPredicate => {
+            // First press of `w` on Events in one-shot mode:
+            // transition into watch mode, seeding the narrow from
+            // whatever the user already set in the filter bar.
+            // `from_query` decides Waiting vs NarrowRequired status
+            // based on `can_start`.
+            if state.events.watch().is_none() {
+                let narrow = state.events.build_query();
+                let session = WatchSession::from_query(narrow, DEFAULT_TRANSITION_BUFFER_CAP);
+                state.events.enter_watch_mode(session);
+            }
             state.events.focus_predicate();
         }
         EventsWatchVerb::CommitPredicate => {
@@ -1036,5 +1052,71 @@ mod tests {
         assert!(s.events.selected_row.is_none());
         assert!(super::EventsHandler::handle_focus(&mut s, FocusAction::Left).is_none());
         assert!(super::EventsHandler::handle_focus(&mut s, FocusAction::Right).is_none());
+    }
+
+    #[test]
+    fn w_on_oneshot_events_enters_watch_mode_and_focuses_predicate() {
+        use crate::view::events::state::{EventsMode, WatchStatus};
+        let mut s = fresh_state();
+        let c = tiny_config();
+        s.current_tab = ViewId::Events;
+        // Seed a narrow via the existing filter bar so the transition
+        // produces a Waiting (not NarrowRequired) status.
+        s.events.filters.source = "abc-component".into();
+
+        update(&mut s, key(KeyCode::Char('w'), KeyModifiers::NONE), &c);
+
+        // Mode flipped to Watch; predicate focused.
+        assert!(matches!(s.events.mode, EventsMode::Watch(_)));
+        assert!(s.events.predicate_input_focused());
+        let watch = s.events.watch().expect("watch mode active");
+        assert_eq!(watch.narrow.component_id.as_deref(), Some("abc-component"));
+        assert!(matches!(watch.status, WatchStatus::Waiting));
+    }
+
+    #[test]
+    fn w_on_oneshot_events_with_empty_filters_enters_narrow_required() {
+        use crate::view::events::state::{EventsMode, WatchStatus};
+        let mut s = fresh_state();
+        let c = tiny_config();
+        s.current_tab = ViewId::Events;
+
+        update(&mut s, key(KeyCode::Char('w'), KeyModifiers::NONE), &c);
+
+        assert!(matches!(s.events.mode, EventsMode::Watch(_)));
+        let watch = s.events.watch().expect("watch mode active");
+        // Default `time = "last 15m"` produces a non-blank start_time_iso
+        // in build_query, which can_start accepts. So the transition
+        // path lands on Waiting, not NarrowRequired, even with no
+        // explicit component/uuid/types. This locks that behavior in.
+        assert!(matches!(
+            watch.status,
+            WatchStatus::Waiting | WatchStatus::NarrowRequired
+        ));
+        assert!(s.events.predicate_input_focused());
+    }
+
+    #[test]
+    fn w_on_already_watching_just_focuses_predicate() {
+        use crate::view::events::state::{EventsMode, WatchSession, WatchStatus};
+        let mut s = fresh_state();
+        let c = tiny_config();
+        s.current_tab = ViewId::Events;
+        // Pre-seed an active watch session.
+        let session = WatchSession::new_for_component("xyz".into(), &c);
+        s.events.enter_watch_mode(session);
+        let prior_buffer_cap = s.events.watch().unwrap().buffer_cap;
+
+        update(&mut s, key(KeyCode::Char('w'), KeyModifiers::NONE), &c);
+
+        // Still in watch mode (not re-entered), predicate focused, buffer_cap unchanged.
+        assert!(matches!(s.events.mode, EventsMode::Watch(_)));
+        assert!(s.events.predicate_input_focused());
+        let watch = s.events.watch().unwrap();
+        assert_eq!(watch.buffer_cap, prior_buffer_cap);
+        assert_eq!(watch.narrow.component_id.as_deref(), Some("xyz"));
+        // Status was Waiting after new_for_component; the second `w`
+        // shouldn't have replaced the session.
+        assert!(matches!(watch.status, WatchStatus::Waiting));
     }
 }

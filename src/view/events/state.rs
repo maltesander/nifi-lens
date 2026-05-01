@@ -652,6 +652,33 @@ impl WatchSession {
         }
     }
 
+    /// Build a fresh `WatchSession` from an arbitrary `ProvenanceQuery`.
+    /// Used by the in-tab `w` chord on Events (one-shot → watch
+    /// transition): the query is whatever `EventsState::build_query`
+    /// produced from the current filter bar.
+    ///
+    /// Status starts at `Waiting` if `can_start` accepts the narrow,
+    /// otherwise `NarrowRequired`. The watch strip uses the latter to
+    /// prompt the user to add at least one narrow term before the
+    /// worker can spawn.
+    pub fn from_query(narrow: ProvenanceQuery, buffer_cap: usize) -> Self {
+        let status = if Self::can_start(&narrow, SystemTime::now()) {
+            WatchStatus::Waiting
+        } else {
+            WatchStatus::NarrowRequired
+        };
+        Self {
+            narrow,
+            predicate: Predicate::default(),
+            predicate_input: String::new(),
+            buffer: VecDeque::new(),
+            buffer_cap,
+            cursor: None,
+            status,
+            stats: WatchStats::default(),
+        }
+    }
+
     /// Cost guard: refuse to spawn the worker unless the narrow has
     /// at least one of (component, flow-file UUID, non-empty event
     /// types, non-blank start time). `now` is injected to keep the
@@ -703,6 +730,38 @@ impl WatchSession {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn from_query_with_satisfied_narrow_starts_waiting() {
+        let narrow = ProvenanceQuery {
+            component_id: Some("proc-1".into()),
+            max_results: 500,
+            ..Default::default()
+        };
+        let session = WatchSession::from_query(narrow, 2000);
+        assert_eq!(session.narrow.component_id.as_deref(), Some("proc-1"));
+        assert_eq!(session.buffer_cap, 2000);
+        assert!(session.predicate_input.is_empty());
+        assert!(session.buffer.is_empty());
+        assert!(matches!(session.status, WatchStatus::Waiting));
+    }
+
+    #[test]
+    fn from_query_with_empty_narrow_starts_narrow_required() {
+        let session = WatchSession::from_query(ProvenanceQuery::default(), 1500);
+        assert!(matches!(session.status, WatchStatus::NarrowRequired));
+        assert_eq!(session.buffer_cap, 1500);
+    }
+
+    #[test]
+    fn from_query_with_event_types_only_starts_waiting() {
+        let narrow = ProvenanceQuery {
+            event_types: vec!["DROP".into(), "SEND".into()],
+            ..Default::default()
+        };
+        let session = WatchSession::from_query(narrow, 2000);
+        assert!(matches!(session.status, WatchStatus::Waiting));
+    }
 
     #[test]
     fn watch_session_new_for_component_seeds_narrow_and_waiting_status() {
