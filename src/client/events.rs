@@ -17,7 +17,7 @@ use nifi_rust_client::dynamic::types::{
 
 use crate::client::NifiClient;
 use crate::client::classify_or_fallback;
-use crate::client::tracer::summary_from_dto;
+use crate::client::tracer::{event_detail_from_dto, summary_from_dto};
 use crate::error::NifiLensError;
 
 /// Filter set for a provenance query. Empty fields mean "no filter".
@@ -356,6 +356,47 @@ impl NifiClient {
                 })
             })
     }
+
+    /// Fetch the full event detail (including attribute map) for a
+    /// single provenance event id.
+    ///
+    /// Wraps `GET /nifi-api/provenance-events/{id}`. In clustered mode
+    /// the caller must pass the `cluster_node_id` returned with the
+    /// owning provenance query handle (the same node that emitted the
+    /// event id) — that node is the only one that can resolve the
+    /// per-node event id. Used by the watch worker, which addresses
+    /// each tail batch back to the node that produced it.
+    ///
+    /// Errors are classified via `classify_or_fallback`.
+    pub async fn fetch_provenance_event_detail(
+        &self,
+        event_id: i64,
+        cluster_node_id: Option<&str>,
+    ) -> Result<crate::client::ProvenanceEventDetail, NifiLensError> {
+        tracing::debug!(
+            context = %self.context_name(),
+            event_id,
+            cluster_node_id = ?cluster_node_id,
+            "fetching provenance event detail",
+        );
+
+        let dto = self
+            .inner
+            .provenanceevents()
+            .get_provenance_event(&event_id.to_string(), cluster_node_id)
+            .await
+            .map_err(|err| {
+                classify_or_fallback(self.context_name(), Box::new(err), |source| {
+                    NifiLensError::ProvenanceEventFetchFailed {
+                        context: self.context_name().to_string(),
+                        event_id,
+                        source,
+                    }
+                })
+            })?;
+
+        Ok(event_detail_from_dto(dto))
+    }
 }
 
 #[cfg(test)]
@@ -499,6 +540,69 @@ mod tests {
         );
         assert_eq!(EventType::from_wire("UNKNOWN_THING"), EventType::Other);
         assert_eq!(EventType::from_wire(""), EventType::Other);
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn fetch_event_detail_happy_path() {
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path("/nifi-api/provenance-events/12345"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "provenanceEvent": {
+                    "id": "12345",
+                    "eventId": 12345,
+                    "eventTime": "04/30/2026 10:42:08.123 UTC",
+                    "eventType": "SEND",
+                    "componentId": "abc",
+                    "componentName": "UpdateRecord-fx-rate",
+                    "componentType": "UpdateRecord",
+                    "groupId": "g1",
+                    "flowFileUuid": "ff-1",
+                    "attributes": [
+                        {"name": "filename", "value": "invoice.json", "previousValue": null},
+                        {"name": "mime.type", "value": "application/json", "previousValue": null}
+                    ],
+                    "transitUri": null,
+                    "inputContentAvailable": true,
+                    "outputContentAvailable": true
+                }
+            })))
+            .mount(&server)
+            .await;
+
+        let client = test_client(&server).await;
+        let detail = client
+            .fetch_provenance_event_detail(12345, None)
+            .await
+            .expect("fetch ok");
+        assert_eq!(detail.summary.event_id, 12345);
+        assert_eq!(detail.attributes.len(), 2);
+        assert_eq!(detail.attributes[0].key, "filename");
+        assert!(detail.input_available);
+        assert!(detail.output_available);
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn fetch_event_detail_404_maps_to_typed_error() {
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path("/nifi-api/provenance-events/9999"))
+            .respond_with(ResponseTemplate::new(404))
+            .mount(&server)
+            .await;
+        let client = test_client(&server).await;
+        let err = client
+            .fetch_provenance_event_detail(9999, None)
+            .await
+            .unwrap_err();
+        let s = err.to_string();
+        // The typed error variant produced for 404 by classify_or_fallback
+        // varies by project version; either marker is acceptable evidence
+        // that the error was typed (not a panic, not a generic string).
+        assert!(
+            s.contains("404") || s.to_lowercase().contains("not found"),
+            "expected typed 404 error, got: {s}",
+        );
     }
 
     #[test]

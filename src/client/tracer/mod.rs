@@ -339,7 +339,10 @@ impl NifiClient {
     /// Fetches the full detail of a single provenance event by its numeric ID.
     ///
     /// Maps `GET /nifi-api/provenance-events/{id}` into a [`ProvenanceEventDetail`].
-    /// Errors are classified via `classify_or_fallback`.
+    /// Errors are classified via `classify_or_fallback`. Uses the dynamic
+    /// client's pinned `cluster_node_id`; for an explicit override (e.g.,
+    /// the watch worker addressing the node that emitted the event id) use
+    /// [`NifiClient::fetch_provenance_event_detail`].
     pub async fn get_provenance_event(
         &self,
         event_id: i64,
@@ -365,39 +368,7 @@ impl NifiClient {
                 })
             })?;
 
-        let input_available = dto.input_content_available.unwrap_or(false);
-        let output_available = dto.output_content_available.unwrap_or(false);
-        let transit_uri = dto.transit_uri.clone();
-        let input_size = dto
-            .input_content_claim_file_size_bytes
-            .and_then(|n| u64::try_from(n).ok());
-        let output_size = dto
-            .output_content_claim_file_size_bytes
-            .and_then(|n| u64::try_from(n).ok());
-        let attributes = dto
-            .attributes
-            .as_ref()
-            .map(|attrs| {
-                attrs
-                    .iter()
-                    .map(|a| AttributeTriple {
-                        key: a.name.clone().unwrap_or_default(),
-                        previous: a.previous_value.clone(),
-                        current: a.value.clone(),
-                    })
-                    .collect::<Vec<_>>()
-            })
-            .unwrap_or_default();
-
-        Ok(ProvenanceEventDetail {
-            summary: summary_from_dto(dto),
-            attributes,
-            transit_uri,
-            input_available,
-            output_available,
-            input_size,
-            output_size,
-        })
+        Ok(event_detail_from_dto(dto))
     }
 
     /// Deletes a lineage query from the NiFi server.
@@ -671,6 +642,50 @@ pub(crate) fn summary_from_dto(
         flow_file_uuid: dto.flow_file_uuid.unwrap_or_default(),
         relationship: dto.relationship,
         details: dto.details,
+    }
+}
+
+/// Convert a raw `ProvenanceEventDto` into a fully-populated
+/// [`ProvenanceEventDetail`] (summary + attribute triples + content
+/// availability + claim sizes + transit URI). Pure; no I/O. Shared
+/// between `NifiClient::get_provenance_event` and
+/// `NifiClient::fetch_provenance_event_detail` so the round-trip
+/// shape is locked once.
+pub(crate) fn event_detail_from_dto(
+    dto: nifi_rust_client::dynamic::types::ProvenanceEventDto,
+) -> ProvenanceEventDetail {
+    let input_available = dto.input_content_available.unwrap_or(false);
+    let output_available = dto.output_content_available.unwrap_or(false);
+    let transit_uri = dto.transit_uri.clone();
+    let input_size = dto
+        .input_content_claim_file_size_bytes
+        .and_then(|n| u64::try_from(n).ok());
+    let output_size = dto
+        .output_content_claim_file_size_bytes
+        .and_then(|n| u64::try_from(n).ok());
+    let attributes = dto
+        .attributes
+        .as_ref()
+        .map(|attrs| {
+            attrs
+                .iter()
+                .map(|a| AttributeTriple {
+                    key: a.name.clone().unwrap_or_default(),
+                    previous: a.previous_value.clone(),
+                    current: a.value.clone(),
+                })
+                .collect::<Vec<_>>()
+        })
+        .unwrap_or_default();
+
+    ProvenanceEventDetail {
+        summary: summary_from_dto(dto),
+        attributes,
+        transit_uri,
+        input_available,
+        output_available,
+        input_size,
+        output_size,
     }
 }
 
