@@ -297,15 +297,23 @@ mod tests {
     }
 
     /// Insta filter that redacts the age column to a stable placeholder
-    /// so snapshots are deterministic across runs. Action timestamps are
-    /// fixed in test fixtures, but the rendered age depends on
-    /// `OffsetDateTime::now_utc()` and would otherwise drift over time.
-    /// The format `format_age_secs` produces is `<digits><s|m|h>` (e.g.
-    /// `12s`, `3h`); the regex matches a digit run followed by exactly
-    /// one of those unit characters, anchored after the leading row
-    /// padding.
+    /// so snapshots are deterministic across runs. Action timestamps
+    /// are fixed in test fixtures, but the rendered age depends on
+    /// `OffsetDateTime::now_utc()` and would otherwise drift over
+    /// time. The format `format_age_secs` produces is `<digits><s|m|h>`
+    /// (e.g. `12s`, `3h`).
+    ///
+    /// **Width-stable redaction.** The age cell is rendered into a
+    /// fixed [`AGE_WIDTH`] column + 1-char separator (11 chars total
+    /// counted from the row's leading `"  "` indent). The regex
+    /// captures that *entire* span — leading indent, the digit/unit
+    /// value, and all trailing padding — and replaces with an 11-char
+    /// `<AGE>` placeholder. Without this width-greedy match the
+    /// replacement would shift downstream columns left or right by 1
+    /// every time the digit count changes (e.g., as a fixture's age
+    /// crosses from `9h` to `10h` after enough wall-clock time elapses).
     fn age_filter() -> Vec<(&'static str, &'static str)> {
-        vec![(r"  \d+[smh] ", "  <AGE> ")]
+        vec![(r"  \d+[smh] +", "  <AGE>    ")]
     }
 
     #[test]
