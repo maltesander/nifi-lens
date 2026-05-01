@@ -719,6 +719,7 @@ mod tests {
                 trimmed_total: 0,
                 detail_fetch_errors: 0,
             },
+            last_parse_error: None,
         });
         state.selected_row = Some(0);
         state
@@ -777,6 +778,7 @@ mod tests {
                 trimmed_total: 0,
                 detail_fetch_errors: 0,
             },
+            last_parse_error: None,
         });
         state.selected_row = Some(0);
         insta::with_settings!({

@@ -184,6 +184,12 @@ pub struct AppState {
     /// Set by the context-switch handler so the app loop can force-restart
     /// the current view worker (the registry no-ops when the view matches).
     pub pending_worker_restart: bool,
+    /// Set by `commit_predicate` (and other in-tab edits to the watch
+    /// session's narrow/predicate) so the app loop knows to abort the
+    /// running watch worker and spawn a fresh one with the updated
+    /// values. Lighter than `pending_worker_restart` — leaves cluster
+    /// fetchers untouched.
+    pub pending_events_watch_restart: bool,
     /// Cross-link back/forward history.
     pub history: crate::app::history::TabHistory,
     /// Typed input layer — translates raw `KeyEvent`s into `InputEvent`s.
@@ -233,6 +239,7 @@ impl AppState {
             error_detail: None,
             should_quit: false,
             pending_worker_restart: false,
+            pending_events_watch_restart: false,
             history: crate::app::history::TabHistory::default(),
             keymap: crate::input::KeyMap::default(),
             clipboard: None,

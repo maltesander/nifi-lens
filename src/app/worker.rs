@@ -305,6 +305,57 @@ impl WorkerRegistry {
         self.active
     }
 
+    /// Abort the events watch worker (if any) and respawn it with the
+    /// current narrow / predicate / cursor on `EventsState`. Called from
+    /// the main loop when `state.pending_events_watch_restart` is set
+    /// — typically after `commit_predicate` succeeded — so the new
+    /// predicate actually takes effect (the worker holds a clone of
+    /// the value at spawn time).
+    ///
+    /// No-op when there is no surviving `WatchSession` on `events`,
+    /// or when the user is not currently on the Events tab (in which
+    /// case `ensure()`'s normal pause-on-exit path will already have
+    /// torn down the handle and the next tab re-entry will pick up
+    /// the updated session anyway).
+    pub fn restart_events_watch(
+        &mut self,
+        client: &Arc<RwLock<NifiClient>>,
+        tx: &mpsc::Sender<AppEvent>,
+        events: &mut crate::view::events::state::EventsState,
+        config: &crate::config::Config,
+    ) {
+        if self.active != Some(ViewId::Events) {
+            return;
+        }
+        if let Some(handle) = self.events_watch_handle.take() {
+            handle.abort();
+        }
+        let resume = events.watch().map(|session| {
+            (
+                session.narrow.clone(),
+                session.predicate.clone(),
+                session.cursor,
+            )
+        });
+        if let Some((narrow, predicate, cursor)) = resume {
+            tracing::debug!(
+                "worker registry: respawning events watch worker after predicate/narrow change"
+            );
+            let cadence = config.polling.cluster.events_tail;
+            let detail_concurrency = config.polling.cluster.batch_concurrency.max(1);
+            let handle = crate::view::events::worker::spawn_watch(
+                client.clone(),
+                tx.clone(),
+                narrow,
+                predicate,
+                cursor,
+                cadence,
+                detail_concurrency,
+            );
+            self.events_watch_handle = Some(handle);
+        }
+    }
+
     /// Abort the current worker so the next `ensure()` call spawns a
     /// fresh one. Used after context switch — the view tab hasn't changed
     /// but the backing client has. Subscribers are managed by the caller

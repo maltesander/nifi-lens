@@ -228,38 +228,52 @@ impl EventsState {
     }
 
     /// Append a character to the predicate-input buffer. No-op when
-    /// focus is elsewhere.
+    /// focus is elsewhere. Clears any sticky parse-error chip.
     pub fn push_predicate_char(&mut self, ch: char) {
         if !self.predicate_focus {
             return;
         }
         if let Some(w) = self.watch_mut() {
             w.predicate_input.push(ch);
+            w.last_parse_error = None;
         }
     }
 
     /// Pop the last character from the predicate-input buffer. No-op
-    /// when focus is elsewhere or the buffer is empty.
+    /// when focus is elsewhere or the buffer is empty. Clears any
+    /// sticky parse-error chip.
     pub fn pop_predicate_char(&mut self) {
         if !self.predicate_focus {
             return;
         }
         if let Some(w) = self.watch_mut() {
             w.predicate_input.pop();
+            w.last_parse_error = None;
         }
     }
 
     /// Parse `predicate_input` into the active predicate. On parse
-    /// error, returns the error and leaves the previous predicate in
-    /// place. On success, the predicate replaces the active one;
-    /// existing buffer rows are NOT re-filtered (forward-only).
+    /// error, stores the error on `WatchSession.last_parse_error` (so
+    /// the watch strip can render it) AND returns the error so the
+    /// caller can decide whether to keep predicate-input focus. On
+    /// success, the predicate replaces the active one and any prior
+    /// error is cleared. Existing buffer rows are NOT re-filtered
+    /// (forward-only, per spec).
     pub fn commit_predicate(&mut self) -> Result<(), crate::client::PredicateParseError> {
         let Some(w) = self.watch_mut() else {
             return Ok(());
         };
-        let parsed = crate::client::Predicate::parse(&w.predicate_input)?;
-        w.predicate = parsed;
-        Ok(())
+        match crate::client::Predicate::parse(&w.predicate_input) {
+            Ok(parsed) => {
+                w.predicate = parsed;
+                w.last_parse_error = None;
+                Ok(())
+            }
+            Err(err) => {
+                w.last_parse_error = Some(err.clone());
+                Err(err)
+            }
+        }
     }
 
     /// User asked to leave watch mode. If the buffer is empty (or the
@@ -623,6 +637,10 @@ pub struct WatchSession {
     pub cursor: Option<TailCursor>,
     pub status: WatchStatus,
     pub stats: WatchStats,
+    /// Last predicate parse error from `commit_predicate`, if any.
+    /// Cleared on successful commit and on every keystroke edit. The
+    /// watch strip widget renders this inline when set.
+    pub last_parse_error: Option<crate::client::PredicateParseError>,
 }
 
 impl WatchSession {
@@ -649,6 +667,7 @@ impl WatchSession {
             cursor: None,
             status: WatchStatus::Waiting,
             stats: WatchStats::default(),
+            last_parse_error: None,
         }
     }
 
@@ -676,6 +695,7 @@ impl WatchSession {
             cursor: None,
             status,
             stats: WatchStats::default(),
+            last_parse_error: None,
         }
     }
 
@@ -730,6 +750,53 @@ impl WatchSession {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn commit_predicate_failure_stores_error_on_session() {
+        let mut s = EventsState::new();
+        let mut session = empty_session(100);
+        session.predicate_input = "filename matches /foo/".into(); // bad operator
+        s.enter_watch_mode(session);
+
+        let res = s.commit_predicate();
+        assert!(res.is_err());
+        let watch = s.watch().expect("still in watch mode");
+        let err = watch.last_parse_error.as_ref().expect("error stored");
+        assert!(err.message.contains("operator"), "got: {}", err.message);
+    }
+
+    #[test]
+    fn commit_predicate_success_clears_prior_error() {
+        let mut s = EventsState::new();
+        let mut session = empty_session(100);
+        session.predicate_input = "filename matches /foo/".into();
+        s.enter_watch_mode(session);
+        let _ = s.commit_predicate(); // bad → error stored
+        assert!(s.watch().unwrap().last_parse_error.is_some());
+
+        // Replace with a valid predicate and commit again.
+        if let Some(w) = s.watch_mut() {
+            w.predicate_input = "filename = ok".into();
+        }
+        s.focus_predicate(); // ensure focus so subsequent edits would clear too
+        let res = s.commit_predicate();
+        assert!(res.is_ok());
+        assert!(s.watch().unwrap().last_parse_error.is_none());
+    }
+
+    #[test]
+    fn editing_predicate_clears_sticky_error() {
+        let mut s = EventsState::new();
+        let mut session = empty_session(100);
+        session.predicate_input = "filename matches /foo/".into();
+        s.enter_watch_mode(session);
+        let _ = s.commit_predicate();
+        assert!(s.watch().unwrap().last_parse_error.is_some());
+
+        s.focus_predicate();
+        s.push_predicate_char(' '); // any edit
+        assert!(s.watch().unwrap().last_parse_error.is_none());
+    }
 
     #[test]
     fn from_query_with_satisfied_narrow_starts_waiting() {
@@ -1365,6 +1432,7 @@ mod tests {
             cursor: None,
             status: WatchStatus::Paused,
             stats: WatchStats::default(),
+            last_parse_error: None,
         }
     }
 
@@ -1483,6 +1551,7 @@ mod tests {
             cursor: None,
             status: WatchStatus::Tailing,
             stats: WatchStats::default(),
+            last_parse_error: None,
         });
         s
     }

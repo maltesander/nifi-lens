@@ -115,10 +115,23 @@ fn render_full(frame: &mut Frame, area: Rect, watch: &WatchSession, focused: boo
         ));
     }
 
-    let body = Paragraph::new(vec![
-        Line::from(vec![pred_label, pred_value]),
-        Line::from(Span::styled(stats, theme::muted())),
-    ]);
+    // The bottom line is normally the stats. When a parse error is
+    // sticky on the session (set by `commit_predicate`), replace the
+    // stats line with a focused error message — investigators care
+    // far more about why their predicate didn't take than the ev/s
+    // counter. The error clears as soon as the user types again.
+    let bottom_line = match &watch.last_parse_error {
+        Some(err) => Line::from(vec![
+            Span::styled("✖ ", theme::error()),
+            Span::styled(
+                format!("col {}: {}", err.column, err.message),
+                theme::error(),
+            ),
+        ]),
+        None => Line::from(Span::styled(stats, theme::muted())),
+    };
+
+    let body = Paragraph::new(vec![Line::from(vec![pred_label, pred_value]), bottom_line]);
     frame.render_widget(body, inner);
 }
 
@@ -176,6 +189,7 @@ mod tests {
                 trimmed_total: 0,
                 detail_fetch_errors: 0,
             },
+            last_parse_error: None,
         });
         if predicate_focus {
             s.focus_predicate();

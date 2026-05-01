@@ -385,13 +385,18 @@ fn handle_predicate_edit(state: &mut AppState, key: KeyEvent) -> Option<UpdateRe
         }
         KeyCode::Enter => {
             match state.events.commit_predicate() {
-                Ok(()) => state.events.unfocus_predicate(),
+                Ok(()) => {
+                    state.events.unfocus_predicate();
+                    // The worker was spawned with a clone of the
+                    // previous predicate; signal a restart so the
+                    // new predicate actually takes effect.
+                    state.pending_events_watch_restart = true;
+                }
                 Err(_e) => {
-                    // Parse error keeps focus; an inline error chip is
-                    // wired by Task 17 (widget::watch_strip). Until then
-                    // the error is visible in the redacted predicate
-                    // log line emitted by the worker on retry.
-                    tracing::debug!("predicate parse error (suppressed; surfaced in Task 17)");
+                    // Parse error stays sticky on `WatchSession.last_parse_error`
+                    // (set by `commit_predicate` itself); the watch strip
+                    // renders it inline. Keep predicate-input focus so
+                    // the user can fix and retry without re-pressing `w`.
                 }
             }
             redraw()
@@ -485,9 +490,12 @@ fn handle_watch_verb(state: &mut AppState, verb: EventsWatchVerb) -> Option<Upda
             // defensive costs nothing.
             if state.events.predicate_input_focused() {
                 match state.events.commit_predicate() {
-                    Ok(()) => state.events.unfocus_predicate(),
+                    Ok(()) => {
+                        state.events.unfocus_predicate();
+                        state.pending_events_watch_restart = true;
+                    }
                     Err(_e) => {
-                        tracing::debug!("predicate parse error (suppressed; surfaced in Task 17)");
+                        // Sticky error rendered by widget::watch_strip.
                     }
                 }
             }
@@ -1094,6 +1102,58 @@ mod tests {
             WatchStatus::Waiting | WatchStatus::NarrowRequired
         ));
         assert!(s.events.predicate_input_focused());
+    }
+
+    #[test]
+    fn predicate_commit_sets_pending_events_watch_restart() {
+        use crate::view::events::state::WatchSession;
+        let mut s = fresh_state();
+        let c = tiny_config();
+        s.current_tab = ViewId::Events;
+        // Enter watch mode and focus the predicate input.
+        s.events
+            .enter_watch_mode(WatchSession::new_for_component("xyz".into(), &c));
+        s.events.focus_predicate();
+        // Type a valid predicate.
+        for ch in "filename = ok".chars() {
+            update(&mut s, key(KeyCode::Char(ch), KeyModifiers::NONE), &c);
+        }
+        assert!(
+            !s.pending_events_watch_restart,
+            "flag should still be false before Enter"
+        );
+
+        // Press Enter — commit succeeds, flag should fire so the
+        // main loop respawns the worker with the new predicate.
+        update(&mut s, key(KeyCode::Enter, KeyModifiers::NONE), &c);
+
+        assert!(
+            s.pending_events_watch_restart,
+            "flag must be set on successful commit"
+        );
+        // And focus dropped, predicate now active.
+        assert!(!s.events.predicate_input_focused());
+        assert_eq!(s.events.watch().unwrap().predicate.clauses().len(), 1);
+    }
+
+    #[test]
+    fn predicate_commit_failure_does_not_set_restart_flag() {
+        use crate::view::events::state::WatchSession;
+        let mut s = fresh_state();
+        let c = tiny_config();
+        s.current_tab = ViewId::Events;
+        s.events
+            .enter_watch_mode(WatchSession::new_for_component("xyz".into(), &c));
+        s.events.focus_predicate();
+        for ch in "filename matches /bad/".chars() {
+            update(&mut s, key(KeyCode::Char(ch), KeyModifiers::NONE), &c);
+        }
+        update(&mut s, key(KeyCode::Enter, KeyModifiers::NONE), &c);
+
+        // Commit failed → no restart, focus retained, error stored.
+        assert!(!s.pending_events_watch_restart);
+        assert!(s.events.predicate_input_focused());
+        assert!(s.events.watch().unwrap().last_parse_error.is_some());
     }
 
     #[test]
