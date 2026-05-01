@@ -13,6 +13,7 @@ pub mod overview;
 pub mod parameter_context;
 pub mod predicate;
 pub mod queues;
+pub mod reporting_tasks;
 pub mod status;
 pub mod tls_cert;
 pub mod tracer;
@@ -808,6 +809,10 @@ pub use overview::{
     SystemDiagAggregate, SystemDiagSnapshot,
 };
 pub use predicate::{ClauseLiteral, Op, Predicate, PredicateParseError};
+pub use reporting_tasks::{
+    ReportingTaskPropertyDescriptor, ReportingTaskRow, ReportingTaskState, ReportingTasksSnapshot,
+    ValidationStatus,
+};
 pub use tls_cert::{CertEntry, NodeCertChain, TlsCertsSnapshot, TlsProbeError};
 pub use tracer::{
     AttributeTriple, ContentRangeSnapshot, ContentRender, ContentSide, ContentSnapshot,
