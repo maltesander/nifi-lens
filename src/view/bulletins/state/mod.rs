@@ -161,6 +161,10 @@ pub struct FilterState {
     pub show_info: bool,
     pub component_type: Option<ComponentType>,
     pub text: String,
+    /// When `Some`, only bulletins with this exact `source_id` are shown.
+    /// Set by `BulletinsState::set_source_filter`; cleared by the user
+    /// via any filter-reset action.
+    pub source_id: Option<String>,
 }
 
 impl Default for FilterState {
@@ -171,6 +175,7 @@ impl Default for FilterState {
             show_info: true,
             component_type: None,
             text: String::new(),
+            source_id: None,
         }
     }
 }
@@ -406,6 +411,12 @@ impl BulletinsState {
     }
 
     fn row_matches(&self, b: &BulletinSnapshot) -> bool {
+        // Source-id pin: when set, only show bulletins from that source.
+        if let Some(want_id) = self.filters.source_id.as_deref()
+            && b.source_id != want_id
+        {
+            return false;
+        }
         // Severity. `Unknown` rides with the Info chip by design.
         let sev = crate::client::Severity::parse(&b.level);
         let severity_ok = match sev {
@@ -477,6 +488,14 @@ impl BulletinsState {
         let prev = self.selected_ring_index();
         self.filters = FilterState::default();
         self.mutes.clear();
+        self.reconcile_selection(prev);
+    }
+
+    /// Pin the view to bulletins from a single `source_id`. Pass `None`
+    /// to clear the pin. Reconciles selection after the filter changes.
+    pub fn set_source_filter(&mut self, source_id: Option<String>) {
+        let prev = self.selected_ring_index();
+        self.filters.source_id = source_id;
         self.reconcile_selection(prev);
     }
 

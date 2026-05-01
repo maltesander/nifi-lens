@@ -2674,6 +2674,19 @@ fn handle_intent_outcome(
                 }
             }
         }
+        Ok(IntentOutcome::BulletinsLandingOn { source_id }) => {
+            // Switch to Bulletins and pin the view to the given source id.
+            state.current_tab = ViewId::Bulletins;
+            state.overview.reporting_tasks_modal = None;
+            state.bulletins.set_source_filter(Some(source_id));
+            UpdateResult {
+                redraw: true,
+                intent: None,
+                tracer_followup: None,
+                sparkline_followup: None,
+                queue_listing_followup: None,
+            }
+        }
         Err(err) => {
             state.post_error(err.to_string(), Some(format!("{err:?}")));
             // Close the context switcher modal so the banner is visible.

@@ -216,6 +216,11 @@ pub enum IntentOutcome {
         pg_id: String,
         preselect: Option<String>,
     },
+    /// Cross-link from Overview reporting-tasks modal: switch to the
+    /// Bulletins tab and pre-filter by the reporting task's source id.
+    BulletinsLandingOn {
+        source_id: String,
+    },
 }
 
 /// Payload variants pushed from Tracer workers back into the UI loop.
