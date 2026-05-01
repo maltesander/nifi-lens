@@ -1,9 +1,9 @@
 //! Renderer for the Overview tab's top "Components" panel.
 //!
-//! Four-row table — process groups, processors, controller services,
-//! remote process groups. Display-only; not focusable. Aligned columns:
-//! 2-pad + 20-label + 4-count + 4-gap + repeating 12-slot (8 label +
-//! 4 value).
+//! Five-row table — process groups, processors, controller services,
+//! remote process groups, reporting tasks. Display-only; not focusable.
+//! Aligned columns: 2-pad + 20-label + 4-count + 4-gap + repeating
+//! 12-slot (8 label + 4 value).
 
 use ratatui::Frame;
 use ratatui::layout::Rect;
@@ -14,18 +14,21 @@ use ratatui::widgets::Paragraph;
 use super::super::state::OverviewState;
 use crate::client::{
     ControllerServiceCounts, ControllerStatusSnapshot, ProcessorStateCounts,
-    RemoteProcessGroupCounts,
+    RemoteProcessGroupCounts, ReportingTaskCounts,
 };
 use crate::theme;
 
-/// Three-row Components table — process groups, processors, controller
-/// services. Display-only; not focusable.
+/// Five-row Components table — process groups, processors, controller
+/// services, remote process groups, reporting tasks. Display-only; not
+/// focusable.
 ///
 /// All projections are sourced from `OverviewState` fields mirrored
 /// from `AppState.cluster.snapshot` by the `redraw_*` reducers. The
 /// renderer shows "loading…" until both `root_pg_status` and
 /// `controller_status` have landed in the cluster snapshot. The CS row
 /// degrades to "cs list unavailable" when `state.cs_counts` is `None`.
+/// The reporting-tasks row degrades to "rt list unavailable" when
+/// `state.reporting_task_counts` is `None`.
 pub(super) fn render_components_table(frame: &mut Frame, area: Rect, state: &OverviewState) {
     let (Some(controller), Some(root_pg)) = (state.controller.as_ref(), state.root_pg.as_ref())
     else {
@@ -38,6 +41,7 @@ pub(super) fn render_components_table(frame: &mut Frame, area: Rect, state: &Ove
         processors_row(&root_pg.processors),
         controller_services_row(state.cs_counts.as_ref()),
         remote_pgs_row(&root_pg.remote_process_groups),
+        reporting_tasks_row(state.reporting_task_counts.as_ref()),
     ];
     frame.render_widget(Paragraph::new(lines), area);
 }
@@ -136,4 +140,33 @@ fn remote_pgs_row(c: &RemoteProcessGroupCounts) -> Line<'static> {
     spans.extend(slot_gap());
     spans.extend(slot("NOT-TX", c.not_transmitting, theme::muted()));
     Line::from(spans)
+}
+
+fn reporting_tasks_row(counts: Option<&ReportingTaskCounts>) -> Line<'static> {
+    match counts {
+        Some(c) => {
+            let mut spans = label_and_count("Reporting tasks", c.total as u32);
+            if c.total == 0 {
+                // No state breakdown to render, but keep the chord
+                // hint so the user knows `t` opens the (empty) modal.
+                spans.extend(slot_text("", theme::muted()));
+            } else {
+                spans.extend(slot("RUNNING", c.running as u32, theme::success()));
+                spans.extend(slot_gap());
+                spans.extend(slot("STOPPED", c.stopped as u32, theme::muted()));
+                spans.extend(slot_gap());
+                spans.extend(slot("INVALID", c.invalid as u32, theme::error()));
+            }
+            spans.extend(slot_gap());
+            spans.push(Span::styled("[t]", theme::accent()));
+            Line::from(spans)
+        }
+        None => Line::from(vec![
+            Span::raw("  "),
+            Span::raw(format!("{:<20}", "Reporting tasks")),
+            Span::styled(format!("{:>4}", "?"), theme::muted()),
+            Span::raw("    "),
+            Span::styled("rt list unavailable", theme::error()),
+        ]),
+    }
 }

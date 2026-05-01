@@ -98,6 +98,11 @@ pub struct OverviewState {
     /// to a "cs list unavailable" chip in that case. The renderer
     /// reads this directly.
     pub cs_counts: Option<crate::client::ControllerServiceCounts>,
+    /// Latest reporting-task counts mirrored from the cluster
+    /// snapshot by `redraw_components`. `None` when the endpoint
+    /// is `Loading` or has only ever failed — the renderer
+    /// degrades the row to "rt list unavailable" in that case.
+    pub reporting_task_counts: Option<crate::client::ReportingTaskCounts>,
     pub sparkline: [BulletinBucket; SPARKLINE_MINUTES],
     /// Unix seconds at the start of `sparkline[SPARKLINE_MINUTES-1]` (the
     /// newest bucket). `None` until the first PG-status poll lands. Aligned
@@ -414,6 +419,15 @@ pub(crate) fn redraw_components(state: &mut crate::app::state::AppState) {
         .latest()
         .map(|s| s.counts.clone());
 
+    // Mirror reporting-task counts the same way. `None` when the endpoint
+    // is still loading or has only ever failed (renderer degrades the row).
+    state.overview.reporting_task_counts = state
+        .cluster
+        .snapshot
+        .reporting_tasks
+        .latest()
+        .map(|s| s.counts());
+
     let Some(root_pg) = state.cluster.snapshot.root_pg_status.latest() else {
         // Pre-first-fetch: leave `root_pg` as `None` and `unhealthy`
         // untouched. The Components panel renders its "loading…"
@@ -702,6 +716,61 @@ mod tests {
             state.overview.cs_counts.is_none(),
             "cs_counts must be cleared when cluster snapshot is Loading"
         );
+    }
+
+    #[test]
+    fn redraw_components_mirrors_reporting_task_counts_into_overview_state() {
+        use crate::client::reporting_tasks::{
+            ReportingTaskState, ReportingTasksSnapshot, ValidationStatus,
+        };
+        use crate::cluster::snapshot::{EndpointState, FetchMeta};
+        use std::time::Instant;
+
+        fn rt_row(
+            state: ReportingTaskState,
+            valid: ValidationStatus,
+        ) -> crate::client::reporting_tasks::ReportingTaskRow {
+            use std::collections::BTreeMap;
+            crate::client::reporting_tasks::ReportingTaskRow {
+                id: "x".into(),
+                name: "x".into(),
+                task_type: "x".into(),
+                state,
+                scheduling_strategy: "TIMER_DRIVEN".into(),
+                scheduling_period: "30s".into(),
+                active_thread_count: 0,
+                validation_status: valid,
+                validation_errors: vec![],
+                comments: None,
+                properties: BTreeMap::new(),
+                descriptors: BTreeMap::new(),
+            }
+        }
+
+        let mut state = crate::test_support::fresh_state();
+        let snapshot = ReportingTasksSnapshot {
+            tasks: vec![
+                rt_row(ReportingTaskState::Running, ValidationStatus::Valid),
+                rt_row(ReportingTaskState::Running, ValidationStatus::Invalid),
+            ],
+            fetched_at: Instant::now(),
+        };
+        state.cluster.snapshot.reporting_tasks = EndpointState::Ready {
+            data: snapshot,
+            meta: FetchMeta {
+                fetched_at: Instant::now(),
+                fetch_duration: crate::test_support::default_fetch_duration(),
+                next_interval: std::time::Duration::from_secs(10),
+            },
+        };
+        redraw_components(&mut state);
+        let counts = state
+            .overview
+            .reporting_task_counts
+            .expect("reporting_task_counts must be mirrored after redraw");
+        assert_eq!(counts.total, 2);
+        assert_eq!(counts.running, 1, "running-and-valid only");
+        assert_eq!(counts.invalid, 1);
     }
 
     #[test]
