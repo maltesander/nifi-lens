@@ -21,7 +21,7 @@ pub use action::{AppAction, FocusAction, GoTarget, HistoryAction, TabAction};
 pub use verb::{
     ActionHistoryModalVerb, BrowserPeekVerb, BrowserQueueVerb, BrowserVerb, BulletinsVerb,
     CommonVerb, ContentModalVerb, EventsVerb, EventsWatchVerb, FilterField,
-    OverviewReportingTasksVerb, ParameterContextModalVerb, Severity, TracerVerb,
+    OverviewReportingTasksVerb, OverviewVerb, ParameterContextModalVerb, Severity, TracerVerb,
     VersionControlModalVerb, ViewVerb,
 };
 
@@ -415,7 +415,13 @@ impl KeyMap {
                     }
                 }
             }
-            ViewId::Overview => {}
+            ViewId::Overview => {
+                for &v in OverviewVerb::all() {
+                    if chord_matches(v.chord(), key) {
+                        return InputEvent::View(ViewVerb::Overview(v));
+                    }
+                }
+            }
         }
 
         InputEvent::Unmapped

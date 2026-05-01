@@ -63,7 +63,22 @@ pub fn render(frame: &mut Frame, state: &mut AppState) {
 
 fn render_content(frame: &mut Frame, area: Rect, state: &mut AppState) {
     match state.current_tab {
-        ViewId::Overview => overview::render(frame, area, &state.overview),
+        ViewId::Overview => {
+            overview::render(frame, area, &state.overview);
+            if let Some(modal) = state.overview.reporting_tasks_modal.as_ref() {
+                use crate::view::overview::render::{MaybeSnapshot, render_reporting_tasks_modal};
+                let snap =
+                    MaybeSnapshot::from_endpoint_state(&state.cluster.snapshot.reporting_tasks);
+                render_reporting_tasks_modal(
+                    frame,
+                    area,
+                    modal,
+                    snap,
+                    &state.context_name,
+                    &state.cluster.snapshot.bulletins,
+                );
+            }
+        }
         ViewId::Bulletins => {
             let browser = &state.browser;
             let cfg = &state.timestamp_cfg;

@@ -7,10 +7,24 @@ pub(crate) struct OverviewHandler;
 
 impl ViewKeyHandler for OverviewHandler {
     fn handle_verb(state: &mut AppState, verb: crate::input::ViewVerb) -> Option<UpdateResult> {
-        if let crate::input::ViewVerb::OverviewReportingTasksModal(v) = verb {
-            return handle_reporting_tasks_modal_verb(state, v);
+        use crate::input::{OverviewVerb, ViewVerb};
+        match verb {
+            ViewVerb::Overview(OverviewVerb::OpenReportingTasksModal) => {
+                use crate::view::overview::reporting_tasks_modal::ReportingTasksModalState;
+                let modal = if let Some(snap) = state.cluster.snapshot.reporting_tasks.latest() {
+                    ReportingTasksModalState::open(snap)
+                } else {
+                    ReportingTasksModalState::default()
+                };
+                state.overview.reporting_tasks_modal = Some(modal);
+                Some(UpdateResult {
+                    redraw: true,
+                    ..Default::default()
+                })
+            }
+            ViewVerb::OverviewReportingTasksModal(v) => handle_reporting_tasks_modal_verb(state, v),
+            _ => None,
         }
-        None
     }
 
     fn handle_focus(
@@ -976,6 +990,81 @@ mod tests {
                 .search
                 .input_active,
             "search input should be active"
+        );
+    }
+
+    // ---- OverviewVerb ('t' chord) tests ----
+
+    fn dispatch_overview_verb(
+        s: &mut crate::app::state::AppState,
+        verb: crate::input::OverviewVerb,
+    ) -> Option<crate::app::state::UpdateResult> {
+        use crate::input::ViewVerb;
+        OverviewHandler::handle_verb(s, ViewVerb::Overview(verb))
+    }
+
+    #[test]
+    fn t_opens_modal_with_data() {
+        use crate::input::OverviewVerb;
+        let mut s = fresh_state();
+        s.current_tab = ViewId::Overview;
+        seed_rt_snapshot(
+            &mut s,
+            snap_with_tasks(vec![bare_task("r1"), bare_task("r2")]),
+        );
+        let r = dispatch_overview_verb(&mut s, OverviewVerb::OpenReportingTasksModal);
+        assert!(r.unwrap().redraw, "should request a redraw");
+        let modal = s
+            .overview
+            .reporting_tasks_modal
+            .as_ref()
+            .expect("modal should be open");
+        // First task selected.
+        assert_eq!(modal.selected_id.as_deref(), Some("r1"));
+    }
+
+    #[test]
+    fn t_opens_empty_modal_before_first_fetch() {
+        use crate::input::OverviewVerb;
+        let mut s = fresh_state();
+        s.current_tab = ViewId::Overview;
+        // No snapshot seeded → EndpointState::Loading by default.
+        let r = dispatch_overview_verb(&mut s, OverviewVerb::OpenReportingTasksModal);
+        assert!(r.unwrap().redraw, "should request a redraw");
+        // Modal opens in default (empty) state; selected_id is None.
+        let modal = s
+            .overview
+            .reporting_tasks_modal
+            .as_ref()
+            .expect("modal should be open");
+        assert!(
+            modal.selected_id.is_none(),
+            "no selection before first fetch"
+        );
+    }
+
+    #[test]
+    fn cluster_changed_reporting_tasks_reconciles_open_modal_selection() {
+        let mut s = fresh_state();
+        s.current_tab = ViewId::Overview;
+        // Open modal with tasks [a, b, c].
+        open_modal_with_tasks(&mut s, vec![bare_task("a"), bare_task("b"), bare_task("c")]);
+        // Manually select "c" at ordinal 2.
+        {
+            let modal = s.overview.reporting_tasks_modal.as_mut().unwrap();
+            modal.selected_id = Some("c".into());
+            modal.selected_ordinal = 2;
+        }
+        // Simulate an arrival of a snapshot where "c" is gone (shrunk to [a, b]).
+        let new_snap = snap_with_tasks(vec![bare_task("a"), bare_task("b")]);
+        seed_rt_snapshot(&mut s, new_snap);
+        crate::view::overview::state::redraw_components(&mut s);
+        // reconcile_selection should fall back to ordinal 2 clamped → "b".
+        let modal = s.overview.reporting_tasks_modal.as_ref().unwrap();
+        assert_eq!(
+            modal.selected_id.as_deref(),
+            Some("b"),
+            "selection should clamp to last row when selected id disappears"
         );
     }
 }

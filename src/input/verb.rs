@@ -770,6 +770,45 @@ impl Verb for VersionControlModalVerb {
     }
 }
 
+/// Tab-level chords for the Overview tab.
+///
+/// Currently a single chord: `t` opens the reporting-tasks modal. Mirrors
+/// the per-tab verb enums for Bulletins, Browser, Events, and Tracer — the
+/// keymap routes `ViewId::Overview` events to this table when the modal is
+/// not yet open (the modal's own gate takes over once it is).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum OverviewVerb {
+    OpenReportingTasksModal,
+}
+
+impl Verb for OverviewVerb {
+    fn chord(self) -> Chord {
+        match self {
+            Self::OpenReportingTasksModal => Chord::simple(KeyCode::Char('t')),
+        }
+    }
+
+    fn label(self) -> &'static str {
+        match self {
+            Self::OpenReportingTasksModal => "open reporting tasks",
+        }
+    }
+
+    fn hint(self) -> &'static str {
+        match self {
+            Self::OpenReportingTasksModal => "tasks",
+        }
+    }
+
+    fn priority(self) -> u8 {
+        50
+    }
+
+    fn all() -> &'static [Self] {
+        &[Self::OpenReportingTasksModal]
+    }
+}
+
 /// Verbs that are only active when the Overview reporting-tasks modal is open.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum OverviewReportingTasksVerb {
@@ -1124,6 +1163,7 @@ pub enum ViewVerb {
     BrowserPeek(BrowserPeekVerb),
     Events(EventsVerb),
     EventsWatch(EventsWatchVerb),
+    Overview(OverviewVerb),
     Tracer(TracerVerb),
     ContentModal(ContentModalVerb),
     OverviewReportingTasksModal(OverviewReportingTasksVerb),

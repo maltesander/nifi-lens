@@ -430,6 +430,15 @@ pub(crate) fn redraw_components(state: &mut crate::app::state::AppState) {
         .latest()
         .map(|s| s.counts());
 
+    // Keep the modal selection stable when a fresh ReportingTasks snapshot
+    // arrives while the modal is open.
+    if let Some(modal) = state.overview.reporting_tasks_modal.as_mut()
+        && let Some(snap) = state.cluster.snapshot.reporting_tasks.latest()
+    {
+        let snap = snap.clone();
+        modal.reconcile_selection(&snap);
+    }
+
     let Some(root_pg) = state.cluster.snapshot.root_pg_status.latest() else {
         // Pre-first-fetch: leave `root_pg` as `None` and `unhealthy`
         // untouched. The Components panel renders its "loading…"
