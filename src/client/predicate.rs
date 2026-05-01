@@ -169,10 +169,10 @@ fn parse_literal(
     op: Op,
 ) -> Result<ClauseLiteral, PredicateParseError> {
     if matches!(op, Op::RegexMatch | Op::RegexNotMatch) {
-        let pattern = parse_regex_literal(bytes, cur)?;
+        let (pattern, start_col) = parse_regex_literal(bytes, cur)?;
         let regex = Regex::new(&pattern).map_err(|e| PredicateParseError {
             message: format!("invalid regex: {e}"),
-            column: *cur,
+            column: start_col + 1,
         })?;
         Ok(ClauseLiteral::Regex(regex))
     } else if *cur < bytes.len() && bytes[*cur] == b'"' {
@@ -182,7 +182,10 @@ fn parse_literal(
     }
 }
 
-fn parse_regex_literal(bytes: &[u8], cur: &mut usize) -> Result<String, PredicateParseError> {
+fn parse_regex_literal(
+    bytes: &[u8],
+    cur: &mut usize,
+) -> Result<(String, usize), PredicateParseError> {
     if *cur >= bytes.len() || bytes[*cur] != b'/' {
         return Err(PredicateParseError {
             message: "expected '/' starting regex literal".to_string(),
@@ -191,19 +194,23 @@ fn parse_regex_literal(bytes: &[u8], cur: &mut usize) -> Result<String, Predicat
     }
     let start = *cur;
     *cur += 1;
-    let mut out = String::new();
+    let mut out: Vec<u8> = Vec::new();
     while *cur < bytes.len() {
         match bytes[*cur] {
             b'\\' if *cur + 1 < bytes.len() && bytes[*cur + 1] == b'/' => {
-                out.push('/');
+                out.push(b'/');
                 *cur += 2;
             }
             b'/' => {
                 *cur += 1;
-                return Ok(out);
+                let pattern = String::from_utf8(out).map_err(|_| PredicateParseError {
+                    message: "regex literal not valid UTF-8".to_string(),
+                    column: start + 1,
+                })?;
+                return Ok((pattern, start));
             }
             b => {
-                out.push(b as char);
+                out.push(b);
                 *cur += 1;
             }
         }
@@ -217,19 +224,22 @@ fn parse_regex_literal(bytes: &[u8], cur: &mut usize) -> Result<String, Predicat
 fn parse_quoted(bytes: &[u8], cur: &mut usize) -> Result<String, PredicateParseError> {
     let start = *cur;
     *cur += 1;
-    let mut out = String::new();
+    let mut out: Vec<u8> = Vec::new();
     while *cur < bytes.len() {
         match bytes[*cur] {
             b'\\' if *cur + 1 < bytes.len() && bytes[*cur + 1] == b'"' => {
-                out.push('"');
+                out.push(b'"');
                 *cur += 2;
             }
             b'"' => {
                 *cur += 1;
-                return Ok(out);
+                return String::from_utf8(out).map_err(|_| PredicateParseError {
+                    message: "quoted string not valid UTF-8".to_string(),
+                    column: start + 1,
+                });
             }
             b => {
-                out.push(b as char);
+                out.push(b);
                 *cur += 1;
             }
         }
@@ -369,5 +379,36 @@ mod tests {
     fn attribute_with_dots_and_dashes() {
         let p = parse("kafka.consumer-group = svc-1");
         assert_eq!(p.clauses()[0].attribute, "kafka.consumer-group");
+    }
+
+    #[test]
+    fn regex_literal_preserves_non_ascii() {
+        let p = parse("filename =~ /naïve/");
+        match &p.clauses()[0].literal {
+            ClauseLiteral::Regex(r) => assert!(r.is_match("naïve")),
+            _ => panic!("expected Regex"),
+        }
+    }
+
+    #[test]
+    fn quoted_literal_preserves_non_ascii() {
+        let p = parse("description = \"héllo wörld\"");
+        match &p.clauses()[0].literal {
+            ClauseLiteral::Plain(v) => assert_eq!(v, "héllo wörld"),
+            _ => panic!("expected Plain"),
+        }
+    }
+
+    #[test]
+    fn invalid_regex_reports_correct_column() {
+        // Closed-but-malformed regex: `[` opens a class that never closes inside the /.../
+        let err = Predicate::parse("filename =~ /[/").unwrap_err();
+        // The opening / is at 0-based byte 12, so 1-based column is 13.
+        assert!(
+            err.message.contains("invalid regex"),
+            "got message: {}",
+            err.message
+        );
+        assert_eq!(err.column, 13);
     }
 }
