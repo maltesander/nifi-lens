@@ -96,6 +96,7 @@ insecure_tls = false
 # connections_by_pg           = "15s"   # per-PG connection endpoint backfill
 # version_control             = "30s"   # per-PG /versions/process-groups drift state
 # parameter_context_bindings  = "30s"   # per-PG bound parameter context refs
+# reporting_tasks             = "30s"   # reporting-tasks list + modal
 # status_history              = "30s"   # selection-scoped sparkline (processor/PG/conn/RPG)
 # about                       = "5m"    # /flow/about banner info
 # max_interval                = "60s"   # adaptive cap on slow clusters
