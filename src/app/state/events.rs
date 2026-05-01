@@ -4,7 +4,7 @@ use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 
 use super::{AppState, PendingIntent, UpdateResult, ViewKeyHandler};
 use crate::input::FilterField as InputFilterField;
-use crate::input::{CommonVerb, EventsVerb, FocusAction, GoTarget, ViewVerb};
+use crate::input::{CommonVerb, EventsVerb, EventsWatchVerb, FocusAction, GoTarget, ViewVerb};
 use crate::view::events::state::FilterField;
 
 /// Convert `crate::input::FilterField` to `crate::view::events::state::FilterField`.
@@ -26,6 +26,7 @@ impl ViewKeyHandler for EventsHandler {
     fn handle_verb(state: &mut AppState, verb: ViewVerb) -> Option<UpdateResult> {
         let ev = match verb {
             ViewVerb::Events(v) => v,
+            ViewVerb::EventsWatch(v) => return handle_watch_verb(state, v),
             _ => return None,
         };
 
@@ -209,8 +210,16 @@ impl ViewKeyHandler for EventsHandler {
             }
             FocusAction::Left | FocusAction::Right => None,
             FocusAction::Descend => {
-                // Enter → submit query.
-                submit_query(state)
+                // Enter on the filter bar submits a one-shot query — but
+                // only when not in watch mode. Watch mode owns Enter via
+                // EventsWatchVerb::CommitPredicate (when predicate is
+                // focused, via text-input bypass) or as a no-op
+                // otherwise.
+                if state.events.watch().is_some() {
+                    None
+                } else {
+                    submit_query(state)
+                }
             }
             FocusAction::Ascend => {
                 // Esc at filter bar: no-op.
@@ -244,17 +253,21 @@ impl ViewKeyHandler for EventsHandler {
     }
 
     fn is_text_input_focused(state: &AppState) -> bool {
-        state.events.filter_edit.is_some()
+        state.events.filter_edit.is_some() || state.events.predicate_input_focused()
     }
 
     fn blocks_app_shortcuts(state: &AppState) -> bool {
-        state.events.filter_edit.is_some()
+        state.events.filter_edit.is_some() || state.events.predicate_input_focused()
     }
 
     fn handle_text_input(state: &mut AppState, key: KeyEvent) -> Option<UpdateResult> {
-        if state.events.filter_edit.is_some()
-            && matches!(key.modifiers, KeyModifiers::NONE | KeyModifiers::SHIFT)
-        {
+        if !matches!(key.modifiers, KeyModifiers::NONE | KeyModifiers::SHIFT) {
+            return None;
+        }
+        if state.events.predicate_input_focused() {
+            return handle_predicate_edit(state, key);
+        }
+        if state.events.filter_edit.is_some() {
             handle_filter_edit(state, key)
         } else {
             None
@@ -337,6 +350,135 @@ fn handle_filter_edit(state: &mut AppState, key: KeyEvent) -> Option<UpdateResul
         }
         _ => Some(UpdateResult::default()),
     }
+}
+
+/// Handle a raw `KeyEvent` while the watch-strip predicate input is
+/// focused. Mirrors `handle_filter_edit` for the predicate buffer.
+/// Esc unfocuses (returns to row nav); Enter commits the predicate
+/// (parse error keeps focus).
+fn handle_predicate_edit(state: &mut AppState, key: KeyEvent) -> Option<UpdateResult> {
+    match key.code {
+        KeyCode::Esc => {
+            state.events.unfocus_predicate();
+            redraw()
+        }
+        KeyCode::Enter => {
+            match state.events.commit_predicate() {
+                Ok(()) => state.events.unfocus_predicate(),
+                Err(_e) => {
+                    // Parse error keeps focus; an inline error chip is
+                    // wired by Task 17 (widget::watch_strip). Until then
+                    // the error is visible in the redacted predicate
+                    // log line emitted by the worker on retry.
+                    tracing::debug!("predicate parse error (suppressed; surfaced in Task 17)");
+                }
+            }
+            redraw()
+        }
+        KeyCode::Backspace => {
+            state.events.pop_predicate_char();
+            redraw()
+        }
+        KeyCode::Char('v') if key.modifiers == KeyModifiers::NONE => {
+            match state.get_from_clipboard() {
+                Ok(text) => {
+                    for ch in text.chars() {
+                        state.events.push_predicate_char(ch);
+                    }
+                }
+                Err(err) => {
+                    state.post_warning(format!("clipboard paste: {err}"));
+                }
+            }
+            redraw()
+        }
+        KeyCode::Char('x') if key.modifiers == KeyModifiers::NONE => {
+            let text = state
+                .events
+                .watch()
+                .map(|w| w.predicate_input.clone())
+                .unwrap_or_default();
+            if !text.is_empty() {
+                let _ = state.copy_to_clipboard(text);
+            }
+            state.events.unfocus_predicate();
+            redraw()
+        }
+        KeyCode::Char(ch) => {
+            state.events.push_predicate_char(ch);
+            redraw()
+        }
+        _ => Some(UpdateResult::default()),
+    }
+}
+
+/// Dispatch an [`EventsWatchVerb`]. Called from `handle_verb` whenever
+/// the keymap claims a watch chord (i.e., when the Events tab is in
+/// watch sub-mode).
+fn handle_watch_verb(state: &mut AppState, verb: EventsWatchVerb) -> Option<UpdateResult> {
+    use crate::view::events::state::WatchStatus;
+    match verb {
+        EventsWatchVerb::EditPredicate => {
+            state.events.focus_predicate();
+        }
+        EventsWatchVerb::CommitPredicate => {
+            // Reachable only when predicate input is focused; text-input
+            // bypass already routes Enter via `handle_predicate_edit`.
+            // Keep this arm so the verb table is exhaustive — the
+            // `is_text_input_focused` short-circuit in the dispatcher
+            // means we should never actually take this path, but being
+            // defensive costs nothing.
+            if state.events.predicate_input_focused() {
+                match state.events.commit_predicate() {
+                    Ok(()) => state.events.unfocus_predicate(),
+                    Err(_e) => {
+                        tracing::debug!("predicate parse error (suppressed; surfaced in Task 17)");
+                    }
+                }
+            }
+        }
+        EventsWatchVerb::UnfocusPredicate => {
+            // Same defense-in-depth: text-input bypass owns Esc when
+            // predicate is focused. When unfocused, FocusAction::Ascend
+            // wins before this verb is reached.
+            state.events.unfocus_predicate();
+        }
+        EventsWatchVerb::Pause => {
+            if let Some(w) = state.events.watch_mut() {
+                w.status = match &w.status {
+                    WatchStatus::Tailing | WatchStatus::Waiting => WatchStatus::Paused,
+                    WatchStatus::Paused => WatchStatus::Waiting,
+                    other => other.clone(),
+                };
+            }
+        }
+        EventsWatchVerb::ClearBuffer => {
+            if let Some(w) = state.events.watch_mut() {
+                w.buffer.clear();
+                w.stats.trimmed_total = 0;
+            }
+            // Drop any stale row selection — buffer indices are gone.
+            state.events.selected_row = None;
+        }
+        EventsWatchVerb::Common(common) => {
+            // Refresh / Copy / OpenSearch / SearchNext / SearchPrev /
+            // Close are not bound at the watch-strip top level until
+            // Tasks 17/18/19 wire the watch-strip widget and exit-confirm
+            // modal. Match exhaustively so adding a new CommonVerb later
+            // doesn't silently dispatch into a no-op.
+            match common {
+                CommonVerb::Refresh
+                | CommonVerb::Copy
+                | CommonVerb::OpenSearch
+                | CommonVerb::SearchNext
+                | CommonVerb::SearchPrev
+                | CommonVerb::Close => {
+                    tracing::debug!(verb = ?common, "watch CommonVerb wired in Task 17/18/19");
+                }
+            }
+        }
+    }
+    redraw()
 }
 
 #[cfg(test)]

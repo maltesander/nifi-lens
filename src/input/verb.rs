@@ -1001,6 +1001,7 @@ pub enum ViewVerb {
     BrowserQueue(BrowserQueueVerb),
     BrowserPeek(BrowserPeekVerb),
     Events(EventsVerb),
+    EventsWatch(EventsWatchVerb),
     Tracer(TracerVerb),
     ContentModal(ContentModalVerb),
     VersionControlModal(VersionControlModalVerb),

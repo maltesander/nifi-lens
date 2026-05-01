@@ -20,8 +20,8 @@ pub mod verb;
 pub use action::{AppAction, FocusAction, GoTarget, HistoryAction, TabAction};
 pub use verb::{
     ActionHistoryModalVerb, BrowserPeekVerb, BrowserQueueVerb, BrowserVerb, BulletinsVerb,
-    CommonVerb, ContentModalVerb, EventsVerb, FilterField, ParameterContextModalVerb, Severity,
-    TracerVerb, VersionControlModalVerb, ViewVerb,
+    CommonVerb, ContentModalVerb, EventsVerb, EventsWatchVerb, FilterField,
+    ParameterContextModalVerb, Severity, TracerVerb, VersionControlModalVerb, ViewVerb,
 };
 
 // ---------------------------------------------------------------------------
@@ -373,9 +373,24 @@ impl KeyMap {
                 }
             }
             ViewId::Events => {
-                for &v in EventsVerb::all() {
-                    if chord_matches(v.chord(), key) {
-                        return InputEvent::View(ViewVerb::Events(v));
+                // Watch sub-mode shadows one-shot verbs: when a
+                // `WatchSession` is active, the EventsWatchVerb chord
+                // table replaces EventsVerb. Enter/Esc reach this point
+                // only when predicate input is unfocused (text-input
+                // bypass eats them otherwise) and have already been
+                // claimed by FocusAction above, so the gate here picks
+                // up `w`/`p`/`Shift+C`/`Common(...)` chords.
+                if state.events.watch().is_some() {
+                    for &v in EventsWatchVerb::all() {
+                        if chord_matches(v.chord(), key) {
+                            return InputEvent::View(ViewVerb::EventsWatch(v));
+                        }
+                    }
+                } else {
+                    for &v in EventsVerb::all() {
+                        if chord_matches(v.chord(), key) {
+                            return InputEvent::View(ViewVerb::Events(v));
+                        }
                     }
                 }
             }
@@ -397,8 +412,8 @@ impl KeyMap {
     /// shortcut.
     pub fn reverse_table(&self) -> Vec<(String, String)> {
         use crate::input::{
-            AppAction, BrowserVerb, BulletinsVerb, ContentModalVerb, EventsVerb, FocusAction,
-            HistoryAction, ParameterContextModalVerb, TabAction, TracerVerb, Verb,
+            AppAction, BrowserVerb, BulletinsVerb, ContentModalVerb, EventsVerb, EventsWatchVerb,
+            FocusAction, HistoryAction, ParameterContextModalVerb, TabAction, TracerVerb, Verb,
             VersionControlModalVerb,
         };
         let mut out: Vec<(String, String)> = Vec::new();
@@ -422,6 +437,9 @@ impl KeyMap {
         }
         for &v in EventsVerb::all() {
             out.push((v.chord().display(), format!("EventsVerb::{v:?}")));
+        }
+        for &v in EventsWatchVerb::all() {
+            out.push((v.chord().display(), format!("EventsWatchVerb::{v:?}")));
         }
         for &v in TracerVerb::all() {
             out.push((v.chord().display(), format!("TracerVerb::{v:?}")));

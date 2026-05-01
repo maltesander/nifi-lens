@@ -143,6 +143,10 @@ pub struct EventsState {
     /// variant. Watch-only state lives on `WatchSession` inside
     /// `Watch(_)`.
     pub mode: EventsMode,
+    /// True iff focus is in the watch-strip predicate input.
+    /// One-shot mode keeps this `false`. Tasks beyond 16 may flip it
+    /// programmatically (e.g., the cross-link arm focusing on entry).
+    pub predicate_focus: bool,
 }
 
 impl EventsState {
@@ -156,6 +160,7 @@ impl EventsState {
             filter_edit: None,
             pre_edit_value: None,
             mode: EventsMode::OneShot,
+            predicate_focus: false,
         }
     }
 
@@ -197,6 +202,59 @@ impl EventsState {
             EventsMode::Watch(s) => Some(s),
             EventsMode::OneShot => None,
         }
+    }
+
+    /// True iff focus is currently in the watch-strip predicate input.
+    pub fn predicate_input_focused(&self) -> bool {
+        self.predicate_focus
+    }
+
+    /// Move focus to the watch-strip predicate input. No-op when the
+    /// tab isn't in watch mode.
+    pub fn focus_predicate(&mut self) {
+        if matches!(self.mode, EventsMode::Watch(_)) {
+            self.predicate_focus = true;
+        }
+    }
+
+    /// Drop predicate-input focus (returns row navigation).
+    pub fn unfocus_predicate(&mut self) {
+        self.predicate_focus = false;
+    }
+
+    /// Append a character to the predicate-input buffer. No-op when
+    /// focus is elsewhere.
+    pub fn push_predicate_char(&mut self, ch: char) {
+        if !self.predicate_focus {
+            return;
+        }
+        if let Some(w) = self.watch_mut() {
+            w.predicate_input.push(ch);
+        }
+    }
+
+    /// Pop the last character from the predicate-input buffer. No-op
+    /// when focus is elsewhere or the buffer is empty.
+    pub fn pop_predicate_char(&mut self) {
+        if !self.predicate_focus {
+            return;
+        }
+        if let Some(w) = self.watch_mut() {
+            w.predicate_input.pop();
+        }
+    }
+
+    /// Parse `predicate_input` into the active predicate. On parse
+    /// error, returns the error and leaves the previous predicate in
+    /// place. On success, the predicate replaces the active one;
+    /// existing buffer rows are NOT re-filtered (forward-only).
+    pub fn commit_predicate(&mut self) -> Result<(), crate::client::PredicateParseError> {
+        let Some(w) = self.watch_mut() else {
+            return Ok(());
+        };
+        let parsed = crate::client::Predicate::parse(&w.predicate_input)?;
+        w.predicate = parsed;
+        Ok(())
     }
 }
 
@@ -1482,5 +1540,85 @@ mod tests {
         crate::view::events::resume_watch(&mut s);
         // Tailing should not be touched by resume.
         assert!(matches!(s.watch().unwrap().status, WatchStatus::Tailing));
+    }
+
+    #[test]
+    fn predicate_focus_lifecycle() {
+        let mut s = EventsState::new();
+        s.enter_watch_mode(empty_session(100));
+        assert!(!s.predicate_input_focused());
+        s.focus_predicate();
+        assert!(s.predicate_input_focused());
+        s.push_predicate_char('f');
+        s.push_predicate_char('=');
+        assert_eq!(s.watch().unwrap().predicate_input, "f=");
+        s.unfocus_predicate();
+        assert!(!s.predicate_input_focused());
+    }
+
+    #[test]
+    fn focus_predicate_no_op_in_oneshot_mode() {
+        let mut s = EventsState::new();
+        s.focus_predicate();
+        assert!(!s.predicate_input_focused());
+    }
+
+    #[test]
+    fn push_predicate_char_no_op_when_unfocused() {
+        let mut s = EventsState::new();
+        s.enter_watch_mode(empty_session(100));
+        // Not focused.
+        s.push_predicate_char('x');
+        assert_eq!(s.watch().unwrap().predicate_input, "");
+    }
+
+    #[test]
+    fn pop_predicate_char_removes_last() {
+        let mut s = EventsState::new();
+        s.enter_watch_mode(empty_session(100));
+        s.focus_predicate();
+        s.push_predicate_char('a');
+        s.push_predicate_char('b');
+        s.pop_predicate_char();
+        assert_eq!(s.watch().unwrap().predicate_input, "a");
+    }
+
+    #[test]
+    fn commit_predicate_replaces_active_predicate() {
+        let mut s = EventsState::new();
+        let mut session = empty_session(100);
+        session.predicate_input = "filename =~ /^x/".into();
+        s.enter_watch_mode(session);
+        let res = s.commit_predicate();
+        assert!(res.is_ok());
+        assert_eq!(s.watch().unwrap().predicate.clauses().len(), 1);
+    }
+
+    #[test]
+    fn commit_predicate_parse_error_keeps_old_predicate() {
+        let mut s = EventsState::new();
+        let mut session = empty_session(100);
+        session.predicate = Predicate::parse("filename = ok").unwrap(); // existing predicate
+        session.predicate_input = "garbage".into(); // bad input
+        s.enter_watch_mode(session);
+        let res = s.commit_predicate();
+        assert!(res.is_err());
+        // The previous predicate is unchanged.
+        let watch = s.watch().unwrap();
+        assert_eq!(watch.predicate.clauses().len(), 1);
+        assert_eq!(watch.predicate.clauses()[0].attribute, "filename");
+    }
+
+    #[test]
+    fn commit_predicate_empty_input_clears_predicate() {
+        let mut s = EventsState::new();
+        let mut session = empty_session(100);
+        session.predicate = Predicate::parse("filename = ok").unwrap();
+        session.predicate_input = "".into();
+        s.enter_watch_mode(session);
+        let res = s.commit_predicate();
+        assert!(res.is_ok());
+        // Empty predicate matches anything.
+        assert!(s.watch().unwrap().predicate.is_empty());
     }
 }
