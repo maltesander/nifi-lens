@@ -72,8 +72,15 @@ async fn create_stopped_disk_monitor(client: &DynamicClient) -> Result<()> {
 async fn create_invalid_memory_monitor(client: &DynamicClient) -> Result<()> {
     let name = "fixture-memory-monitor";
     tracing::info!(%name, "creating reporting task (target: INVALID)");
-    // Don't set Memory Pool — required, so the task lands INVALID.
-    let body = make_reporting_task(name, "org.apache.nifi.controller.MonitorMemory", props(&[]));
+    // `Memory Pool` defaults to a valid JVM pool name, so leaving it
+    // unset still validates. Force an invalid pool name instead — the
+    // MonitorMemory validator checks against live MXBean pool names
+    // and rejects unknown values.
+    let body = make_reporting_task(
+        name,
+        "org.apache.nifi.controller.MonitorMemory",
+        props(&[("Memory Pool", "NoSuchMemoryPool")]),
+    );
     let created = client
         .controller()
         .create_reporting_task(&body)
