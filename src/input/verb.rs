@@ -128,6 +128,27 @@ pub enum EventsVerb {
     RaiseCap,
 }
 
+/// Verbs active when the Events tab is in `Watch` sub-mode.
+/// `Common` arm shadows the same `CommonVerb` chords the rest of the
+/// app uses (`/`, `n`, `Shift+N`, `r`, `c`, `Esc`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum EventsWatchVerb {
+    Common(CommonVerb),
+    /// `w` — focus the predicate input. (Cross-link from Browser/Tracer
+    /// rows uses the same chord, dispatched by Tasks 20/21.)
+    EditPredicate,
+    /// `p` — pause / resume the worker.
+    Pause,
+    /// `Shift+C` — clear the rolling buffer (predicate is preserved;
+    /// `c` lowercase remains the inherited `CommonVerb::Copy`).
+    ClearBuffer,
+    /// `Enter` — commit the predicate input. Parse error keeps focus.
+    CommitPredicate,
+    /// `Esc` — when predicate input is focused, unfocus and return
+    /// to row navigation. (Esc with row focused goes via `CommonVerb::Close`.)
+    UnfocusPredicate,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum TracerVerb {
     Common(CommonVerb),
@@ -403,6 +424,70 @@ impl Verb for EventsVerb {
             Self::Reset,
             Self::Common(CommonVerb::Refresh),
             Self::RaiseCap,
+        ]
+    }
+}
+
+impl Verb for EventsWatchVerb {
+    fn chord(self) -> Chord {
+        match self {
+            Self::Common(c) => c.chord(),
+            Self::EditPredicate => Chord::simple(KeyCode::Char('w')),
+            Self::Pause => Chord::simple(KeyCode::Char('p')),
+            Self::ClearBuffer => Chord::shift(KeyCode::Char('C')),
+            Self::CommitPredicate => Chord::simple(KeyCode::Enter),
+            Self::UnfocusPredicate => Chord::simple(KeyCode::Esc),
+        }
+    }
+    fn label(self) -> &'static str {
+        match self {
+            Self::Common(c) => c.label(),
+            Self::EditPredicate => "edit predicate",
+            Self::Pause => "pause / resume",
+            Self::ClearBuffer => "clear buffer",
+            Self::CommitPredicate => "commit predicate",
+            Self::UnfocusPredicate => "unfocus predicate",
+        }
+    }
+    fn hint(self) -> &'static str {
+        match self {
+            Self::Common(c) => c.hint(),
+            Self::EditPredicate => "edit",
+            Self::Pause => "pause",
+            Self::ClearBuffer => "clear",
+            Self::CommitPredicate => "commit",
+            Self::UnfocusPredicate => "back",
+        }
+    }
+    fn priority(self) -> u8 {
+        match self {
+            Self::Common(c) => c.priority(),
+            Self::EditPredicate => 80,
+            Self::Pause => 70,
+            Self::ClearBuffer => 50,
+            _ => 40,
+        }
+    }
+    fn show_in_hint_bar(self) -> bool {
+        // SearchNext/Prev only relevant during search; hide unless committed.
+        !matches!(
+            self,
+            Self::Common(CommonVerb::SearchNext) | Self::Common(CommonVerb::SearchPrev)
+        )
+    }
+    fn all() -> &'static [Self] {
+        &[
+            Self::EditPredicate,
+            Self::Pause,
+            Self::ClearBuffer,
+            Self::CommitPredicate,
+            Self::Common(CommonVerb::OpenSearch),
+            Self::Common(CommonVerb::SearchNext),
+            Self::Common(CommonVerb::SearchPrev),
+            Self::Common(CommonVerb::Refresh),
+            Self::Common(CommonVerb::Copy),
+            Self::UnfocusPredicate,
+            Self::Common(CommonVerb::Close),
         ]
     }
 }
@@ -1498,6 +1583,24 @@ mod tests {
         // CommonVerb has no hint-bar exclusions today.
         for &v in CommonVerb::all() {
             assert!(v.show_in_hint_bar(), "{v:?} should appear in hint bar");
+        }
+    }
+
+    #[test]
+    fn events_watch_verb_chords_no_dupes() {
+        // `UnfocusPredicate` and `Common(Close)` intentionally share `Esc`
+        // (focus-state-dispatched at runtime — see variant rustdoc). All
+        // other chords must be unique within this enum's namespace.
+        let mut seen = std::collections::HashSet::new();
+        for v in EventsWatchVerb::all() {
+            if matches!(
+                v,
+                EventsWatchVerb::UnfocusPredicate | EventsWatchVerb::Common(CommonVerb::Close)
+            ) {
+                continue;
+            }
+            let c = v.chord();
+            assert!(seen.insert(c), "duplicate chord for {:?}: {:?}", v, c);
         }
     }
 }
