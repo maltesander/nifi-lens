@@ -160,6 +160,11 @@ pub enum TracerVerb {
     Save,
     ToggleDiff,
     OpenContentModal,
+    /// `w` — cross-link from the focused tracer event row to the Events
+    /// tab in watch sub-mode, scoped to the event's `component_id`.
+    /// Emitted only when the focused event has a non-empty `component_id`;
+    /// otherwise the chord is suppressed and the dispatch is a no-op.
+    Watch,
 }
 
 impl Verb for BulletinsVerb {
@@ -512,6 +517,7 @@ impl Verb for TracerVerb {
             Self::Save => Chord::simple(KeyCode::Char('s')),
             Self::ToggleDiff => Chord::simple(KeyCode::Char('d')),
             Self::OpenContentModal => Chord::simple(KeyCode::Char('i')),
+            Self::Watch => Chord::simple(KeyCode::Char('w')),
         }
     }
     fn label(self) -> &'static str {
@@ -520,6 +526,7 @@ impl Verb for TracerVerb {
             Self::Save => "save content to file",
             Self::ToggleDiff => "toggle attribute diff",
             Self::OpenContentModal => "open content viewer modal",
+            Self::Watch => "watch this component",
         }
     }
     fn hint(self) -> &'static str {
@@ -528,6 +535,7 @@ impl Verb for TracerVerb {
             Self::Save => "save",
             Self::ToggleDiff => "diff",
             Self::OpenContentModal => "view",
+            Self::Watch => "watch",
         }
     }
     fn enabled(self, ctx: &HintContext<'_>) -> bool {
@@ -547,11 +555,15 @@ impl Verb for TracerVerb {
                 ctx.state.tracer.content_modal.is_none()
                     && ctx.state.tracer_has_any_side_available()
             }
+            Self::Watch => ctx.state.tracer.selected_event_component_id().is_some(),
             _ => true,
         }
     }
     fn priority(self) -> u8 {
-        50
+        match self {
+            Self::Watch => 60,
+            _ => 50,
+        }
     }
     fn all() -> &'static [Self] {
         &[
@@ -560,6 +572,7 @@ impl Verb for TracerVerb {
             Self::Save,
             Self::ToggleDiff,
             Self::OpenContentModal,
+            Self::Watch,
         ]
     }
 }

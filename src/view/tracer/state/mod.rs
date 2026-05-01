@@ -59,6 +59,23 @@ impl TracerState {
         }
     }
 
+    /// Returns the component UUID of the currently-focused tracer event,
+    /// if any. Returns `None` when:
+    /// * the tracer is not in a mode that has a focused event
+    ///   (`Entry` / `LineageRunning`),
+    /// * `Lineage` mode has no events in its snapshot, or
+    /// * the focused event's `component_id` is the empty string.
+    ///
+    /// Used by `TracerVerb::Watch` (the `w` cross-link to the Events
+    /// watch sub-mode) for both its enabled-predicate gating and its
+    /// dispatch arm. Mirrors `BrowserState::selected_component_id`'s
+    /// non-empty contract — empty IDs cannot identify a component, so
+    /// the chord is suppressed and the dispatch is a no-op.
+    pub fn selected_event_component_id(&self) -> Option<String> {
+        let id = self.selected_component_id()?;
+        if id.is_empty() { None } else { Some(id) }
+    }
+
     /// Returns the speaking component name for the currently-focused
     /// component in Tracer, or `None` when nothing is selected.
     /// Parallel to [`Self::selected_component_id`]:

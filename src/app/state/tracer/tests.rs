@@ -1212,3 +1212,96 @@ fn modal_search_next_scrolls_offset_into_viewport() {
         "scroll must jump to match line 60"
     );
 }
+
+// ---------------------------------------------------------------------------
+// TracerVerb::Watch — `w` cross-link to Events watch sub-mode (Task 21)
+// ---------------------------------------------------------------------------
+
+/// Seeds a Lineage state with a single event whose `component_id` is
+/// `component_id`. Mirrors the simplest tracer setup used by other tests
+/// in this file. The selected_event index is 0.
+fn seed_tracer_event_with_component(s: &mut crate::app::state::AppState, component_id: &str) {
+    use crate::client::LineageSnapshot;
+    use crate::client::tracer::ProvenanceEventSummary;
+
+    let summary = ProvenanceEventSummary {
+        event_id: 7,
+        event_time_iso: "2026-01-01T00:00:00Z".to_string(),
+        event_type: "ATTRIBUTES_MODIFIED".to_string(),
+        component_id: component_id.to_string(),
+        component_name: "UpdateAttribute".to_string(),
+        component_type: "UpdateAttribute".to_string(),
+        group_id: "root".to_string(),
+        flow_file_uuid: "ff-7".to_string(),
+        relationship: None,
+        details: None,
+    };
+    s.tracer.mode = TracerMode::Lineage(Box::new(LineageView {
+        uuid: "ff-7".to_string(),
+        snapshot: LineageSnapshot {
+            events: vec![summary],
+            percent_completed: 100,
+            finished: true,
+        },
+        selected_event: 0,
+        event_detail: EventDetail::NotLoaded,
+        loaded_details: std::collections::HashMap::new(),
+        diff_mode: ts::AttributeDiffMode::default(),
+        fetched_at: SystemTime::now(),
+        focus: ts::LineageFocus::default(),
+        active_detail_tab: ts::DetailTab::default(),
+    }));
+}
+
+#[test]
+fn tracer_w_on_event_with_component_emits_open_watch_intent() {
+    use crate::app::state::PendingIntent;
+    use crate::input::{TracerVerb, ViewVerb};
+    use crate::intent::CrossLink;
+
+    let mut s = fresh_state();
+    s.current_tab = ViewId::Tracer;
+    seed_tracer_event_with_component(&mut s, "abc-comp");
+
+    let result = super::TracerHandler::handle_verb(&mut s, ViewVerb::Tracer(TracerVerb::Watch))
+        .expect("handled");
+    assert!(result.redraw);
+    let intent = result.intent.expect("intent emitted");
+    match intent {
+        PendingIntent::Goto(CrossLink::OpenWatch { component_id }) => {
+            assert_eq!(component_id, "abc-comp");
+        }
+        other => panic!("expected OpenWatch, got {other:?}"),
+    }
+}
+
+#[test]
+fn tracer_w_with_no_event_selected_returns_no_intent() {
+    use crate::input::{TracerVerb, ViewVerb};
+
+    let mut s = fresh_state();
+    s.current_tab = ViewId::Tracer;
+    // Mode stays at Entry (default) — no Lineage, no LatestEvents.
+    let result = super::TracerHandler::handle_verb(&mut s, ViewVerb::Tracer(TracerVerb::Watch))
+        .expect("handled");
+    assert!(
+        result.intent.is_none(),
+        "Watch with no Lineage/LatestEvents must not emit an intent",
+    );
+}
+
+#[test]
+fn tracer_w_on_event_with_empty_component_returns_no_intent() {
+    use crate::input::{TracerVerb, ViewVerb};
+
+    let mut s = fresh_state();
+    s.current_tab = ViewId::Tracer;
+    seed_tracer_event_with_component(&mut s, ""); // empty component_id
+
+    let result = super::TracerHandler::handle_verb(&mut s, ViewVerb::Tracer(TracerVerb::Watch))
+        .expect("handled");
+    assert!(
+        result.intent.is_none(),
+        "Watch on an event with empty component_id must not emit an intent",
+    );
+}
