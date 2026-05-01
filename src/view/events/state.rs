@@ -136,6 +136,13 @@ pub struct EventsState {
     /// Snapshot of the filter value captured on `enter_filter_edit`,
     /// so `cancel_filter_edit` can restore it.
     pub pre_edit_value: Option<String>,
+    /// Discriminator for one-shot vs watch sub-mode. The legacy
+    /// per-query fields (`events`, `status`, `selected_row`, `cap`,
+    /// `filter_edit`, `pre_edit_value`) live alongside this — they
+    /// are inactive in `Watch` mode but not duplicated into the
+    /// variant. Watch-only state lives on `WatchSession` inside
+    /// `Watch(_)`.
+    pub mode: EventsMode,
 }
 
 impl EventsState {
@@ -148,6 +155,7 @@ impl EventsState {
             cap: DEFAULT_RESULT_CAP,
             filter_edit: None,
             pre_edit_value: None,
+            mode: EventsMode::OneShot,
         }
     }
 
@@ -158,6 +166,36 @@ impl EventsState {
     pub fn clear_failed_status(&mut self) {
         if matches!(self.status, EventsQueryStatus::Failed { .. }) {
             self.status = EventsQueryStatus::Idle;
+        }
+    }
+
+    /// Replace the current mode with `Watch(session)`. Existing
+    /// one-shot fields are left untouched — the user can return to
+    /// them by exiting watch mode.
+    pub fn enter_watch_mode(&mut self, session: WatchSession) {
+        self.mode = EventsMode::Watch(session);
+    }
+
+    /// Drop the watch session (and its buffer) and return to
+    /// `OneShot`. Caller is responsible for aborting the worker
+    /// before calling this.
+    pub fn exit_watch_mode(&mut self) {
+        self.mode = EventsMode::OneShot;
+    }
+
+    /// Borrow the active [`WatchSession`], if any.
+    pub fn watch(&self) -> Option<&WatchSession> {
+        match &self.mode {
+            EventsMode::Watch(s) => Some(s),
+            EventsMode::OneShot => None,
+        }
+    }
+
+    /// Mutable borrow of the active [`WatchSession`], if any.
+    pub fn watch_mut(&mut self) -> Option<&mut WatchSession> {
+        match &mut self.mode {
+            EventsMode::Watch(s) => Some(s),
+            EventsMode::OneShot => None,
         }
     }
 }
@@ -457,6 +495,22 @@ pub struct WatchStats {
     pub last_poll_latency: Option<Duration>,
     pub trimmed_total: u64,
     pub detail_fetch_errors: u64,
+}
+
+/// Mode discriminator for the Events tab. `OneShot` is the historical
+/// behaviour — submit a query, await results, render. `Watch` enters
+/// the live-tail sub-mode and carries a [`WatchSession`].
+///
+/// The size disparity between `OneShot` (zero-sized) and
+/// `Watch(WatchSession)` (~320 B) is acceptable: there is exactly one
+/// `EventsMode` per `EventsState`, and `EventsState` itself lives in
+/// a single owned slot on `AppState` — boxing would add a heap hop
+/// for every watch-mode access without saving meaningful memory.
+#[allow(clippy::large_enum_variant)]
+#[derive(Debug)]
+pub enum EventsMode {
+    OneShot,
+    Watch(WatchSession),
 }
 
 /// Full state for one active watch — predicate, narrow, rolling
@@ -1173,5 +1227,43 @@ mod tests {
         let ids: Vec<i64> = s.buffer.iter().map(|m| m.summary.event_id).collect();
         assert_eq!(ids, vec![2]);
         assert_eq!(s.stats.trimmed_total, 1);
+    }
+
+    #[test]
+    fn events_state_default_is_oneshot_mode() {
+        let s = EventsState::new();
+        assert!(matches!(s.mode, EventsMode::OneShot));
+    }
+
+    #[test]
+    fn events_state_enter_watch_replaces_mode() {
+        let mut s = EventsState::new();
+        let session = empty_session(100);
+        s.enter_watch_mode(session);
+        assert!(matches!(s.mode, EventsMode::Watch(_)));
+    }
+
+    #[test]
+    fn events_state_exit_watch_restores_oneshot() {
+        let mut s = EventsState::new();
+        s.enter_watch_mode(empty_session(100));
+        s.exit_watch_mode();
+        assert!(matches!(s.mode, EventsMode::OneShot));
+    }
+
+    #[test]
+    fn watch_helpers_borrow_active_session() {
+        let mut s = EventsState::new();
+        assert!(s.watch().is_none());
+        assert!(s.watch_mut().is_none());
+
+        s.enter_watch_mode(empty_session(100));
+        assert!(s.watch().is_some());
+
+        // Mutate via watch_mut to confirm it returns the live session.
+        if let Some(w) = s.watch_mut() {
+            w.predicate_input = "x".into();
+        }
+        assert_eq!(s.watch().unwrap().predicate_input, "x");
     }
 }
