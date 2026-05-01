@@ -32,6 +32,11 @@ pub struct ProvenanceQuery {
     /// Flowfile UUID to match. Translated to the `FlowFileUUID` search
     /// term on the server.
     pub flow_file_uuid: Option<String>,
+    /// Optional list of NiFi provenance event types to narrow the
+    /// search. Empty = no narrowing. Translated into a single
+    /// `EventType` search term whose value is the alternation
+    /// `"DROP|SEND|RECEIVE..."`. NiFi parses this as a Lucene query.
+    pub event_types: Vec<String>,
     /// Earliest event time to include in the query, in the server's
     /// native `MM/dd/yyyy HH:mm:ss` format or ISO-8601. Inclusive.
     pub start_time_iso: Option<String>,
@@ -168,6 +173,7 @@ impl NifiClient {
             context = %self.context_name(),
             component_id = ?query.component_id,
             flow_file_uuid = ?query.flow_file_uuid,
+            event_types = ?query.event_types,
             start_time = ?query.start_time_iso,
             end_time = ?query.end_time_iso,
             max_results = query.max_results,
@@ -186,6 +192,12 @@ impl NifiClient {
             term.inverse = Some(false);
             term.value = Some(uuid.clone());
             search_terms.insert("FlowFileUUID".to_string(), Some(term));
+        }
+        if !query.event_types.is_empty() {
+            let mut term = ProvenanceSearchValueDto::default();
+            term.inverse = Some(false);
+            term.value = Some(query.event_types.join("|"));
+            search_terms.insert("EventType".to_string(), Some(term));
         }
 
         let mut request = ProvenanceRequestDto::default();
@@ -350,6 +362,131 @@ impl NifiClient {
 mod tests {
     use super::*;
     use ratatui::style::{Modifier, Style};
+    use wiremock::matchers::{method, path};
+    use wiremock::{Mock, MockServer, ResponseTemplate};
+
+    /// Build a `NifiClient` pointed at the wiremock server. Mounts a
+    /// `/nifi-api/flow/about` stub (version 2.6.0) so `detect_version`
+    /// succeeds, mirroring the pattern used elsewhere in `src/client/`.
+    async fn test_client(server: &MockServer) -> NifiClient {
+        Mock::given(method("GET"))
+            .and(path("/nifi-api/flow/about"))
+            .respond_with(
+                ResponseTemplate::new(200).set_body_json(
+                    serde_json::json!({"about": {"version": "2.6.0", "title": "NiFi"}}),
+                ),
+            )
+            .mount(server)
+            .await;
+
+        let inner = nifi_rust_client::NifiClientBuilder::new(&server.uri())
+            .expect("builder")
+            .build_dynamic()
+            .expect("dynamic client");
+        inner.detect_version().await.expect("detect_version");
+        let version = semver::Version::parse("2.6.0").expect("parse");
+        NifiClient::from_parts(inner, "test", version)
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn submit_query_with_event_types_includes_search_term() {
+        let server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .and(path("/nifi-api/provenance"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "provenance": {
+                    "id": "q1",
+                    "request": {},
+                    "results": null
+                }
+            })))
+            .mount(&server)
+            .await;
+
+        let client = test_client(&server).await;
+        let q = ProvenanceQuery {
+            event_types: vec!["DROP".into(), "SEND".into()],
+            max_results: 100,
+            ..Default::default()
+        };
+        let h = client.submit_provenance_query(&q).await.expect("submit ok");
+        assert_eq!(h.query_id, "q1");
+
+        // Inspect the actual POST body to prove the event_types field
+        // was serialized into an `EventType` search term whose value is
+        // the `|`-alternation of the inputs. This is more robust than a
+        // wiremock body_json matcher because the dynamic client also
+        // injects fields like clusterNodeId we don't want to lock down.
+        let posts: Vec<_> = server
+            .received_requests()
+            .await
+            .expect("received_requests")
+            .into_iter()
+            .filter(|r| {
+                r.method == wiremock::http::Method::POST && r.url.path() == "/nifi-api/provenance"
+            })
+            .collect();
+        assert_eq!(posts.len(), 1, "exactly one POST /provenance");
+        let body: serde_json::Value = serde_json::from_slice(&posts[0].body).expect("body is JSON");
+        let search_terms = body
+            .pointer("/provenance/request/searchTerms")
+            .expect("searchTerms present in request body");
+        let event_term = search_terms
+            .get("EventType")
+            .expect("EventType search term present");
+        // The search term object shape is `{"value": "...", "inverse": false}`.
+        assert_eq!(
+            event_term.get("value").and_then(|v| v.as_str()),
+            Some("DROP|SEND"),
+        );
+        assert_eq!(
+            event_term.get("inverse").and_then(|v| v.as_bool()),
+            Some(false),
+        );
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn submit_query_without_event_types_omits_search_term() {
+        let server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .and(path("/nifi-api/provenance"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "provenance": {
+                    "id": "q2",
+                    "request": {},
+                    "results": null
+                }
+            })))
+            .mount(&server)
+            .await;
+
+        let client = test_client(&server).await;
+        let q = ProvenanceQuery {
+            max_results: 100,
+            ..Default::default()
+        };
+        let _ = client.submit_provenance_query(&q).await.expect("submit ok");
+
+        let posts: Vec<_> = server
+            .received_requests()
+            .await
+            .expect("received_requests")
+            .into_iter()
+            .filter(|r| {
+                r.method == wiremock::http::Method::POST && r.url.path() == "/nifi-api/provenance"
+            })
+            .collect();
+        assert_eq!(posts.len(), 1);
+        let body: serde_json::Value = serde_json::from_slice(&posts[0].body).expect("body is JSON");
+        // When no narrowing fields are set, search_terms is None and
+        // therefore absent from the serialised body.
+        if let Some(terms) = body.pointer("/provenance/request/searchTerms") {
+            assert!(
+                terms.get("EventType").is_none(),
+                "EventType term must not be present when event_types is empty"
+            );
+        }
+    }
 
     #[test]
     fn event_type_from_wire_case_insensitive() {

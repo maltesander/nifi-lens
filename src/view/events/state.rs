@@ -313,6 +313,7 @@ impl EventsState {
             } else {
                 Some(self.filters.uuid.clone())
             },
+            event_types: Vec::new(),
             start_time_iso: start,
             end_time_iso: None,
             max_results: self.cap,
