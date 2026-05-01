@@ -80,10 +80,10 @@ Below `widget::modal::MIN_WIDTH × MIN_HEIGHT` the modal degrades via
 
 ### Central cluster store
 
-`ClusterStore` owns eleven endpoint fetchers: `root_pg_status`,
+`ClusterStore` owns twelve endpoint fetchers: `root_pg_status`,
 `controller_services`, `controller_status`, `system_diagnostics`,
 `bulletins`, `connections_by_pg`, `about`, `cluster_nodes`, `tls_certs`,
-`version_control`, `parameter_context_bindings`. Each runs as an
+`version_control`, `parameter_context_bindings`, `reporting_tasks`. Each runs as an
 independent `tokio::task::spawn_local` future, pushes
 `AppEvent::ClusterUpdate` on success, and sleeps for its base cadence
 (scaled adaptively up to `max_interval` based on measured latency,
@@ -94,10 +94,10 @@ Snapshot mutation is main-loop-only: the `ClusterUpdate` arm in
 `AppEvent::ClusterChanged(endpoint)`. Views match on the endpoint and
 invoke their `redraw_*` reducers.
 
-Seven endpoints are **subscriber-gated** — they park when no view is
+Eight endpoints are **subscriber-gated** — they park when no view is
 subscribed: `root_pg_status`, `controller_services`,
 `connections_by_pg`, `cluster_nodes`, `tls_certs`, `version_control`,
-`parameter_context_bindings`. `WorkerRegistry::ensure` calls
+`parameter_context_bindings`, `reporting_tasks`. `WorkerRegistry::ensure` calls
 `cluster.subscribe(endpoint, view)` on tab entry and `unsubscribe`
 on tab exit.
 
@@ -401,6 +401,22 @@ Modal verb adds `Enter` (expand selected) and refines `Esc` to
 cascade through search → expanded → close. `c` copies the selected
 row as TSV.
 
+### Reporting tasks modal
+
+`t` on the Overview tab opens the **reporting-tasks modal**: a
+master-detail full-screen modal whose left pane is a filterable list
+of every NiFi reporting task (name, type chip, run-status badge); the
+right pane shows Identity (name, type, bundle), Scheduling (strategy,
+period, run duration), Properties, Validation errors, and Recent
+bulletins. Sensitive properties are masked to a `[sensitive]` chip;
+`#{param}` references are annotated with a trailing `→` and Enter
+opens the parameter-context modal pre-selected. Recent bulletins are
+filtered from the existing in-memory ring buffer by `source_id`, so
+no extra fetch is needed. `c` copies the focused row as TSV (sensitive
+values remain masked). The fetcher is subscriber-gated to
+`ViewId::Overview` only — the modal piggybacks on Overview's
+subscription rather than adding a separate gate. Read-only in v0.x.
+
 ### Sparkline strip
 
 The Browser detail identity panel for processor / PG / connection /
@@ -555,6 +571,9 @@ selection-scoped (cadences the sparkline worker), not a
 `ClusterStore` fetcher. Values use humantime format (`"10s"`,
 `"750ms"`, `"2m"`); out-of-range values emit `tracing::warn!` but
 are accepted.
+
+The `reporting_tasks` fetcher cadence defaults to `30s`; it is
+subscriber-gated to `ViewId::Overview`.
 
 Events in-flight query polling (750 ms) and Tracer content
 in-flight polling (500 ms) are hardcoded — internal mechanics.
