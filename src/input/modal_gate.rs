@@ -109,6 +109,25 @@ impl ModalGate for ContentModalGate {
     }
 }
 
+/// Overview reporting-tasks modal (`src/view/overview/reporting_tasks_modal.rs`).
+pub struct OverviewReportingTasksModalGate;
+
+impl ModalGate for OverviewReportingTasksModalGate {
+    type V = crate::input::OverviewReportingTasksVerb;
+
+    fn host_view() -> ViewId {
+        ViewId::Overview
+    }
+
+    fn is_active(state: &AppState) -> bool {
+        state.overview.reporting_tasks_modal.is_some() && state.modal.is_none()
+    }
+
+    fn to_view_verb(v: Self::V) -> ViewVerb {
+        ViewVerb::OverviewReportingTasksModal(v)
+    }
+}
+
 /// Browser version-control modal (`src/view/browser/render/version_control_modal.rs`).
 pub struct VersionControlModalGate;
 

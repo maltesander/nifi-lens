@@ -21,7 +21,8 @@ pub use action::{AppAction, FocusAction, GoTarget, HistoryAction, TabAction};
 pub use verb::{
     ActionHistoryModalVerb, BrowserPeekVerb, BrowserQueueVerb, BrowserVerb, BulletinsVerb,
     CommonVerb, ContentModalVerb, EventsVerb, EventsWatchVerb, FilterField,
-    ParameterContextModalVerb, Severity, TracerVerb, VersionControlModalVerb, ViewVerb,
+    OverviewReportingTasksVerb, ParameterContextModalVerb, Severity, TracerVerb,
+    VersionControlModalVerb, ViewVerb,
 };
 
 // ---------------------------------------------------------------------------
@@ -251,9 +252,12 @@ impl KeyMap {
         // all of them via `state.modal.is_none()` inside each gate).
         use crate::input::modal_gate::{
             self, ActionHistoryModalGate, BrowserPeekGate, ContentModalGate,
-            ParameterContextModalGate, VersionControlModalGate,
+            OverviewReportingTasksModalGate, ParameterContextModalGate, VersionControlModalGate,
         };
         if let Some(ev) = modal_gate::try_dispatch::<ContentModalGate>(state, key) {
+            return ev;
+        }
+        if let Some(ev) = modal_gate::try_dispatch::<OverviewReportingTasksModalGate>(state, key) {
             return ev;
         }
         if let Some(ev) = modal_gate::try_dispatch::<VersionControlModalGate>(state, key) {

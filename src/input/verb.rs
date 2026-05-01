@@ -770,6 +770,102 @@ impl Verb for VersionControlModalVerb {
     }
 }
 
+/// Verbs that are only active when the Overview reporting-tasks modal is open.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum OverviewReportingTasksVerb {
+    Common(CommonVerb),
+    RowUp,
+    RowDown,
+    PageUp,
+    PageDown,
+    JumpTop,
+    JumpBottom,
+    /// `Enter` — when List pane focused: shift focus to Detail pane.
+    /// When Detail pane focused: no-op (activation not required in v0.1).
+    FocusDetail,
+}
+
+impl Verb for OverviewReportingTasksVerb {
+    fn chord(self) -> Chord {
+        match self {
+            Self::Common(c) => c.chord(),
+            Self::RowUp => Chord::simple(KeyCode::Up),
+            Self::RowDown => Chord::simple(KeyCode::Down),
+            Self::PageUp => Chord::simple(KeyCode::PageUp),
+            Self::PageDown => Chord::simple(KeyCode::PageDown),
+            Self::JumpTop => Chord::simple(KeyCode::Home),
+            Self::JumpBottom => Chord::simple(KeyCode::End),
+            Self::FocusDetail => Chord::simple(KeyCode::Enter),
+        }
+    }
+
+    fn label(self) -> &'static str {
+        match self {
+            Self::Common(c) => c.label(),
+            Self::RowUp => "row up",
+            Self::RowDown => "row down",
+            Self::PageUp => "page up",
+            Self::PageDown => "page down",
+            Self::JumpTop => "top",
+            Self::JumpBottom => "bottom",
+            Self::FocusDetail => "focus detail",
+        }
+    }
+
+    fn hint(self) -> &'static str {
+        match self {
+            Self::Common(c) => c.hint(),
+            Self::RowUp | Self::RowDown => "row",
+            Self::PageUp | Self::PageDown => "page",
+            Self::JumpTop => "top",
+            Self::JumpBottom => "bottom",
+            Self::FocusDetail => "focus detail",
+        }
+    }
+
+    fn show_in_hint_bar(self) -> bool {
+        // Hide natural-navigation chords and search-cycling chords from the
+        // footer strip — they are intuitive and crowd out meaningful verbs.
+        !matches!(
+            self,
+            Self::RowUp
+                | Self::RowDown
+                | Self::PageUp
+                | Self::PageDown
+                | Self::JumpTop
+                | Self::JumpBottom
+                | Self::FocusDetail
+                | Self::Common(CommonVerb::SearchNext)
+                | Self::Common(CommonVerb::SearchPrev)
+        )
+    }
+
+    fn enabled(self, _ctx: &HintContext<'_>) -> bool {
+        // Modal is the dispatch gate — chords only fire when the keymap is in
+        // modal mode. Always return true here; dispatch suppresses outside the
+        // modal.
+        true
+    }
+
+    fn all() -> &'static [Self] {
+        &[
+            Self::Common(CommonVerb::Close),
+            Self::RowUp,
+            Self::RowDown,
+            Self::PageUp,
+            Self::PageDown,
+            Self::JumpTop,
+            Self::JumpBottom,
+            Self::FocusDetail,
+            Self::Common(CommonVerb::OpenSearch),
+            Self::Common(CommonVerb::SearchNext),
+            Self::Common(CommonVerb::SearchPrev),
+            Self::Common(CommonVerb::Copy),
+            Self::Common(CommonVerb::Refresh),
+        ]
+    }
+}
+
 /// Verbs that are only active when the parameter-context modal is open.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum ParameterContextModalVerb {
@@ -1030,6 +1126,7 @@ pub enum ViewVerb {
     EventsWatch(EventsWatchVerb),
     Tracer(TracerVerb),
     ContentModal(ContentModalVerb),
+    OverviewReportingTasksModal(OverviewReportingTasksVerb),
     VersionControlModal(VersionControlModalVerb),
     ParameterContextModal(ParameterContextModalVerb),
     ActionHistoryModal(ActionHistoryModalVerb),

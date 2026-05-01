@@ -6,7 +6,10 @@ use super::{AppState, Modal, UpdateResult, ViewKeyHandler};
 pub(crate) struct OverviewHandler;
 
 impl ViewKeyHandler for OverviewHandler {
-    fn handle_verb(_state: &mut AppState, _verb: crate::input::ViewVerb) -> Option<UpdateResult> {
+    fn handle_verb(state: &mut AppState, verb: crate::input::ViewVerb) -> Option<UpdateResult> {
+        if let crate::input::ViewVerb::OverviewReportingTasksModal(v) = verb {
+            return handle_reporting_tasks_modal_verb(state, v);
+        }
         None
     }
 
@@ -118,6 +121,18 @@ impl ViewKeyHandler for OverviewHandler {
             },
         }
     }
+}
+
+/// Stub handler for the Overview reporting-tasks modal verb. Wired to the
+/// actual behaviour in Task 21 (Esc cascade, Copy, row nav, etc.). For now
+/// every verb is a no-op so the gate compiles and the `ViewVerb` variant is
+/// reachable through the dispatcher.
+fn handle_reporting_tasks_modal_verb(
+    _state: &mut AppState,
+    _verb: crate::input::OverviewReportingTasksVerb,
+) -> Option<UpdateResult> {
+    // Task 21 implements Esc cascade, Copy, row nav, search, etc.
+    None
 }
 
 #[cfg(test)]
