@@ -51,7 +51,7 @@ async fn create_stopped_disk_monitor(client: &DynamicClient) -> Result<()> {
         "org.apache.nifi.controller.MonitorDiskUsage",
         props(&[
             ("Directory Location", "/opt/nifi/nifi-current/logs"),
-            ("Directory Threshold", "90%"),
+            ("Threshold", "90%"),
         ]),
     );
     let created = client
