@@ -47,12 +47,13 @@ pub enum ClusterEndpoint {
     TlsCerts = 8,
     VersionControl = 9,
     ParameterContextBindings = 10,
+    ReportingTasks = 11,
 }
 
 impl ClusterEndpoint {
     /// Total count — used to size fixed arrays like
     /// `[AtomicUsize; ClusterEndpoint::COUNT]`.
-    pub const COUNT: usize = 11;
+    pub const COUNT: usize = 12;
 
     pub fn as_str(self) -> &'static str {
         match self {
@@ -67,6 +68,7 @@ impl ClusterEndpoint {
             Self::TlsCerts => "tls_certs",
             Self::VersionControl => "version_control",
             Self::ParameterContextBindings => "parameter_context_bindings",
+            Self::ReportingTasks => "reporting_tasks",
         }
     }
 }
@@ -85,7 +87,7 @@ mod tests {
     fn endpoint_count_matches_variants() {
         // Guard: bumping this requires also updating the SubscriberRegistry
         // fixed-size arrays.
-        assert_eq!(ClusterEndpoint::COUNT, 11);
+        assert_eq!(ClusterEndpoint::COUNT, 12);
     }
 
     #[test]
@@ -130,6 +132,15 @@ mod tests {
         assert_eq!(
             format!("{}", ClusterEndpoint::ParameterContextBindings),
             "parameter_context_bindings"
+        );
+    }
+
+    #[test]
+    fn reporting_tasks_as_str_is_stable() {
+        assert_eq!(ClusterEndpoint::ReportingTasks.as_str(), "reporting_tasks");
+        assert_eq!(
+            format!("{}", ClusterEndpoint::ReportingTasks),
+            "reporting_tasks"
         );
     }
 }

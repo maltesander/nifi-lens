@@ -10,7 +10,7 @@ use crate::app::state::ViewId;
 use crate::client::overview::{ClusterNodesSnapshot, SystemDiagSnapshot};
 use crate::client::{
     AboutSnapshot, BulletinSnapshot, ConnectionEndpoints, ControllerServicesSnapshot,
-    ControllerStatusSnapshot, NifiClient, RootPgStatusSnapshot,
+    ControllerStatusSnapshot, NifiClient, ReportingTasksSnapshot, RootPgStatusSnapshot,
 };
 use crate::cluster::ClusterEndpoint;
 use crate::cluster::config::ClusterPollingConfig;
@@ -56,6 +56,7 @@ pub enum ClusterUpdate {
         Result<ParameterContextBindingsMap, NifiLensError>,
         FetchMeta,
     ),
+    ReportingTasks(Result<ReportingTasksSnapshot, NifiLensError>, FetchMeta),
 }
 
 impl ClusterUpdate {
@@ -72,6 +73,7 @@ impl ClusterUpdate {
             Self::BulletinsDelta { .. } => ClusterEndpoint::Bulletins,
             Self::VersionControl(..) => ClusterEndpoint::VersionControl,
             Self::ParameterContextBindings(..) => ClusterEndpoint::ParameterContextBindings,
+            Self::ReportingTasks(..) => ClusterEndpoint::ReportingTasks,
         }
     }
 }
@@ -482,6 +484,9 @@ impl ClusterStore {
             }
             ClusterUpdate::ParameterContextBindings(result, meta) => {
                 self.snapshot.parameter_context_bindings.apply(result, meta);
+            }
+            ClusterUpdate::ReportingTasks(result, meta) => {
+                self.snapshot.reporting_tasks.apply(result, meta);
             }
         }
         endpoint
