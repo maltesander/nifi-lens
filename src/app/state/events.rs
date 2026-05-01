@@ -24,6 +24,12 @@ pub(crate) struct EventsHandler;
 
 impl ViewKeyHandler for EventsHandler {
     fn handle_verb(state: &mut AppState, verb: ViewVerb) -> Option<UpdateResult> {
+        if state.events.exit_watch_pending {
+            // Modal is armed — suppress all verb dispatch. The
+            // text-input bypass routes y/N/Esc through
+            // `handle_text_input::handle_exit_watch_confirm`.
+            return Some(UpdateResult::default());
+        }
         let ev = match verb {
             ViewVerb::Events(v) => v,
             ViewVerb::EventsWatch(v) => return handle_watch_verb(state, v),
@@ -76,6 +82,12 @@ impl ViewKeyHandler for EventsHandler {
     }
 
     fn handle_focus(state: &mut AppState, action: FocusAction) -> Option<UpdateResult> {
+        if state.events.exit_watch_pending {
+            // Modal is armed — suppress focus dispatch as well. The
+            // text-input bypass owns Esc → cancel; everything else is
+            // swallowed.
+            return Some(UpdateResult::default());
+        }
         // If a field is being edited, Descend commits and Ascend cancels.
         // This path is defensive — normally text-input bypass handles edits.
         if state.events.filter_edit.is_some() {
@@ -253,16 +265,25 @@ impl ViewKeyHandler for EventsHandler {
     }
 
     fn is_text_input_focused(state: &AppState) -> bool {
-        state.events.filter_edit.is_some() || state.events.predicate_input_focused()
+        state.events.filter_edit.is_some()
+            || state.events.predicate_input_focused()
+            || state.events.exit_watch_pending
     }
 
     fn blocks_app_shortcuts(state: &AppState) -> bool {
-        state.events.filter_edit.is_some() || state.events.predicate_input_focused()
+        state.events.filter_edit.is_some()
+            || state.events.predicate_input_focused()
+            || state.events.exit_watch_pending
     }
 
     fn handle_text_input(state: &mut AppState, key: KeyEvent) -> Option<UpdateResult> {
         if !matches!(key.modifiers, KeyModifiers::NONE | KeyModifiers::SHIFT) {
             return None;
+        }
+        // The exit-watch confirm modal shadows every other key handler
+        // when armed. Only `y`/`n`/`Esc` resolve it.
+        if state.events.exit_watch_pending {
+            return handle_exit_watch_confirm(state, key);
         }
         if state.events.predicate_input_focused() {
             return handle_predicate_edit(state, key);
@@ -406,6 +427,24 @@ fn handle_predicate_edit(state: &mut AppState, key: KeyEvent) -> Option<UpdateRe
         }
         KeyCode::Char(ch) => {
             state.events.push_predicate_char(ch);
+            redraw()
+        }
+        _ => Some(UpdateResult::default()),
+    }
+}
+
+/// Handle a raw `KeyEvent` while the discard-watch confirm modal is
+/// armed. Only `y` / `Y` confirm; `n` / `N` / `Esc` cancel. Every
+/// other key is swallowed (returns a redraw) so it can't leak into
+/// the underlying view.
+fn handle_exit_watch_confirm(state: &mut AppState, key: KeyEvent) -> Option<UpdateResult> {
+    match key.code {
+        KeyCode::Char('y') | KeyCode::Char('Y') => {
+            state.events.confirm_exit_watch();
+            redraw()
+        }
+        KeyCode::Char('n') | KeyCode::Char('N') | KeyCode::Esc => {
+            state.events.cancel_exit_watch();
             redraw()
         }
         _ => Some(UpdateResult::default()),

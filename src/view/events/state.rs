@@ -147,6 +147,10 @@ pub struct EventsState {
     /// One-shot mode keeps this `false`. Tasks beyond 16 may flip it
     /// programmatically (e.g., the cross-link arm focusing on entry).
     pub predicate_focus: bool,
+    /// True iff a `discard N watched events?` confirm modal is visible.
+    /// Set by `request_exit_watch` when the buffer is non-empty;
+    /// cleared by `confirm_exit_watch` / `cancel_exit_watch`.
+    pub exit_watch_pending: bool,
 }
 
 impl EventsState {
@@ -161,6 +165,7 @@ impl EventsState {
             pre_edit_value: None,
             mode: EventsMode::OneShot,
             predicate_focus: false,
+            exit_watch_pending: false,
         }
     }
 
@@ -255,6 +260,36 @@ impl EventsState {
         let parsed = crate::client::Predicate::parse(&w.predicate_input)?;
         w.predicate = parsed;
         Ok(())
+    }
+
+    /// User asked to leave watch mode. If the buffer is empty (or the
+    /// tab is not in watch mode), exit immediately and return `false`
+    /// to indicate no confirmation was needed. If the buffer has any
+    /// matched events, arm the confirm modal and return `true` so the
+    /// caller can render it.
+    pub fn request_exit_watch(&mut self) -> bool {
+        let needs_confirm = match self.watch() {
+            Some(w) => !w.buffer.is_empty(),
+            None => false,
+        };
+        if !needs_confirm {
+            self.exit_watch_mode();
+            self.exit_watch_pending = false;
+            return false;
+        }
+        self.exit_watch_pending = true;
+        true
+    }
+
+    /// User answered `y` — drop the buffer and return to one-shot.
+    pub fn confirm_exit_watch(&mut self) {
+        self.exit_watch_pending = false;
+        self.exit_watch_mode();
+    }
+
+    /// User answered `n` / Esc — keep the session, disarm the modal.
+    pub fn cancel_exit_watch(&mut self) {
+        self.exit_watch_pending = false;
     }
 }
 
@@ -1620,5 +1655,65 @@ mod tests {
         assert!(res.is_ok());
         // Empty predicate matches anything.
         assert!(s.watch().unwrap().predicate.is_empty());
+    }
+
+    #[test]
+    fn leaving_watch_with_buffered_events_arms_confirm() {
+        let mut s = EventsState::new();
+        let mut session = empty_session(100);
+        session.buffer.push_back(matched(1));
+        s.enter_watch_mode(session);
+
+        let armed = s.request_exit_watch();
+        assert!(armed, "non-empty buffer must arm the confirm modal");
+        assert!(s.exit_watch_pending);
+        // Mode unchanged until confirmed.
+        assert!(matches!(s.mode, EventsMode::Watch(_)));
+    }
+
+    #[test]
+    fn leaving_watch_with_empty_buffer_exits_immediately() {
+        let mut s = EventsState::new();
+        s.enter_watch_mode(empty_session(100));
+
+        let armed = s.request_exit_watch();
+        assert!(!armed, "empty buffer should not need confirmation");
+        assert!(matches!(s.mode, EventsMode::OneShot));
+    }
+
+    #[test]
+    fn request_exit_watch_no_op_in_oneshot() {
+        let mut s = EventsState::new();
+        let armed = s.request_exit_watch();
+        assert!(!armed);
+        assert!(matches!(s.mode, EventsMode::OneShot));
+        assert!(!s.exit_watch_pending);
+    }
+
+    #[test]
+    fn confirm_exit_watch_drops_buffer_and_returns_to_oneshot() {
+        let mut s = EventsState::new();
+        let mut session = empty_session(100);
+        session.buffer.push_back(matched(1));
+        s.enter_watch_mode(session);
+
+        s.request_exit_watch();
+        s.confirm_exit_watch();
+        assert!(matches!(s.mode, EventsMode::OneShot));
+        assert!(!s.exit_watch_pending);
+    }
+
+    #[test]
+    fn cancel_exit_watch_keeps_session_and_disarms() {
+        let mut s = EventsState::new();
+        let mut session = empty_session(100);
+        session.buffer.push_back(matched(1));
+        s.enter_watch_mode(session);
+
+        s.request_exit_watch();
+        s.cancel_exit_watch();
+        assert!(matches!(s.mode, EventsMode::Watch(_)));
+        assert!(!s.exit_watch_pending);
+        assert_eq!(s.watch().unwrap().buffer.len(), 1);
     }
 }

@@ -112,6 +112,49 @@ pub fn render(
     let detail_inner = detail_block.inner(detail_area);
     frame.render_widget(detail_block, detail_area);
     render_detail_pane(frame, detail_inner, state, now, cfg);
+
+    if state.exit_watch_pending {
+        let n_events = state.watch().map(|w| w.buffer.len()).unwrap_or(0);
+        render_exit_watch_confirm(frame, area, n_events);
+    }
+}
+
+/// Centred [y/N] confirm modal shown when the user requests to leave
+/// watch mode while the buffer contains matched events. Drawn as an
+/// overlay over the entire Events area.
+fn render_exit_watch_confirm(frame: &mut Frame, area: Rect, n_events: usize) {
+    use ratatui::layout::Margin;
+    use ratatui::style::{Modifier, Style};
+    use ratatui::widgets::{Block, Borders, Clear, Wrap};
+
+    // 50x5 area, centred on the visible region.
+    let modal_w = 50u16.min(area.width.saturating_sub(2));
+    let modal_h = 5u16.min(area.height.saturating_sub(2));
+    let modal_area = Rect::new(
+        area.x + area.width.saturating_sub(modal_w) / 2,
+        area.y + area.height.saturating_sub(modal_h) / 2,
+        modal_w,
+        modal_h,
+    );
+
+    frame.render_widget(Clear, modal_area);
+    let block = Block::default().borders(Borders::ALL).title(Span::styled(
+        " confirm ",
+        Style::default().add_modifier(Modifier::BOLD),
+    ));
+    let inner = block.inner(modal_area);
+    frame.render_widget(block, modal_area);
+
+    let suffix = if n_events == 1 { "" } else { "s" };
+    let prompt = format!("discard {n_events} watched event{suffix}?");
+    let body = Paragraph::new(vec![
+        Line::from(prompt).alignment(Alignment::Center),
+        Line::from(Span::styled("[y/N]", theme::muted())).alignment(Alignment::Center),
+    ])
+    .wrap(Wrap { trim: true });
+    // Inner area already excludes borders; small horizontal margin keeps
+    // the prompt off the edges.
+    frame.render_widget(body, inner.inner(Margin::new(1, 0)));
 }
 
 fn render_filter_bar(frame: &mut Frame, area: Rect, state: &EventsState) {
@@ -624,6 +667,63 @@ mod tests {
         });
     }
 
+    fn watch_state_with_events() -> EventsState {
+        use crate::client::{AttributeTriple, Predicate, ProvenanceEventSummary, ProvenanceQuery};
+        use crate::view::events::state::{MatchedEvent, WatchSession, WatchStats, WatchStatus};
+        use std::collections::VecDeque;
+
+        let mut state = EventsState::new();
+        let mut buffer = VecDeque::new();
+        for id in 1..=3i64 {
+            buffer.push_back(MatchedEvent {
+                summary: ProvenanceEventSummary {
+                    event_id: id,
+                    event_time_iso: "04/30/2026 10:42:08.000 UTC".into(),
+                    event_type: "SEND".into(),
+                    component_id: "abc".into(),
+                    component_name: "UpdateRecord-fx-rate".into(),
+                    component_type: "UpdateRecord".into(),
+                    group_id: "g1".into(),
+                    flow_file_uuid: format!("ff-aaaaaaaa-bbbb-cccc-dddd-{id:012}"),
+                    relationship: None,
+                    details: None,
+                },
+                attrs: vec![
+                    AttributeTriple {
+                        key: "filename".into(),
+                        previous: None,
+                        current: Some(format!("invoice-{id}.json")),
+                    },
+                    AttributeTriple {
+                        key: "mime.type".into(),
+                        previous: None,
+                        current: Some("application/json".into()),
+                    },
+                ],
+            });
+        }
+        state.enter_watch_mode(WatchSession {
+            narrow: ProvenanceQuery {
+                component_id: Some("abc".into()),
+                ..Default::default()
+            },
+            predicate: Predicate::parse("filename =~ /^invoice-/").unwrap(),
+            predicate_input: "filename =~ /^invoice-/".into(),
+            buffer,
+            buffer_cap: 2000,
+            cursor: None,
+            status: WatchStatus::Tailing,
+            stats: WatchStats {
+                events_per_sec_ewma: 12.5,
+                last_poll_latency: Some(std::time::Duration::from_millis(250)),
+                trimmed_total: 0,
+                detail_fetch_errors: 0,
+            },
+        });
+        state.selected_row = Some(0);
+        state
+    }
+
     #[test]
     fn render_watch_mode_with_buffer() {
         use crate::client::{AttributeTriple, Predicate, ProvenanceEventSummary, ProvenanceQuery};
@@ -683,6 +783,18 @@ mod tests {
             filters => vec![(r"last \d+[smhd] ago", "last __ ago")],
         }, {
             assert_snapshot!("events_watch_mode_with_buffer", render_to_string(&state));
+        });
+    }
+
+    #[test]
+    fn render_exit_watch_confirm_overlays_table() {
+        let mut state = watch_state_with_events();
+        let armed = state.request_exit_watch();
+        assert!(armed, "buffered events should arm the confirm modal");
+        insta::with_settings!({
+            filters => vec![(r"last \d+[smhd] ago", "last __ ago")],
+        }, {
+            assert_snapshot!("events_exit_watch_confirm_overlay", render_to_string(&state));
         });
     }
 }
