@@ -35,8 +35,10 @@ mod components;
 pub mod node_detail;
 mod nodes;
 mod queues;
+pub mod reporting_tasks_modal;
 
 pub use node_detail::render_node_detail_modal;
+pub use reporting_tasks_modal::{MaybeSnapshot, render as render_reporting_tasks_modal};
 
 use ratatui::Frame;
 use ratatui::layout::{Constraint, Direction, Layout, Rect};
