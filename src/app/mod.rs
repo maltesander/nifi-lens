@@ -120,12 +120,13 @@ pub async fn run(
             }
             AppEvent::ClusterChanged(endpoint) => {
                 use crate::cluster::ClusterEndpoint;
-                // Overview cares about eight cluster endpoints (all read-
+                // Overview cares about nine cluster endpoints (all read-
                 // model fields plus Bulletins for the sparkline +
                 // noisy-components leaderboard), including
                 // ControllerStatus, SystemDiagnostics, About, ClusterNodes
-                // for the per-node membership join, and TlsCerts for
-                // per-node cert expiry.
+                // for the per-node membership join, TlsCerts for per-node
+                // cert expiry, and ReportingTasks for the Components-panel
+                // row + modal.
                 let affects_overview = matches!(
                     endpoint,
                     ClusterEndpoint::RootPgStatus
@@ -136,6 +137,7 @@ pub async fn run(
                         | ClusterEndpoint::Bulletins
                         | ClusterEndpoint::ClusterNodes
                         | ClusterEndpoint::TlsCerts
+                        | ClusterEndpoint::ReportingTasks
                 );
                 // `VersionControl` is intentionally NOT in this set — it is wired
                 // via a separate `affects_browser_version_control` flag that triggers
@@ -155,7 +157,9 @@ pub async fn run(
 
                 if affects_overview {
                     match endpoint {
-                        ClusterEndpoint::RootPgStatus | ClusterEndpoint::ControllerServices => {
+                        ClusterEndpoint::RootPgStatus
+                        | ClusterEndpoint::ControllerServices
+                        | ClusterEndpoint::ReportingTasks => {
                             crate::view::overview::state::redraw_components(&mut state);
                         }
                         ClusterEndpoint::ControllerStatus => {

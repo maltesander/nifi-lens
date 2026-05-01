@@ -9,6 +9,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Reporting tasks visibility on Overview**: a Components-panel row showing
+  `running / stopped / invalid` counts plus a `t`-launched master-detail
+  modal with properties, validation errors, parameter-ref annotations, and
+  filtered bulletin history. Read-only.
 - Events watch sub-mode: live tail of provenance events with a
   client-side AND-of-clauses attribute predicate. Lowercase `w` on
   Browser / Tracer rows opens Events pre-narrowed to a component.

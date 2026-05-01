@@ -31,6 +31,8 @@ pub struct ClusterPollingConfig {
         with = "humantime_serde"
     )]
     pub parameter_context_bindings: Duration,
+    #[serde(default = "default_reporting_tasks", with = "humantime_serde")]
+    pub reporting_tasks: Duration,
     /// Cadence for the per-selection sparkline worker
     /// (`/flow/{type}/{id}/status/history`). Selection-scoped, so the
     /// worker is only running for the currently-selected
@@ -77,6 +79,7 @@ impl Default for ClusterPollingConfig {
             connections_by_pg: default_connections_by_pg(),
             version_control: default_version_control(),
             parameter_context_bindings: default_parameter_context_bindings(),
+            reporting_tasks: default_reporting_tasks(),
             status_history: default_status_history(),
             events_tail: default_events_tail(),
             about: default_about(),
@@ -115,6 +118,9 @@ fn default_version_control() -> Duration {
     Duration::from_secs(30)
 }
 fn default_parameter_context_bindings() -> Duration {
+    Duration::from_secs(30)
+}
+fn default_reporting_tasks() -> Duration {
     Duration::from_secs(30)
 }
 fn default_status_history() -> Duration {
@@ -296,5 +302,20 @@ mod tests {
         let toml_str = r#"events_tail = "5m""#;
         let cfg: ClusterPollingConfig = toml::from_str(toml_str).unwrap();
         assert_eq!(cfg.events_tail, Duration::from_secs(60));
+    }
+
+    #[test]
+    fn reporting_tasks_default_is_30s() {
+        let cfg = ClusterPollingConfig::default();
+        assert_eq!(cfg.reporting_tasks, Duration::from_secs(30));
+    }
+
+    #[test]
+    fn reporting_tasks_parses_from_humantime() {
+        let toml = r#"
+            reporting_tasks = "1m"
+        "#;
+        let cfg: ClusterPollingConfig = toml::from_str(toml).unwrap();
+        assert_eq!(cfg.reporting_tasks, Duration::from_secs(60));
     }
 }

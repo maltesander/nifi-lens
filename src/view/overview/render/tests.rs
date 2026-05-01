@@ -1135,3 +1135,77 @@ fn components_table_includes_remote_pgs_row_when_rpgs_present() {
         "missing transmitting label: {out:?}"
     );
 }
+
+// ── Reporting-tasks row focused tests ─────────────────────────────────────
+
+/// Build a minimal state with both `controller` and `root_pg` set so
+/// the Components panel renders its content (not "loading…"), leaving
+/// `reporting_task_counts` for the caller to configure.
+fn state_for_reporting_tasks_row() -> OverviewState {
+    let mut state = OverviewState::new();
+    seed_controller_status(&mut state, ControllerStatusSnapshot::default());
+    seed_root_pg(&mut state, RootPgStatusSnapshot::default());
+    state.cs_counts = Some(crate::client::ControllerServiceCounts::default());
+    state
+}
+
+#[test]
+fn snapshot_reporting_tasks_row_populated() {
+    let mut state = state_for_reporting_tasks_row();
+    state.reporting_task_counts = Some(crate::client::ReportingTaskCounts {
+        total: 5,
+        running: 4,
+        stopped: 0,
+        invalid: 1,
+    });
+    let out = render_to_string(&state);
+    assert!(
+        out.contains("Reporting tasks"),
+        "row label must appear: {out:?}"
+    );
+    assert!(out.contains("RUNNING"), "must show RUNNING slot: {out:?}");
+    assert!(out.contains("STOPPED"), "must show STOPPED slot: {out:?}");
+    assert!(out.contains("INVALID"), "must show INVALID slot: {out:?}");
+    assert!(out.contains("[t]"), "must show [t] chord chip: {out:?}");
+    insta::assert_snapshot!("reporting_tasks_row_populated", out);
+}
+
+#[test]
+fn snapshot_reporting_tasks_row_empty() {
+    let mut state = state_for_reporting_tasks_row();
+    state.reporting_task_counts = Some(crate::client::ReportingTaskCounts::default());
+    let out = render_to_string(&state);
+    assert!(
+        out.contains("Reporting tasks"),
+        "row label must appear: {out:?}"
+    );
+    // No slots rendered for zero total, but [t] chip must still appear.
+    assert!(
+        out.contains("[t]"),
+        "must keep [t] chip on empty row: {out:?}"
+    );
+    // Verify the row has no numeric slot after "Reporting tasks   0" by
+    // checking the snapshot visually — a simple string check is sufficient
+    // since `insta::assert_snapshot!` below pins the exact output.
+    insta::assert_snapshot!("reporting_tasks_row_empty", out);
+}
+
+#[test]
+fn snapshot_reporting_tasks_row_unavailable() {
+    let state = state_for_reporting_tasks_row();
+    // `reporting_task_counts` left as `None` → degraded row.
+    let out = render_to_string(&state);
+    assert!(
+        out.contains("Reporting tasks"),
+        "row label must appear: {out:?}"
+    );
+    assert!(
+        out.contains("rt list unavailable"),
+        "must show unavailable chip: {out:?}"
+    );
+    assert!(
+        !out.contains("[t]"),
+        "must omit [t] chip in unavailable state: {out:?}"
+    );
+    insta::assert_snapshot!("reporting_tasks_row_unavailable", out);
+}

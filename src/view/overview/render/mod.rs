@@ -35,8 +35,10 @@ mod components;
 pub mod node_detail;
 mod nodes;
 mod queues;
+pub mod reporting_tasks_modal;
 
 pub use node_detail::render_node_detail_modal;
+pub use reporting_tasks_modal::{MaybeSnapshot, render as render_reporting_tasks_modal};
 
 use ratatui::Frame;
 use ratatui::layout::{Constraint, Direction, Layout, Rect};
@@ -55,7 +57,7 @@ pub fn render(frame: &mut Frame, area: Rect, state: &OverviewState) {
     let zones = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
-            Constraint::Length(6),            // components panel (4 rows + 2 border)
+            Constraint::Length(7),            // components panel (5 rows + 2 border)
             Constraint::Length(nodes_height), // nodes panel
             Constraint::Length(7),            // bulletins/noisy panel (5 content + 2 border)
             Constraint::Fill(1),              // unhealthy queues panel

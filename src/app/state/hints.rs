@@ -67,7 +67,16 @@ pub fn collect_hints(state: &AppState) -> Vec<crate::widget::hint_bar::HintSpan>
     // verbs (e.g. Browser Properties with no eligible selection) stay
     // in the bar but render dim, so users learn what's possible.
     match state.current_tab {
-        ViewId::Overview => {}
+        ViewId::Overview => {
+            // When the modal is open its own verb strip is rendered inside
+            // the modal frame; suppress the tab-level chord here.
+            if state.overview.reporting_tasks_modal.is_none() {
+                use crate::input::OverviewVerb;
+                for &v in OverviewVerb::all() {
+                    push_verb(&mut out, v, &ctx);
+                }
+            }
+        }
         ViewId::Bulletins => {
             for &v in BulletinsVerb::all() {
                 push_verb(&mut out, v, &ctx);

@@ -13,6 +13,7 @@ pub mod overview;
 pub mod parameter_context;
 pub mod predicate;
 pub mod queues;
+pub mod reporting_tasks;
 pub mod status;
 pub mod tls_cert;
 pub mod tracer;
@@ -324,6 +325,30 @@ impl NifiClient {
                 })
             })?;
         Ok(ControllerServicesSnapshot::from_listing(&listing))
+    }
+
+    /// Calls `flow().get_reporting_tasks()` and collapses the entity into
+    /// a typed snapshot. Sensitive property values are masked to `None`
+    /// by `ReportingTasksSnapshot::from_entity`.
+    pub async fn reporting_tasks_snapshot(&self) -> Result<ReportingTasksSnapshot, NifiLensError> {
+        tracing::debug!(
+            context = %self.context_name,
+            "fetching /flow/reporting-tasks"
+        );
+        let entity = self
+            .inner
+            .flow()
+            .get_reporting_tasks()
+            .await
+            .map_err(|err| {
+                classify_or_fallback(&self.context_name, Box::new(err), |source| {
+                    NifiLensError::ReportingTasksListFailed {
+                        context: self.context_name.clone(),
+                        source,
+                    }
+                })
+            })?;
+        Ok(ReportingTasksSnapshot::from_entity(entity))
     }
 
     /// Calls `flow().get_bulletin_board(after, None, None, None, None, limit)`
@@ -808,6 +833,10 @@ pub use overview::{
     SystemDiagAggregate, SystemDiagSnapshot,
 };
 pub use predicate::{ClauseLiteral, Op, Predicate, PredicateParseError};
+pub use reporting_tasks::{
+    ReportingTaskCounts, ReportingTaskPropertyDescriptor, ReportingTaskRow, ReportingTaskState,
+    ReportingTasksSnapshot, ValidationStatus,
+};
 pub use tls_cert::{CertEntry, NodeCertChain, TlsCertsSnapshot, TlsProbeError};
 pub use tracer::{
     AttributeTriple, ContentRangeSnapshot, ContentRender, ContentSide, ContentSnapshot,

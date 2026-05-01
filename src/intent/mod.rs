@@ -90,6 +90,9 @@ pub enum CrossLink {
     /// 20 (Browser) and 21 (Tracer); main-loop apply lands with those
     /// tasks.
     OpenWatch { component_id: String },
+    /// From Overview reporting-tasks modal: switch to Bulletins tab and
+    /// pre-filter by the reporting task's source id.
+    OpenBulletins { source_id: String },
 }
 
 impl Intent {
@@ -107,6 +110,7 @@ impl Intent {
             Self::Goto(CrossLink::TraceByUuid { .. }) => "trace by uuid",
             Self::Goto(CrossLink::OpenParameterContextModal { .. }) => "open parameter context",
             Self::Goto(CrossLink::OpenWatch { .. }) => "open watch",
+            Self::Goto(CrossLink::OpenBulletins { .. }) => "goto Bulletins",
             Self::CancelLineageQuery => "CancelLineageQuery",
             Self::DeleteLineageQuery { .. } => "DeleteLineageQuery",
             Self::LoadEventDetail { .. } => "LoadEventDetail",
@@ -185,6 +189,13 @@ impl IntentDispatcher {
             Intent::Goto(CrossLink::OpenWatch { component_id }) => {
                 Some(Ok(IntentOutcome::EventsWatchLandingOn {
                     component_id: component_id.clone(),
+                }))
+            }
+            // OpenBulletins switches to the Bulletins tab and pre-filters
+            // by the reporting task's source id. Pure — no client work.
+            Intent::Goto(CrossLink::OpenBulletins { source_id }) => {
+                Some(Ok(IntentOutcome::BulletinsLandingOn {
+                    source_id: source_id.clone(),
                 }))
             }
             _ => None,
@@ -537,6 +548,43 @@ mod tests {
             })
             .name(),
             "open watch"
+        );
+    }
+
+    #[test]
+    fn open_bulletins_cross_link_returns_bulletins_landing_on() {
+        let outcome = IntentDispatcher::handle_pure(&Intent::Goto(CrossLink::OpenBulletins {
+            source_id: "rt-abc-123".into(),
+        }))
+        .expect("OpenBulletins must be handled by handle_pure")
+        .expect("OpenBulletins returns Ok(...)");
+        match outcome {
+            IntentOutcome::BulletinsLandingOn { source_id } => {
+                assert_eq!(source_id, "rt-abc-123");
+            }
+            other => panic!("expected BulletinsLandingOn, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn open_bulletins_is_not_a_write_intent() {
+        let intent = Intent::Goto(CrossLink::OpenBulletins {
+            source_id: "rt-abc-123".into(),
+        });
+        assert!(
+            !intent.is_write(),
+            "OpenBulletins must not be a write intent"
+        );
+    }
+
+    #[test]
+    fn open_bulletins_name_label() {
+        assert_eq!(
+            Intent::Goto(CrossLink::OpenBulletins {
+                source_id: "x".into(),
+            })
+            .name(),
+            "goto Bulletins"
         );
     }
 

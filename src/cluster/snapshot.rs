@@ -29,7 +29,7 @@ use crate::client::overview::{ClusterNodesSnapshot, SystemDiagSnapshot};
 use crate::client::tls_cert::TlsCertsSnapshot;
 use crate::client::{
     AboutSnapshot, BulletinSnapshot, ConnectionEndpoints, ControllerServicesSnapshot,
-    ControllerStatusSnapshot, RootPgStatusSnapshot,
+    ControllerStatusSnapshot, ReportingTasksSnapshot, RootPgStatusSnapshot,
 };
 use crate::cluster::ClusterEndpoint;
 use crate::error::NifiLensError;
@@ -218,6 +218,7 @@ pub struct ClusterSnapshot {
     pub bulletins: BulletinRing,
     pub version_control: EndpointState<VersionControlMap>,
     pub parameter_context_bindings: EndpointState<ParameterContextBindingsMap>,
+    pub reporting_tasks: EndpointState<ReportingTasksSnapshot>,
 }
 
 impl ClusterSnapshot {
@@ -313,6 +314,9 @@ impl ClusterSnapshot {
             }
             ClusterEndpoint::ParameterContextBindings => {
                 meta_of(&self.parameter_context_bindings).map(|m| m.next_interval)
+            }
+            ClusterEndpoint::ReportingTasks => {
+                meta_of(&self.reporting_tasks).map(|m| m.next_interval)
             }
         }
     }

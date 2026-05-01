@@ -6,6 +6,7 @@ pub mod invalid;
 pub mod orders;
 pub mod parameter_contexts;
 pub mod registry;
+pub mod reporting_tasks;
 pub mod services;
 pub mod versioned;
 
@@ -28,6 +29,9 @@ pub async fn seed(
 
     tracing::info!("seeding controller services at root");
     let service_ids = services::seed(client, "root").await?;
+
+    tracing::info!("seeding root reporting tasks");
+    reporting_tasks::seed(client).await?;
 
     tracing::info!(marker = FIXTURE_MARKER_NAME, "creating fixture marker PG");
     let body = make_pg(FIXTURE_MARKER_NAME);
