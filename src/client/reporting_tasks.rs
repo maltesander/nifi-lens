@@ -49,14 +49,15 @@ impl ReportingTaskState {
     /// Map the NiFi wire string. Unknown values warn and fall back to
     /// `Stopped` — mirrors `ProcessorStatus::from_wire` discipline.
     pub fn from_wire(raw: &str) -> Self {
-        match raw {
-            "RUNNING" => Self::Running,
-            "STOPPED" => Self::Stopped,
-            "DISABLED" => Self::Disabled,
-            other => {
-                tracing::warn!(value = %other, "unknown reporting-task state");
-                Self::Stopped
-            }
+        if raw.eq_ignore_ascii_case("RUNNING") {
+            Self::Running
+        } else if raw.eq_ignore_ascii_case("STOPPED") {
+            Self::Stopped
+        } else if raw.eq_ignore_ascii_case("DISABLED") {
+            Self::Disabled
+        } else {
+            tracing::warn!(value = %raw, "unknown reporting-task state");
+            Self::Stopped
         }
     }
 }
@@ -70,14 +71,15 @@ pub enum ValidationStatus {
 
 impl ValidationStatus {
     pub fn from_wire(raw: &str) -> Self {
-        match raw {
-            "VALID" => Self::Valid,
-            "INVALID" => Self::Invalid,
-            "VALIDATING" => Self::Validating,
-            other => {
-                tracing::warn!(value = %other, "unknown reporting-task validation status");
-                Self::Validating
-            }
+        if raw.eq_ignore_ascii_case("VALID") {
+            Self::Valid
+        } else if raw.eq_ignore_ascii_case("INVALID") {
+            Self::Invalid
+        } else if raw.eq_ignore_ascii_case("VALIDATING") {
+            Self::Validating
+        } else {
+            tracing::warn!(value = %raw, "unknown reporting-task validation status");
+            Self::Validating
         }
     }
 }
@@ -135,6 +137,22 @@ mod tests {
         assert_eq!(
             ValidationStatus::from_wire("???"),
             ValidationStatus::Validating
+        );
+    }
+
+    #[test]
+    fn from_wire_is_case_insensitive() {
+        assert_eq!(
+            ReportingTaskState::from_wire("running"),
+            ReportingTaskState::Running
+        );
+        assert_eq!(
+            ReportingTaskState::from_wire("Stopped"),
+            ReportingTaskState::Stopped
+        );
+        assert_eq!(
+            ValidationStatus::from_wire("invalid"),
+            ValidationStatus::Invalid
         );
     }
 }
