@@ -448,7 +448,7 @@ impl EventsState {
         self.selected_row.and_then(|i| self.events.get(i))
     }
 
-    /// Build a [`ProvenanceQuery`](crate::client::ProvenanceQuery) from the
+    /// Build a [`ProvenanceQuery`] from the
     /// current filter state. Projects `filters.time` into a NiFi-native
     /// `MM/dd/yyyy HH:mm:ss UTC` start date (best-effort — empty /
     /// unparseable input falls back to no start filter).
