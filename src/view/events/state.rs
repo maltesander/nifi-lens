@@ -632,9 +632,10 @@ impl WatchSession {
     ///
     /// Status starts as `Waiting`; the worker's first successful poll
     /// promotes it to `Tailing` via the standard reducer arms.
-    /// `buffer_cap` is hardcoded at 2000 here; Task 22 will plumb the
-    /// `[events]` config knob through the call sites.
-    pub fn new_for_component(component_id: String) -> Self {
+    ///
+    /// `buffer_cap` is sourced from `config.events.watch_buffer_size`,
+    /// which deserialization has already clamped into `100..=20_000`.
+    pub fn new_for_component(component_id: String, config: &crate::config::Config) -> Self {
         Self {
             narrow: ProvenanceQuery {
                 component_id: Some(component_id),
@@ -644,7 +645,7 @@ impl WatchSession {
             predicate: Predicate::default(),
             predicate_input: String::new(),
             buffer: VecDeque::new(),
-            buffer_cap: 2000,
+            buffer_cap: config.events.watch_buffer_size,
             cursor: None,
             status: WatchStatus::Waiting,
             stats: WatchStats::default(),
@@ -705,7 +706,8 @@ mod tests {
 
     #[test]
     fn watch_session_new_for_component_seeds_narrow_and_waiting_status() {
-        let session = WatchSession::new_for_component("proc-42".into());
+        let cfg = crate::test_support::tiny_config();
+        let session = WatchSession::new_for_component("proc-42".into(), &cfg);
         assert_eq!(session.narrow.component_id.as_deref(), Some("proc-42"));
         assert_eq!(session.narrow.max_results, 1000);
         assert!(session.narrow.flow_file_uuid.is_none());

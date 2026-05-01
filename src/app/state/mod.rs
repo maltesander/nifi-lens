@@ -1175,7 +1175,7 @@ fn update_inner(state: &mut AppState, event: AppEvent, config: &Config) -> Updat
                 queue_listing_followup: None,
             }
         }
-        AppEvent::IntentOutcome(outcome) => handle_intent_outcome(state, outcome),
+        AppEvent::IntentOutcome(outcome) => handle_intent_outcome(state, outcome, config),
         // ClusterStore events are intercepted in the async main loop
         // (`src/app/mod.rs::run`) which owns `tx`; the reducer never
         // sees them. These arms exist only to keep `update_inner`
@@ -2406,6 +2406,7 @@ pub(crate) fn handle_browser_payload(state: &mut AppState, payload: crate::event
 fn handle_intent_outcome(
     state: &mut AppState,
     outcome: Result<IntentOutcome, NifiLensError>,
+    config: &Config,
 ) -> UpdateResult {
     match outcome {
         Ok(IntentOutcome::ContextSwitched {
@@ -2605,7 +2606,8 @@ fn handle_intent_outcome(
             });
             state.current_tab = ViewId::Events;
             state.close_modal();
-            let session = crate::view::events::state::WatchSession::new_for_component(component_id);
+            let session =
+                crate::view::events::state::WatchSession::new_for_component(component_id, config);
             state.events.enter_watch_mode(session);
             state.events.focus_predicate();
             UpdateResult {

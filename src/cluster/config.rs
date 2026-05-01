@@ -39,6 +39,16 @@ pub struct ClusterPollingConfig {
     /// per-PG fan-out cadences.
     #[serde(default = "default_status_history", with = "humantime_serde")]
     pub status_history: Duration,
+    /// Cadence for the Events watch sub-mode tail loop. Drives how often
+    /// the watch worker submits a fresh provenance query to pull newly
+    /// matched events from `start_date = cursor`. Default `2s`. Out-of-
+    /// range values warn and clamp into `[100ms, 60s]` rather than
+    /// rejecting the config entirely.
+    #[serde(
+        default = "default_events_tail",
+        deserialize_with = "deserialize_clamped_events_tail"
+    )]
+    pub events_tail: Duration,
     #[serde(default = "default_about", with = "humantime_serde")]
     pub about: Duration,
     #[serde(default = "default_max_interval", with = "humantime_serde")]
@@ -68,6 +78,7 @@ impl Default for ClusterPollingConfig {
             version_control: default_version_control(),
             parameter_context_bindings: default_parameter_context_bindings(),
             status_history: default_status_history(),
+            events_tail: default_events_tail(),
             about: default_about(),
             max_interval: default_max_interval(),
             jitter_percent: default_jitter_percent(),
@@ -109,8 +120,35 @@ fn default_parameter_context_bindings() -> Duration {
 fn default_status_history() -> Duration {
     Duration::from_secs(30)
 }
+fn default_events_tail() -> Duration {
+    Duration::from_secs(2)
+}
 fn default_about() -> Duration {
     Duration::from_secs(300)
+}
+
+/// Deserialize `[polling.cluster] events_tail` as a humantime duration,
+/// then clamp into `[100ms, 60s]`. Out-of-range values emit a
+/// `tracing::warn!` (mirroring the `[events] watch_buffer_size`
+/// behaviour) rather than rejecting the config entirely. The watch
+/// sub-mode is the only consumer; a 50 ms cadence would hammer NiFi
+/// while a 5 min cadence would defeat the live-tail experience.
+fn deserialize_clamped_events_tail<'de, D>(deserializer: D) -> Result<Duration, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    let raw: Duration = humantime_serde::deserialize(deserializer)?;
+    let min = Duration::from_millis(100);
+    let max = Duration::from_secs(60);
+    let clamped = raw.clamp(min, max);
+    if clamped != raw {
+        tracing::warn!(
+            raw_ms = raw.as_millis() as u64,
+            clamped_ms = clamped.as_millis() as u64,
+            "[polling.cluster] events_tail out of range; clamped to [100ms, 60s]",
+        );
+    }
+    Ok(clamped)
 }
 fn default_max_interval() -> Duration {
     Duration::from_secs(60)
@@ -231,5 +269,32 @@ mod tests {
         let toml_str = r#"batch_concurrency = 4"#;
         let cfg: ClusterPollingConfig = toml::from_str(toml_str).unwrap();
         assert_eq!(cfg.batch_concurrency, 4);
+    }
+
+    #[test]
+    fn events_tail_default_is_2s() {
+        let cfg = ClusterPollingConfig::default();
+        assert_eq!(cfg.events_tail, Duration::from_secs(2));
+    }
+
+    #[test]
+    fn events_tail_parses_humantime() {
+        let toml_str = r#"events_tail = "750ms""#;
+        let cfg: ClusterPollingConfig = toml::from_str(toml_str).unwrap();
+        assert_eq!(cfg.events_tail, Duration::from_millis(750));
+    }
+
+    #[test]
+    fn events_tail_clamps_below_min() {
+        let toml_str = r#"events_tail = "5ms""#;
+        let cfg: ClusterPollingConfig = toml::from_str(toml_str).unwrap();
+        assert_eq!(cfg.events_tail, Duration::from_millis(100));
+    }
+
+    #[test]
+    fn events_tail_clamps_above_max() {
+        let toml_str = r#"events_tail = "5m""#;
+        let cfg: ClusterPollingConfig = toml::from_str(toml_str).unwrap();
+        assert_eq!(cfg.events_tail, Duration::from_secs(60));
     }
 }

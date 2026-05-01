@@ -179,9 +179,7 @@ impl WorkerRegistry {
                     )
                 });
                 if let Some((narrow, predicate, cursor)) = resume {
-                    // Task 22 introduces `[events] events_tail`; until
-                    // then the cadence is hardcoded.
-                    let cadence = std::time::Duration::from_secs(2);
+                    let cadence = config.polling.cluster.events_tail;
                     let detail_concurrency = config.polling.cluster.batch_concurrency.max(1);
                     crate::view::events::resume_watch(events);
                     let handle = crate::view::events::worker::spawn_watch(
