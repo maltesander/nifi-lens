@@ -436,7 +436,13 @@ pub fn spawn_watch(
 
             // ---------------- Tick stats ----------------
             let elapsed_secs = started.elapsed().as_secs_f32().max(0.001);
-            let inst = scanned as f32 / elapsed_secs;
+            // EWMA tracks MATCHED events per second (i.e., events that
+            // passed the predicate and made it into the rolling buffer).
+            // Scanned-but-not-matched events don't count toward the
+            // headline rate — when the predicate is blocking everything,
+            // the user should see "0.0 ev/s" even if NiFi is producing
+            // events as fast as ever.
+            let inst = matched as f32 / elapsed_secs;
             // EWMA with alpha=0.3 — same shape as Browser sparkline workers.
             ewma_per_sec = 0.7 * ewma_per_sec + 0.3 * inst;
 
