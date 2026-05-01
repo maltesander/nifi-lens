@@ -123,16 +123,322 @@ impl ViewKeyHandler for OverviewHandler {
     }
 }
 
-/// Stub handler for the Overview reporting-tasks modal verb. Wired to the
-/// actual behaviour in Task 21 (Esc cascade, Copy, row nav, etc.). For now
-/// every verb is a no-op so the gate compiles and the `ViewVerb` variant is
-/// reachable through the dispatcher.
+/// Handler for Overview reporting-tasks modal verbs.
+///
+/// Covers: Esc cascade (search → close), Copy, row navigation, Enter
+/// cross-links (param-ref → parameter-context modal; bulletin → Bulletins
+/// tab), search open/next/prev, and force-refresh.
 fn handle_reporting_tasks_modal_verb(
-    _state: &mut AppState,
-    _verb: crate::input::OverviewReportingTasksVerb,
+    state: &mut AppState,
+    verb: crate::input::OverviewReportingTasksVerb,
 ) -> Option<UpdateResult> {
-    // Task 21 implements Esc cascade, Copy, row nav, search, etc.
-    None
+    use crate::app::state::PendingIntent;
+    use crate::input::{CommonVerb, OverviewReportingTasksVerb as V};
+    use crate::intent::CrossLink;
+    use crate::view::overview::reporting_tasks_modal::{
+        DetailRow, ModalPaneFocus, ReportingTasksModalState,
+    };
+
+    let redraw = || {
+        Some(UpdateResult {
+            redraw: true,
+            ..Default::default()
+        })
+    };
+
+    match verb {
+        // ---- Esc cascade: search → close modal ----
+        V::Common(CommonVerb::Close) => {
+            let modal = state.overview.reporting_tasks_modal.as_mut()?;
+            if !modal.search.query.is_empty() {
+                // Clear search and refilter.
+                modal.search.query.clear();
+                let snap = state.cluster.snapshot.reporting_tasks.latest();
+                if let Some(snap) = snap {
+                    let snap = snap.clone();
+                    state
+                        .overview
+                        .reporting_tasks_modal
+                        .as_mut()
+                        .unwrap()
+                        .refilter(&snap);
+                }
+                return redraw();
+            }
+            // No active search — close the modal.
+            state.overview.reporting_tasks_modal = None;
+            redraw()
+        }
+
+        // ---- Enter (FocusDetail / cross-link from detail) ----
+        V::FocusDetail => {
+            let modal = state.overview.reporting_tasks_modal.as_mut()?;
+            if modal.focus == ModalPaneFocus::List {
+                // Shift focus to the detail pane.
+                modal.focus = ModalPaneFocus::Detail;
+                // Place cursor on first actionable row.
+                let snap = state.cluster.snapshot.reporting_tasks.latest().cloned();
+                if let Some(snap) = snap.as_ref() {
+                    let task = modal.selected_row(snap);
+                    if let Some(task) = task {
+                        let bulletin_count = state
+                            .cluster
+                            .snapshot
+                            .bulletins
+                            .buf
+                            .iter()
+                            .filter(|b| b.source_id == task.id)
+                            .count()
+                            .min(10);
+                        modal.detail_cursor =
+                            ReportingTasksModalState::first_detail_cursor(task, bulletin_count);
+                    } else {
+                        modal.detail_cursor = DetailRow::NonInteractive;
+                    }
+                }
+                return redraw();
+            }
+            // Focus is already on Detail — execute the cross-link.
+            let snap = state.cluster.snapshot.reporting_tasks.latest().cloned();
+            let Some(snap) = snap else {
+                return redraw();
+            };
+            let task_id;
+            let detail_cursor;
+            {
+                let modal = state.overview.reporting_tasks_modal.as_ref()?;
+                let task = modal.selected_row(&snap)?;
+                task_id = task.id.clone();
+                detail_cursor = modal.detail_cursor;
+            }
+            let task = snap.tasks.iter().find(|t| t.id == task_id)?;
+            match detail_cursor {
+                DetailRow::Property(prop_idx) => {
+                    // Look up the i-th property in BTreeMap iteration order.
+                    let Some((_, value)) = task.properties.iter().nth(prop_idx) else {
+                        return redraw();
+                    };
+                    let Some(val_str) = value.as_deref() else {
+                        return redraw();
+                    };
+                    // Extract the first param ref name.
+                    use crate::view::browser::render::{ParamRefScan, scan_param_refs};
+                    let preselect = match scan_param_refs(val_str) {
+                        ParamRefScan::Single { name } => Some(name),
+                        ParamRefScan::Multiple => None,
+                        ParamRefScan::None => return redraw(),
+                    };
+                    // Reporting tasks have no owning PG — use the root PG id
+                    // (first entry in process_group_ids, which is DFS-root).
+                    let root_pg_id = state
+                        .cluster
+                        .snapshot
+                        .root_pg_status
+                        .latest()
+                        .and_then(|s| s.process_group_ids.first().cloned())
+                        .unwrap_or_default();
+                    state.overview.reporting_tasks_modal = None;
+                    Some(UpdateResult {
+                        redraw: true,
+                        intent: Some(PendingIntent::Goto(CrossLink::OpenParameterContextModal {
+                            pg_id: root_pg_id,
+                            preselect,
+                        })),
+                        ..Default::default()
+                    })
+                }
+                DetailRow::Bulletin(_bulletin_idx) => {
+                    // Cross-link to Bulletins, pre-filtered by source id.
+                    state.overview.reporting_tasks_modal = None;
+                    Some(UpdateResult {
+                        redraw: true,
+                        intent: Some(PendingIntent::Goto(CrossLink::OpenBulletins {
+                            source_id: task_id,
+                        })),
+                        ..Default::default()
+                    })
+                }
+                DetailRow::NonInteractive => redraw(),
+            }
+        }
+
+        // ---- Row navigation (list pane) ----
+        V::RowUp => {
+            let modal = state.overview.reporting_tasks_modal.as_mut()?;
+            if modal.focus == ModalPaneFocus::List {
+                if modal.selected_ordinal > 0 {
+                    modal.selected_ordinal -= 1;
+                }
+                if let Some(&raw_idx) = modal.filtered_indices.get(modal.selected_ordinal) {
+                    let snap = state.cluster.snapshot.reporting_tasks.latest();
+                    modal.selected_id = snap
+                        .and_then(|s| s.tasks.get(raw_idx))
+                        .map(|t| t.id.clone());
+                }
+            }
+            redraw()
+        }
+        V::RowDown => {
+            let modal = state.overview.reporting_tasks_modal.as_mut()?;
+            if modal.focus == ModalPaneFocus::List {
+                let max = modal.filtered_indices.len().saturating_sub(1);
+                if modal.selected_ordinal < max {
+                    modal.selected_ordinal += 1;
+                }
+                if let Some(&raw_idx) = modal.filtered_indices.get(modal.selected_ordinal) {
+                    let snap = state.cluster.snapshot.reporting_tasks.latest();
+                    modal.selected_id = snap
+                        .and_then(|s| s.tasks.get(raw_idx))
+                        .map(|t| t.id.clone());
+                }
+            }
+            redraw()
+        }
+        V::PageUp => {
+            let modal = state.overview.reporting_tasks_modal.as_mut()?;
+            if modal.focus == ModalPaneFocus::List {
+                modal.selected_ordinal = modal.selected_ordinal.saturating_sub(10);
+                if let Some(&raw_idx) = modal.filtered_indices.get(modal.selected_ordinal) {
+                    let snap = state.cluster.snapshot.reporting_tasks.latest();
+                    modal.selected_id = snap
+                        .and_then(|s| s.tasks.get(raw_idx))
+                        .map(|t| t.id.clone());
+                }
+            }
+            redraw()
+        }
+        V::PageDown => {
+            let modal = state.overview.reporting_tasks_modal.as_mut()?;
+            if modal.focus == ModalPaneFocus::List {
+                let max = modal.filtered_indices.len().saturating_sub(1);
+                modal.selected_ordinal = (modal.selected_ordinal + 10).min(max);
+                if let Some(&raw_idx) = modal.filtered_indices.get(modal.selected_ordinal) {
+                    let snap = state.cluster.snapshot.reporting_tasks.latest();
+                    modal.selected_id = snap
+                        .and_then(|s| s.tasks.get(raw_idx))
+                        .map(|t| t.id.clone());
+                }
+            }
+            redraw()
+        }
+        V::JumpTop => {
+            let modal = state.overview.reporting_tasks_modal.as_mut()?;
+            if modal.focus == ModalPaneFocus::List {
+                modal.selected_ordinal = 0;
+                if let Some(&raw_idx) = modal.filtered_indices.first() {
+                    let snap = state.cluster.snapshot.reporting_tasks.latest();
+                    modal.selected_id = snap
+                        .and_then(|s| s.tasks.get(raw_idx))
+                        .map(|t| t.id.clone());
+                }
+            }
+            redraw()
+        }
+        V::JumpBottom => {
+            let modal = state.overview.reporting_tasks_modal.as_mut()?;
+            if modal.focus == ModalPaneFocus::List {
+                modal.selected_ordinal = modal.filtered_indices.len().saturating_sub(1);
+                if let Some(&raw_idx) = modal.filtered_indices.last() {
+                    let snap = state.cluster.snapshot.reporting_tasks.latest();
+                    modal.selected_id = snap
+                        .and_then(|s| s.tasks.get(raw_idx))
+                        .map(|t| t.id.clone());
+                }
+            }
+            redraw()
+        }
+
+        // ---- Copy ----
+        V::Common(CommonVerb::Copy) => {
+            let snap = state.cluster.snapshot.reporting_tasks.latest().cloned();
+            let (text, focus, detail_cursor) = {
+                let modal = state.overview.reporting_tasks_modal.as_ref()?;
+                let focus = modal.focus;
+                let detail_cursor = modal.detail_cursor;
+                let text = match focus {
+                    ModalPaneFocus::List => {
+                        // Copy selected list row as TSV.
+                        snap.as_ref().and_then(|s| modal.selected_row(s)).map(|t| {
+                            use crate::view::overview::reporting_tasks_modal::short_type;
+                            format!(
+                                "{}\t{}\t{}\t{}\t{}",
+                                t.id,
+                                t.name,
+                                short_type(&t.task_type),
+                                t.scheduling_period,
+                                t.active_thread_count,
+                            )
+                        })
+                    }
+                    ModalPaneFocus::Detail => snap
+                        .as_ref()
+                        .and_then(|s| modal.selected_row(s))
+                        .and_then(|task| match detail_cursor {
+                            DetailRow::Property(i) => {
+                                task.properties.iter().nth(i).map(|(name, value)| {
+                                    let descriptor = task.descriptors.get(name);
+                                    let sensitive =
+                                        descriptor.map(|d| d.sensitive).unwrap_or(false);
+                                    let display_name = descriptor
+                                        .map(|d| d.display_name.as_str())
+                                        .unwrap_or(name.as_str());
+                                    let val_str = if sensitive {
+                                        "[masked]".to_string()
+                                    } else {
+                                        value.as_deref().unwrap_or("[masked]").to_string()
+                                    };
+                                    format!("{display_name}\t{val_str}")
+                                })
+                            }
+                            DetailRow::Bulletin(i) => state
+                                .cluster
+                                .snapshot
+                                .bulletins
+                                .buf
+                                .iter()
+                                .rev()
+                                .filter(|b| b.source_id == task.id)
+                                .take(10)
+                                .collect::<Vec<_>>()
+                                .get(i)
+                                .map(|b| {
+                                    format!("{}\t{}\t{}", b.timestamp_iso, b.level, b.message)
+                                }),
+                            DetailRow::NonInteractive => None,
+                        }),
+                };
+                (text, focus, detail_cursor)
+            };
+            let _ = (focus, detail_cursor); // suppress unused warnings
+            if let Some(text) = text {
+                super::clipboard_copy(state, &text);
+            }
+            redraw()
+        }
+
+        // ---- Search ----
+        V::Common(CommonVerb::OpenSearch) => {
+            let modal = state.overview.reporting_tasks_modal.as_mut()?;
+            modal.search.input_active = true;
+            redraw()
+        }
+        V::Common(CommonVerb::SearchNext) => {
+            // No-op — search is a simple text filter, not a highlight cursor.
+            redraw()
+        }
+        V::Common(CommonVerb::SearchPrev) => {
+            // No-op — search is a simple text filter, not a highlight cursor.
+            redraw()
+        }
+
+        // ---- Refresh ----
+        V::Common(CommonVerb::Refresh) => {
+            state
+                .cluster
+                .force(crate::cluster::ClusterEndpoint::ReportingTasks);
+            redraw()
+        }
+    }
 }
 
 #[cfg(test)]
@@ -437,5 +743,239 @@ mod tests {
         };
         crate::view::overview::state::redraw_controller_status(&mut s);
         assert_eq!(s.overview.controller.as_ref().unwrap().running, 7);
+    }
+
+    // ---- Reporting-tasks modal handler tests ----
+
+    use crate::app::state::PendingIntent;
+    use crate::client::reporting_tasks::{
+        ReportingTaskRow, ReportingTaskState, ReportingTasksSnapshot, ValidationStatus,
+    };
+    use crate::cluster::snapshot::{EndpointState, FetchMeta};
+    use crate::input::{CommonVerb, OverviewReportingTasksVerb as MV, ViewVerb};
+    use crate::view::overview::reporting_tasks_modal::{
+        DetailRow, ModalPaneFocus, ReportingTasksModalState,
+    };
+    use std::collections::BTreeMap;
+    use std::time::{Duration, Instant};
+
+    fn bare_task(id: &str) -> ReportingTaskRow {
+        ReportingTaskRow {
+            id: id.into(),
+            name: format!("Task-{id}"),
+            task_type: "org.x.Y".into(),
+            state: ReportingTaskState::Running,
+            scheduling_strategy: "TIMER_DRIVEN".into(),
+            scheduling_period: "30s".into(),
+            active_thread_count: 0,
+            validation_status: ValidationStatus::Valid,
+            validation_errors: vec![],
+            comments: None,
+            properties: BTreeMap::new(),
+            descriptors: BTreeMap::new(),
+        }
+    }
+
+    fn snap_with_tasks(tasks: Vec<ReportingTaskRow>) -> ReportingTasksSnapshot {
+        ReportingTasksSnapshot {
+            tasks,
+            fetched_at: Instant::now(),
+        }
+    }
+
+    fn seed_rt_snapshot(s: &mut crate::app::state::AppState, snap: ReportingTasksSnapshot) {
+        s.cluster.snapshot.reporting_tasks = EndpointState::Ready {
+            data: snap,
+            meta: FetchMeta {
+                fetched_at: Instant::now(),
+                fetch_duration: crate::test_support::default_fetch_duration(),
+                next_interval: Duration::from_secs(10),
+            },
+        };
+    }
+
+    fn open_modal_with_tasks(s: &mut crate::app::state::AppState, tasks: Vec<ReportingTaskRow>) {
+        let snap = snap_with_tasks(tasks);
+        let modal = ReportingTasksModalState::open(&snap);
+        seed_rt_snapshot(s, snap);
+        s.overview.reporting_tasks_modal = Some(modal);
+    }
+
+    fn dispatch_modal_verb(
+        s: &mut crate::app::state::AppState,
+        verb: MV,
+    ) -> Option<crate::app::state::UpdateResult> {
+        OverviewHandler::handle_verb(s, ViewVerb::OverviewReportingTasksModal(verb))
+    }
+
+    #[test]
+    fn enter_on_list_shifts_focus_to_detail() {
+        let mut s = fresh_state();
+        s.current_tab = ViewId::Overview;
+        open_modal_with_tasks(&mut s, vec![bare_task("t1"), bare_task("t2")]);
+
+        let r = dispatch_modal_verb(&mut s, MV::FocusDetail);
+        assert!(r.unwrap().redraw);
+        let modal = s.overview.reporting_tasks_modal.as_ref().unwrap();
+        assert_eq!(modal.focus, ModalPaneFocus::Detail);
+    }
+
+    #[test]
+    fn esc_with_search_query_clears_search_keeps_modal_open() {
+        let mut s = fresh_state();
+        s.current_tab = ViewId::Overview;
+        open_modal_with_tasks(&mut s, vec![bare_task("t1")]);
+        s.overview
+            .reporting_tasks_modal
+            .as_mut()
+            .unwrap()
+            .search
+            .query = "foo".into();
+
+        dispatch_modal_verb(&mut s, MV::Common(CommonVerb::Close));
+        let modal = s.overview.reporting_tasks_modal.as_ref();
+        assert!(
+            modal.is_some(),
+            "modal should still be open after search clear"
+        );
+        assert!(
+            modal.unwrap().search.query.is_empty(),
+            "search query should be cleared"
+        );
+    }
+
+    #[test]
+    fn esc_without_search_closes_modal() {
+        let mut s = fresh_state();
+        s.current_tab = ViewId::Overview;
+        open_modal_with_tasks(&mut s, vec![bare_task("t1")]);
+
+        dispatch_modal_verb(&mut s, MV::Common(CommonVerb::Close));
+        assert!(
+            s.overview.reporting_tasks_modal.is_none(),
+            "modal should be closed"
+        );
+    }
+
+    #[test]
+    fn enter_on_bulletin_emits_bulletins_cross_link() {
+        let mut s = fresh_state();
+        s.current_tab = ViewId::Overview;
+        let task = bare_task("task-id-1");
+        open_modal_with_tasks(&mut s, vec![task.clone()]);
+
+        // Seed a bulletin for this task
+        use crate::client::BulletinSnapshot;
+        s.cluster
+            .snapshot
+            .bulletins
+            .buf
+            .push_back(BulletinSnapshot {
+                id: 1,
+                level: "WARN".into(),
+                message: "test bulletin".into(),
+                source_id: "task-id-1".into(),
+                source_name: "Task-task-id-1".into(),
+                source_type: "REPORTING_TASK".into(),
+                group_id: "".into(),
+                timestamp_iso: "2026-01-01T00:00:00Z".into(),
+                timestamp_human: "00:00:00 UTC".into(),
+            });
+
+        // Shift focus to detail pane
+        let modal = s.overview.reporting_tasks_modal.as_mut().unwrap();
+        modal.focus = ModalPaneFocus::Detail;
+        modal.detail_cursor = DetailRow::Bulletin(0);
+
+        // Press Enter
+        let r = dispatch_modal_verb(&mut s, MV::FocusDetail);
+        let r = r.expect("should return Some");
+        assert!(r.redraw);
+        // Modal should be closed
+        assert!(s.overview.reporting_tasks_modal.is_none());
+        // Intent should be OpenBulletins
+        match r.intent {
+            Some(PendingIntent::Goto(crate::intent::CrossLink::OpenBulletins { source_id })) => {
+                assert_eq!(source_id, "task-id-1");
+            }
+            other => panic!("expected Goto(OpenBulletins), got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn row_down_increments_selection() {
+        let mut s = fresh_state();
+        s.current_tab = ViewId::Overview;
+        open_modal_with_tasks(
+            &mut s,
+            vec![bare_task("t1"), bare_task("t2"), bare_task("t3")],
+        );
+
+        dispatch_modal_verb(&mut s, MV::RowDown);
+        let modal = s.overview.reporting_tasks_modal.as_ref().unwrap();
+        assert_eq!(modal.selected_ordinal, 1);
+        assert_eq!(modal.selected_id.as_deref(), Some("t2"));
+    }
+
+    #[test]
+    fn row_up_decrements_selection_clamped() {
+        let mut s = fresh_state();
+        s.current_tab = ViewId::Overview;
+        open_modal_with_tasks(&mut s, vec![bare_task("t1"), bare_task("t2")]);
+        // Already at 0
+        dispatch_modal_verb(&mut s, MV::RowUp);
+        assert_eq!(
+            s.overview
+                .reporting_tasks_modal
+                .as_ref()
+                .unwrap()
+                .selected_ordinal,
+            0
+        );
+    }
+
+    #[test]
+    fn jump_top_and_bottom_work() {
+        let mut s = fresh_state();
+        s.current_tab = ViewId::Overview;
+        open_modal_with_tasks(
+            &mut s,
+            vec![bare_task("t1"), bare_task("t2"), bare_task("t3")],
+        );
+        dispatch_modal_verb(&mut s, MV::JumpBottom);
+        assert_eq!(
+            s.overview
+                .reporting_tasks_modal
+                .as_ref()
+                .unwrap()
+                .selected_ordinal,
+            2
+        );
+        dispatch_modal_verb(&mut s, MV::JumpTop);
+        assert_eq!(
+            s.overview
+                .reporting_tasks_modal
+                .as_ref()
+                .unwrap()
+                .selected_ordinal,
+            0
+        );
+    }
+
+    #[test]
+    fn open_search_activates_search_input() {
+        let mut s = fresh_state();
+        s.current_tab = ViewId::Overview;
+        open_modal_with_tasks(&mut s, vec![bare_task("t1")]);
+        dispatch_modal_verb(&mut s, MV::Common(CommonVerb::OpenSearch));
+        assert!(
+            s.overview
+                .reporting_tasks_modal
+                .as_ref()
+                .unwrap()
+                .search
+                .input_active,
+            "search input should be active"
+        );
     }
 }

@@ -13,6 +13,24 @@ pub enum ModalPaneFocus {
     Detail,
 }
 
+/// Cursor position inside the detail pane. Only lands on actionable rows —
+/// property rows that contain a `#{name}` parameter reference, and bulletin
+/// rows. Non-interactive rows (Identity, Scheduling, headers, validation
+/// errors) are skipped.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum DetailRow {
+    /// A property row at ordinal `i` within the task's `properties`
+    /// `BTreeMap` iteration order (0-based). Only set when the property
+    /// value is non-None, non-sensitive, and contains a `#{name}` ref.
+    Property(usize),
+    /// A bulletin row at ordinal `i` within the up-to-10 filtered
+    /// bulletin list shown in the "Recent bulletins" section.
+    Bulletin(usize),
+    /// No actionable row is focused (default).
+    #[default]
+    NonInteractive,
+}
+
 #[derive(Debug, Default)]
 pub struct ReportingTasksModalState {
     pub selected_id: Option<String>,
@@ -25,6 +43,8 @@ pub struct ReportingTasksModalState {
     pub focus: ModalPaneFocus,
     pub search: SearchState,
     pub filtered_indices: Vec<usize>,
+    /// Cursor within the detail pane when `focus == Detail`.
+    pub detail_cursor: DetailRow,
 }
 
 impl ReportingTasksModalState {
@@ -108,6 +128,63 @@ impl ReportingTasksModalState {
         let id = self.selected_id.as_ref()?;
         snapshot.tasks.iter().find(|t| &t.id == id)
     }
+
+    /// Return the first available `DetailRow` cursor position for
+    /// `task`. Property rows that have a `#{name}` parameter reference
+    /// come before bulletin rows. Returns `NonInteractive` when neither
+    /// kind is available.
+    pub fn first_detail_cursor(task: &ReportingTaskRow, bulletin_count: usize) -> DetailRow {
+        // Any property with a non-sensitive, non-None value containing a
+        // `#{name}` reference is actionable.
+        if let Some(i) = task
+            .properties
+            .iter()
+            .enumerate()
+            .find(|(_, (name, value))| {
+                let descriptor = task.descriptors.get(*name);
+                let sensitive = descriptor.map(|d| d.sensitive).unwrap_or(false);
+                !sensitive && value.as_deref().is_some_and(contains_param_ref_raw)
+            })
+            .map(|(i, _)| i)
+        {
+            return DetailRow::Property(i);
+        }
+        if bulletin_count > 0 {
+            return DetailRow::Bulletin(0);
+        }
+        DetailRow::NonInteractive
+    }
+}
+
+/// Detects `#{name}` references in a NiFi property value (no import needed
+/// from the render module — inlined here so the state module stays
+/// renderer-independent).
+pub fn contains_param_ref_raw(s: &str) -> bool {
+    let bytes = s.as_bytes();
+    let mut i = 0;
+    while i < bytes.len() {
+        if bytes[i] == b'#' && i + 1 < bytes.len() && bytes[i + 1] == b'#' {
+            // Escape: ##{...} — skip past the closing brace if present.
+            if i + 2 < bytes.len()
+                && bytes[i + 2] == b'{'
+                && let Some(close) = bytes[i + 3..].iter().position(|&b| b == b'}')
+            {
+                i += 3 + close + 1;
+                continue;
+            }
+            i += 2;
+            continue;
+        }
+        if bytes[i] == b'#'
+            && i + 1 < bytes.len()
+            && bytes[i + 1] == b'{'
+            && bytes[i + 2..].contains(&b'}')
+        {
+            return true;
+        }
+        i += 1;
+    }
+    false
 }
 
 /// Last `.`-separated segment of a fully-qualified class name. Used by
