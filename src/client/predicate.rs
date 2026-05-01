@@ -88,6 +88,34 @@ impl Predicate {
     pub fn clauses(&self) -> &[Clause] {
         &self.clauses
     }
+
+    /// Evaluate the predicate against an event's attribute list.
+    /// Empty predicate matches anything. Missing attributes:
+    /// `=`/`=~` -> false, `!=`/`!~` -> true.
+    pub fn matches(&self, attrs: &[crate::client::AttributeTriple]) -> bool {
+        self.clauses.iter().all(|c| clause_matches(c, attrs))
+    }
+}
+
+fn clause_matches(clause: &Clause, attrs: &[crate::client::AttributeTriple]) -> bool {
+    let value: Option<&str> = attrs
+        .iter()
+        .find(|a| a.key == clause.attribute)
+        .and_then(|a| a.current.as_deref());
+    match (&clause.literal, clause.op, value) {
+        (ClauseLiteral::Plain(rhs), Op::Eq, Some(v)) => v == rhs.as_str(),
+        (ClauseLiteral::Plain(_), Op::Eq, None) => false,
+        (ClauseLiteral::Plain(rhs), Op::Ne, Some(v)) => v != rhs.as_str(),
+        (ClauseLiteral::Plain(_), Op::Ne, None) => true,
+        (ClauseLiteral::Regex(re), Op::RegexMatch, Some(v)) => re.is_match(v),
+        (ClauseLiteral::Regex(_), Op::RegexMatch, None) => false,
+        (ClauseLiteral::Regex(re), Op::RegexNotMatch, Some(v)) => !re.is_match(v),
+        (ClauseLiteral::Regex(_), Op::RegexNotMatch, None) => true,
+        // Mismatched literal/op combinations cannot occur because
+        // parse_literal pairs them. Defensive fallback uses missing-semantics.
+        (_, Op::Eq | Op::RegexMatch, _) => false,
+        (_, Op::Ne | Op::RegexNotMatch, _) => true,
+    }
 }
 
 fn skip_ws(bytes: &[u8], cur: &mut usize) {
@@ -289,9 +317,18 @@ fn next_token_excerpt(bytes: &[u8], cur: usize) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::client::AttributeTriple;
 
     fn parse(s: &str) -> Predicate {
         Predicate::parse(s).expect("valid predicate")
+    }
+
+    fn attr(key: &str, current: Option<&str>) -> AttributeTriple {
+        AttributeTriple {
+            key: key.to_string(),
+            previous: None,
+            current: current.map(str::to_string),
+        }
     }
 
     #[test]
@@ -410,5 +447,66 @@ mod tests {
             err.message
         );
         assert_eq!(err.column, 13);
+    }
+
+    #[test]
+    fn empty_predicate_matches_anything() {
+        let p = parse("");
+        assert!(p.matches(&[]));
+        assert!(p.matches(&[attr("filename", Some("x"))]));
+    }
+
+    #[test]
+    fn eq_matches_equal_value() {
+        let p = parse("filename = invoice.json");
+        assert!(p.matches(&[attr("filename", Some("invoice.json"))]));
+        assert!(!p.matches(&[attr("filename", Some("other.json"))]));
+    }
+
+    #[test]
+    fn eq_missing_attr_does_not_match() {
+        let p = parse("filename = invoice.json");
+        assert!(!p.matches(&[]));
+        assert!(!p.matches(&[attr("other", Some("x"))]));
+    }
+
+    #[test]
+    fn ne_missing_attr_matches() {
+        let p = parse("filename != bad");
+        assert!(p.matches(&[]));
+        assert!(p.matches(&[attr("filename", Some("good"))]));
+        assert!(!p.matches(&[attr("filename", Some("bad"))]));
+    }
+
+    #[test]
+    fn regex_match_missing_attr_does_not_match() {
+        let p = parse("filename =~ /^invoice-/");
+        assert!(!p.matches(&[]));
+        assert!(p.matches(&[attr("filename", Some("invoice-1.json"))]));
+        assert!(!p.matches(&[attr("filename", Some("other.json"))]));
+    }
+
+    #[test]
+    fn regex_not_match_missing_attr_matches() {
+        let p = parse("filename !~ /^bad-/");
+        assert!(p.matches(&[]));
+        assert!(p.matches(&[attr("filename", Some("good"))]));
+        assert!(!p.matches(&[attr("filename", Some("bad-x"))]));
+    }
+
+    #[test]
+    fn and_short_circuits_on_first_false() {
+        let p = parse("filename =~ /^invoice-/ AND mime.type = application/json");
+        assert!(!p.matches(&[attr("filename", Some("nope"))]));
+        assert!(p.matches(&[
+            attr("filename", Some("invoice-1.json")),
+            attr("mime.type", Some("application/json")),
+        ]));
+    }
+
+    #[test]
+    fn null_current_value_treated_as_missing() {
+        let p = parse("filename = x");
+        assert!(!p.matches(&[attr("filename", None)]));
     }
 }
