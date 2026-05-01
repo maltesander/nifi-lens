@@ -194,6 +194,50 @@ pub(crate) fn spawn_controller_services(
     })
 }
 
+/// Spawns the reporting_tasks fetch loop. Emits
+/// `AppEvent::ClusterUpdate(ClusterUpdate::ReportingTasks(..))` on
+/// every cycle — success or failure — so the store can preserve
+/// `last_ok` via `EndpointState::apply`.
+#[allow(dead_code)] // wired into ClusterStore in Task 8
+pub(crate) fn spawn_reporting_tasks(
+    client: Arc<RwLock<NifiClient>>,
+    tx: mpsc::Sender<AppEvent>,
+    cfg: FetchTaskConfig,
+) -> JoinHandle<()> {
+    tokio::task::spawn_local(async move {
+        let mut next_interval = cfg.base_interval;
+        loop {
+            if cfg.gated && !subscribers_present(&cfg.subscriber_counter) {
+                cfg.force.notified().await;
+                continue;
+            }
+            let t0 = Instant::now();
+            let result = {
+                let guard = client.read().await;
+                guard.reporting_tasks_snapshot().await
+            };
+            let duration = t0.elapsed();
+            let meta = FetchMeta {
+                fetched_at: t0,
+                fetch_duration: duration,
+                next_interval,
+            };
+            if tx
+                .send(AppEvent::ClusterUpdate(ClusterUpdate::ReportingTasks(
+                    result, meta,
+                )))
+                .await
+                .is_err()
+            {
+                tracing::debug!("reporting_tasks fetch: channel closed, exiting");
+                return;
+            }
+            next_interval = adaptive_interval(cfg.base_interval, duration, cfg.max_interval);
+            sleep_with_jitter(next_interval, cfg.jitter_percent, &cfg.force).await;
+        }
+    })
+}
+
 /// Spawns the bulletins fetch loop. Cursor-aware: holds an
 /// `Arc<AtomicI64>` initialized from the ring's `last_id` at spawn time
 /// and advanced to `max(batch_id)` after each successful fetch. Emits

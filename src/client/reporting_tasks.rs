@@ -101,6 +101,22 @@ pub struct ReportingTaskCounts {
 }
 
 impl ReportingTasksSnapshot {
+    /// Map the wire-level `ReportingTasksEntity` into our typed snapshot.
+    /// Sensitive properties (per descriptor) have their value masked to
+    /// `None` so renderers show `[sensitive]`.
+    pub fn from_entity(entity: nifi_rust_client::dynamic::types::ReportingTasksEntity) -> Self {
+        let tasks = entity
+            .reporting_tasks
+            .unwrap_or_default()
+            .into_iter()
+            .filter_map(ReportingTaskRow::from_entity)
+            .collect();
+        Self {
+            tasks,
+            fetched_at: Instant::now(),
+        }
+    }
+
     pub fn counts(&self) -> ReportingTaskCounts {
         let mut c = ReportingTaskCounts {
             total: self.tasks.len(),
@@ -124,6 +140,63 @@ impl ReportingTasksSnapshot {
             }
         }
         c
+    }
+}
+
+impl ReportingTaskRow {
+    pub fn from_entity(
+        entity: nifi_rust_client::dynamic::types::ReportingTaskEntity,
+    ) -> Option<Self> {
+        let component = entity.component?;
+        let id = component.id.clone().or(entity.id)?;
+
+        let descriptors: BTreeMap<String, ReportingTaskPropertyDescriptor> = component
+            .descriptors
+            .unwrap_or_default()
+            .into_iter()
+            .filter_map(|(k, opt_dto)| {
+                opt_dto.map(|dto| {
+                    (
+                        k.clone(),
+                        ReportingTaskPropertyDescriptor {
+                            display_name: dto.display_name.unwrap_or_else(|| k.clone()),
+                            sensitive: dto.sensitive.unwrap_or(false),
+                            required: dto.required.unwrap_or(false),
+                            default_value: dto.default_value,
+                        },
+                    )
+                })
+            })
+            .collect();
+
+        // Mask sensitive values: descriptor.sensitive == true → value None.
+        let properties: BTreeMap<String, Option<String>> = component
+            .properties
+            .unwrap_or_default()
+            .into_iter()
+            .map(|(k, v)| {
+                let masked = descriptors.get(&k).map(|d| d.sensitive).unwrap_or(false);
+                let value = if masked { None } else { v };
+                (k, value)
+            })
+            .collect();
+
+        Some(Self {
+            id,
+            name: component.name.unwrap_or_default(),
+            task_type: component.r#type.unwrap_or_default(),
+            state: ReportingTaskState::from_wire(component.state.as_deref().unwrap_or("")),
+            scheduling_strategy: component.scheduling_strategy.unwrap_or_default(),
+            scheduling_period: component.scheduling_period.unwrap_or_default(),
+            active_thread_count: component.active_thread_count.unwrap_or(0).max(0) as u32,
+            validation_status: ValidationStatus::from_wire(
+                component.validation_status.as_deref().unwrap_or(""),
+            ),
+            validation_errors: component.validation_errors.unwrap_or_default(),
+            comments: component.comments.filter(|s| !s.is_empty()),
+            properties,
+            descriptors,
+        })
     }
 }
 
@@ -228,5 +301,81 @@ mod tests {
             "validation_status Invalid is orthogonal to state"
         );
         assert_eq!(counts.total, 5);
+    }
+
+    #[test]
+    fn from_entity_masks_sensitive_properties() {
+        use nifi_rust_client::dynamic::types::{
+            PropertyDescriptorDto, ReportingTaskDto, ReportingTaskEntity, ReportingTasksEntity,
+        };
+        use std::collections::HashMap;
+
+        let mut props = HashMap::new();
+        props.insert("password".to_string(), Some("hunter2".to_string()));
+        props.insert("public".to_string(), Some("v".to_string()));
+
+        let mut desc_password = PropertyDescriptorDto::default();
+        desc_password.display_name = Some("Password".to_string());
+        desc_password.sensitive = Some(true);
+        desc_password.required = Some(true);
+
+        let mut desc_public = PropertyDescriptorDto::default();
+        desc_public.display_name = Some("Public".to_string());
+        desc_public.sensitive = Some(false);
+        desc_public.required = Some(false);
+
+        let mut descriptors = HashMap::new();
+        descriptors.insert("password".to_string(), Some(desc_password));
+        descriptors.insert("public".to_string(), Some(desc_public));
+
+        let mut dto = ReportingTaskDto::default();
+        dto.id = Some("abc".to_string());
+        dto.name = Some("PromExporter".to_string());
+        dto.r#type = Some("org.x.PrometheusReportingTask".to_string());
+        dto.state = Some("RUNNING".to_string());
+        dto.scheduling_strategy = Some("TIMER_DRIVEN".to_string());
+        dto.scheduling_period = Some("30s".to_string());
+        dto.active_thread_count = Some(1);
+        dto.validation_status = Some("VALID".to_string());
+        dto.validation_errors = Some(vec![]);
+        dto.properties = Some(props);
+        dto.descriptors = Some(descriptors);
+
+        let mut task_entity = ReportingTaskEntity::default();
+        task_entity.id = Some("abc".to_string());
+        task_entity.component = Some(dto);
+
+        let mut entity = ReportingTasksEntity::default();
+        entity.reporting_tasks = Some(vec![task_entity]);
+
+        let snapshot = ReportingTasksSnapshot::from_entity(entity);
+        assert_eq!(snapshot.tasks.len(), 1);
+        let row = &snapshot.tasks[0];
+        assert_eq!(
+            row.properties.get("password"),
+            Some(&None),
+            "sensitive masked"
+        );
+        assert_eq!(
+            row.properties.get("public"),
+            Some(&Some("v".to_string())),
+            "non-sensitive preserved"
+        );
+        assert_eq!(row.state, ReportingTaskState::Running);
+    }
+
+    #[test]
+    fn from_entity_filters_entries_without_component() {
+        use nifi_rust_client::dynamic::types::{ReportingTaskEntity, ReportingTasksEntity};
+
+        let mut task_entity = ReportingTaskEntity::default();
+        task_entity.id = Some("x".to_string());
+        // component intentionally left None → unusable
+
+        let mut entity = ReportingTasksEntity::default();
+        entity.reporting_tasks = Some(vec![task_entity]);
+
+        let snapshot = ReportingTasksSnapshot::from_entity(entity);
+        assert_eq!(snapshot.tasks.len(), 0);
     }
 }

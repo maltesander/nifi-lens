@@ -360,6 +360,14 @@ pub enum NifiLensError {
     },
 
     /// See `ClientBuildFailed` for the boxed-source rationale; callers
+    /// must box explicitly.
+    #[snafu(display("failed to fetch reporting tasks for context {context:?}: {source}"))]
+    ReportingTasksListFailed {
+        context: String,
+        source: Box<dyn std::error::Error + Send + Sync>,
+    },
+
+    /// See `ClientBuildFailed` for the boxed-source rationale; callers
     /// must box explicitly. Raised per-PG by the cluster store's
     /// connections-by-PG fetcher when `/process-groups/{id}/connections`
     /// fails; per-PG errors are non-fatal — the snapshot's
