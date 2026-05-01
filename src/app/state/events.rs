@@ -4,7 +4,7 @@ use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 
 use super::{AppState, PendingIntent, UpdateResult, ViewKeyHandler};
 use crate::input::FilterField as InputFilterField;
-use crate::input::{CommonVerb, EventsVerb, FocusAction, GoTarget, ViewVerb};
+use crate::input::{CommonVerb, EventsVerb, EventsWatchVerb, FocusAction, GoTarget, ViewVerb};
 use crate::view::events::state::FilterField;
 
 /// Convert `crate::input::FilterField` to `crate::view::events::state::FilterField`.
@@ -24,8 +24,15 @@ pub(crate) struct EventsHandler;
 
 impl ViewKeyHandler for EventsHandler {
     fn handle_verb(state: &mut AppState, verb: ViewVerb) -> Option<UpdateResult> {
+        if state.events.exit_watch_pending {
+            // Modal is armed — suppress all verb dispatch. The
+            // text-input bypass routes y/N/Esc through
+            // `handle_text_input::handle_exit_watch_confirm`.
+            return Some(UpdateResult::default());
+        }
         let ev = match verb {
             ViewVerb::Events(v) => v,
+            ViewVerb::EventsWatch(v) => return handle_watch_verb(state, v),
             _ => return None,
         };
 
@@ -75,6 +82,12 @@ impl ViewKeyHandler for EventsHandler {
     }
 
     fn handle_focus(state: &mut AppState, action: FocusAction) -> Option<UpdateResult> {
+        if state.events.exit_watch_pending {
+            // Modal is armed — suppress focus dispatch as well. The
+            // text-input bypass owns Esc → cancel; everything else is
+            // swallowed.
+            return Some(UpdateResult::default());
+        }
         // If a field is being edited, Descend commits and Ascend cancels.
         // This path is defensive — normally text-input bypass handles edits.
         if state.events.filter_edit.is_some() {
@@ -160,7 +173,7 @@ impl ViewKeyHandler for EventsHandler {
                 FocusAction::PageDown => {
                     // Page down through results: go forward 10 rows.
                     for _ in 0..10 {
-                        let max = state.events.events.len().saturating_sub(1);
+                        let max = state.events.current_row_count().saturating_sub(1);
                         if state.events.selected_row == Some(max) {
                             break;
                         }
@@ -209,8 +222,16 @@ impl ViewKeyHandler for EventsHandler {
             }
             FocusAction::Left | FocusAction::Right => None,
             FocusAction::Descend => {
-                // Enter → submit query.
-                submit_query(state)
+                // Enter on the filter bar submits a one-shot query — but
+                // only when not in watch mode. Watch mode owns Enter via
+                // EventsWatchVerb::CommitPredicate (when predicate is
+                // focused, via text-input bypass) or as a no-op
+                // otherwise.
+                if state.events.watch().is_some() {
+                    None
+                } else {
+                    submit_query(state)
+                }
             }
             FocusAction::Ascend => {
                 // Esc at filter bar: no-op.
@@ -245,16 +266,29 @@ impl ViewKeyHandler for EventsHandler {
 
     fn is_text_input_focused(state: &AppState) -> bool {
         state.events.filter_edit.is_some()
+            || state.events.predicate_input_focused()
+            || state.events.exit_watch_pending
     }
 
     fn blocks_app_shortcuts(state: &AppState) -> bool {
         state.events.filter_edit.is_some()
+            || state.events.predicate_input_focused()
+            || state.events.exit_watch_pending
     }
 
     fn handle_text_input(state: &mut AppState, key: KeyEvent) -> Option<UpdateResult> {
-        if state.events.filter_edit.is_some()
-            && matches!(key.modifiers, KeyModifiers::NONE | KeyModifiers::SHIFT)
-        {
+        if !matches!(key.modifiers, KeyModifiers::NONE | KeyModifiers::SHIFT) {
+            return None;
+        }
+        // The exit-watch confirm modal shadows every other key handler
+        // when armed. Only `y`/`n`/`Esc` resolve it.
+        if state.events.exit_watch_pending {
+            return handle_exit_watch_confirm(state, key);
+        }
+        if state.events.predicate_input_focused() {
+            return handle_predicate_edit(state, key);
+        }
+        if state.events.filter_edit.is_some() {
             handle_filter_edit(state, key)
         } else {
             None
@@ -337,6 +371,177 @@ fn handle_filter_edit(state: &mut AppState, key: KeyEvent) -> Option<UpdateResul
         }
         _ => Some(UpdateResult::default()),
     }
+}
+
+/// Handle a raw `KeyEvent` while the watch-strip predicate input is
+/// focused. Mirrors `handle_filter_edit` for the predicate buffer.
+/// Esc unfocuses (returns to row nav); Enter commits the predicate
+/// (parse error keeps focus).
+fn handle_predicate_edit(state: &mut AppState, key: KeyEvent) -> Option<UpdateResult> {
+    match key.code {
+        KeyCode::Esc => {
+            state.events.unfocus_predicate();
+            redraw()
+        }
+        KeyCode::Enter => {
+            match state.events.commit_predicate() {
+                Ok(()) => {
+                    state.events.unfocus_predicate();
+                    // The worker was spawned with a clone of the
+                    // previous predicate; signal a restart so the
+                    // new predicate actually takes effect.
+                    state.pending_events_watch_restart = true;
+                }
+                Err(_e) => {
+                    // Parse error stays sticky on `WatchSession.last_parse_error`
+                    // (set by `commit_predicate` itself); the watch strip
+                    // renders it inline. Keep predicate-input focus so
+                    // the user can fix and retry without re-pressing `w`.
+                }
+            }
+            redraw()
+        }
+        KeyCode::Backspace => {
+            state.events.pop_predicate_char();
+            redraw()
+        }
+        KeyCode::Char('v') if key.modifiers == KeyModifiers::NONE => {
+            match state.get_from_clipboard() {
+                Ok(text) => {
+                    for ch in text.chars() {
+                        state.events.push_predicate_char(ch);
+                    }
+                }
+                Err(err) => {
+                    state.post_warning(format!("clipboard paste: {err}"));
+                }
+            }
+            redraw()
+        }
+        KeyCode::Char('x') if key.modifiers == KeyModifiers::NONE => {
+            let text = state
+                .events
+                .watch()
+                .map(|w| w.predicate_input.clone())
+                .unwrap_or_default();
+            if !text.is_empty() {
+                let _ = state.copy_to_clipboard(text);
+            }
+            state.events.unfocus_predicate();
+            redraw()
+        }
+        KeyCode::Char(ch) => {
+            state.events.push_predicate_char(ch);
+            redraw()
+        }
+        _ => Some(UpdateResult::default()),
+    }
+}
+
+/// Handle a raw `KeyEvent` while the discard-watch confirm modal is
+/// armed. Only `y` / `Y` confirm; `n` / `N` / `Esc` cancel. Every
+/// other key is swallowed (returns a redraw) so it can't leak into
+/// the underlying view.
+fn handle_exit_watch_confirm(state: &mut AppState, key: KeyEvent) -> Option<UpdateResult> {
+    match key.code {
+        KeyCode::Char('y') | KeyCode::Char('Y') => {
+            state.events.confirm_exit_watch();
+            redraw()
+        }
+        KeyCode::Char('n') | KeyCode::Char('N') | KeyCode::Esc => {
+            state.events.cancel_exit_watch();
+            redraw()
+        }
+        _ => Some(UpdateResult::default()),
+    }
+}
+
+/// Dispatch an [`EventsWatchVerb`]. Called from `handle_verb` whenever
+/// the keymap claims a watch chord (i.e., when the Events tab is in
+/// watch sub-mode).
+fn handle_watch_verb(state: &mut AppState, verb: EventsWatchVerb) -> Option<UpdateResult> {
+    use crate::view::events::state::{WatchSession, WatchStatus};
+    /// Default rolling-buffer cap when transitioning from one-shot to
+    /// watch mode in-tab. Matches `[events] watch_buffer_size`'s
+    /// default (Task 22) — the config knob isn't reachable from the
+    /// `ViewKeyHandler::handle_verb` signature, so we use the default
+    /// here. Cross-link entry (`new_for_component`) honors the config.
+    const DEFAULT_TRANSITION_BUFFER_CAP: usize = 2000;
+    match verb {
+        EventsWatchVerb::EditPredicate => {
+            // First press of `w` on Events in one-shot mode:
+            // transition into watch mode, seeding the narrow from
+            // whatever the user already set in the filter bar.
+            // `from_query` decides Waiting vs NarrowRequired status
+            // based on `can_start`.
+            if state.events.watch().is_none() {
+                let narrow = state.events.build_query();
+                let session = WatchSession::from_query(narrow, DEFAULT_TRANSITION_BUFFER_CAP);
+                state.events.enter_watch_mode(session);
+            }
+            state.events.focus_predicate();
+        }
+        EventsWatchVerb::CommitPredicate => {
+            // Reachable only when predicate input is focused; text-input
+            // bypass already routes Enter via `handle_predicate_edit`.
+            // Keep this arm so the verb table is exhaustive — the
+            // `is_text_input_focused` short-circuit in the dispatcher
+            // means we should never actually take this path, but being
+            // defensive costs nothing.
+            if state.events.predicate_input_focused() {
+                match state.events.commit_predicate() {
+                    Ok(()) => {
+                        state.events.unfocus_predicate();
+                        state.pending_events_watch_restart = true;
+                    }
+                    Err(_e) => {
+                        // Sticky error rendered by widget::watch_strip.
+                    }
+                }
+            }
+        }
+        EventsWatchVerb::UnfocusPredicate => {
+            // Same defense-in-depth: text-input bypass owns Esc when
+            // predicate is focused. When unfocused, FocusAction::Ascend
+            // wins before this verb is reached.
+            state.events.unfocus_predicate();
+        }
+        EventsWatchVerb::Pause => {
+            if let Some(w) = state.events.watch_mut() {
+                w.status = match &w.status {
+                    WatchStatus::Tailing | WatchStatus::Waiting => WatchStatus::Paused,
+                    WatchStatus::Paused => WatchStatus::Waiting,
+                    other => other.clone(),
+                };
+            }
+        }
+        EventsWatchVerb::ClearBuffer => {
+            if let Some(w) = state.events.watch_mut() {
+                w.buffer.clear();
+                w.stats.trimmed_total = 0;
+            }
+            // Drop any stale row selection — buffer indices are gone.
+            state.events.selected_row = None;
+        }
+        EventsWatchVerb::Common(common) => {
+            // Refresh / Copy / OpenSearch / SearchNext / SearchPrev /
+            // Close are not bound at the watch-strip top level until
+            // Tasks 17/18/19 wire the watch-strip widget and exit-confirm
+            // modal. Match exhaustively so adding a new CommonVerb later
+            // doesn't silently dispatch into a no-op.
+            match common {
+                CommonVerb::Refresh
+                | CommonVerb::Copy
+                | CommonVerb::OpenSearch
+                | CommonVerb::SearchNext
+                | CommonVerb::SearchPrev
+                | CommonVerb::Close => {
+                    tracing::debug!(verb = ?common, "watch CommonVerb wired in Task 17/18/19");
+                }
+            }
+        }
+    }
+    redraw()
 }
 
 #[cfg(test)]
@@ -855,5 +1060,123 @@ mod tests {
         assert!(s.events.selected_row.is_none());
         assert!(super::EventsHandler::handle_focus(&mut s, FocusAction::Left).is_none());
         assert!(super::EventsHandler::handle_focus(&mut s, FocusAction::Right).is_none());
+    }
+
+    #[test]
+    fn w_on_oneshot_events_enters_watch_mode_and_focuses_predicate() {
+        use crate::view::events::state::{EventsMode, WatchStatus};
+        let mut s = fresh_state();
+        let c = tiny_config();
+        s.current_tab = ViewId::Events;
+        // Seed a narrow via the existing filter bar so the transition
+        // produces a Waiting (not NarrowRequired) status.
+        s.events.filters.source = "abc-component".into();
+
+        update(&mut s, key(KeyCode::Char('w'), KeyModifiers::NONE), &c);
+
+        // Mode flipped to Watch; predicate focused.
+        assert!(matches!(s.events.mode, EventsMode::Watch(_)));
+        assert!(s.events.predicate_input_focused());
+        let watch = s.events.watch().expect("watch mode active");
+        assert_eq!(watch.narrow.component_id.as_deref(), Some("abc-component"));
+        assert!(matches!(watch.status, WatchStatus::Waiting));
+    }
+
+    #[test]
+    fn w_on_oneshot_events_with_empty_filters_enters_narrow_required() {
+        use crate::view::events::state::{EventsMode, WatchStatus};
+        let mut s = fresh_state();
+        let c = tiny_config();
+        s.current_tab = ViewId::Events;
+
+        update(&mut s, key(KeyCode::Char('w'), KeyModifiers::NONE), &c);
+
+        assert!(matches!(s.events.mode, EventsMode::Watch(_)));
+        let watch = s.events.watch().expect("watch mode active");
+        // Default `time = "last 15m"` produces a non-blank start_time_iso
+        // in build_query, which can_start accepts. So the transition
+        // path lands on Waiting, not NarrowRequired, even with no
+        // explicit component/uuid/types. This locks that behavior in.
+        assert!(matches!(
+            watch.status,
+            WatchStatus::Waiting | WatchStatus::NarrowRequired
+        ));
+        assert!(s.events.predicate_input_focused());
+    }
+
+    #[test]
+    fn predicate_commit_sets_pending_events_watch_restart() {
+        use crate::view::events::state::WatchSession;
+        let mut s = fresh_state();
+        let c = tiny_config();
+        s.current_tab = ViewId::Events;
+        // Enter watch mode and focus the predicate input.
+        s.events
+            .enter_watch_mode(WatchSession::new_for_component("xyz".into(), &c));
+        s.events.focus_predicate();
+        // Type a valid predicate.
+        for ch in "filename = ok".chars() {
+            update(&mut s, key(KeyCode::Char(ch), KeyModifiers::NONE), &c);
+        }
+        assert!(
+            !s.pending_events_watch_restart,
+            "flag should still be false before Enter"
+        );
+
+        // Press Enter — commit succeeds, flag should fire so the
+        // main loop respawns the worker with the new predicate.
+        update(&mut s, key(KeyCode::Enter, KeyModifiers::NONE), &c);
+
+        assert!(
+            s.pending_events_watch_restart,
+            "flag must be set on successful commit"
+        );
+        // And focus dropped, predicate now active.
+        assert!(!s.events.predicate_input_focused());
+        assert_eq!(s.events.watch().unwrap().predicate.clauses().len(), 1);
+    }
+
+    #[test]
+    fn predicate_commit_failure_does_not_set_restart_flag() {
+        use crate::view::events::state::WatchSession;
+        let mut s = fresh_state();
+        let c = tiny_config();
+        s.current_tab = ViewId::Events;
+        s.events
+            .enter_watch_mode(WatchSession::new_for_component("xyz".into(), &c));
+        s.events.focus_predicate();
+        for ch in "filename matches /bad/".chars() {
+            update(&mut s, key(KeyCode::Char(ch), KeyModifiers::NONE), &c);
+        }
+        update(&mut s, key(KeyCode::Enter, KeyModifiers::NONE), &c);
+
+        // Commit failed → no restart, focus retained, error stored.
+        assert!(!s.pending_events_watch_restart);
+        assert!(s.events.predicate_input_focused());
+        assert!(s.events.watch().unwrap().last_parse_error.is_some());
+    }
+
+    #[test]
+    fn w_on_already_watching_just_focuses_predicate() {
+        use crate::view::events::state::{EventsMode, WatchSession, WatchStatus};
+        let mut s = fresh_state();
+        let c = tiny_config();
+        s.current_tab = ViewId::Events;
+        // Pre-seed an active watch session.
+        let session = WatchSession::new_for_component("xyz".into(), &c);
+        s.events.enter_watch_mode(session);
+        let prior_buffer_cap = s.events.watch().unwrap().buffer_cap;
+
+        update(&mut s, key(KeyCode::Char('w'), KeyModifiers::NONE), &c);
+
+        // Still in watch mode (not re-entered), predicate focused, buffer_cap unchanged.
+        assert!(matches!(s.events.mode, EventsMode::Watch(_)));
+        assert!(s.events.predicate_input_focused());
+        let watch = s.events.watch().unwrap();
+        assert_eq!(watch.buffer_cap, prior_buffer_cap);
+        assert_eq!(watch.narrow.component_id.as_deref(), Some("xyz"));
+        // Status was Waiting after new_for_component; the second `w`
+        // shouldn't have replaced the session.
+        assert!(matches!(watch.status, WatchStatus::Waiting));
     }
 }

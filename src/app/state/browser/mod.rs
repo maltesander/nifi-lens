@@ -176,6 +176,25 @@ impl ViewKeyHandler for BrowserHandler {
                     queue_listing_followup: None,
                 });
             }
+            BrowserVerb::Watch => {
+                // Defensive: enabled() gates this verb to UUID-bearing rows
+                // whose kind supports watch (Processor / PG / RPG). Belt-and-
+                // suspenders mirroring the OpenActionHistory pattern — if the
+                // selection has changed between hint render and dispatch,
+                // selected_component_id() returns None and the arm is a noop.
+                let Some(component_id) = state.browser.selected_component_id() else {
+                    return Some(UpdateResult::default());
+                };
+                return Some(UpdateResult {
+                    redraw: true,
+                    intent: Some(super::PendingIntent::Goto(
+                        crate::intent::CrossLink::OpenWatch { component_id },
+                    )),
+                    tracer_followup: None,
+                    sparkline_followup: None,
+                    queue_listing_followup: None,
+                });
+            }
             BrowserVerb::ShowVersionControl => {
                 if !state.browser_selection_is_versioned_pg() {
                     // Defensive: `enabled()` prevents dispatch for non-versioned

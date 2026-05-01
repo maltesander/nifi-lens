@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- Events watch sub-mode: live tail of provenance events with a
+  client-side AND-of-clauses attribute predicate. Lowercase `w` on
+  Browser / Tracer rows opens Events pre-narrowed to a component.
+- Config: `[events] watch_buffer_size`, `[events] watch_retry_max`,
+  `[polling.cluster] events_tail`.
+
 ## [0.9.0] — 2026-04-30
 
 ### Added

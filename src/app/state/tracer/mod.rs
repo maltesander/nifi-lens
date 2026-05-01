@@ -159,6 +159,26 @@ impl ViewKeyHandler for TracerHandler {
                 }
                 return Some(UpdateResult::default());
             }
+            TracerVerb::Watch => {
+                // Defensive: enabled() gates this verb to focused events
+                // with a non-empty component_id. Belt-and-suspenders mirror
+                // of the BrowserVerb::Watch arm — if the selection has
+                // changed between hint render and dispatch,
+                // selected_event_component_id() returns None and the arm is
+                // a noop.
+                let Some(component_id) = state.tracer.selected_event_component_id() else {
+                    return Some(UpdateResult::default());
+                };
+                return Some(UpdateResult {
+                    redraw: true,
+                    intent: Some(PendingIntent::Goto(crate::intent::CrossLink::OpenWatch {
+                        component_id,
+                    })),
+                    tracer_followup: None,
+                    sparkline_followup: None,
+                    queue_listing_followup: None,
+                });
+            }
             // OpenSearch / SearchNext / SearchPrev / Close are not bound on
             // the Tracer top-level (search and close are inside the content
             // modal). Keep the match exhaustive.

@@ -18,3 +18,4 @@ pub mod severity;
 pub mod sparkline;
 pub mod status_bar;
 pub mod top_bar;
+pub mod watch_strip;

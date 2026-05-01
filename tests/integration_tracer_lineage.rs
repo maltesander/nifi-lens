@@ -105,6 +105,7 @@ async fn integration_tracer_lineage_happy_path() {
         let prov_query = ProvenanceQuery {
             component_id: Some(processor_id.clone()),
             flow_file_uuid: None,
+            event_types: Vec::new(),
             start_time_iso: None,
             end_time_iso: None,
             max_results: 10,

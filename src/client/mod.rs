@@ -11,6 +11,7 @@ pub mod events;
 pub mod history;
 pub mod overview;
 pub mod parameter_context;
+pub mod predicate;
 pub mod queues;
 pub mod status;
 pub mod tls_cert;
@@ -806,6 +807,7 @@ pub use overview::{
     GcSnapshot, NodeDiagnostics, NodeHealthRow, RepoUsage, Severity as HealthSeverity,
     SystemDiagAggregate, SystemDiagSnapshot,
 };
+pub use predicate::{ClauseLiteral, Op, Predicate, PredicateParseError};
 pub use tls_cert::{CertEntry, NodeCertChain, TlsCertsSnapshot, TlsProbeError};
 pub use tracer::{
     AttributeTriple, ContentRangeSnapshot, ContentRender, ContentSide, ContentSnapshot,

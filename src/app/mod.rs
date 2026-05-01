@@ -73,7 +73,9 @@ pub async fn run(
         &client,
         &tx,
         &mut state.browser,
+        &mut state.events,
         &mut state.cluster,
+        &config,
     );
 
     let dispatcher = Arc::new(IntentDispatcher {
@@ -493,6 +495,10 @@ pub async fn run(
             state.pending_worker_restart = false;
             state.cluster.spawn_fetchers(client.clone(), tx.clone());
         }
+        if state.pending_events_watch_restart {
+            workers.restart_events_watch(&client, &tx, &mut state.events, &config);
+            state.pending_events_watch_restart = false;
+        }
         // Drop the content viewer modal when leaving the Tracer tab so
         // stale in-flight chunks don't update a modal that is no longer
         // visible, and so re-entry always starts from a clean state.
@@ -504,7 +510,9 @@ pub async fn run(
             &client,
             &tx,
             &mut state.browser,
+            &mut state.events,
             &mut state.cluster,
+            &config,
         );
 
         // After ensure(), re-emit any pending Browser detail request that

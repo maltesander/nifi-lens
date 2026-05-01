@@ -83,6 +83,10 @@ pub struct WorkerRegistry {
     active: Option<ViewId>,
     /// The spawned worker handle, if any. Today only Browser spawns one.
     handle: Option<JoinHandle<()>>,
+    /// Tab-scoped Events watch worker handle. Aborted when the user
+    /// leaves the Events tab and respawned on re-entry as long as a
+    /// `WatchSession` is still active on `EventsState`.
+    pub events_watch_handle: Option<JoinHandle<()>>,
 }
 
 impl WorkerRegistry {
@@ -99,13 +103,16 @@ impl WorkerRegistry {
     /// `subscribe` on entry into a view and `unsubscribe` on exit so
     /// `ClusterStore` can gate expensive endpoints to only the views
     /// that need them.
+    #[allow(clippy::too_many_arguments)]
     pub fn ensure(
         &mut self,
         view: ViewId,
         client: &Arc<RwLock<NifiClient>>,
         tx: &mpsc::Sender<AppEvent>,
         browser: &mut crate::view::browser::state::BrowserState,
+        events: &mut crate::view::events::state::EventsState,
         cluster: &mut crate::cluster::ClusterStore,
+        config: &crate::config::Config,
     ) {
         if self.active == Some(view) {
             return;
@@ -123,6 +130,14 @@ impl WorkerRegistry {
             );
             if let Some(handle) = self.handle.take() {
                 handle.abort();
+            }
+            // Tab-scoped Events watch worker: abort on Events exit
+            // and pause the surviving session so re-entry can resume.
+            if existing_view == ViewId::Events {
+                if let Some(h) = self.events_watch_handle.take() {
+                    h.abort();
+                }
+                crate::view::events::pause_watch(events);
             }
             Self::transition_out(existing_view, cluster, browser);
         }
@@ -151,7 +166,36 @@ impl WorkerRegistry {
                 );
                 None
             }
-            ViewId::Events | ViewId::Tracer => {
+            ViewId::Events => {
+                tracing::debug!(?view, "worker registry: no main worker for events");
+                // Re-spawn the watch worker only when a session
+                // survives from a previous entry — `pause_watch` left
+                // the predicate/buffer/cursor intact on `EventsState`.
+                let resume = events.watch().map(|session| {
+                    (
+                        session.narrow.clone(),
+                        session.predicate.clone(),
+                        session.cursor,
+                    )
+                });
+                if let Some((narrow, predicate, cursor)) = resume {
+                    let cadence = config.polling.cluster.events_tail;
+                    let detail_concurrency = config.polling.cluster.batch_concurrency.max(1);
+                    crate::view::events::resume_watch(events);
+                    let handle = crate::view::events::worker::spawn_watch(
+                        client.clone(),
+                        tx.clone(),
+                        narrow,
+                        predicate,
+                        cursor,
+                        cadence,
+                        detail_concurrency,
+                    );
+                    self.events_watch_handle = Some(handle);
+                }
+                None
+            }
+            ViewId::Tracer => {
                 tracing::debug!(?view, "worker registry: no worker for this view");
                 None
             }
@@ -261,6 +305,57 @@ impl WorkerRegistry {
         self.active
     }
 
+    /// Abort the events watch worker (if any) and respawn it with the
+    /// current narrow / predicate / cursor on `EventsState`. Called from
+    /// the main loop when `state.pending_events_watch_restart` is set
+    /// — typically after `commit_predicate` succeeded — so the new
+    /// predicate actually takes effect (the worker holds a clone of
+    /// the value at spawn time).
+    ///
+    /// No-op when there is no surviving `WatchSession` on `events`,
+    /// or when the user is not currently on the Events tab (in which
+    /// case `ensure()`'s normal pause-on-exit path will already have
+    /// torn down the handle and the next tab re-entry will pick up
+    /// the updated session anyway).
+    pub fn restart_events_watch(
+        &mut self,
+        client: &Arc<RwLock<NifiClient>>,
+        tx: &mpsc::Sender<AppEvent>,
+        events: &mut crate::view::events::state::EventsState,
+        config: &crate::config::Config,
+    ) {
+        if self.active != Some(ViewId::Events) {
+            return;
+        }
+        if let Some(handle) = self.events_watch_handle.take() {
+            handle.abort();
+        }
+        let resume = events.watch().map(|session| {
+            (
+                session.narrow.clone(),
+                session.predicate.clone(),
+                session.cursor,
+            )
+        });
+        if let Some((narrow, predicate, cursor)) = resume {
+            tracing::debug!(
+                "worker registry: respawning events watch worker after predicate/narrow change"
+            );
+            let cadence = config.polling.cluster.events_tail;
+            let detail_concurrency = config.polling.cluster.batch_concurrency.max(1);
+            let handle = crate::view::events::worker::spawn_watch(
+                client.clone(),
+                tx.clone(),
+                narrow,
+                predicate,
+                cursor,
+                cadence,
+                detail_concurrency,
+            );
+            self.events_watch_handle = Some(handle);
+        }
+    }
+
     /// Abort the current worker so the next `ensure()` call spawns a
     /// fresh one. Used after context switch — the view tab hasn't changed
     /// but the backing client has. Subscribers are managed by the caller
@@ -273,6 +368,13 @@ impl WorkerRegistry {
             );
             handle.abort();
         }
+        // The watch worker is bound to the prior client; tear it down
+        // alongside the main view worker. The `WatchSession` itself
+        // survives on `EventsState` — caller decides whether to keep
+        // it across the context switch.
+        if let Some(handle) = self.events_watch_handle.take() {
+            handle.abort();
+        }
         self.active = None;
     }
 
@@ -282,6 +384,9 @@ impl WorkerRegistry {
     pub fn shutdown(&mut self) {
         tracing::debug!("worker registry: shutting down");
         if let Some(handle) = self.handle.take() {
+            handle.abort();
+        }
+        if let Some(handle) = self.events_watch_handle.take() {
             handle.abort();
         }
         self.active = None;

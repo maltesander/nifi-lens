@@ -1,0 +1,28 @@
+---
+source: src/view/events/render.rs
+expression: render_to_string(&state)
+---
+"┌ Filters ─────────────────────────────────────────────────────────────────────────────────────────┐"
+"│D time last 15m   T type (any)   S source (any)   U uuid (any)   A attr (any)                     │"
+"│status ○ idle   results 0 / cap 500   — D/T/S/U/A edit · Enter run · N new · R reset · L raise cap│"
+"└──────────────────────────────────────────────────────────────────────────────────────────────────┘"
+"┌ Watch ──────────────────────────────────────────────────────────────────────────────── ● tailing ┐"
+"│  predicate filename =~ /^invoice-/                                                               │"
+"│12.5 ev/s · 3/2000 buf · last 250 ms                                                              │"
+"└──────────────────────────────────────────────────────────────────────────────────────────────────┘"
+"┌ Events ────────────────────────────────────────────────────────────────────────────────────────  ┐"
+"│time            type                   component                uuid           details            │"
+"│Apr 30 10:42:08 SEND                   UpdateRecord-fx-rate     ff-aaaaa…03                       │"
+"│Apr 30 10:42:08 SEND                   UpdateRecord-fx-rate     ff-aaaaa…02                       │"
+"│Apr 30 10:42:08 SEND                   UpdateRecord-fx-rate     ff-aaaaa…01                       │"
+"└──────────────────────────────────────────────────────────────────────────────────────────────────┘"
+"┌ Detail ──────────────────────────────────────────────────────────────────────────────────────────┐"
+"│SEND · UpdateRecord-fx-rate · Apr 30 10:42:08 · flowfile ff-aaaaaaaa-bbbb-cccc-dddd-000000000003  │"
+"│                                                                                                  │"
+"│relationship   (none)                                                                             │"
+"│component  UpdateRecord-fx-rate   group  g1                                                       │"
+"│                                                                                                  │"
+"│attributes                                                                                        │"
+"│  filename: invoice-3.json                                                                        │"
+"│  mime.type: application/json                                                                     │"
+"└──────────────────────────────────────────────────────────────────────────────────────────────────┘"

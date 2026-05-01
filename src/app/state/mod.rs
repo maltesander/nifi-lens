@@ -184,6 +184,12 @@ pub struct AppState {
     /// Set by the context-switch handler so the app loop can force-restart
     /// the current view worker (the registry no-ops when the view matches).
     pub pending_worker_restart: bool,
+    /// Set by `commit_predicate` (and other in-tab edits to the watch
+    /// session's narrow/predicate) so the app loop knows to abort the
+    /// running watch worker and spawn a fresh one with the updated
+    /// values. Lighter than `pending_worker_restart` — leaves cluster
+    /// fetchers untouched.
+    pub pending_events_watch_restart: bool,
     /// Cross-link back/forward history.
     pub history: crate::app::history::TabHistory,
     /// Typed input layer — translates raw `KeyEvent`s into `InputEvent`s.
@@ -233,6 +239,7 @@ impl AppState {
             error_detail: None,
             should_quit: false,
             pending_worker_restart: false,
+            pending_events_watch_restart: false,
             history: crate::app::history::TabHistory::default(),
             keymap: crate::input::KeyMap::default(),
             clipboard: None,
@@ -1175,7 +1182,7 @@ fn update_inner(state: &mut AppState, event: AppEvent, config: &Config) -> Updat
                 queue_listing_followup: None,
             }
         }
-        AppEvent::IntentOutcome(outcome) => handle_intent_outcome(state, outcome),
+        AppEvent::IntentOutcome(outcome) => handle_intent_outcome(state, outcome, config),
         // ClusterStore events are intercepted in the async main loop
         // (`src/app/mod.rs::run`) which owns `tx`; the reducer never
         // sees them. These arms exist only to keep `update_inner`
@@ -2406,6 +2413,7 @@ pub(crate) fn handle_browser_payload(state: &mut AppState, payload: crate::event
 fn handle_intent_outcome(
     state: &mut AppState,
     outcome: Result<IntentOutcome, NifiLensError>,
+    config: &Config,
 ) -> UpdateResult {
     match outcome {
         Ok(IntentOutcome::ContextSwitched {
@@ -2588,6 +2596,30 @@ fn handle_intent_outcome(
             UpdateResult {
                 redraw: true,
                 intent: Some(PendingIntent::RunProvenanceQuery { query }),
+                tracer_followup: None,
+                sparkline_followup: None,
+                queue_listing_followup: None,
+            }
+        }
+        Ok(IntentOutcome::EventsWatchLandingOn { component_id }) => {
+            // Switch to Events in Watch sub-mode pre-narrowed to the
+            // component; focus the predicate input on entry. The watch
+            // worker is spawned by `WorkerRegistry::ensure` on the next
+            // loop iteration once `events.watch().is_some()`.
+            let anchor = capture_anchor(state);
+            state.history.push(crate::app::history::HistoryEntry {
+                tab: state.current_tab,
+                anchor,
+            });
+            state.current_tab = ViewId::Events;
+            state.close_modal();
+            let session =
+                crate::view::events::state::WatchSession::new_for_component(component_id, config);
+            state.events.enter_watch_mode(session);
+            state.events.focus_predicate();
+            UpdateResult {
+                redraw: true,
+                intent: None,
                 tracer_followup: None,
                 sparkline_followup: None,
                 queue_listing_followup: None,

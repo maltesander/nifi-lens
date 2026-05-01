@@ -1,7 +1,8 @@
 //! Pure state for the Events tab.
 
-use crate::client::ProvenanceEventSummary;
-use std::time::SystemTime;
+use crate::client::{AttributeTriple, Predicate, ProvenanceEventSummary, ProvenanceQuery};
+use std::collections::VecDeque;
+use std::time::{Duration, SystemTime};
 
 /// Default provenance query result cap.
 pub(crate) const DEFAULT_RESULT_CAP: u32 = 500;
@@ -135,6 +136,21 @@ pub struct EventsState {
     /// Snapshot of the filter value captured on `enter_filter_edit`,
     /// so `cancel_filter_edit` can restore it.
     pub pre_edit_value: Option<String>,
+    /// Discriminator for one-shot vs watch sub-mode. The legacy
+    /// per-query fields (`events`, `status`, `selected_row`, `cap`,
+    /// `filter_edit`, `pre_edit_value`) live alongside this — they
+    /// are inactive in `Watch` mode but not duplicated into the
+    /// variant. Watch-only state lives on `WatchSession` inside
+    /// `Watch(_)`.
+    pub mode: EventsMode,
+    /// True iff focus is in the watch-strip predicate input.
+    /// One-shot mode keeps this `false`. Tasks beyond 16 may flip it
+    /// programmatically (e.g., the cross-link arm focusing on entry).
+    pub predicate_focus: bool,
+    /// True iff a `discard N watched events?` confirm modal is visible.
+    /// Set by `request_exit_watch` when the buffer is non-empty;
+    /// cleared by `confirm_exit_watch` / `cancel_exit_watch`.
+    pub exit_watch_pending: bool,
 }
 
 impl EventsState {
@@ -147,6 +163,9 @@ impl EventsState {
             cap: DEFAULT_RESULT_CAP,
             filter_edit: None,
             pre_edit_value: None,
+            mode: EventsMode::OneShot,
+            predicate_focus: false,
+            exit_watch_pending: false,
         }
     }
 
@@ -158,6 +177,133 @@ impl EventsState {
         if matches!(self.status, EventsQueryStatus::Failed { .. }) {
             self.status = EventsQueryStatus::Idle;
         }
+    }
+
+    /// Replace the current mode with `Watch(session)`. Existing
+    /// one-shot fields are left untouched — the user can return to
+    /// them by exiting watch mode.
+    pub fn enter_watch_mode(&mut self, session: WatchSession) {
+        self.mode = EventsMode::Watch(session);
+    }
+
+    /// Drop the watch session (and its buffer) and return to
+    /// `OneShot`. Caller is responsible for aborting the worker
+    /// before calling this.
+    pub fn exit_watch_mode(&mut self) {
+        self.mode = EventsMode::OneShot;
+    }
+
+    /// Borrow the active [`WatchSession`], if any.
+    pub fn watch(&self) -> Option<&WatchSession> {
+        match &self.mode {
+            EventsMode::Watch(s) => Some(s),
+            EventsMode::OneShot => None,
+        }
+    }
+
+    /// Mutable borrow of the active [`WatchSession`], if any.
+    pub fn watch_mut(&mut self) -> Option<&mut WatchSession> {
+        match &mut self.mode {
+            EventsMode::Watch(s) => Some(s),
+            EventsMode::OneShot => None,
+        }
+    }
+
+    /// True iff focus is currently in the watch-strip predicate input.
+    pub fn predicate_input_focused(&self) -> bool {
+        self.predicate_focus
+    }
+
+    /// Move focus to the watch-strip predicate input. No-op when the
+    /// tab isn't in watch mode.
+    pub fn focus_predicate(&mut self) {
+        if matches!(self.mode, EventsMode::Watch(_)) {
+            self.predicate_focus = true;
+        }
+    }
+
+    /// Drop predicate-input focus (returns row navigation).
+    pub fn unfocus_predicate(&mut self) {
+        self.predicate_focus = false;
+    }
+
+    /// Append a character to the predicate-input buffer. No-op when
+    /// focus is elsewhere. Clears any sticky parse-error chip.
+    pub fn push_predicate_char(&mut self, ch: char) {
+        if !self.predicate_focus {
+            return;
+        }
+        if let Some(w) = self.watch_mut() {
+            w.predicate_input.push(ch);
+            w.last_parse_error = None;
+        }
+    }
+
+    /// Pop the last character from the predicate-input buffer. No-op
+    /// when focus is elsewhere or the buffer is empty. Clears any
+    /// sticky parse-error chip.
+    pub fn pop_predicate_char(&mut self) {
+        if !self.predicate_focus {
+            return;
+        }
+        if let Some(w) = self.watch_mut() {
+            w.predicate_input.pop();
+            w.last_parse_error = None;
+        }
+    }
+
+    /// Parse `predicate_input` into the active predicate. On parse
+    /// error, stores the error on `WatchSession.last_parse_error` (so
+    /// the watch strip can render it) AND returns the error so the
+    /// caller can decide whether to keep predicate-input focus. On
+    /// success, the predicate replaces the active one and any prior
+    /// error is cleared. Existing buffer rows are NOT re-filtered
+    /// (forward-only, per spec).
+    pub fn commit_predicate(&mut self) -> Result<(), crate::client::PredicateParseError> {
+        let Some(w) = self.watch_mut() else {
+            return Ok(());
+        };
+        match crate::client::Predicate::parse(&w.predicate_input) {
+            Ok(parsed) => {
+                w.predicate = parsed;
+                w.last_parse_error = None;
+                Ok(())
+            }
+            Err(err) => {
+                w.last_parse_error = Some(err.clone());
+                Err(err)
+            }
+        }
+    }
+
+    /// User asked to leave watch mode. If the buffer is empty (or the
+    /// tab is not in watch mode), exit immediately and return `false`
+    /// to indicate no confirmation was needed. If the buffer has any
+    /// matched events, arm the confirm modal and return `true` so the
+    /// caller can render it.
+    pub fn request_exit_watch(&mut self) -> bool {
+        let needs_confirm = match self.watch() {
+            Some(w) => !w.buffer.is_empty(),
+            None => false,
+        };
+        if !needs_confirm {
+            self.exit_watch_mode();
+            self.exit_watch_pending = false;
+            return false;
+        }
+        self.exit_watch_pending = true;
+        true
+    }
+
+    /// User answered `y` — drop the buffer and return to one-shot.
+    pub fn confirm_exit_watch(&mut self) {
+        self.exit_watch_pending = false;
+        self.exit_watch_mode();
+    }
+
+    /// User answered `n` / Esc — keep the session, disarm the modal.
+    pub fn cancel_exit_watch(&mut self) {
+        self.exit_watch_pending = false;
     }
 }
 
@@ -249,10 +395,22 @@ impl EventsState {
         }
     }
 
-    /// Enter Mode B (row navigation). Does nothing if the results list
-    /// is empty.
+    /// Number of rows currently visible in the results table — sourced
+    /// from the watch buffer in `Watch` mode and from the one-shot
+    /// `events` vec otherwise. The two sources never coexist in one
+    /// frame; row-navigation logic uses this to bound `selected_row`
+    /// regardless of the active mode.
+    pub fn current_row_count(&self) -> usize {
+        match self.watch() {
+            Some(w) => w.buffer.len(),
+            None => self.events.len(),
+        }
+    }
+
+    /// Enter Mode B (row navigation). Does nothing if there are no
+    /// rows in the active mode's results source.
     pub fn enter_row_nav(&mut self) {
-        if !self.events.is_empty() {
+        if self.current_row_count() > 0 {
             self.selected_row = Some(0);
         }
     }
@@ -264,7 +422,7 @@ impl EventsState {
 
     pub fn move_selection_down(&mut self) {
         if let Some(idx) = self.selected_row {
-            let max = self.events.len().saturating_sub(1);
+            let max = self.current_row_count().saturating_sub(1);
             self.selected_row = Some((idx + 1).min(max));
         }
     }
@@ -275,8 +433,18 @@ impl EventsState {
         }
     }
 
-    /// Accessor for the currently-selected event, if any.
+    /// Accessor for the currently-selected event, if any. Mode-aware:
+    /// in watch mode the rows are rendered newest-first from
+    /// `WatchSession.buffer` (a `VecDeque` with push-back ordering),
+    /// so `selected_row = 0` corresponds to the *last* buffer entry.
+    /// One-shot mode uses the legacy `events` vec directly.
     pub fn selected_event(&self) -> Option<&crate::client::ProvenanceEventSummary> {
+        if let Some(w) = self.watch() {
+            let i = self.selected_row?;
+            let len = w.buffer.len();
+            let idx = len.checked_sub(i + 1)?;
+            return w.buffer.get(idx).map(|m| &m.summary);
+        }
         self.selected_row.and_then(|i| self.events.get(i))
     }
 
@@ -313,6 +481,7 @@ impl EventsState {
             } else {
                 Some(self.filters.uuid.clone())
             },
+            event_types: Vec::new(),
             start_time_iso: start,
             end_time_iso: None,
             max_results: self.cap,
@@ -415,12 +584,290 @@ pub fn apply_payload(state: &mut EventsState, payload: crate::event::EventsPaylo
             }
             state.status = EventsQueryStatus::Failed { error };
         }
+        // Watch-mode payloads — delegated to the watch reducer in
+        // `crate::view::events::handle_watch_payload`.
+        EventsPayload::WatchMatch { .. }
+        | EventsPayload::WatchTick { .. }
+        | EventsPayload::WatchFailed { .. } => {
+            let selected = state.selected_row;
+            crate::view::events::handle_watch_payload(state, payload, selected);
+        }
+    }
+}
+
+/// One event that matched the active watch predicate, with its full
+/// attribute map captured at fetch time.
+#[derive(Debug, Clone)]
+pub struct MatchedEvent {
+    pub summary: ProvenanceEventSummary,
+    pub attrs: Vec<AttributeTriple>,
+}
+
+/// Cursor advanced after each tail iteration so the next poll only
+/// returns events strictly newer than what we've already scanned.
+#[derive(Debug, Clone, Copy)]
+pub struct TailCursor {
+    pub last_event_id: i64,
+    pub last_event_time: SystemTime,
+}
+
+/// Status of the watch worker, surfaced as a chip on the Watch strip.
+#[derive(Debug, Clone)]
+pub enum WatchStatus {
+    Tailing,
+    Paused,
+    NarrowRequired,
+    Waiting,
+    Failed { error: String, retry_in: Duration },
+}
+
+/// Rolling stats for the Watch strip.
+#[derive(Debug, Clone, Default)]
+pub struct WatchStats {
+    pub events_per_sec_ewma: f32,
+    pub last_poll_latency: Option<Duration>,
+    pub trimmed_total: u64,
+    pub detail_fetch_errors: u64,
+}
+
+/// Mode discriminator for the Events tab. `OneShot` is the historical
+/// behaviour — submit a query, await results, render. `Watch` enters
+/// the live-tail sub-mode and carries a [`WatchSession`].
+///
+/// The size disparity between `OneShot` (zero-sized) and
+/// `Watch(WatchSession)` (~320 B) is acceptable: there is exactly one
+/// `EventsMode` per `EventsState`, and `EventsState` itself lives in
+/// a single owned slot on `AppState` — boxing would add a heap hop
+/// for every watch-mode access without saving meaningful memory.
+#[allow(clippy::large_enum_variant)]
+#[derive(Debug)]
+pub enum EventsMode {
+    OneShot,
+    Watch(WatchSession),
+}
+
+/// Full state for one active watch — predicate, narrow, rolling
+/// buffer, cursor, status. Lives on `EventsState::mode` when the
+/// tab is in watch mode (mode wrapping arrives in Task 9).
+#[derive(Debug)]
+pub struct WatchSession {
+    pub narrow: ProvenanceQuery,
+    pub predicate: Predicate,
+    pub predicate_input: String,
+    pub buffer: VecDeque<MatchedEvent>,
+    pub buffer_cap: usize,
+    pub cursor: Option<TailCursor>,
+    pub status: WatchStatus,
+    pub stats: WatchStats,
+    /// Last predicate parse error from `commit_predicate`, if any.
+    /// Cleared on successful commit and on every keystroke edit. The
+    /// watch strip widget renders this inline when set.
+    pub last_parse_error: Option<crate::client::PredicateParseError>,
+}
+
+impl WatchSession {
+    /// Build a fresh `WatchSession` pre-narrowed to a single component
+    /// UUID, with an empty predicate and an empty buffer. Used by the
+    /// `w` cross-link from Browser (Task 20) and Tracer (Task 21).
+    ///
+    /// Status starts as `Waiting`; the worker's first successful poll
+    /// promotes it to `Tailing` via the standard reducer arms.
+    ///
+    /// `buffer_cap` is sourced from `config.events.watch_buffer_size`,
+    /// which deserialization has already clamped into `100..=20_000`.
+    pub fn new_for_component(component_id: String, config: &crate::config::Config) -> Self {
+        Self {
+            narrow: ProvenanceQuery {
+                component_id: Some(component_id),
+                max_results: 1000,
+                ..Default::default()
+            },
+            predicate: Predicate::default(),
+            predicate_input: String::new(),
+            buffer: VecDeque::new(),
+            buffer_cap: config.events.watch_buffer_size,
+            cursor: None,
+            status: WatchStatus::Waiting,
+            stats: WatchStats::default(),
+            last_parse_error: None,
+        }
+    }
+
+    /// Build a fresh `WatchSession` from an arbitrary `ProvenanceQuery`.
+    /// Used by the in-tab `w` chord on Events (one-shot → watch
+    /// transition): the query is whatever `EventsState::build_query`
+    /// produced from the current filter bar.
+    ///
+    /// Status starts at `Waiting` if `can_start` accepts the narrow,
+    /// otherwise `NarrowRequired`. The watch strip uses the latter to
+    /// prompt the user to add at least one narrow term before the
+    /// worker can spawn.
+    pub fn from_query(narrow: ProvenanceQuery, buffer_cap: usize) -> Self {
+        let status = if Self::can_start(&narrow, SystemTime::now()) {
+            WatchStatus::Waiting
+        } else {
+            WatchStatus::NarrowRequired
+        };
+        Self {
+            narrow,
+            predicate: Predicate::default(),
+            predicate_input: String::new(),
+            buffer: VecDeque::new(),
+            buffer_cap,
+            cursor: None,
+            status,
+            stats: WatchStats::default(),
+            last_parse_error: None,
+        }
+    }
+
+    /// Cost guard: refuse to spawn the worker unless the narrow has
+    /// at least one of (component, flow-file UUID, non-empty event
+    /// types, non-blank start time). `now` is injected to keep the
+    /// function pure for tests and to leave room for a future
+    /// "start_time within 24h" gate (the spec mentions 24h as a UX
+    /// hint; the runtime gate accepts any non-blank start_time as
+    /// deliberate).
+    pub fn can_start(narrow: &ProvenanceQuery, now: SystemTime) -> bool {
+        if narrow.component_id.is_some() {
+            return true;
+        }
+        if narrow.flow_file_uuid.is_some() {
+            return true;
+        }
+        if !narrow.event_types.is_empty() {
+            return true;
+        }
+        if let Some(s) = narrow.start_time_iso.as_deref()
+            && !s.trim().is_empty()
+        {
+            return true;
+        }
+        let _ = now;
+        false
+    }
+
+    /// Append a new matched event to the rolling buffer. If the buffer
+    /// is at `buffer_cap`, drop the oldest — *unless* `focused_row`
+    /// names index 0, in which case drop the second-oldest. This
+    /// prevents the user's cursor from jumping under their finger
+    /// while they investigate a row.
+    ///
+    /// When `buffer_cap` is 1 there is no second-oldest entry to fall
+    /// back to, so the focused row is dropped normally.
+    pub fn push_event(&mut self, ev: MatchedEvent, focused_row: Option<usize>) {
+        if self.buffer.len() >= self.buffer_cap {
+            let trim_idx = if focused_row == Some(0) && self.buffer.len() >= 2 {
+                1
+            } else {
+                0
+            };
+            self.buffer.remove(trim_idx);
+            self.stats.trimmed_total = self.stats.trimmed_total.saturating_add(1);
+        }
+        self.buffer.push_back(ev);
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn commit_predicate_failure_stores_error_on_session() {
+        let mut s = EventsState::new();
+        let mut session = empty_session(100);
+        session.predicate_input = "filename matches /foo/".into(); // bad operator
+        s.enter_watch_mode(session);
+
+        let res = s.commit_predicate();
+        assert!(res.is_err());
+        let watch = s.watch().expect("still in watch mode");
+        let err = watch.last_parse_error.as_ref().expect("error stored");
+        assert!(err.message.contains("operator"), "got: {}", err.message);
+    }
+
+    #[test]
+    fn commit_predicate_success_clears_prior_error() {
+        let mut s = EventsState::new();
+        let mut session = empty_session(100);
+        session.predicate_input = "filename matches /foo/".into();
+        s.enter_watch_mode(session);
+        let _ = s.commit_predicate(); // bad → error stored
+        assert!(s.watch().unwrap().last_parse_error.is_some());
+
+        // Replace with a valid predicate and commit again.
+        if let Some(w) = s.watch_mut() {
+            w.predicate_input = "filename = ok".into();
+        }
+        s.focus_predicate(); // ensure focus so subsequent edits would clear too
+        let res = s.commit_predicate();
+        assert!(res.is_ok());
+        assert!(s.watch().unwrap().last_parse_error.is_none());
+    }
+
+    #[test]
+    fn editing_predicate_clears_sticky_error() {
+        let mut s = EventsState::new();
+        let mut session = empty_session(100);
+        session.predicate_input = "filename matches /foo/".into();
+        s.enter_watch_mode(session);
+        let _ = s.commit_predicate();
+        assert!(s.watch().unwrap().last_parse_error.is_some());
+
+        s.focus_predicate();
+        s.push_predicate_char(' '); // any edit
+        assert!(s.watch().unwrap().last_parse_error.is_none());
+    }
+
+    #[test]
+    fn from_query_with_satisfied_narrow_starts_waiting() {
+        let narrow = ProvenanceQuery {
+            component_id: Some("proc-1".into()),
+            max_results: 500,
+            ..Default::default()
+        };
+        let session = WatchSession::from_query(narrow, 2000);
+        assert_eq!(session.narrow.component_id.as_deref(), Some("proc-1"));
+        assert_eq!(session.buffer_cap, 2000);
+        assert!(session.predicate_input.is_empty());
+        assert!(session.buffer.is_empty());
+        assert!(matches!(session.status, WatchStatus::Waiting));
+    }
+
+    #[test]
+    fn from_query_with_empty_narrow_starts_narrow_required() {
+        let session = WatchSession::from_query(ProvenanceQuery::default(), 1500);
+        assert!(matches!(session.status, WatchStatus::NarrowRequired));
+        assert_eq!(session.buffer_cap, 1500);
+    }
+
+    #[test]
+    fn from_query_with_event_types_only_starts_waiting() {
+        let narrow = ProvenanceQuery {
+            event_types: vec!["DROP".into(), "SEND".into()],
+            ..Default::default()
+        };
+        let session = WatchSession::from_query(narrow, 2000);
+        assert!(matches!(session.status, WatchStatus::Waiting));
+    }
+
+    #[test]
+    fn watch_session_new_for_component_seeds_narrow_and_waiting_status() {
+        let cfg = crate::test_support::tiny_config();
+        let session = WatchSession::new_for_component("proc-42".into(), &cfg);
+        assert_eq!(session.narrow.component_id.as_deref(), Some("proc-42"));
+        assert_eq!(session.narrow.max_results, 1000);
+        assert!(session.narrow.flow_file_uuid.is_none());
+        assert!(session.narrow.event_types.is_empty());
+        assert!(session.narrow.start_time_iso.is_none());
+        assert!(session.predicate_input.is_empty());
+        assert!(session.buffer.is_empty());
+        assert_eq!(session.buffer_cap, 2000);
+        assert!(session.cursor.is_none());
+        assert!(matches!(session.status, WatchStatus::Waiting));
+        assert!(WatchSession::can_start(&session.narrow, SystemTime::now()));
+    }
 
     #[test]
     fn events_state_new_is_idle_with_default_filters() {
@@ -733,6 +1180,92 @@ mod tests {
     }
 
     #[test]
+    fn selected_event_in_watch_mode_resolves_through_newest_first() {
+        let mut s = EventsState::new();
+        let mut session = empty_session(100);
+        // Push three events in order; the renderer flips them so the
+        // newest (id=3) is row 0.
+        session.buffer.push_back(matched(1));
+        session.buffer.push_back(matched(2));
+        session.buffer.push_back(matched(3));
+        s.enter_watch_mode(session);
+
+        s.enter_row_nav();
+        assert_eq!(s.selected_row, Some(0));
+        assert_eq!(s.selected_event().unwrap().event_id, 3);
+
+        s.move_selection_down();
+        assert_eq!(s.selected_event().unwrap().event_id, 2);
+
+        s.move_selection_down();
+        assert_eq!(s.selected_event().unwrap().event_id, 1);
+    }
+
+    #[test]
+    fn selected_event_falls_back_to_events_vec_in_oneshot() {
+        let mut s = EventsState::new();
+        s.events.push(ProvenanceEventSummary {
+            event_id: 42,
+            event_time_iso: "t".into(),
+            event_type: "DROP".into(),
+            component_id: "c".into(),
+            component_name: "n".into(),
+            component_type: "T".into(),
+            group_id: "g".into(),
+            flow_file_uuid: "ff".into(),
+            relationship: None,
+            details: None,
+        });
+        s.selected_row = Some(0);
+        assert_eq!(s.selected_event().unwrap().event_id, 42);
+    }
+
+    #[test]
+    fn enter_row_nav_in_watch_mode_uses_buffer_not_events_vec() {
+        // Reproduces the bug: when the watch buffer holds matched
+        // events but `state.events` (the one-shot vec) is empty, Tab
+        // / Down → enter_row_nav must still pick up the first watch
+        // row. Before the fix, the empty-check looked at the wrong
+        // source and stayed in filter-bar mode.
+        let mut s = EventsState::new();
+        let mut session = empty_session(100);
+        session.buffer.push_back(matched(1));
+        session.buffer.push_back(matched(2));
+        s.enter_watch_mode(session);
+        // Confirm: one-shot events vec is empty, watch buffer has 2 rows.
+        assert!(s.events.is_empty());
+        assert_eq!(s.current_row_count(), 2);
+
+        s.enter_row_nav();
+        assert_eq!(s.selected_row, Some(0));
+
+        // Down stops at the last buffer row, not at events.len() == 0.
+        s.move_selection_down();
+        assert_eq!(s.selected_row, Some(1));
+        s.move_selection_down();
+        assert_eq!(s.selected_row, Some(1)); // clamped at len-1
+    }
+
+    #[test]
+    fn current_row_count_falls_back_to_events_vec_in_oneshot() {
+        let mut s = EventsState::new();
+        assert_eq!(s.current_row_count(), 0);
+        s.events.push(ProvenanceEventSummary {
+            event_id: 1,
+            event_time_iso: "t".into(),
+            event_type: "SEND".into(),
+            component_id: "c".into(),
+            component_name: "n".into(),
+            component_type: "T".into(),
+            group_id: "g".into(),
+            flow_file_uuid: "ff".into(),
+            relationship: None,
+            details: None,
+        });
+        assert_eq!(s.current_row_count(), 1);
+    }
+
+    #[test]
     fn enter_row_nav_with_results_selects_first_row() {
         use crate::client::ProvenanceEventSummary;
         use crate::event::EventsPayload;
@@ -872,6 +1405,75 @@ mod tests {
         );
     }
 
+    use crate::client::ProvenanceQuery;
+    use std::time::{Duration, SystemTime};
+
+    fn empty_query() -> ProvenanceQuery {
+        ProvenanceQuery::default()
+    }
+
+    fn query_with_component() -> ProvenanceQuery {
+        ProvenanceQuery {
+            component_id: Some("abc".into()),
+            ..Default::default()
+        }
+    }
+
+    fn query_with_event_types() -> ProvenanceQuery {
+        ProvenanceQuery {
+            event_types: vec!["DROP".into()],
+            ..Default::default()
+        }
+    }
+
+    #[test]
+    fn watch_session_can_start_requires_a_narrow() {
+        let now = SystemTime::UNIX_EPOCH + Duration::from_secs(1_777_640_000);
+        assert!(!WatchSession::can_start(&empty_query(), now));
+    }
+
+    #[test]
+    fn watch_session_can_start_with_component() {
+        let now = SystemTime::UNIX_EPOCH + Duration::from_secs(1_777_640_000);
+        assert!(WatchSession::can_start(&query_with_component(), now));
+    }
+
+    #[test]
+    fn watch_session_can_start_with_event_types() {
+        let now = SystemTime::UNIX_EPOCH + Duration::from_secs(1_777_640_000);
+        assert!(WatchSession::can_start(&query_with_event_types(), now));
+    }
+
+    #[test]
+    fn watch_session_can_start_with_flow_file_uuid() {
+        let now = SystemTime::UNIX_EPOCH + Duration::from_secs(1_777_640_000);
+        let q = ProvenanceQuery {
+            flow_file_uuid: Some("ff-1".into()),
+            ..Default::default()
+        };
+        assert!(WatchSession::can_start(&q, now));
+    }
+
+    #[test]
+    fn watch_session_can_start_with_explicit_start_time() {
+        let now = SystemTime::UNIX_EPOCH + Duration::from_secs(1_777_640_000);
+        let q = ProvenanceQuery {
+            start_time_iso: Some("2026-04-30T22:00:00Z".into()),
+            ..Default::default()
+        };
+        assert!(WatchSession::can_start(&q, now));
+    }
+
+    #[test]
+    fn watch_session_can_start_rejects_blank_start_time() {
+        let now = SystemTime::UNIX_EPOCH + Duration::from_secs(1_777_640_000);
+        let q = ProvenanceQuery {
+            start_time_iso: Some("   ".into()),
+            ..Default::default()
+        };
+        assert!(!WatchSession::can_start(&q, now));
+    }
+
     #[test]
     fn leave_row_nav_clears_selection() {
         use crate::client::ProvenanceEventSummary;
@@ -908,5 +1510,489 @@ mod tests {
         s.enter_row_nav();
         s.leave_row_nav();
         assert_eq!(s.selected_row, None);
+    }
+
+    fn matched(id: i64) -> MatchedEvent {
+        MatchedEvent {
+            summary: ProvenanceEventSummary {
+                event_id: id,
+                event_time_iso: format!("t{id}"),
+                event_type: "SEND".into(),
+                component_id: "c".into(),
+                component_name: "n".into(),
+                component_type: "U".into(),
+                group_id: "g".into(),
+                flow_file_uuid: format!("ff{id}"),
+                relationship: None,
+                details: None,
+            },
+            attrs: vec![],
+        }
+    }
+
+    fn empty_session(buffer_cap: usize) -> WatchSession {
+        WatchSession {
+            narrow: ProvenanceQuery::default(),
+            predicate: Predicate::default(),
+            predicate_input: String::new(),
+            buffer: VecDeque::new(),
+            buffer_cap,
+            cursor: None,
+            status: WatchStatus::Paused,
+            stats: WatchStats::default(),
+            last_parse_error: None,
+        }
+    }
+
+    #[test]
+    fn push_event_appends_when_buffer_has_room() {
+        let mut s = empty_session(3);
+        s.push_event(matched(1), None);
+        s.push_event(matched(2), None);
+        let ids: Vec<i64> = s.buffer.iter().map(|m| m.summary.event_id).collect();
+        assert_eq!(ids, vec![1, 2]);
+        assert_eq!(s.stats.trimmed_total, 0);
+    }
+
+    #[test]
+    fn push_event_trims_oldest_when_full() {
+        let mut s = empty_session(3);
+        for id in 1..=4 {
+            s.push_event(matched(id), None);
+        }
+        let ids: Vec<i64> = s.buffer.iter().map(|m| m.summary.event_id).collect();
+        assert_eq!(ids, vec![2, 3, 4]);
+        assert_eq!(s.stats.trimmed_total, 1);
+    }
+
+    #[test]
+    fn push_event_protects_focused_oldest() {
+        let mut s = empty_session(3);
+        for id in 1..=3 {
+            s.push_event(matched(id), None);
+        }
+        // Buffer is full: [1, 2, 3]; focused index 0 (event 1).
+        s.push_event(matched(4), Some(0));
+        let ids: Vec<i64> = s.buffer.iter().map(|m| m.summary.event_id).collect();
+        // Should drop event 2 (second-oldest) instead of event 1.
+        assert_eq!(ids, vec![1, 3, 4]);
+        assert_eq!(s.stats.trimmed_total, 1);
+    }
+
+    #[test]
+    fn push_event_unfocused_or_other_row_drops_oldest_normally() {
+        let mut s = empty_session(3);
+        for id in 1..=3 {
+            s.push_event(matched(id), None);
+        }
+        // Focused index is 2 (newest) — not the oldest, so normal trim.
+        s.push_event(matched(4), Some(2));
+        let ids: Vec<i64> = s.buffer.iter().map(|m| m.summary.event_id).collect();
+        assert_eq!(ids, vec![2, 3, 4]);
+        assert_eq!(s.stats.trimmed_total, 1);
+    }
+
+    #[test]
+    fn push_event_buffer_cap_one_focused_still_drops_focused() {
+        // Edge case: with buffer_cap = 1, there's no second-oldest to fall
+        // back to — the focused row is the only row, so trim must drop it.
+        let mut s = empty_session(1);
+        s.push_event(matched(1), None);
+        s.push_event(matched(2), Some(0));
+        let ids: Vec<i64> = s.buffer.iter().map(|m| m.summary.event_id).collect();
+        assert_eq!(ids, vec![2]);
+        assert_eq!(s.stats.trimmed_total, 1);
+    }
+
+    #[test]
+    fn events_state_default_is_oneshot_mode() {
+        let s = EventsState::new();
+        assert!(matches!(s.mode, EventsMode::OneShot));
+    }
+
+    #[test]
+    fn events_state_enter_watch_replaces_mode() {
+        let mut s = EventsState::new();
+        let session = empty_session(100);
+        s.enter_watch_mode(session);
+        assert!(matches!(s.mode, EventsMode::Watch(_)));
+    }
+
+    #[test]
+    fn events_state_exit_watch_restores_oneshot() {
+        let mut s = EventsState::new();
+        s.enter_watch_mode(empty_session(100));
+        s.exit_watch_mode();
+        assert!(matches!(s.mode, EventsMode::OneShot));
+    }
+
+    #[test]
+    fn watch_helpers_borrow_active_session() {
+        let mut s = EventsState::new();
+        assert!(s.watch().is_none());
+        assert!(s.watch_mut().is_none());
+
+        s.enter_watch_mode(empty_session(100));
+        assert!(s.watch().is_some());
+
+        // Mutate via watch_mut to confirm it returns the live session.
+        if let Some(w) = s.watch_mut() {
+            w.predicate_input = "x".into();
+        }
+        assert_eq!(s.watch().unwrap().predicate_input, "x");
+    }
+
+    use crate::client::AttributeTriple;
+    use crate::event::EventsPayload;
+
+    fn watch_state() -> EventsState {
+        let mut s = EventsState::new();
+        s.enter_watch_mode(WatchSession {
+            narrow: ProvenanceQuery {
+                component_id: Some("c".into()),
+                ..Default::default()
+            },
+            predicate: Predicate::parse("filename =~ /^x/").unwrap(),
+            predicate_input: "filename =~ /^x/".into(),
+            buffer: VecDeque::new(),
+            buffer_cap: 100,
+            cursor: None,
+            status: WatchStatus::Tailing,
+            stats: WatchStats::default(),
+            last_parse_error: None,
+        });
+        s
+    }
+
+    fn summary(id: i64) -> ProvenanceEventSummary {
+        ProvenanceEventSummary {
+            event_id: id,
+            event_time_iso: format!("t{id}"),
+            event_type: "SEND".into(),
+            component_id: "c".into(),
+            component_name: "n".into(),
+            component_type: "T".into(),
+            group_id: "g".into(),
+            flow_file_uuid: format!("ff{id}"),
+            relationship: None,
+            details: None,
+        }
+    }
+
+    #[test]
+    fn handle_watch_match_appends_to_buffer() {
+        let mut s = watch_state();
+        let attrs = vec![AttributeTriple {
+            key: "filename".into(),
+            previous: None,
+            current: Some("xy".into()),
+        }];
+        crate::view::events::handle_watch_payload(
+            &mut s,
+            EventsPayload::WatchMatch {
+                summary: summary(1),
+                attrs,
+            },
+            None,
+        );
+        let watch = s.watch().expect("still in watch mode");
+        assert_eq!(watch.buffer.len(), 1);
+        assert_eq!(watch.buffer.front().unwrap().summary.event_id, 1);
+    }
+
+    #[test]
+    fn handle_watch_tick_updates_stats() {
+        let mut s = watch_state();
+        crate::view::events::handle_watch_payload(
+            &mut s,
+            EventsPayload::WatchTick {
+                events_per_sec_ewma: 12.5,
+                last_poll_latency_ms: 250,
+                scanned: 50,
+                matched: 3,
+                detail_fetch_errors: 1,
+            },
+            None,
+        );
+        let stats = &s.watch().unwrap().stats;
+        assert!((stats.events_per_sec_ewma - 12.5).abs() < f32::EPSILON);
+        assert_eq!(stats.last_poll_latency.unwrap().as_millis(), 250);
+        assert_eq!(stats.detail_fetch_errors, 1);
+    }
+
+    #[test]
+    fn handle_watch_tick_promotes_waiting_to_tailing() {
+        let mut s = watch_state();
+        // Force into Waiting state.
+        if let Some(w) = s.watch_mut() {
+            w.status = WatchStatus::Waiting;
+        }
+        crate::view::events::handle_watch_payload(
+            &mut s,
+            EventsPayload::WatchTick {
+                events_per_sec_ewma: 0.0,
+                last_poll_latency_ms: 100,
+                scanned: 0,
+                matched: 0,
+                detail_fetch_errors: 0,
+            },
+            None,
+        );
+        assert!(matches!(s.watch().unwrap().status, WatchStatus::Tailing));
+    }
+
+    #[test]
+    fn handle_watch_failed_flips_status() {
+        let mut s = watch_state();
+        crate::view::events::handle_watch_payload(
+            &mut s,
+            EventsPayload::WatchFailed {
+                error: "boom".into(),
+                retry_in_ms: 5_000,
+            },
+            None,
+        );
+        match &s.watch().unwrap().status {
+            WatchStatus::Failed { error, retry_in } => {
+                assert_eq!(error, "boom");
+                assert_eq!(retry_in.as_millis(), 5_000);
+            }
+            other => panic!("expected Failed, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn handle_watch_payload_no_op_when_not_in_watch_mode() {
+        let mut s = EventsState::new();
+        // Not in watch mode — payload should be a no-op.
+        crate::view::events::handle_watch_payload(
+            &mut s,
+            EventsPayload::WatchMatch {
+                summary: summary(1),
+                attrs: vec![],
+            },
+            None,
+        );
+        assert!(matches!(s.mode, EventsMode::OneShot));
+        assert!(s.watch().is_none());
+    }
+
+    fn matched_with_attrs(id: i64) -> MatchedEvent {
+        MatchedEvent {
+            summary: ProvenanceEventSummary {
+                event_id: id,
+                event_time_iso: format!("t{id}"),
+                event_type: "SEND".into(),
+                component_id: "c".into(),
+                component_name: "n".into(),
+                component_type: "T".into(),
+                group_id: "g".into(),
+                flow_file_uuid: format!("ff{id}"),
+                relationship: None,
+                details: None,
+            },
+            attrs: vec![AttributeTriple {
+                key: "filename".into(),
+                previous: None,
+                current: Some(format!("file-{id}.json")),
+            }],
+        }
+    }
+
+    #[test]
+    fn pause_watch_flips_status_and_keeps_buffer() {
+        let mut s = EventsState::new();
+        let mut session = empty_session(100);
+        session.buffer.push_back(matched_with_attrs(1));
+        session.status = WatchStatus::Tailing;
+        s.enter_watch_mode(session);
+
+        crate::view::events::pause_watch(&mut s);
+
+        assert!(matches!(s.watch().unwrap().status, WatchStatus::Paused));
+        assert_eq!(s.watch().unwrap().buffer.len(), 1);
+        assert_eq!(s.watch().unwrap().buffer[0].summary.event_id, 1);
+    }
+
+    #[test]
+    fn pause_watch_no_op_when_not_in_watch_mode() {
+        let mut s = EventsState::new();
+        crate::view::events::pause_watch(&mut s);
+        assert!(matches!(s.mode, EventsMode::OneShot));
+    }
+
+    #[test]
+    fn pause_watch_preserves_existing_failed_status() {
+        let mut s = EventsState::new();
+        let mut session = empty_session(100);
+        session.status = WatchStatus::Failed {
+            error: "boom".into(),
+            retry_in: std::time::Duration::from_secs(5),
+        };
+        s.enter_watch_mode(session);
+        crate::view::events::pause_watch(&mut s);
+        // Pause should override Failed → Paused, since the worker is now gone.
+        assert!(matches!(s.watch().unwrap().status, WatchStatus::Paused));
+    }
+
+    #[test]
+    fn resume_watch_promotes_paused_to_waiting() {
+        let mut s = EventsState::new();
+        let mut session = empty_session(100);
+        session.status = WatchStatus::Paused;
+        s.enter_watch_mode(session);
+        crate::view::events::resume_watch(&mut s);
+        assert!(matches!(s.watch().unwrap().status, WatchStatus::Waiting));
+    }
+
+    #[test]
+    fn resume_watch_no_op_when_already_tailing() {
+        let mut s = EventsState::new();
+        let mut session = empty_session(100);
+        session.status = WatchStatus::Tailing;
+        s.enter_watch_mode(session);
+        crate::view::events::resume_watch(&mut s);
+        // Tailing should not be touched by resume.
+        assert!(matches!(s.watch().unwrap().status, WatchStatus::Tailing));
+    }
+
+    #[test]
+    fn predicate_focus_lifecycle() {
+        let mut s = EventsState::new();
+        s.enter_watch_mode(empty_session(100));
+        assert!(!s.predicate_input_focused());
+        s.focus_predicate();
+        assert!(s.predicate_input_focused());
+        s.push_predicate_char('f');
+        s.push_predicate_char('=');
+        assert_eq!(s.watch().unwrap().predicate_input, "f=");
+        s.unfocus_predicate();
+        assert!(!s.predicate_input_focused());
+    }
+
+    #[test]
+    fn focus_predicate_no_op_in_oneshot_mode() {
+        let mut s = EventsState::new();
+        s.focus_predicate();
+        assert!(!s.predicate_input_focused());
+    }
+
+    #[test]
+    fn push_predicate_char_no_op_when_unfocused() {
+        let mut s = EventsState::new();
+        s.enter_watch_mode(empty_session(100));
+        // Not focused.
+        s.push_predicate_char('x');
+        assert_eq!(s.watch().unwrap().predicate_input, "");
+    }
+
+    #[test]
+    fn pop_predicate_char_removes_last() {
+        let mut s = EventsState::new();
+        s.enter_watch_mode(empty_session(100));
+        s.focus_predicate();
+        s.push_predicate_char('a');
+        s.push_predicate_char('b');
+        s.pop_predicate_char();
+        assert_eq!(s.watch().unwrap().predicate_input, "a");
+    }
+
+    #[test]
+    fn commit_predicate_replaces_active_predicate() {
+        let mut s = EventsState::new();
+        let mut session = empty_session(100);
+        session.predicate_input = "filename =~ /^x/".into();
+        s.enter_watch_mode(session);
+        let res = s.commit_predicate();
+        assert!(res.is_ok());
+        assert_eq!(s.watch().unwrap().predicate.clauses().len(), 1);
+    }
+
+    #[test]
+    fn commit_predicate_parse_error_keeps_old_predicate() {
+        let mut s = EventsState::new();
+        let mut session = empty_session(100);
+        session.predicate = Predicate::parse("filename = ok").unwrap(); // existing predicate
+        session.predicate_input = "garbage".into(); // bad input
+        s.enter_watch_mode(session);
+        let res = s.commit_predicate();
+        assert!(res.is_err());
+        // The previous predicate is unchanged.
+        let watch = s.watch().unwrap();
+        assert_eq!(watch.predicate.clauses().len(), 1);
+        assert_eq!(watch.predicate.clauses()[0].attribute, "filename");
+    }
+
+    #[test]
+    fn commit_predicate_empty_input_clears_predicate() {
+        let mut s = EventsState::new();
+        let mut session = empty_session(100);
+        session.predicate = Predicate::parse("filename = ok").unwrap();
+        session.predicate_input = "".into();
+        s.enter_watch_mode(session);
+        let res = s.commit_predicate();
+        assert!(res.is_ok());
+        // Empty predicate matches anything.
+        assert!(s.watch().unwrap().predicate.is_empty());
+    }
+
+    #[test]
+    fn leaving_watch_with_buffered_events_arms_confirm() {
+        let mut s = EventsState::new();
+        let mut session = empty_session(100);
+        session.buffer.push_back(matched(1));
+        s.enter_watch_mode(session);
+
+        let armed = s.request_exit_watch();
+        assert!(armed, "non-empty buffer must arm the confirm modal");
+        assert!(s.exit_watch_pending);
+        // Mode unchanged until confirmed.
+        assert!(matches!(s.mode, EventsMode::Watch(_)));
+    }
+
+    #[test]
+    fn leaving_watch_with_empty_buffer_exits_immediately() {
+        let mut s = EventsState::new();
+        s.enter_watch_mode(empty_session(100));
+
+        let armed = s.request_exit_watch();
+        assert!(!armed, "empty buffer should not need confirmation");
+        assert!(matches!(s.mode, EventsMode::OneShot));
+    }
+
+    #[test]
+    fn request_exit_watch_no_op_in_oneshot() {
+        let mut s = EventsState::new();
+        let armed = s.request_exit_watch();
+        assert!(!armed);
+        assert!(matches!(s.mode, EventsMode::OneShot));
+        assert!(!s.exit_watch_pending);
+    }
+
+    #[test]
+    fn confirm_exit_watch_drops_buffer_and_returns_to_oneshot() {
+        let mut s = EventsState::new();
+        let mut session = empty_session(100);
+        session.buffer.push_back(matched(1));
+        s.enter_watch_mode(session);
+
+        s.request_exit_watch();
+        s.confirm_exit_watch();
+        assert!(matches!(s.mode, EventsMode::OneShot));
+        assert!(!s.exit_watch_pending);
+    }
+
+    #[test]
+    fn cancel_exit_watch_keeps_session_and_disarms() {
+        let mut s = EventsState::new();
+        let mut session = empty_session(100);
+        session.buffer.push_back(matched(1));
+        s.enter_watch_mode(session);
+
+        s.request_exit_watch();
+        s.cancel_exit_watch();
+        assert!(matches!(s.mode, EventsMode::Watch(_)));
+        assert!(!s.exit_watch_pending);
+        assert_eq!(s.watch().unwrap().buffer.len(), 1);
     }
 }

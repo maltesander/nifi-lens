@@ -3729,3 +3729,139 @@ fn refresh_sparkline_same_selection_is_noop() {
         "calling refresh again with same selection must not respawn the worker"
     );
 }
+
+// ---------------------------------------------------------------------------
+// BrowserVerb::Watch — `w` cross-link to Events watch sub-mode (Task 20)
+// ---------------------------------------------------------------------------
+
+#[test]
+fn browser_w_on_processor_emits_open_watch_intent() {
+    use crate::input::{BrowserVerb, ViewVerb};
+
+    let mut state = make_state_with_processor_selected("abc-processor", "MyProc");
+    let result = BrowserHandler::handle_verb(&mut state, ViewVerb::Browser(BrowserVerb::Watch))
+        .expect("handled");
+    assert!(result.redraw);
+    let intent = result.intent.expect("intent emitted");
+    match intent {
+        PendingIntent::Goto(CrossLink::OpenWatch { component_id }) => {
+            assert_eq!(component_id, "abc-processor");
+        }
+        other => panic!("expected OpenWatch intent, got {other:?}"),
+    }
+}
+
+#[test]
+fn browser_w_on_pg_emits_open_watch_intent() {
+    use crate::input::{BrowserVerb, ViewVerb};
+
+    let mut state = make_state_with_selected_kind(NodeKind::ProcessGroup);
+    let arena_idx = state.browser.visible[state.browser.selected];
+    state.browser.nodes[arena_idx].id = "pg-1".into();
+    state.browser.nodes[arena_idx].name = "MyPG".into();
+
+    let result = BrowserHandler::handle_verb(&mut state, ViewVerb::Browser(BrowserVerb::Watch))
+        .expect("handled");
+    let intent = result.intent.expect("intent emitted for PG");
+    match intent {
+        PendingIntent::Goto(CrossLink::OpenWatch { component_id }) => {
+            assert_eq!(component_id, "pg-1");
+        }
+        other => panic!("expected OpenWatch intent for PG, got {other:?}"),
+    }
+}
+
+#[test]
+fn browser_w_on_rpg_emits_open_watch_intent() {
+    use crate::input::{BrowserVerb, ViewVerb};
+
+    let mut state = make_state_with_selected_kind(NodeKind::RemoteProcessGroup);
+    let arena_idx = state.browser.visible[state.browser.selected];
+    state.browser.nodes[arena_idx].id = "rpg-1".into();
+
+    let result = BrowserHandler::handle_verb(&mut state, ViewVerb::Browser(BrowserVerb::Watch))
+        .expect("handled");
+    let intent = result.intent.expect("intent emitted for RPG");
+    match intent {
+        PendingIntent::Goto(CrossLink::OpenWatch { component_id }) => {
+            assert_eq!(component_id, "rpg-1");
+        }
+        other => panic!("expected OpenWatch intent for RPG, got {other:?}"),
+    }
+}
+
+#[test]
+fn browser_w_on_connection_returns_no_intent() {
+    use crate::input::{BrowserVerb, ViewVerb};
+
+    let mut state = make_state_with_selected_kind(NodeKind::Connection);
+    let result = BrowserHandler::handle_verb(&mut state, ViewVerb::Browser(BrowserVerb::Watch))
+        .expect("handled");
+    assert!(
+        result.intent.is_none(),
+        "Connection rows must not emit OpenWatch (selected_component_id returns None)",
+    );
+}
+
+#[test]
+fn browser_w_on_controller_service_returns_no_intent() {
+    use crate::input::{BrowserVerb, ViewVerb};
+
+    let mut state = make_state_with_selected_kind(NodeKind::ControllerService);
+    let result = BrowserHandler::handle_verb(&mut state, ViewVerb::Browser(BrowserVerb::Watch))
+        .expect("handled");
+    assert!(
+        result.intent.is_none(),
+        "ControllerService rows must not emit OpenWatch",
+    );
+}
+
+#[test]
+fn browser_w_on_port_returns_no_intent() {
+    use crate::input::{BrowserVerb, ViewVerb};
+
+    for kind in [NodeKind::InputPort, NodeKind::OutputPort] {
+        let mut state = make_state_with_selected_kind(kind);
+        let result = BrowserHandler::handle_verb(&mut state, ViewVerb::Browser(BrowserVerb::Watch))
+            .expect("handled");
+        assert!(
+            result.intent.is_none(),
+            "Port rows must not emit OpenWatch (kind={kind:?})",
+        );
+    }
+}
+
+#[test]
+fn selected_component_id_returns_uuid_for_watch_capable_kinds() {
+    for (kind, expected_id) in [
+        (NodeKind::Processor, "target"),
+        (NodeKind::ProcessGroup, "target"),
+        (NodeKind::RemoteProcessGroup, "target"),
+    ] {
+        let state = make_state_with_selected_kind(kind);
+        assert_eq!(
+            state.browser.selected_component_id().as_deref(),
+            Some(expected_id),
+            "expected Some(id) for watch-capable kind {kind:?}",
+        );
+    }
+}
+
+#[test]
+fn selected_component_id_returns_none_for_non_watch_kinds() {
+    use crate::client::FolderKind;
+    let cases: &[NodeKind] = &[
+        NodeKind::Connection,
+        NodeKind::ControllerService,
+        NodeKind::InputPort,
+        NodeKind::OutputPort,
+        NodeKind::Folder(FolderKind::Queues),
+    ];
+    for kind in cases {
+        let state = make_state_with_selected_kind(*kind);
+        assert!(
+            state.browser.selected_component_id().is_none(),
+            "expected None for non-watch kind {kind:?}",
+        );
+    }
+}

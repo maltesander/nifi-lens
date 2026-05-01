@@ -38,6 +38,7 @@ nucleo = "0.5"
 parquet = { version = "58", default-features = false, features = ["arrow", "snap", "brotli", "lz4", "zstd"] }
 rand = "0.10"
 ratatui = "0.30"
+regex = "1"
 rustls = "0.23"
 semver = "1"
 serde = { version = "1", features = ["derive"] }

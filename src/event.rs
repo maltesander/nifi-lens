@@ -199,6 +199,15 @@ pub enum IntentOutcome {
     EventsLandingOn {
         component_id: String,
     },
+    /// Cross-link from Browser/Tracer `w` lands on Events in the Watch
+    /// sub-mode pre-narrowed to the given component. The reducer
+    /// switches tabs, calls `EventsState::enter_watch_mode` with a
+    /// fresh session, and focuses the predicate input. The watch
+    /// worker is spawned by `WorkerRegistry::ensure` on the same loop
+    /// iteration once the tab change lands.
+    EventsWatchLandingOn {
+        component_id: String,
+    },
     /// Parameter-contexts feature: open the parameter-context modal on
     /// Browser scoped to the given PG, optionally pre-selecting a
     /// parameter name. The reducer calls
@@ -320,6 +329,31 @@ pub enum EventsPayload {
     QueryFailed {
         query_id: Option<String>,
         error: String,
+    },
+    /// One event matched the active watch predicate. Carries the
+    /// summary and the full attribute list (already fetched by the
+    /// worker) so the reducer doesn't need to re-fetch for the
+    /// detail pane.
+    WatchMatch {
+        summary: crate::client::ProvenanceEventSummary,
+        attrs: Vec<crate::client::AttributeTriple>,
+    },
+    /// Periodic stats heartbeat from the watch worker — emitted at
+    /// the end of each tail-loop iteration regardless of whether any
+    /// events matched. The reducer updates `WatchStats` and the strip
+    /// status.
+    WatchTick {
+        events_per_sec_ewma: f32,
+        last_poll_latency_ms: u64,
+        scanned: usize,
+        matched: usize,
+        detail_fetch_errors: u64,
+    },
+    /// Watch worker hit a non-recoverable error (will retry with
+    /// backoff). Reducer flips status to `Failed { error, retry_in }`.
+    WatchFailed {
+        error: String,
+        retry_in_ms: u64,
     },
 }
 
@@ -452,5 +486,83 @@ mod tests {
             err: "404".into(),
         };
         let _ = (peek, err);
+    }
+
+    #[test]
+    fn watch_match_payload_destructures() {
+        use crate::client::{AttributeTriple, ProvenanceEventSummary};
+        let summary = ProvenanceEventSummary {
+            event_id: 1,
+            event_time_iso: "t".into(),
+            event_type: "SEND".into(),
+            component_id: "c".into(),
+            component_name: "n".into(),
+            component_type: "U".into(),
+            group_id: "g".into(),
+            flow_file_uuid: "f".into(),
+            relationship: None,
+            details: None,
+        };
+        let attrs = vec![AttributeTriple {
+            key: "filename".into(),
+            previous: None,
+            current: Some("x".into()),
+        }];
+        let ev = EventsPayload::WatchMatch {
+            summary: summary.clone(),
+            attrs: attrs.clone(),
+        };
+        match ev {
+            EventsPayload::WatchMatch {
+                summary: s,
+                attrs: a,
+            } => {
+                assert_eq!(s.event_id, 1);
+                assert_eq!(a.len(), 1);
+            }
+            _ => panic!("wrong variant"),
+        }
+    }
+
+    #[test]
+    fn watch_tick_payload_destructures() {
+        let ev = EventsPayload::WatchTick {
+            events_per_sec_ewma: 12.5,
+            last_poll_latency_ms: 250,
+            scanned: 50,
+            matched: 3,
+            detail_fetch_errors: 1,
+        };
+        match ev {
+            EventsPayload::WatchTick {
+                events_per_sec_ewma,
+                last_poll_latency_ms,
+                scanned,
+                matched,
+                detail_fetch_errors,
+            } => {
+                assert!((events_per_sec_ewma - 12.5).abs() < f32::EPSILON);
+                assert_eq!(last_poll_latency_ms, 250);
+                assert_eq!(scanned, 50);
+                assert_eq!(matched, 3);
+                assert_eq!(detail_fetch_errors, 1);
+            }
+            _ => panic!("wrong variant"),
+        }
+    }
+
+    #[test]
+    fn watch_failed_payload_destructures() {
+        let ev = EventsPayload::WatchFailed {
+            error: "submit returned 500".into(),
+            retry_in_ms: 5_000,
+        };
+        match ev {
+            EventsPayload::WatchFailed { error, retry_in_ms } => {
+                assert_eq!(error, "submit returned 500");
+                assert_eq!(retry_in_ms, 5_000);
+            }
+            _ => panic!("wrong variant"),
+        }
     }
 }

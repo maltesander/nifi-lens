@@ -2212,6 +2212,7 @@ dependencies = [
  "rand 0.10.1",
  "ratatui",
  "rcgen",
+ "regex",
  "rustls",
  "semver",
  "serde",

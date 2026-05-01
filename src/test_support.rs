@@ -26,6 +26,7 @@ pub(crate) fn tiny_config() -> Config {
         current_context: "dev".into(),
         browser: Default::default(),
         bulletins: Default::default(),
+        events: Default::default(),
         ui: Default::default(),
         polling: Default::default(),
         tracer: Default::default(),

@@ -17,6 +17,8 @@ pub struct Config {
     #[serde(default)]
     pub bulletins: BulletinsConfig,
     #[serde(default)]
+    pub events: EventsConfig,
+    #[serde(default)]
     pub ui: UiConfig,
     #[serde(default)]
     pub polling: PollingConfig,
@@ -85,6 +87,78 @@ impl Default for BulletinsConfig {
 
 fn default_ring_size() -> usize {
     5000
+}
+
+/// Events-tab configuration set via `[events]` in the TOML config.
+///
+/// The watch sub-mode (Task 22) consumes both knobs:
+///
+/// * `watch_buffer_size` caps the rolling [`WatchSession`] match buffer.
+/// * `watch_retry_max` caps the worker's exponential backoff after a
+///   submit/poll failure.
+///
+/// The companion `[polling.cluster] events_tail` cadence lives on
+/// `ClusterPollingConfig` next to the other periodic-poll cadences.
+///
+/// [`WatchSession`]: crate::view::events::state::WatchSession
+#[derive(Debug, Clone, Deserialize, PartialEq, Eq)]
+pub struct EventsConfig {
+    /// Max number of matched events kept in the watch sub-mode rolling
+    /// buffer. Default 2000; valid range `100..=20_000`. Out-of-range
+    /// values emit a `tracing::warn!` and clamp into the valid range
+    /// rather than rejecting the config entirely.
+    #[serde(
+        default = "default_watch_buffer_size",
+        deserialize_with = "deserialize_clamped_watch_buffer_size"
+    )]
+    pub watch_buffer_size: usize,
+
+    /// Cap on the watch worker's exponential-backoff sleep between
+    /// retries after a submit/poll failure. Default `60s`. The worker
+    /// progresses through `5s → 10s → 30s → cap`; lowering this knob
+    /// makes recovery faster on flaky clusters at the cost of more
+    /// retry traffic.
+    #[serde(default = "default_watch_retry_max", with = "humantime_serde")]
+    pub watch_retry_max: std::time::Duration,
+}
+
+impl Default for EventsConfig {
+    fn default() -> Self {
+        Self {
+            watch_buffer_size: default_watch_buffer_size(),
+            watch_retry_max: default_watch_retry_max(),
+        }
+    }
+}
+
+fn default_watch_buffer_size() -> usize {
+    2000
+}
+
+fn default_watch_retry_max() -> std::time::Duration {
+    std::time::Duration::from_secs(60)
+}
+
+/// Clamp `[events] watch_buffer_size` into `100..=20_000`. Out-of-range
+/// values emit a `tracing::warn!` and continue with the clamped value;
+/// the watch sub-mode treats a buffer of fewer than 100 entries as
+/// near-useless and more than 20 000 as a memory hazard, but neither
+/// is severe enough to fail config parsing.
+fn deserialize_clamped_watch_buffer_size<'de, D>(deserializer: D) -> Result<usize, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    use serde::Deserialize;
+    let raw = usize::deserialize(deserializer)?;
+    let clamped = raw.clamp(100, 20_000);
+    if clamped != raw {
+        tracing::warn!(
+            raw,
+            clamped,
+            "[events] watch_buffer_size out of range; clamped to [100, 20000]"
+        );
+    }
+    Ok(clamped)
 }
 
 /// UI rendering preferences, set via `[ui]` in the TOML config.
@@ -950,5 +1024,121 @@ mod tests {
         let from_default = BrowserConfig::default();
         let from_serde: BrowserConfig = toml::from_str("").expect("empty table parses as default");
         assert_eq!(from_default, from_serde);
+    }
+
+    /// Helper: wrap a body in a minimal Config TOML so `current_context`
+    /// and `[[contexts]]` are present (both are required by `Config`).
+    fn wrap_config(body: &str) -> String {
+        format!(
+            r#"
+current_context = "dev"
+
+{body}
+
+[[contexts]]
+name = "dev"
+url = "https://dev:8443"
+
+[contexts.auth]
+type = "password"
+username = "admin"
+password = "x"
+"#
+        )
+    }
+
+    #[test]
+    fn events_section_defaults() {
+        let cfg: Config = toml::from_str(&wrap_config("")).expect("parses");
+        assert_eq!(cfg.events.watch_buffer_size, 2000);
+        assert_eq!(
+            cfg.events.watch_retry_max,
+            std::time::Duration::from_secs(60)
+        );
+        assert_eq!(
+            cfg.polling.cluster.events_tail,
+            std::time::Duration::from_secs(2)
+        );
+    }
+
+    #[test]
+    fn events_watch_buffer_clamps_below_min() {
+        let cfg: Config = toml::from_str(&wrap_config(
+            r#"
+[events]
+watch_buffer_size = 50
+"#,
+        ))
+        .expect("parses");
+        assert_eq!(cfg.events.watch_buffer_size, 100);
+    }
+
+    #[test]
+    fn events_watch_buffer_clamps_above_max() {
+        let cfg: Config = toml::from_str(&wrap_config(
+            r#"
+[events]
+watch_buffer_size = 99999
+"#,
+        ))
+        .expect("parses");
+        assert_eq!(cfg.events.watch_buffer_size, 20_000);
+    }
+
+    #[test]
+    fn events_watch_buffer_in_range_passes_through() {
+        let cfg: Config = toml::from_str(&wrap_config(
+            r#"
+[events]
+watch_buffer_size = 5000
+"#,
+        ))
+        .expect("parses");
+        assert_eq!(cfg.events.watch_buffer_size, 5000);
+    }
+
+    #[test]
+    fn events_tail_clamps_below_min() {
+        let cfg: Config = toml::from_str(&wrap_config(
+            r#"
+[polling.cluster]
+events_tail = "5ms"
+"#,
+        ))
+        .expect("parses");
+        assert_eq!(
+            cfg.polling.cluster.events_tail,
+            std::time::Duration::from_millis(100)
+        );
+    }
+
+    #[test]
+    fn events_tail_clamps_above_max() {
+        let cfg: Config = toml::from_str(&wrap_config(
+            r#"
+[polling.cluster]
+events_tail = "10m"
+"#,
+        ))
+        .expect("parses");
+        assert_eq!(
+            cfg.polling.cluster.events_tail,
+            std::time::Duration::from_secs(60)
+        );
+    }
+
+    #[test]
+    fn events_tail_in_range_passes_through() {
+        let cfg: Config = toml::from_str(&wrap_config(
+            r#"
+[polling.cluster]
+events_tail = "750ms"
+"#,
+        ))
+        .expect("parses");
+        assert_eq!(
+            cfg.polling.cluster.events_tail,
+            std::time::Duration::from_millis(750)
+        );
     }
 }
