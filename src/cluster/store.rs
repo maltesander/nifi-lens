@@ -17,7 +17,8 @@ use crate::cluster::config::ClusterPollingConfig;
 use crate::cluster::fetcher_tasks::{
     FetchTaskConfig, spawn_about, spawn_bulletins, spawn_cluster_nodes, spawn_connections_by_pg,
     spawn_controller_services, spawn_controller_status, spawn_parameter_context_bindings,
-    spawn_root_pg_status, spawn_system_diagnostics, spawn_tls_certs, spawn_version_control,
+    spawn_reporting_tasks, spawn_root_pg_status, spawn_system_diagnostics, spawn_tls_certs,
+    spawn_version_control,
 };
 use crate::cluster::snapshot::{
     ClusterSnapshot, FetchMeta, ParameterContextBindingsMap, VersionControlMap,
@@ -417,6 +418,21 @@ impl ClusterStore {
             tx.clone(),
             self.pg_ids_rx.clone(),
             parameter_context_bindings_cfg,
+        ));
+
+        let reporting_tasks_cfg = FetchTaskConfig {
+            base_interval: self.config.reporting_tasks,
+            max_interval: self.config.max_interval,
+            jitter_percent: self.config.jitter_percent,
+            force: self.notifies.get(ClusterEndpoint::ReportingTasks),
+            gated: true,
+            subscriber_counter: self.subscribers.counter(ClusterEndpoint::ReportingTasks),
+            batch_concurrency: self.config.batch_concurrency,
+        };
+        self.handles.push(spawn_reporting_tasks(
+            client.clone(),
+            tx.clone(),
+            reporting_tasks_cfg,
         ));
     }
 

@@ -198,7 +198,6 @@ pub(crate) fn spawn_controller_services(
 /// `AppEvent::ClusterUpdate(ClusterUpdate::ReportingTasks(..))` on
 /// every cycle — success or failure — so the store can preserve
 /// `last_ok` via `EndpointState::apply`.
-#[allow(dead_code)] // wired into ClusterStore in Task 8
 pub(crate) fn spawn_reporting_tasks(
     client: Arc<RwLock<NifiClient>>,
     tx: mpsc::Sender<AppEvent>,
