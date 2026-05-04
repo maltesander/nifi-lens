@@ -79,6 +79,26 @@ impl ClusterUpdate {
     }
 }
 
+/// Tri-state for whether the active NiFi context exposes
+/// `/policies/*` and `/tenants/*` meaningfully.
+///
+/// - `Unknown`: no probe yet (fresh context, or before first
+///   access-modal open).
+/// - `Supported`: at least one `200` from a policy or tenant call.
+/// - `Unsupported`: a `409 "no authorizer configured"` or `403`
+///   from an unsecured (HTTP, no auth) NiFi.
+///
+/// Single-user-authorizer is **not** `Unsupported` — it returns
+/// `200` on `/policies/{action}/{resource}` with the implicit
+/// admin-only policy. See the spec for detection table.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum AccessAuditState {
+    #[default]
+    Unknown,
+    Supported,
+    Unsupported,
+}
+
 /// One `Arc<Notify>` per endpoint — UI task signals these on force
 /// refresh or subscriber-add.
 ///
@@ -130,6 +150,10 @@ pub struct ClusterStore {
     /// Stored here so `spawn_fetchers` can hand it to the tls-certs fetcher
     /// without needing the full `NifiClient`.
     base_url: String,
+    /// Whether the active context exposes /policies and /tenants
+    /// meaningfully. Set by the access modal worker on first call
+    /// outcome. Reset to `Unknown` in `shutdown()`.
+    pub access_audit: AccessAuditState,
 }
 
 impl std::fmt::Debug for ClusterStore {
@@ -168,6 +192,7 @@ impl ClusterStore {
             node_addresses_tx,
             node_addresses_rx,
             base_url,
+            access_audit: AccessAuditState::Unknown,
         }
     }
 
@@ -525,6 +550,7 @@ impl ClusterStore {
         for h in self.handles.drain(..) {
             h.abort();
         }
+        self.access_audit = AccessAuditState::Unknown;
     }
 }
 
@@ -1105,5 +1131,18 @@ mod tests {
             }
             other => panic!("expected Ready, got {:?}", other),
         }
+    }
+
+    #[test]
+    fn access_audit_starts_unknown_and_resets_on_shutdown() {
+        let mut store = ClusterStore::new(
+            ClusterPollingConfig::default(),
+            5000,
+            "https://nifi.test:8443".into(),
+        );
+        assert!(matches!(store.access_audit, AccessAuditState::Unknown));
+        store.access_audit = AccessAuditState::Supported;
+        store.shutdown();
+        assert!(matches!(store.access_audit, AccessAuditState::Unknown));
     }
 }
