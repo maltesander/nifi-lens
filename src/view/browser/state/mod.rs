@@ -19,6 +19,7 @@ use crate::client::status::{ControllerServiceState, ProcessorStatus};
 
 pub mod access_modal;
 pub mod action_history_modal;
+pub mod identity_modal;
 pub mod parameter_context_modal;
 pub use parameter_context_modal::{
     ParameterContextLoad, ParameterContextModalState, ResolvedParameter, resolve,

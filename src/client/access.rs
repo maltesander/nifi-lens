@@ -153,6 +153,115 @@ pub struct AccessFetchResult {
     pub outcomes: HashMap<Axis, AxisOutcome>,
 }
 
+use crate::client::classify_or_fallback;
+use crate::view::browser::state::identity_modal::{
+    GrantSource, IdentityGrant, IdentityKind, ResourceBucket, axis_from_action_and_resource,
+};
+
+#[derive(Debug, Clone, Default)]
+pub struct IdentityFetchResult {
+    pub identity: String,
+    pub grants: Vec<IdentityGrant>,
+    pub group_memberships: Vec<String>,
+}
+
+/// Calls `GET /nifi-api/tenants/users/{id}` or
+/// `GET /nifi-api/tenants/user-groups/{id}` and flattens the inline
+/// `accessPolicies` array into `IdentityGrant`s grouped by resource
+/// bucket.
+pub async fn fetch_identity_grants(
+    client: &NifiClient,
+    kind: IdentityKind,
+    id: &str,
+) -> Result<IdentityFetchResult, NifiLensError> {
+    match kind {
+        IdentityKind::User => {
+            let entity = client.tenants().get_user(id).await.map_err(|err| {
+                classify_or_fallback(client.context_name(), Box::new(err), |source| {
+                    NifiLensError::TenantFetchFailed {
+                        context: client.context_name().to_string(),
+                        id: id.to_string(),
+                        source,
+                    }
+                })
+            })?;
+            let component = entity.component.unwrap_or_default();
+            let identity = component.identity.unwrap_or_default();
+            let group_memberships = component
+                .user_groups
+                .unwrap_or_default()
+                .into_iter()
+                .filter_map(|g| g.component.and_then(|c| c.identity))
+                .collect();
+            let grants = component
+                .access_policies
+                .unwrap_or_default()
+                .into_iter()
+                .filter_map(grant_from_summary)
+                .collect();
+            Ok(IdentityFetchResult {
+                identity,
+                grants,
+                group_memberships,
+            })
+        }
+        IdentityKind::UserGroup => {
+            let entity = client.tenants().get_user_group(id).await.map_err(|err| {
+                classify_or_fallback(client.context_name(), Box::new(err), |source| {
+                    NifiLensError::TenantFetchFailed {
+                        context: client.context_name().to_string(),
+                        id: id.to_string(),
+                        source,
+                    }
+                })
+            })?;
+            let component = entity.component.unwrap_or_default();
+            let identity = component.identity.unwrap_or_default();
+            let grants = component
+                .access_policies
+                .unwrap_or_default()
+                .into_iter()
+                .filter_map(grant_from_entity)
+                .collect();
+            Ok(IdentityFetchResult {
+                identity,
+                grants,
+                group_memberships: vec![],
+            })
+        }
+    }
+}
+
+fn grant_from_summary(
+    summary: nifi_rust_client::dynamic::types::AccessPolicySummaryEntity,
+) -> Option<IdentityGrant> {
+    let component = summary.component?;
+    let resource = component.resource?;
+    // action is an enum — convert to &str for the axis resolver
+    let action = component.action?.as_str().to_owned();
+    Some(IdentityGrant {
+        axis: axis_from_action_and_resource(&action, &resource),
+        bucket: ResourceBucket::from_resource(&resource),
+        resource,
+        source: GrantSource::Direct,
+    })
+}
+
+fn grant_from_entity(
+    entity: nifi_rust_client::dynamic::types::AccessPolicyEntity,
+) -> Option<IdentityGrant> {
+    let component = entity.component?;
+    let resource = component.resource?;
+    // action is an enum — convert to &str for the axis resolver
+    let action = component.action?.as_str().to_owned();
+    Some(IdentityGrant {
+        axis: axis_from_action_and_resource(&action, &resource),
+        bucket: ResourceBucket::from_resource(&resource),
+        resource,
+        source: GrantSource::Direct,
+    })
+}
+
 /// Fan out five parallel `fetch_axis` calls via `buffer_unordered(5)`.
 ///
 /// All five `Axis::ALL` entries are dispatched concurrently; axes that

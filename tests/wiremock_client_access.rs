@@ -1,9 +1,12 @@
 //! Wiremock tests: access-policy client wrappers.
 
-use nifi_lens::client::access::{AccessFetchResult, fetch_axis, fetch_component_access};
+use nifi_lens::client::access::{
+    AccessFetchResult, fetch_axis, fetch_component_access, fetch_identity_grants,
+};
 use nifi_lens::client::{NifiClient, NodeKind};
 use nifi_lens::config::{ResolvedAuth, ResolvedContext, VersionStrategy};
 use nifi_lens::view::browser::state::access_modal::{Axis, AxisOutcome};
+use nifi_lens::view::browser::state::identity_modal::{IdentityKind, ResourceBucket};
 use wiremock::matchers::{method, path};
 use wiremock::{Mock, MockServer, ResponseTemplate};
 
@@ -316,4 +319,65 @@ fn observe_audit_state_unknown_to_unsupported_on_blanket_403() {
         observe_audit_state(AccessAuditState::Unknown, &outcome),
         AccessAuditState::Unsupported,
     );
+}
+
+#[tokio::test]
+async fn fetch_identity_grants_groups_into_buckets() {
+    let server = MockServer::start().await;
+    stub_login_and_about(&server).await;
+    Mock::given(method("GET"))
+        .and(path("/nifi-api/tenants/users/u1"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+            "id": "u1",
+            "component": {
+                "id": "u1",
+                "identity": "alice@corp",
+                "userGroups": [{ "id": "g1", "component": {"id":"g1","identity":"ops-team"} }],
+                "accessPolicies": [
+                    { "component": { "action": "read", "resource": "/processors/abc" } },
+                    { "component": { "action": "write", "resource": "/process-groups/orders" } },
+                    { "component": { "action": "read", "resource": "/flow" } }
+                ]
+            }
+        })))
+        .mount(&server)
+        .await;
+    let client = NifiClient::connect(&ctx(server.uri())).await.unwrap();
+    let result = fetch_identity_grants(&client, IdentityKind::User, "u1")
+        .await
+        .unwrap();
+    assert_eq!(result.identity, "alice@corp");
+    assert_eq!(result.group_memberships, vec!["ops-team".to_string()]);
+    assert_eq!(result.grants.len(), 3);
+    let buckets: Vec<_> = result.grants.iter().map(|g| g.bucket).collect();
+    assert!(buckets.contains(&ResourceBucket::Processors));
+    assert!(buckets.contains(&ResourceBucket::ProcessGroups));
+    assert!(buckets.contains(&ResourceBucket::Global));
+}
+
+#[tokio::test]
+async fn fetch_identity_grants_for_group() {
+    let server = MockServer::start().await;
+    stub_login_and_about(&server).await;
+    Mock::given(method("GET"))
+        .and(path("/nifi-api/tenants/user-groups/g1"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+            "id": "g1",
+            "component": {
+                "id": "g1",
+                "identity": "ops-team",
+                "users": [{"id":"u1"}, {"id":"u2"}],
+                "accessPolicies": [
+                    { "component": { "action": "write", "resource": "/process-groups/orders" } }
+                ]
+            }
+        })))
+        .mount(&server)
+        .await;
+    let client = NifiClient::connect(&ctx(server.uri())).await.unwrap();
+    let result = fetch_identity_grants(&client, IdentityKind::UserGroup, "g1")
+        .await
+        .unwrap();
+    assert_eq!(result.identity, "ops-team");
+    assert_eq!(result.grants.len(), 1);
 }
