@@ -151,6 +151,256 @@ pub struct TenantRef {
     pub member_count: Option<usize>,
 }
 
+// ── Modal state ──────────────────────────────────────────────────────────────
+
+use crate::widget::scroll::CursoredScrollState;
+use crate::widget::search::SearchState;
+use std::collections::HashMap;
+
+/// Per-component matrix modal lifecycle.
+#[derive(Debug, Clone)]
+pub struct AccessModalState {
+    pub component_id: String,
+    pub component_kind: NodeKind,
+    pub component_label: String,
+    pub status: ModalStatus,
+    pub matrix: Vec<MatrixRow>,
+    pub scroll: CursoredScrollState,
+    pub search: SearchState,
+}
+
+/// Lifecycle status of the `AccessModalState`.
+#[derive(Debug, Clone)]
+pub enum ModalStatus {
+    Loading,
+    Loaded,
+    Failed(String),
+}
+
+/// One row in the matrix — an identity (user or group) with its
+/// per-axis cells.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct MatrixRow {
+    pub tenant: TenantRef,
+    pub is_group: bool,
+    pub cells: HashMap<Axis, MatrixCell>,
+}
+
+/// Per-axis, per-identity cell value in the access matrix.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum MatrixCell {
+    Direct,
+    Inherited { source: String },
+    None,
+    Forbidden,
+    Error,
+    NotApplicable,
+}
+
+impl MatrixCell {
+    /// Single-character glyph used in the matrix column.
+    pub fn glyph(&self) -> &'static str {
+        match self {
+            Self::Direct => "✓",
+            Self::Inherited { .. } => "↑",
+            Self::None | Self::NotApplicable => "—",
+            Self::Forbidden | Self::Error => "?",
+        }
+    }
+}
+
+impl AccessModalState {
+    /// Create a new `AccessModalState` in `Loading` status.
+    pub fn new(component_id: String, component_kind: NodeKind, component_label: String) -> Self {
+        Self {
+            component_id,
+            component_kind,
+            component_label,
+            status: ModalStatus::Loading,
+            matrix: Vec::new(),
+            scroll: CursoredScrollState::default(),
+            search: SearchState::default(),
+        }
+    }
+
+    /// Builds the matrix from a 5-axis fetch result. Identities are
+    /// the union of all (users ∪ groups) referenced by any axis.
+    pub fn apply_fetch(&mut self, result: crate::client::access::AccessFetchResult) {
+        let mut by_id: HashMap<String, MatrixRow> = HashMap::new();
+        for axis in Axis::ALL {
+            let outcome = result
+                .outcomes
+                .get(&axis)
+                .cloned()
+                .unwrap_or(AxisOutcome::NotApplicable);
+            match &outcome {
+                AxisOutcome::Direct { users, groups } => {
+                    for u in users {
+                        upsert_cell(&mut by_id, u, false, axis, MatrixCell::Direct);
+                    }
+                    for g in groups {
+                        upsert_cell(&mut by_id, g, true, axis, MatrixCell::Direct);
+                    }
+                }
+                AxisOutcome::Inherited {
+                    source,
+                    users,
+                    groups,
+                } => {
+                    for u in users {
+                        upsert_cell(
+                            &mut by_id,
+                            u,
+                            false,
+                            axis,
+                            MatrixCell::Inherited {
+                                source: source.clone(),
+                            },
+                        );
+                    }
+                    for g in groups {
+                        upsert_cell(
+                            &mut by_id,
+                            g,
+                            true,
+                            axis,
+                            MatrixCell::Inherited {
+                                source: source.clone(),
+                            },
+                        );
+                    }
+                }
+                _ => {}
+            }
+            // For all rows that didn't get a cell for this axis, fill
+            // with the appropriate "absent" marker.
+            for row in by_id.values_mut() {
+                row.cells.entry(axis).or_insert_with(|| match &outcome {
+                    AxisOutcome::None => MatrixCell::None,
+                    AxisOutcome::Forbidden => MatrixCell::Forbidden,
+                    AxisOutcome::Error(_) => MatrixCell::Error,
+                    AxisOutcome::NotApplicable => MatrixCell::NotApplicable,
+                    _ => MatrixCell::None,
+                });
+            }
+        }
+        let mut rows: Vec<_> = by_id.into_values().collect();
+        rows.sort_by(|a, b| a.tenant.identity.cmp(&b.tenant.identity));
+        self.matrix = rows;
+        self.status = ModalStatus::Loaded;
+        self.scroll.clamp_to_content(self.matrix.len());
+    }
+}
+
+fn upsert_cell(
+    by_id: &mut HashMap<String, MatrixRow>,
+    tenant: &TenantRef,
+    is_group: bool,
+    axis: Axis,
+    cell: MatrixCell,
+) {
+    let entry = by_id.entry(tenant.id.clone()).or_insert_with(|| MatrixRow {
+        tenant: tenant.clone(),
+        is_group,
+        cells: HashMap::new(),
+    });
+    entry.cells.insert(axis, cell);
+}
+
+#[cfg(test)]
+mod state_tests {
+    use super::*;
+    use crate::client::access::AccessFetchResult;
+
+    fn alice() -> TenantRef {
+        TenantRef {
+            id: "u1".into(),
+            identity: "alice@corp".into(),
+            member_count: None,
+        }
+    }
+
+    fn ops_team() -> TenantRef {
+        TenantRef {
+            id: "g1".into(),
+            identity: "ops-team".into(),
+            member_count: Some(12),
+        }
+    }
+
+    #[test]
+    fn apply_fetch_unions_users_across_axes() {
+        let mut result = AccessFetchResult::default();
+        result.outcomes.insert(
+            Axis::ViewComponent,
+            AxisOutcome::Direct {
+                users: vec![alice()],
+                groups: vec![ops_team()],
+            },
+        );
+        result.outcomes.insert(
+            Axis::ModifyComponent,
+            AxisOutcome::Direct {
+                users: vec![alice()],
+                groups: vec![],
+            },
+        );
+        for axis in [Axis::ViewData, Axis::Operate, Axis::ManagePolicies] {
+            result.outcomes.insert(axis, AxisOutcome::None);
+        }
+
+        let mut s = AccessModalState::new("p1".into(), NodeKind::Processor, "EnrichOrders".into());
+        s.apply_fetch(result);
+
+        assert_eq!(s.matrix.len(), 2);
+        let alice_row = s
+            .matrix
+            .iter()
+            .find(|r| r.tenant.identity == "alice@corp")
+            .unwrap();
+        assert_eq!(alice_row.cells[&Axis::ViewComponent], MatrixCell::Direct);
+        assert_eq!(alice_row.cells[&Axis::ModifyComponent], MatrixCell::Direct);
+        assert_eq!(alice_row.cells[&Axis::ViewData], MatrixCell::None);
+        let ops_row = s
+            .matrix
+            .iter()
+            .find(|r| r.tenant.identity == "ops-team")
+            .unwrap();
+        assert_eq!(ops_row.cells[&Axis::ViewComponent], MatrixCell::Direct);
+        assert_eq!(ops_row.cells[&Axis::ModifyComponent], MatrixCell::None);
+    }
+
+    #[test]
+    fn apply_fetch_renders_inherited_when_source_differs() {
+        let mut result = AccessFetchResult::default();
+        result.outcomes.insert(
+            Axis::ViewComponent,
+            AxisOutcome::Inherited {
+                source: "/process-groups/root".into(),
+                users: vec![alice()],
+                groups: vec![],
+            },
+        );
+        for axis in [
+            Axis::ModifyComponent,
+            Axis::ViewData,
+            Axis::Operate,
+            Axis::ManagePolicies,
+        ] {
+            result.outcomes.insert(axis, AxisOutcome::None);
+        }
+
+        let mut s = AccessModalState::new("p1".into(), NodeKind::Processor, "EnrichOrders".into());
+        s.apply_fetch(result);
+
+        let cell = &s.matrix[0].cells[&Axis::ViewComponent];
+        match cell {
+            MatrixCell::Inherited { source } => assert_eq!(source, "/process-groups/root"),
+            other => panic!("expected Inherited, got {other:?}"),
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

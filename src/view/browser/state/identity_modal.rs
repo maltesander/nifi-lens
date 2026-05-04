@@ -182,3 +182,111 @@ mod tests {
         );
     }
 }
+
+// ── Modal state ──────────────────────────────────────────────────────────────
+
+use crate::widget::scroll::CursoredScrollState;
+use crate::widget::search::SearchState;
+
+/// Drill-in identity modal lifecycle state.
+#[derive(Debug, Clone)]
+pub struct IdentityModalState {
+    pub identity_id: String,
+    pub kind: IdentityKind,
+    pub identity: String,
+    pub status: IdentityStatus,
+    pub grants: Vec<IdentityGrant>,
+    pub group_memberships: Vec<String>,
+    pub scroll: CursoredScrollState,
+    pub search: SearchState,
+}
+
+/// Lifecycle status of the `IdentityModalState`.
+#[derive(Debug, Clone)]
+pub enum IdentityStatus {
+    Loading,
+    Loaded,
+    Failed(String),
+}
+
+impl IdentityModalState {
+    /// Create a new `IdentityModalState` in `Loading` status.
+    pub fn pending(kind: IdentityKind, identity_id: String, identity: String) -> Self {
+        Self {
+            identity_id,
+            kind,
+            identity,
+            status: IdentityStatus::Loading,
+            grants: Vec::new(),
+            group_memberships: Vec::new(),
+            scroll: CursoredScrollState::default(),
+            search: SearchState::default(),
+        }
+    }
+
+    /// Apply a successful fetch result, transitioning to `Loaded`.
+    pub fn apply_fetch(&mut self, result: crate::client::access::IdentityFetchResult) {
+        self.identity = result.identity;
+        self.grants = result.grants;
+        self.group_memberships = result.group_memberships;
+        self.status = IdentityStatus::Loaded;
+        self.scroll.clamp_to_content(self.grants.len());
+    }
+
+    /// Group grants by `ResourceBucket` in the canonical bucket order.
+    /// Sections with no grants are omitted.
+    pub fn grouped_by_bucket(&self) -> Vec<(ResourceBucket, Vec<&IdentityGrant>)> {
+        const ORDER: &[ResourceBucket] = &[
+            ResourceBucket::ProcessGroups,
+            ResourceBucket::Processors,
+            ResourceBucket::ControllerServices,
+            ResourceBucket::InputPorts,
+            ResourceBucket::OutputPorts,
+            ResourceBucket::RemoteProcessGroups,
+            ResourceBucket::Connections,
+            ResourceBucket::ReportingTasks,
+            ResourceBucket::ParameterContexts,
+            ResourceBucket::Global,
+        ];
+        ORDER
+            .iter()
+            .filter_map(|bucket| {
+                let group: Vec<&IdentityGrant> =
+                    self.grants.iter().filter(|g| g.bucket == *bucket).collect();
+                if group.is_empty() {
+                    None
+                } else {
+                    Some((*bucket, group))
+                }
+            })
+            .collect()
+    }
+}
+
+#[cfg(test)]
+mod identity_state_tests {
+    use super::*;
+
+    fn grant(resource: &str, action: &str, bucket: ResourceBucket) -> IdentityGrant {
+        IdentityGrant {
+            axis: axis_from_action_and_resource(action, resource),
+            resource: resource.into(),
+            bucket,
+            source: GrantSource::Direct,
+        }
+    }
+
+    #[test]
+    fn grouped_by_bucket_preserves_canonical_order() {
+        let mut s = IdentityModalState::pending(IdentityKind::User, "u1".into(), "alice".into());
+        s.grants = vec![
+            grant("/flow", "read", ResourceBucket::Global),
+            grant("/processors/abc", "read", ResourceBucket::Processors),
+            grant("/process-groups/x", "read", ResourceBucket::ProcessGroups),
+        ];
+        let groups = s.grouped_by_bucket();
+        assert_eq!(groups[0].0, ResourceBucket::ProcessGroups);
+        assert_eq!(groups[1].0, ResourceBucket::Processors);
+        assert_eq!(groups[2].0, ResourceBucket::Global);
+    }
+}
