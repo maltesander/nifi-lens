@@ -17,7 +17,9 @@ use crate::client::browser::{
 };
 use crate::client::status::{ControllerServiceState, ProcessorStatus};
 
+pub mod access_modal;
 pub mod action_history_modal;
+pub mod identity_modal;
 pub mod parameter_context_modal;
 pub use parameter_context_modal::{
     ParameterContextLoad, ParameterContextModalState, ResolvedParameter, resolve,
@@ -266,6 +268,16 @@ pub struct BrowserState {
     /// Aborted on selection change, tab switch, or before the dispatcher
     /// spawns a new one.
     pub sparkline_handle: Option<crate::app::worker::AbortOnDrop>,
+    /// Open access (matrix) modal state. `None` while closed.
+    pub access_modal: Option<crate::view::browser::state::access_modal::AccessModalState>,
+    /// Live worker handle for the access modal's 5-axis fan-out.
+    /// Aborted on close / refresh.
+    pub access_modal_handle: Option<crate::app::worker::AbortOnDrop>,
+    /// Open identity drill-in modal. `None` while closed. Only opens
+    /// while `access_modal` is `Some`.
+    pub identity_modal: Option<crate::view::browser::state::identity_modal::IdentityModalState>,
+    /// Live worker handle for the identity modal's `tenants/{id}` fetch.
+    pub identity_modal_handle: Option<crate::app::worker::AbortOnDrop>,
 }
 
 /// One segment in the breadcrumb path.
@@ -554,6 +566,55 @@ impl BrowserState {
     pub fn close_action_history_modal(&mut self) {
         self.action_history_modal_handle = None;
         self.action_history_modal = None;
+    }
+
+    /// Open the access modal in `Loading` state. Caller emits
+    /// `PendingIntent::SpawnAccessModalFetch` to fire the worker.
+    pub fn open_access_modal(
+        &mut self,
+        component_id: String,
+        component_kind: crate::client::NodeKind,
+        component_label: String,
+    ) {
+        self.access_modal = Some(
+            crate::view::browser::state::access_modal::AccessModalState::new(
+                component_id,
+                component_kind,
+                component_label,
+            ),
+        );
+    }
+
+    /// Close the access modal and abort any in-flight worker.
+    /// Also cascades to close the identity drill-in modal.
+    pub fn close_access_modal(&mut self) {
+        self.access_modal_handle = None;
+        self.access_modal = None;
+        // Closing the parent also closes the drill-in.
+        self.close_identity_modal();
+    }
+
+    /// Open the identity drill-in modal in `Loading` state. Only meaningful
+    /// while the parent `access_modal` is `Some`.
+    pub fn open_identity_modal(
+        &mut self,
+        kind: crate::view::browser::state::identity_modal::IdentityKind,
+        identity_id: String,
+        identity: String,
+    ) {
+        self.identity_modal = Some(
+            crate::view::browser::state::identity_modal::IdentityModalState::pending(
+                kind,
+                identity_id,
+                identity,
+            ),
+        );
+    }
+
+    /// Close the identity drill-in modal and abort any in-flight worker.
+    pub fn close_identity_modal(&mut self) {
+        self.identity_modal_handle = None;
+        self.identity_modal = None;
     }
 
     /// Install a fresh `SparklineState` for the given component. Aborts

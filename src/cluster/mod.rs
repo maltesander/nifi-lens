@@ -27,7 +27,7 @@ pub mod subscriber;
 
 pub use config::ClusterPollingConfig;
 pub use snapshot::{BulletinRing, ClusterSnapshot, EndpointState, FetchMeta};
-pub use store::{ClusterStore, ClusterUpdate, SubscriberId};
+pub use store::{AccessAuditState, ClusterStore, ClusterUpdate, SubscriberId};
 pub use subscriber::SubscriberRegistry;
 
 /// Identifies a cluster-wide endpoint managed by `ClusterStore`.

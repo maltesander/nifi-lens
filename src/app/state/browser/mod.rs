@@ -26,6 +26,14 @@ impl ViewKeyHandler for BrowserHandler {
         if let ViewVerb::ActionHistoryModal(v) = verb {
             return Some(handle_action_history_modal_verb(state, v));
         }
+        // AccessModal verbs take priority when the access modal is open.
+        if let ViewVerb::AccessModal(v) = verb {
+            return Some(handle_access_modal_verb(state, v));
+        }
+        // IdentityModal verbs take priority when the identity drill-in modal is open.
+        if let ViewVerb::IdentityModal(v) = verb {
+            return Some(handle_identity_modal_verb(state, v));
+        }
         // BrowserQueueVerb chords are dispatched when the listing panel
         // has focus or the chord doesn't conflict with the tree-focus chord
         // set. The shadow gate inside the keymap (T9) ensures these only
@@ -227,6 +235,36 @@ impl ViewKeyHandler for BrowserHandler {
                 | CommonVerb::SearchPrev
                 | CommonVerb::Close,
             ) => {}
+            BrowserVerb::OpenAccess => {
+                // Defensive: enabled() gates this verb to UUID-bearing rows in
+                // Browser when access auditor is supported. Belt-and-suspenders
+                // mirroring the OpenActionHistory pattern.
+                let Some(component_id) = state.browser.selected_component_id() else {
+                    return Some(UpdateResult::default());
+                };
+                let Some(&arena_idx) = state.browser.visible.get(state.browser.selected) else {
+                    return Some(UpdateResult::default());
+                };
+                let node = &state.browser.nodes[arena_idx];
+                let kind = match node.kind {
+                    crate::client::NodeKind::Folder(_) => return Some(UpdateResult::default()),
+                    other => other,
+                };
+                let label = node.name.clone();
+                state
+                    .browser
+                    .open_access_modal(component_id.clone(), kind, label);
+                return Some(UpdateResult {
+                    redraw: true,
+                    intent: Some(super::PendingIntent::SpawnAccessModalFetch {
+                        component_id,
+                        component_kind: kind,
+                    }),
+                    tracer_followup: None,
+                    sparkline_followup: None,
+                    queue_listing_followup: None,
+                });
+            }
         }
         Some(UpdateResult {
             redraw: true,
@@ -2034,6 +2072,239 @@ fn format_action_tsv(action: &nifi_rust_client::dynamic::types::ActionEntity) ->
     let stype = inner.and_then(|a| a.source_type.as_deref()).unwrap_or("");
     let sname = inner.and_then(|a| a.source_name.as_deref()).unwrap_or("");
     format!("{timestamp}\t{user}\t{op}\t{stype}\t{sname}")
+}
+
+/// Dispatch an `AccessModalVerb` action. Called when the access modal is open
+/// and the keymap has routed `ViewVerb::AccessModal(v)` here.
+fn handle_access_modal_verb(
+    state: &mut AppState,
+    verb: crate::input::AccessModalVerb,
+) -> UpdateResult {
+    use crate::input::AccessModalVerb as V;
+
+    let redraw = || UpdateResult {
+        redraw: true,
+        intent: None,
+        tracer_followup: None,
+        sparkline_followup: None,
+        queue_listing_followup: None,
+    };
+
+    // Early-return arms that need to release the modal borrow before
+    // calling state methods go through manual option checks below.
+    match verb {
+        V::Common(CommonVerb::Close) => {
+            if state.browser.access_modal.is_none() {
+                return UpdateResult::default();
+            }
+            state.browser.close_access_modal();
+            return redraw();
+        }
+        V::DrillIdentity => {
+            let (identity_id, identity, kind) = {
+                let Some(modal) = state.browser.access_modal.as_ref() else {
+                    return UpdateResult::default();
+                };
+                let Some(row) = modal.matrix.get(modal.scroll.selected) else {
+                    return redraw();
+                };
+                let id = row.tenant.id.clone();
+                let ident = row.tenant.identity.clone();
+                let k = if row.is_group {
+                    crate::view::browser::state::identity_modal::IdentityKind::UserGroup
+                } else {
+                    crate::view::browser::state::identity_modal::IdentityKind::User
+                };
+                (id, ident, k)
+            };
+            state
+                .browser
+                .open_identity_modal(kind, identity_id.clone(), identity);
+            return UpdateResult {
+                redraw: true,
+                intent: Some(super::PendingIntent::SpawnIdentityModalFetch {
+                    identity_id,
+                    identity_kind: kind,
+                }),
+                tracer_followup: None,
+                sparkline_followup: None,
+                queue_listing_followup: None,
+            };
+        }
+        _ => {}
+    }
+
+    let Some(modal) = state.browser.access_modal.as_mut() else {
+        return UpdateResult::default();
+    };
+
+    match verb {
+        V::ScrollUp => {
+            modal.scroll.move_up();
+            redraw()
+        }
+        V::ScrollDown => {
+            let len = modal.matrix.len();
+            modal.scroll.move_down(len);
+            redraw()
+        }
+        V::PageUp => {
+            modal.scroll.page_up();
+            redraw()
+        }
+        V::PageDown => {
+            let len = modal.matrix.len();
+            modal.scroll.page_down(len);
+            redraw()
+        }
+        V::JumpTop => {
+            modal.scroll.jump_top();
+            redraw()
+        }
+        V::JumpBottom => {
+            let len = modal.matrix.len();
+            modal.scroll.jump_bottom(len);
+            redraw()
+        }
+        V::Common(CommonVerb::Refresh) => {
+            let component_id = modal.component_id.clone();
+            let component_kind = modal.component_kind;
+            modal.status = crate::view::browser::state::access_modal::ModalStatus::Loading;
+            modal.matrix.clear();
+            modal.scroll = crate::widget::scroll::CursoredScrollState::default();
+            UpdateResult {
+                redraw: true,
+                intent: Some(super::PendingIntent::SpawnAccessModalFetch {
+                    component_id,
+                    component_kind,
+                }),
+                tracer_followup: None,
+                sparkline_followup: None,
+                queue_listing_followup: None,
+            }
+        }
+        // Close and DrillIdentity are handled before the modal borrow above.
+        V::Common(_) | V::DrillIdentity => redraw(),
+    }
+}
+
+/// Dispatch an `IdentityModalVerb` action. Called when the identity drill-in
+/// modal is open and the keymap has routed `ViewVerb::IdentityModal(v)` here.
+fn handle_identity_modal_verb(
+    state: &mut AppState,
+    verb: crate::input::IdentityModalVerb,
+) -> UpdateResult {
+    use crate::input::IdentityModalVerb as V;
+
+    let redraw = || UpdateResult {
+        redraw: true,
+        intent: None,
+        tracer_followup: None,
+        sparkline_followup: None,
+        queue_listing_followup: None,
+    };
+
+    // Close and CrossLink need to release the modal borrow before calling
+    // state-level methods; handle them before the shared borrow below.
+    match verb {
+        V::Common(CommonVerb::Close) => {
+            if state.browser.identity_modal.is_none() {
+                return UpdateResult::default();
+            }
+            state.browser.close_identity_modal();
+            return redraw();
+        }
+        V::CrossLink => {
+            let resource = {
+                let Some(modal) = state.browser.identity_modal.as_ref() else {
+                    return UpdateResult::default();
+                };
+                let Some(grant) = modal.grants.get(modal.scroll.selected) else {
+                    return redraw();
+                };
+                grant.resource.clone()
+            };
+            // Extract a UUID from the resource path; resolve it in the arena.
+            // If found, close both modals and navigate to the component.
+            if let Some(uuid) = uuid_from_resource(&resource)
+                && let Some(resolved) = state.browser.resolve_id(&uuid)
+            {
+                let group_id = resolved.group_id.clone();
+                state.browser.close_access_modal();
+                return UpdateResult {
+                    redraw: true,
+                    intent: Some(super::PendingIntent::Goto(
+                        crate::intent::CrossLink::OpenInBrowser {
+                            component_id: uuid,
+                            group_id,
+                        },
+                    )),
+                    tracer_followup: None,
+                    sparkline_followup: None,
+                    queue_listing_followup: None,
+                };
+            }
+            return redraw();
+        }
+        _ => {}
+    }
+
+    let Some(modal) = state.browser.identity_modal.as_mut() else {
+        return UpdateResult::default();
+    };
+
+    match verb {
+        V::ScrollUp => {
+            modal.scroll.move_up();
+            redraw()
+        }
+        V::ScrollDown => {
+            let len = modal.grants.len();
+            modal.scroll.move_down(len);
+            redraw()
+        }
+        V::PageUp => {
+            modal.scroll.page_up();
+            redraw()
+        }
+        V::PageDown => {
+            let len = modal.grants.len();
+            modal.scroll.page_down(len);
+            redraw()
+        }
+        V::JumpTop => {
+            modal.scroll.jump_top();
+            redraw()
+        }
+        V::JumpBottom => {
+            let len = modal.grants.len();
+            modal.scroll.jump_bottom(len);
+            redraw()
+        }
+        // Close and CrossLink are handled before the modal borrow above.
+        V::Common(_) | V::CrossLink => redraw(),
+    }
+}
+
+/// Extract a UUID from a NiFi resource path such as
+/// `/processors/abc-123` or `/data/process-groups/x-y-z`.
+///
+/// Strips well-known axis prefixes (`/data`, `/operate`, `/policies`,
+/// `/provenance-data`), then takes the trailing path segment and
+/// returns it when it passes the canonical-UUID shape check.
+pub(super) fn uuid_from_resource(resource: &str) -> Option<String> {
+    let trimmed = resource
+        .strip_prefix("/data")
+        .or_else(|| resource.strip_prefix("/operate"))
+        .or_else(|| resource.strip_prefix("/policies"))
+        .or_else(|| resource.strip_prefix("/provenance-data"))
+        .unwrap_or(resource);
+    let last = trimmed.rsplit('/').next()?;
+    if crate::view::browser::state::is_uuid_shape(last) {
+        Some(last.to_string())
+    } else {
+        None
+    }
 }
 
 #[cfg(test)]

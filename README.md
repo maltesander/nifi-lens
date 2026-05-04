@@ -397,6 +397,7 @@ Drift filters (PG-only):
 | `p`          | Open Parameter Context modal (PG selected) / Properties modal (processor or CS selected) |
 | `m`          | Show version control (versioned PG only)               |
 | `a`          | Open action history modal (UUID-bearing components)    |
+| `u`          | Open the **Access** modal — who can view / modify / view-data / operate / manage-policies on the selected component. Press `Enter` on a row to drill into a user/group's cluster-wide grants. Disabled when the cluster has no authorizer configured. |
 | `c`          | Copy the selected node's id                            |
 
 #### Queue listing panel

@@ -154,6 +154,30 @@ pub enum BrowserPayload {
         uuid: String,
         err: String,
     },
+    /// 5-axis access fetch completed. Reducer applies it to
+    /// `BrowserState.access_modal` and folds the new audit state into
+    /// `ClusterStore.access_audit`.
+    AccessModalLoaded {
+        component_id: String,
+        result: crate::client::access::AccessFetchResult,
+        audit: crate::cluster::AccessAuditState,
+    },
+    /// Catastrophic worker failure (rare — per-axis errors land inside
+    /// `result` above). Reducer renders `err` in the modal body.
+    AccessModalFailed {
+        component_id: String,
+        err: String,
+    },
+    /// Identity drill-in fetch completed.
+    IdentityModalLoaded {
+        identity_id: String,
+        result: crate::client::access::IdentityFetchResult,
+    },
+    /// Identity drill-in fetch failed.
+    IdentityModalFailed {
+        identity_id: String,
+        err: String,
+    },
 }
 
 /// Result of a successful intent dispatch.

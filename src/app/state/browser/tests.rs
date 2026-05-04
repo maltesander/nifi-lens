@@ -3865,3 +3865,54 @@ fn selected_component_id_returns_none_for_non_watch_kinds() {
         );
     }
 }
+
+// ---------------------------------------------------------------------------
+// OpenAccess dispatch arm
+// ---------------------------------------------------------------------------
+
+#[test]
+fn open_access_emits_spawn_intent_and_opens_modal() {
+    use crate::cluster::AccessAuditState;
+    use crate::input::{BrowserVerb, ViewVerb};
+
+    let mut state = make_state_with_processor_selected("proc-1", "FetchKafka");
+    state.cluster.access_audit = AccessAuditState::Supported;
+    let result =
+        BrowserHandler::handle_verb(&mut state, ViewVerb::Browser(BrowserVerb::OpenAccess))
+            .expect("handled");
+    assert!(result.redraw);
+    assert!(state.browser.access_modal.is_some());
+    let intent = result.intent.expect("intent emitted");
+    assert!(
+        matches!(intent, PendingIntent::SpawnAccessModalFetch { .. }),
+        "expected SpawnAccessModalFetch, got {intent:?}",
+    );
+}
+
+// ---------------------------------------------------------------------------
+// uuid_from_resource helper
+// ---------------------------------------------------------------------------
+
+#[test]
+fn uuid_from_resource_strips_axis_prefix_and_extracts_uuid() {
+    use super::uuid_from_resource;
+    let valid_uuid = "abcd1234-5678-90ab-cdef-1234567890ab";
+    assert_eq!(
+        uuid_from_resource(&format!("/processors/{valid_uuid}")),
+        Some(valid_uuid.to_string())
+    );
+    assert_eq!(
+        uuid_from_resource(&format!("/data/process-groups/{valid_uuid}")),
+        Some(valid_uuid.to_string())
+    );
+    assert_eq!(
+        uuid_from_resource(&format!("/operate/process-groups/{valid_uuid}")),
+        Some(valid_uuid.to_string())
+    );
+    assert_eq!(
+        uuid_from_resource(&format!("/policies/read/processors/{valid_uuid}")),
+        Some(valid_uuid.to_string())
+    );
+    assert_eq!(uuid_from_resource("/flow"), None);
+    assert_eq!(uuid_from_resource("/processors/not-a-uuid"), None);
+}

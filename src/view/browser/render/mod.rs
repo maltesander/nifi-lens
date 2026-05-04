@@ -6,9 +6,11 @@
 //! per-kind renderer, the loading / empty states, and the properties
 //! modal overlay.
 
+pub mod access_modal;
 pub mod action_history_modal;
 pub mod connection;
 pub mod controller_service;
+pub mod identity_modal;
 mod param_ref_scan;
 pub mod parameter_context_modal;
 pub mod pg;
