@@ -3225,3 +3225,21 @@ fn focused_row_copy_value_rpg_validation_error_returns_message() {
         Some("Auth failed")
     );
 }
+
+#[test]
+fn open_close_access_modal_round_trips() {
+    let mut s = crate::view::browser::state::BrowserState::default();
+    assert!(s.access_modal.is_none());
+    s.open_access_modal(
+        "p1".into(),
+        crate::client::NodeKind::Processor,
+        "EnrichOrders".into(),
+    );
+    assert!(s.access_modal.is_some());
+    s.close_access_modal();
+    assert!(s.access_modal.is_none());
+    assert!(
+        s.identity_modal.is_none(),
+        "close_access_modal must cascade to identity_modal"
+    );
+}
