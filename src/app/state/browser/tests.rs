@@ -3888,3 +3888,31 @@ fn open_access_emits_spawn_intent_and_opens_modal() {
         "expected SpawnAccessModalFetch, got {intent:?}",
     );
 }
+
+// ---------------------------------------------------------------------------
+// uuid_from_resource helper
+// ---------------------------------------------------------------------------
+
+#[test]
+fn uuid_from_resource_strips_axis_prefix_and_extracts_uuid() {
+    use super::uuid_from_resource;
+    let valid_uuid = "abcd1234-5678-90ab-cdef-1234567890ab";
+    assert_eq!(
+        uuid_from_resource(&format!("/processors/{valid_uuid}")),
+        Some(valid_uuid.to_string())
+    );
+    assert_eq!(
+        uuid_from_resource(&format!("/data/process-groups/{valid_uuid}")),
+        Some(valid_uuid.to_string())
+    );
+    assert_eq!(
+        uuid_from_resource(&format!("/operate/process-groups/{valid_uuid}")),
+        Some(valid_uuid.to_string())
+    );
+    assert_eq!(
+        uuid_from_resource(&format!("/policies/read/processors/{valid_uuid}")),
+        Some(valid_uuid.to_string())
+    );
+    assert_eq!(uuid_from_resource("/flow"), None);
+    assert_eq!(uuid_from_resource("/processors/not-a-uuid"), None);
+}
