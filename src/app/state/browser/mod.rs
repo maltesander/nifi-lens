@@ -227,6 +227,11 @@ impl ViewKeyHandler for BrowserHandler {
                 | CommonVerb::SearchPrev
                 | CommonVerb::Close,
             ) => {}
+            // T16 will wire the real dispatch; placeholder keeps the match
+            // exhaustive until then.
+            BrowserVerb::OpenAccess => {
+                return Some(UpdateResult::default());
+            }
         }
         Some(UpdateResult {
             redraw: true,

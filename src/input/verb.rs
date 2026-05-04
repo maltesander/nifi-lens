@@ -108,6 +108,10 @@ pub enum BrowserVerb {
     /// RemoteProcessGroup rows; disabled for the rest (folder /
     /// connection / port / controller service).
     Watch,
+    /// `u` — open the per-component Access modal showing who can
+    /// view / modify / view-data / operate / manage-policies on the
+    /// selected UUID-bearing leaf.
+    OpenAccess,
 }
 
 /// Listing-panel-scoped verbs. Active when focus is inside the
@@ -266,6 +270,7 @@ impl Verb for BrowserVerb {
             Self::OpenActionHistory => Chord::simple(KeyCode::Char('a')),
             Self::ShowVersionControl => Chord::simple(KeyCode::Char('m')),
             Self::Watch => Chord::simple(KeyCode::Char('w')),
+            Self::OpenAccess => Chord::simple(KeyCode::Char('u')),
         }
     }
     fn label(self) -> &'static str {
@@ -276,6 +281,7 @@ impl Verb for BrowserVerb {
             Self::OpenActionHistory => "open action history",
             Self::ShowVersionControl => "show version control",
             Self::Watch => "watch this component",
+            Self::OpenAccess => "open access",
         }
     }
     fn hint(self) -> &'static str {
@@ -286,6 +292,7 @@ impl Verb for BrowserVerb {
             Self::OpenActionHistory => "actions",
             Self::ShowVersionControl => "version",
             Self::Watch => "watch",
+            Self::OpenAccess => "access",
         }
     }
     fn enabled(self, ctx: &HintContext<'_>) -> bool {
@@ -313,6 +320,12 @@ impl Verb for BrowserVerb {
                 ctx.state.current_tab == ViewId::Browser
                     && ctx.state.browser.selected_component_id().is_some()
             }
+            Self::OpenAccess => {
+                ctx.state.current_tab == ViewId::Browser
+                    && ctx.state.browser.selected_component_id().is_some()
+                    && ctx.state.cluster.access_audit
+                        != crate::cluster::AccessAuditState::Unsupported
+            }
             _ => true,
         }
     }
@@ -328,6 +341,7 @@ impl Verb for BrowserVerb {
             Self::OpenActionHistory,
             Self::ShowVersionControl,
             Self::Watch,
+            Self::OpenAccess,
         ]
     }
 }
@@ -1155,6 +1169,169 @@ impl Verb for BrowserPeekVerb {
     }
 }
 
+/// Modal-scoped verbs for the parent Access matrix modal.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum AccessModalVerb {
+    Common(CommonVerb),
+    ScrollUp,
+    ScrollDown,
+    PageUp,
+    PageDown,
+    JumpTop,
+    JumpBottom,
+    /// `Enter` — open identity drill-in for the focused row.
+    DrillIdentity,
+}
+
+impl Verb for AccessModalVerb {
+    fn chord(self) -> Chord {
+        match self {
+            Self::Common(c) => c.chord(),
+            Self::ScrollUp => Chord::simple(KeyCode::Up),
+            Self::ScrollDown => Chord::simple(KeyCode::Down),
+            Self::PageUp => Chord::simple(KeyCode::PageUp),
+            Self::PageDown => Chord::simple(KeyCode::PageDown),
+            Self::JumpTop => Chord::simple(KeyCode::Home),
+            Self::JumpBottom => Chord::simple(KeyCode::End),
+            Self::DrillIdentity => Chord::simple(KeyCode::Enter),
+        }
+    }
+    fn label(self) -> &'static str {
+        match self {
+            Self::Common(c) => c.label(),
+            Self::ScrollUp => "scroll up",
+            Self::ScrollDown => "scroll down",
+            Self::PageUp => "page up",
+            Self::PageDown => "page down",
+            Self::JumpTop => "scroll to top",
+            Self::JumpBottom => "scroll to bottom",
+            Self::DrillIdentity => "drill into focused identity",
+        }
+    }
+    fn hint(self) -> &'static str {
+        match self {
+            Self::Common(c) => c.hint(),
+            Self::DrillIdentity => "drill",
+            _ => "",
+        }
+    }
+    fn priority(self) -> u8 {
+        50
+    }
+    fn show_in_hint_bar(self) -> bool {
+        matches!(
+            self,
+            Self::Common(CommonVerb::Close)
+                | Self::Common(CommonVerb::OpenSearch)
+                | Self::Common(CommonVerb::Copy)
+                | Self::Common(CommonVerb::Refresh)
+                | Self::DrillIdentity
+        )
+    }
+    fn enabled(self, _ctx: &HintContext<'_>) -> bool {
+        true
+    }
+    fn all() -> &'static [Self] {
+        &[
+            Self::Common(CommonVerb::Close),
+            Self::ScrollUp,
+            Self::ScrollDown,
+            Self::PageUp,
+            Self::PageDown,
+            Self::JumpTop,
+            Self::JumpBottom,
+            Self::DrillIdentity,
+            Self::Common(CommonVerb::OpenSearch),
+            Self::Common(CommonVerb::SearchNext),
+            Self::Common(CommonVerb::SearchPrev),
+            Self::Common(CommonVerb::Copy),
+            Self::Common(CommonVerb::Refresh),
+        ]
+    }
+}
+
+/// Modal-scoped verbs for the drill-in Identity modal.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum IdentityModalVerb {
+    Common(CommonVerb),
+    ScrollUp,
+    ScrollDown,
+    PageUp,
+    PageDown,
+    JumpTop,
+    JumpBottom,
+    /// `Enter` — cross-link to Browser arena entry for the focused
+    /// UUID-bearing resource. No-op for global resources.
+    CrossLink,
+}
+
+impl Verb for IdentityModalVerb {
+    fn chord(self) -> Chord {
+        match self {
+            Self::Common(c) => c.chord(),
+            Self::ScrollUp => Chord::simple(KeyCode::Up),
+            Self::ScrollDown => Chord::simple(KeyCode::Down),
+            Self::PageUp => Chord::simple(KeyCode::PageUp),
+            Self::PageDown => Chord::simple(KeyCode::PageDown),
+            Self::JumpTop => Chord::simple(KeyCode::Home),
+            Self::JumpBottom => Chord::simple(KeyCode::End),
+            Self::CrossLink => Chord::simple(KeyCode::Enter),
+        }
+    }
+    fn label(self) -> &'static str {
+        match self {
+            Self::Common(c) => c.label(),
+            Self::ScrollUp => "scroll up",
+            Self::ScrollDown => "scroll down",
+            Self::PageUp => "page up",
+            Self::PageDown => "page down",
+            Self::JumpTop => "scroll to top",
+            Self::JumpBottom => "scroll to bottom",
+            Self::CrossLink => "cross-link to focused resource",
+        }
+    }
+    fn hint(self) -> &'static str {
+        match self {
+            Self::Common(c) => c.hint(),
+            Self::CrossLink => "open",
+            _ => "",
+        }
+    }
+    fn priority(self) -> u8 {
+        50
+    }
+    fn show_in_hint_bar(self) -> bool {
+        matches!(
+            self,
+            Self::Common(CommonVerb::Close)
+                | Self::Common(CommonVerb::OpenSearch)
+                | Self::Common(CommonVerb::Copy)
+                | Self::Common(CommonVerb::Refresh)
+                | Self::CrossLink
+        )
+    }
+    fn enabled(self, _ctx: &HintContext<'_>) -> bool {
+        true
+    }
+    fn all() -> &'static [Self] {
+        &[
+            Self::Common(CommonVerb::Close),
+            Self::ScrollUp,
+            Self::ScrollDown,
+            Self::PageUp,
+            Self::PageDown,
+            Self::JumpTop,
+            Self::JumpBottom,
+            Self::CrossLink,
+            Self::Common(CommonVerb::OpenSearch),
+            Self::Common(CommonVerb::SearchNext),
+            Self::Common(CommonVerb::SearchPrev),
+            Self::Common(CommonVerb::Copy),
+            Self::Common(CommonVerb::Refresh),
+        ]
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum ViewVerb {
     Bulletins(BulletinsVerb),
@@ -1170,6 +1347,8 @@ pub enum ViewVerb {
     VersionControlModal(VersionControlModalVerb),
     ParameterContextModal(ParameterContextModalVerb),
     ActionHistoryModal(ActionHistoryModalVerb),
+    AccessModal(AccessModalVerb),
+    IdentityModal(IdentityModalVerb),
 }
 
 #[cfg(test)]
@@ -1766,5 +1945,31 @@ mod tests {
             let c = v.chord();
             assert!(seen.insert(c), "duplicate chord for {:?}: {:?}", v, c);
         }
+    }
+
+    #[test]
+    fn open_access_chord_is_lowercase_u() {
+        assert_eq!(
+            BrowserVerb::OpenAccess.chord(),
+            Chord::simple(KeyCode::Char('u'))
+        );
+        assert_eq!(BrowserVerb::OpenAccess.label(), "open access");
+        assert_eq!(BrowserVerb::OpenAccess.hint(), "access");
+    }
+
+    #[test]
+    fn access_modal_verb_drill_chord_is_enter() {
+        assert_eq!(
+            AccessModalVerb::DrillIdentity.chord(),
+            Chord::simple(KeyCode::Enter)
+        );
+    }
+
+    #[test]
+    fn identity_modal_verb_cross_link_chord_is_enter() {
+        assert_eq!(
+            IdentityModalVerb::CrossLink.chord(),
+            Chord::simple(KeyCode::Enter)
+        );
     }
 }
