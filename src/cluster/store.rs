@@ -90,7 +90,9 @@ impl ClusterUpdate {
 ///
 /// Single-user-authorizer is **not** `Unsupported` — it returns
 /// `200` on `/policies/{action}/{resource}` with the implicit
-/// admin-only policy. See the spec for detection table.
+/// admin-only policy. See
+/// `docs/superpowers/specs/2026-05-04-access-policies-audit-design.md`
+/// for the full detection table.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub enum AccessAuditState {
     #[default]
@@ -1142,6 +1144,9 @@ mod tests {
         );
         assert!(matches!(store.access_audit, AccessAuditState::Unknown));
         store.access_audit = AccessAuditState::Supported;
+        store.shutdown();
+        assert!(matches!(store.access_audit, AccessAuditState::Unknown));
+        store.access_audit = AccessAuditState::Unsupported;
         store.shutdown();
         assert!(matches!(store.access_audit, AccessAuditState::Unknown));
     }
