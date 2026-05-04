@@ -1,6 +1,6 @@
 //! Wiremock tests: access-policy client wrappers.
 
-use nifi_lens::client::access::fetch_axis;
+use nifi_lens::client::access::{AccessFetchResult, fetch_axis, fetch_component_access};
 use nifi_lens::client::{NifiClient, NodeKind};
 use nifi_lens::config::{ResolvedAuth, ResolvedContext, VersionStrategy};
 use nifi_lens::view::browser::state::access_modal::{Axis, AxisOutcome};
@@ -194,4 +194,72 @@ async fn fetch_axis_returns_not_applicable_without_request() {
             .all(|r| connect_paths.iter().any(|p| r.url.path().contains(p))),
         "unexpected policy request fired: {reqs:?}"
     );
+}
+
+#[tokio::test]
+async fn fetch_component_access_fans_out_five_calls_for_processor() {
+    let server = MockServer::start().await;
+    stub_login_and_about(&server).await;
+    for path_str in [
+        "/nifi-api/policies/read/processors/abc-123",
+        "/nifi-api/policies/write/processors/abc-123",
+        "/nifi-api/policies/read/data/processors/abc-123",
+        "/nifi-api/policies/write/operate/processors/abc-123",
+        "/nifi-api/policies/write/policies/processors/abc-123",
+    ] {
+        Mock::given(method("GET"))
+            .and(path(path_str))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "component": {
+                    "resource": path_str.trim_start_matches("/nifi-api/policies/read").trim_start_matches("/nifi-api/policies/write"),
+                    "users": [],
+                    "userGroups": []
+                }
+            })))
+            .mount(&server)
+            .await;
+    }
+    let client = NifiClient::connect(&ctx(server.uri())).await.unwrap();
+    let result: AccessFetchResult =
+        fetch_component_access(&client, NodeKind::Processor, "abc-123").await;
+    assert_eq!(result.outcomes.len(), 5);
+    // Filter out connect-bootstrap calls; the 5 fetcher calls must all have fired.
+    let policy_calls: Vec<_> = server
+        .received_requests()
+        .await
+        .unwrap()
+        .into_iter()
+        .filter(|r| r.url.path().starts_with("/nifi-api/policies/"))
+        .collect();
+    assert_eq!(policy_calls.len(), 5);
+}
+
+#[tokio::test]
+async fn fetch_component_access_skips_inapplicable_axes_for_cs() {
+    let server = MockServer::start().await;
+    stub_login_and_about(&server).await;
+    for path_str in [
+        "/nifi-api/policies/read/controller-services/cs-1",
+        "/nifi-api/policies/write/controller-services/cs-1",
+        "/nifi-api/policies/write/policies/controller-services/cs-1",
+    ] {
+        Mock::given(method("GET"))
+            .and(path(path_str))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "component": { "resource": "/controller-services/cs-1", "users": [], "userGroups": [] }
+            })))
+            .mount(&server)
+            .await;
+    }
+    let client = NifiClient::connect(&ctx(server.uri())).await.unwrap();
+    let _ = fetch_component_access(&client, NodeKind::ControllerService, "cs-1").await;
+    // ViewData and Operate axes do not apply → only 3 policy requests.
+    let policy_calls: Vec<_> = server
+        .received_requests()
+        .await
+        .unwrap()
+        .into_iter()
+        .filter(|r| r.url.path().starts_with("/nifi-api/policies/"))
+        .collect();
+    assert_eq!(policy_calls.len(), 3);
 }
