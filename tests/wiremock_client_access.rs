@@ -263,3 +263,57 @@ async fn fetch_component_access_skips_inapplicable_axes_for_cs() {
         .collect();
     assert_eq!(policy_calls.len(), 3);
 }
+
+// ── unit tests: observe_audit_state (pure function, no wiremock) ──────────────
+
+use nifi_lens::client::access::observe_audit_state;
+use nifi_lens::cluster::AccessAuditState;
+
+#[test]
+fn observe_audit_state_promotes_unknown_to_supported_on_200() {
+    assert_eq!(
+        observe_audit_state(
+            AccessAuditState::Unknown,
+            &AxisOutcome::Direct {
+                users: vec![],
+                groups: vec![],
+            }
+        ),
+        AccessAuditState::Supported,
+    );
+}
+
+#[test]
+fn observe_audit_state_marks_unsupported_on_unauthorizer_409() {
+    let outcome =
+        AxisOutcome::Error("Status { status: 409, body: \"No authorizer configured\" }".into());
+    assert_eq!(
+        observe_audit_state(AccessAuditState::Unknown, &outcome),
+        AccessAuditState::Unsupported,
+    );
+}
+
+#[test]
+fn observe_audit_state_does_not_demote_supported_on_403() {
+    // Per-axis 403 means caller lacks read on /policies/{...}; it is
+    // NOT a global auth-disabled signal.
+    let outcome = AxisOutcome::Forbidden;
+    assert_eq!(
+        observe_audit_state(AccessAuditState::Supported, &outcome),
+        AccessAuditState::Supported,
+    );
+}
+
+#[test]
+fn observe_audit_state_unknown_to_unsupported_on_blanket_403() {
+    // From an unsecured (HTTP) NiFi the very first call returns
+    // Forbidden — represented as Error with the canonical body string.
+    let outcome = AxisOutcome::Error(
+        "Status { status: 403, body: \"Access is denied. Contact the system administrator.\" }"
+            .into(),
+    );
+    assert_eq!(
+        observe_audit_state(AccessAuditState::Unknown, &outcome),
+        AccessAuditState::Unsupported,
+    );
+}

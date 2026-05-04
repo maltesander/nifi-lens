@@ -93,6 +93,57 @@ fn tenant_ref_from_entity(e: TenantEntity) -> TenantRef {
     }
 }
 
+use crate::cluster::AccessAuditState;
+
+/// Folds an axis outcome into the cluster-wide `AccessAuditState`.
+///
+/// Rules (see spec §Auth-Disabled Detection):
+/// - Any successful outcome → `Supported`.
+/// - From `Unknown`: an `Error` whose message contains "no authorizer"
+///   / "not configurable" (a 409) → `Unsupported`.
+/// - From `Unknown`: an `Error` whose message contains the canonical
+///   "Access is denied. Contact the system administrator" body
+///   (an unsecured-NiFi 403 with no real authorizer) → `Unsupported`.
+/// - Per-axis `Forbidden` (a real 403 from a configured authorizer
+///   where the *caller* lacks read on `/policies/...`) is NOT a
+///   global signal — leave the state alone.
+/// - All other transitions: state unchanged.
+pub fn observe_audit_state(current: AccessAuditState, outcome: &AxisOutcome) -> AccessAuditState {
+    match outcome {
+        AxisOutcome::Direct { .. } | AxisOutcome::Inherited { .. } | AxisOutcome::None => {
+            AccessAuditState::Supported
+        }
+        AxisOutcome::Error(body) if current == AccessAuditState::Unknown => {
+            let lower = body.to_lowercase();
+            if lower.contains("no authorizer")
+                || lower.contains("not configurable")
+                || lower.contains("access is denied. contact the system administrator")
+            {
+                AccessAuditState::Unsupported
+            } else {
+                current
+            }
+        }
+        _ => current,
+    }
+}
+
+/// Run the fan-out and return both the outcomes and the new audit
+/// state. Caller folds the new state into `ClusterStore.access_audit`.
+pub async fn fetch_component_access_with_audit(
+    client: &NifiClient,
+    kind: crate::client::NodeKind,
+    id: &str,
+    current_audit: AccessAuditState,
+) -> (AccessFetchResult, AccessAuditState) {
+    let result = fetch_component_access(client, kind, id).await;
+    let new_audit = result
+        .outcomes
+        .values()
+        .fold(current_audit, observe_audit_state);
+    (result, new_audit)
+}
+
 /// Per-component result from `fetch_component_access`. Holds one outcome
 /// per axis; inapplicable axes carry `AxisOutcome::NotApplicable`.
 #[derive(Debug, Clone, Default)]
