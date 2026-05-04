@@ -88,3 +88,110 @@ async fn fetch_axis_returns_direct_when_response_resource_matches() {
         other => panic!("expected Direct, got {other:?}"),
     }
 }
+
+#[tokio::test]
+async fn fetch_axis_flags_inherited_when_response_resource_differs() {
+    let server = MockServer::start().await;
+    stub_login_and_about(&server).await;
+
+    Mock::given(method("GET"))
+        .and(path("/nifi-api/policies/read/processors/abc-123"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+            "component": {
+                "resource": "/process-groups/parent-pg",
+                "action": "read",
+                "users": [{ "id": "u1", "component": { "id": "u1", "identity": "alice@corp" } }],
+                "userGroups": []
+            }
+        })))
+        .mount(&server)
+        .await;
+
+    let client = NifiClient::connect(&ctx(server.uri())).await.unwrap();
+    let outcome = fetch_axis(&client, Axis::ViewComponent, NodeKind::Processor, "abc-123")
+        .await
+        .unwrap();
+
+    match outcome {
+        AxisOutcome::Inherited { source, users, .. } => {
+            assert_eq!(source, "/process-groups/parent-pg");
+            assert_eq!(users[0].identity, "alice@corp");
+        }
+        other => panic!("expected Inherited, got {other:?}"),
+    }
+}
+
+#[tokio::test]
+async fn fetch_axis_returns_none_on_404() {
+    let server = MockServer::start().await;
+    stub_login_and_about(&server).await;
+
+    Mock::given(method("GET"))
+        .and(path("/nifi-api/policies/read/processors/abc-123"))
+        .respond_with(ResponseTemplate::new(404))
+        .mount(&server)
+        .await;
+
+    let client = NifiClient::connect(&ctx(server.uri())).await.unwrap();
+    let outcome = fetch_axis(&client, Axis::ViewComponent, NodeKind::Processor, "abc-123")
+        .await
+        .unwrap();
+    assert_eq!(outcome, AxisOutcome::None);
+}
+
+#[tokio::test]
+async fn fetch_axis_returns_forbidden_on_403() {
+    let server = MockServer::start().await;
+    stub_login_and_about(&server).await;
+
+    Mock::given(method("GET"))
+        .and(path("/nifi-api/policies/read/processors/abc-123"))
+        .respond_with(ResponseTemplate::new(403))
+        .mount(&server)
+        .await;
+
+    let client = NifiClient::connect(&ctx(server.uri())).await.unwrap();
+    let outcome = fetch_axis(&client, Axis::ViewComponent, NodeKind::Processor, "abc-123")
+        .await
+        .unwrap();
+    assert_eq!(outcome, AxisOutcome::Forbidden);
+}
+
+#[tokio::test]
+async fn fetch_axis_returns_error_on_5xx() {
+    let server = MockServer::start().await;
+    stub_login_and_about(&server).await;
+
+    Mock::given(method("GET"))
+        .and(path("/nifi-api/policies/read/processors/abc-123"))
+        .respond_with(ResponseTemplate::new(503))
+        .mount(&server)
+        .await;
+
+    let client = NifiClient::connect(&ctx(server.uri())).await.unwrap();
+    let outcome = fetch_axis(&client, Axis::ViewComponent, NodeKind::Processor, "abc-123")
+        .await
+        .unwrap();
+    assert!(matches!(outcome, AxisOutcome::Error(_)));
+}
+
+#[tokio::test]
+async fn fetch_axis_returns_not_applicable_without_request() {
+    let server = MockServer::start().await;
+    stub_login_and_about(&server).await;
+
+    let client = NifiClient::connect(&ctx(server.uri())).await.unwrap();
+    let outcome = fetch_axis(&client, Axis::ViewData, NodeKind::ControllerService, "cs-1")
+        .await
+        .unwrap();
+    assert_eq!(outcome, AxisOutcome::NotApplicable);
+    // Only the login + about + cluster-summary calls from NifiClient::connect
+    // should have fired; the fetcher must not have issued any policy request.
+    let reqs = server.received_requests().await.unwrap();
+    let connect_paths = ["/access/token", "/flow/about", "/flow/cluster/summary"];
+    assert!(
+        reqs.iter()
+            .all(|r| connect_paths.iter().any(|p| r.url.path().contains(p))),
+        "unexpected policy request fired: {reqs:?}"
+    );
+}
