@@ -2,6 +2,7 @@
 
 use crate::view::browser::state::access_modal::Axis;
 
+/// Whether a `/tenants/*` lookup targets a user or a user group.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum IdentityKind {
     User,
@@ -22,6 +23,8 @@ pub struct IdentityGrant {
     pub source: GrantSource,
 }
 
+/// Render bucket for the drill-in modal — resources with a known
+/// kind segment land in their own section; everything else is `Global`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ResourceBucket {
     ProcessGroups,
@@ -37,6 +40,7 @@ pub enum ResourceBucket {
     Global,
 }
 
+/// How an identity gained a grant — directly, or via group membership.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum GrantSource {
     Direct,
@@ -69,6 +73,7 @@ impl ResourceBucket {
         }
     }
 
+    /// User-facing section label for the drill-in modal.
     pub fn header(self) -> &'static str {
         match self {
             Self::ProcessGroups => "Process groups",
@@ -105,6 +110,8 @@ fn resource_axis_segment(resource: &str) -> &str {
         "/operate"
     } else if resource.starts_with("/policies/") {
         "/policies"
+    } else if resource.starts_with("/provenance-data/") {
+        "/data"
     } else {
         ""
     }
@@ -167,6 +174,11 @@ mod tests {
         assert_eq!(
             axis_from_action_and_resource("read", "/flow"),
             Some(Axis::ViewComponent)
+        );
+        assert_eq!(
+            axis_from_action_and_resource("read", "/provenance-data/processors/abc"),
+            Some(Axis::ViewData),
+            "/provenance-data/* must resolve to ViewData (same axis as /data/*)"
         );
     }
 }

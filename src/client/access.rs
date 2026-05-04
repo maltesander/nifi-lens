@@ -158,6 +158,9 @@ use crate::view::browser::state::identity_modal::{
     GrantSource, IdentityGrant, IdentityKind, ResourceBucket, axis_from_action_and_resource,
 };
 
+/// Drill-in result returned by `fetch_identity_grants`. Bundles the
+/// resolved identity name, every grant the identity has cluster-wide,
+/// and (for users) the list of groups the user belongs to.
 #[derive(Debug, Clone, Default)]
 pub struct IdentityFetchResult {
     pub identity: String,
@@ -237,10 +240,9 @@ fn grant_from_summary(
 ) -> Option<IdentityGrant> {
     let component = summary.component?;
     let resource = component.resource?;
-    // action is an enum — convert to &str for the axis resolver
-    let action = component.action?.as_str().to_owned();
+    let action = component.action?;
     Some(IdentityGrant {
-        axis: axis_from_action_and_resource(&action, &resource),
+        axis: axis_from_action_and_resource(action.as_str(), &resource),
         bucket: ResourceBucket::from_resource(&resource),
         resource,
         source: GrantSource::Direct,
@@ -252,10 +254,9 @@ fn grant_from_entity(
 ) -> Option<IdentityGrant> {
     let component = entity.component?;
     let resource = component.resource?;
-    // action is an enum — convert to &str for the axis resolver
-    let action = component.action?.as_str().to_owned();
+    let action = component.action?;
     Some(IdentityGrant {
-        axis: axis_from_action_and_resource(&action, &resource),
+        axis: axis_from_action_and_resource(action.as_str(), &resource),
         bucket: ResourceBucket::from_resource(&resource),
         resource,
         source: GrantSource::Direct,

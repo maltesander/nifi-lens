@@ -380,4 +380,8 @@ async fn fetch_identity_grants_for_group() {
         .unwrap();
     assert_eq!(result.identity, "ops-team");
     assert_eq!(result.grants.len(), 1);
+    assert!(
+        result.group_memberships.is_empty(),
+        "groups must not have group_memberships"
+    );
 }
