@@ -5,6 +5,7 @@
 //! login time. The wrapped client is exposed via `Deref` so callers can write
 //! `client.flow().get_about_info()` without an explicit accessor.
 
+pub mod access;
 pub mod browser;
 pub mod build;
 pub mod events;
