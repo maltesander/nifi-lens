@@ -8,6 +8,10 @@ use crate::view::browser::state::access_modal::{Axis, AxisOutcome, TenantRef, ax
 use nifi_rust_client::NifiError;
 use nifi_rust_client::dynamic::types::TenantEntity;
 
+/// Calls `GET /nifi-api/policies/{action}/{resource}`. Maps 404 →
+/// `AxisOutcome::None`, 403 → `AxisOutcome::Forbidden`, other errors
+/// → `AxisOutcome::Error`.
+///
 /// Fetch a single axis for one component. Returns
 /// `AxisOutcome::NotApplicable` when the axis does not apply to the
 /// kind (without making a request).
