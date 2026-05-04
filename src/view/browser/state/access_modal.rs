@@ -18,6 +18,7 @@ pub enum Axis {
 }
 
 impl Axis {
+    /// All five axes in display order.
     pub const ALL: [Axis; 5] = [
         Axis::ViewComponent,
         Axis::ModifyComponent,
@@ -37,9 +38,7 @@ impl Axis {
         }
     }
 
-    /// `(action, resource_prefix)` pair. The full resource is
-    /// `format!("/{prefix}{maybe_node_kind}/{id}")` — see
-    /// `axis_resource()` for the assembly helper.
+    /// NiFi action string for this axis: `"read"` or `"write"`.
     pub fn action(self) -> &'static str {
         match self {
             Self::ViewComponent | Self::ViewData => "read",
@@ -47,7 +46,9 @@ impl Axis {
         }
     }
 
-    pub fn resource_prefix(self) -> &'static str {
+    /// Leading path segment inserted before the component-kind slug;
+    /// empty for view/modify which target the bare resource.
+    pub(crate) fn resource_prefix(self) -> &'static str {
         match self {
             Self::ViewComponent | Self::ModifyComponent => "",
             Self::ViewData => "/data",
@@ -60,6 +61,9 @@ impl Axis {
     /// Empty axes render `—` in every cell instead of being fetched.
     pub fn applies_to(self, kind: NodeKind) -> bool {
         use NodeKind::*;
+        if matches!(kind, Folder(_)) {
+            return false;
+        }
         match self {
             Self::ViewComponent | Self::ModifyComponent | Self::ManagePolicies => true,
             Self::ViewData => {
@@ -80,7 +84,7 @@ impl Axis {
 
 /// Resource path segment for a component kind (the `{resource}` slot
 /// in `/policies/{action}/{resource}/{id}`).
-pub fn node_kind_resource(kind: NodeKind) -> &'static str {
+pub(crate) fn node_kind_resource(kind: NodeKind) -> &'static str {
     use NodeKind::*;
     match kind {
         ProcessGroup => "process-groups",
@@ -136,6 +140,8 @@ pub enum AxisOutcome {
     NotApplicable,
 }
 
+/// A user or group identity returned in a NiFi
+/// `/policies/{action}/{resource}` response.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct TenantRef {
     pub id: String,
@@ -182,6 +188,15 @@ mod tests {
         assert_eq!(
             axis_resource(Axis::ViewData, NodeKind::ControllerService, "abc-123"),
             None
+        );
+        assert_eq!(
+            axis_resource(
+                Axis::ViewComponent,
+                NodeKind::Folder(crate::client::FolderKind::Queues),
+                "id"
+            ),
+            None,
+            "Folder must always return None to prevent malformed paths",
         );
     }
 }
