@@ -210,6 +210,50 @@ impl ModalGate for BrowserPeekGate {
     }
 }
 
+/// Browser access (matrix) modal (`src/view/browser/render/access_modal.rs`).
+pub struct AccessModalGate;
+
+impl ModalGate for AccessModalGate {
+    type V = crate::input::AccessModalVerb;
+
+    fn host_view() -> ViewId {
+        ViewId::Browser
+    }
+
+    fn is_active(state: &AppState) -> bool {
+        // Active only when no deeper modal is open. The
+        // IdentityModalGate takes precedence — chained ahead in
+        // KeyMap::translate.
+        state.browser.access_modal.is_some()
+            && state.browser.identity_modal.is_none()
+            && state.modal.is_none()
+    }
+
+    fn to_view_verb(v: Self::V) -> ViewVerb {
+        ViewVerb::AccessModal(v)
+    }
+}
+
+/// Browser identity drill-in modal (`src/view/browser/render/identity_modal.rs`).
+/// Stacks on top of `AccessModalGate`.
+pub struct IdentityModalGate;
+
+impl ModalGate for IdentityModalGate {
+    type V = crate::input::IdentityModalVerb;
+
+    fn host_view() -> ViewId {
+        ViewId::Browser
+    }
+
+    fn is_active(state: &AppState) -> bool {
+        state.browser.identity_modal.is_some() && state.modal.is_none()
+    }
+
+    fn to_view_verb(v: Self::V) -> ViewVerb {
+        ViewVerb::IdentityModal(v)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

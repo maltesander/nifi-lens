@@ -268,6 +268,16 @@ pub struct BrowserState {
     /// Aborted on selection change, tab switch, or before the dispatcher
     /// spawns a new one.
     pub sparkline_handle: Option<crate::app::worker::AbortOnDrop>,
+    /// Open access (matrix) modal state. `None` while closed.
+    pub access_modal: Option<crate::view::browser::state::access_modal::AccessModalState>,
+    /// Live worker handle for the access modal's 5-axis fan-out.
+    /// Aborted on close / refresh.
+    pub access_modal_handle: Option<crate::app::worker::AbortOnDrop>,
+    /// Open identity drill-in modal. `None` while closed. Only opens
+    /// while `access_modal` is `Some`.
+    pub identity_modal: Option<crate::view::browser::state::identity_modal::IdentityModalState>,
+    /// Live worker handle for the identity modal's `tenants/{id}` fetch.
+    pub identity_modal_handle: Option<crate::app::worker::AbortOnDrop>,
 }
 
 /// One segment in the breadcrumb path.

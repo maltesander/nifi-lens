@@ -19,10 +19,10 @@ pub mod verb;
 // touching callers.
 pub use action::{AppAction, FocusAction, GoTarget, HistoryAction, TabAction};
 pub use verb::{
-    ActionHistoryModalVerb, BrowserPeekVerb, BrowserQueueVerb, BrowserVerb, BulletinsVerb,
-    CommonVerb, ContentModalVerb, EventsVerb, EventsWatchVerb, FilterField,
-    OverviewReportingTasksVerb, OverviewVerb, ParameterContextModalVerb, Severity, TracerVerb,
-    VersionControlModalVerb, ViewVerb,
+    AccessModalVerb, ActionHistoryModalVerb, BrowserPeekVerb, BrowserQueueVerb, BrowserVerb,
+    BulletinsVerb, CommonVerb, ContentModalVerb, EventsVerb, EventsWatchVerb, FilterField,
+    IdentityModalVerb, OverviewReportingTasksVerb, OverviewVerb, ParameterContextModalVerb,
+    Severity, TracerVerb, VersionControlModalVerb, ViewVerb,
 };
 
 // ---------------------------------------------------------------------------
@@ -251,8 +251,9 @@ impl KeyMap {
         // be open on a given tab at a time, and an app-wide modal blocks
         // all of them via `state.modal.is_none()` inside each gate).
         use crate::input::modal_gate::{
-            self, ActionHistoryModalGate, BrowserPeekGate, ContentModalGate,
-            OverviewReportingTasksModalGate, ParameterContextModalGate, VersionControlModalGate,
+            self, AccessModalGate, ActionHistoryModalGate, BrowserPeekGate, ContentModalGate,
+            IdentityModalGate, OverviewReportingTasksModalGate, ParameterContextModalGate,
+            VersionControlModalGate,
         };
         if let Some(ev) = modal_gate::try_dispatch::<ContentModalGate>(state, key) {
             return ev;
@@ -270,6 +271,12 @@ impl KeyMap {
             return ev;
         }
         if let Some(ev) = modal_gate::try_dispatch::<BrowserPeekGate>(state, key) {
+            return ev;
+        }
+        if let Some(ev) = modal_gate::try_dispatch::<IdentityModalGate>(state, key) {
+            return ev;
+        }
+        if let Some(ev) = modal_gate::try_dispatch::<AccessModalGate>(state, key) {
             return ev;
         }
 
