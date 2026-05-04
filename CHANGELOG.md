@@ -9,6 +9,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Browser: new **Access** modal (`u`) showing who can view / modify /
+  view-data / operate / manage-policies on the selected UUID-bearing
+  component (process group, processor, controller service, ports, RPG,
+  connection). Pressing `Enter` on a user or group drills into a
+  per-identity view of every (action, resource) grant cluster-wide, with
+  cross-links back to Browser arena entries for resolvable resources.
+  Read-only. Gracefully disables on clusters with no authorizer configured.
 - **Reporting tasks visibility on Overview**: a Components-panel row showing
   `running / stopped / invalid` counts plus a `t`-launched master-detail
   modal with properties, validation errors, parameter-ref annotations, and

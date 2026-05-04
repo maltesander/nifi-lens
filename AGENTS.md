@@ -271,6 +271,24 @@ already covered there.
   modal snapshots `GroupKey` + `GroupDetails` on open so subsequent
   ring mutations don't disturb it; `Enter` is intentionally a no-op
   inside it.
+- **Access modal — inheritance & auth-disabled** —
+  `BrowserVerb::OpenAccess` (`u`) opens a 5-axis matrix modal whose
+  worker fans out
+  `client.policies().get_access_policy_for_resource(action, resource)`
+  via `buffer_unordered(5)`. **Inheritance is detected by comparing
+  `response.component.resource` to the requested resource** — when they
+  differ, the cell renders `↑` and the source is annotated.
+  **Single-user-authorizer is not Unsupported**: it returns 200 with
+  the implicit admin policy and the matrix renders correctly with a
+  single identity. `AccessAuditState::Unsupported` only fires on 409
+  ("no authorizer configured") or a blanket 403 ("Access is denied.
+  Contact the system administrator") from an unsecured NiFi — same
+  general detection lineage as
+  `cluster/fetcher_tasks.rs::error_is_standalone_409`. Drill-in uses
+  inline `accessPolicies` on `UserDto` / `UserGroupDto` so a single
+  `tenants/{...}/{id}` call is sufficient. Two `ModalGate` impls chain
+  in `KeyMap::translate` with `IdentityModalGate` ahead of
+  `AccessModalGate` (deeper modal wins).
 - **Action history paginator** — worker eagerly fetches page one then
   sleeps on a `tokio::sync::Notify` until the reducer wakes it. 100
   rows/page; auto-load when viewport bottom is within 10 of the loaded
