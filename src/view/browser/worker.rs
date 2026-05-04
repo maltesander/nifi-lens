@@ -569,6 +569,77 @@ pub fn spawn_flowfile_peek_fetch(
     })
 }
 
+/// One-shot 5-axis access fetch for the access matrix modal. Emits
+/// `BrowserPayload::AccessModalLoaded` on success (per-axis errors are
+/// encoded inside `AccessFetchResult`; only a catastrophic worker failure
+/// emits `AccessModalFailed`).
+pub fn spawn_access_modal_fetch(
+    client: Arc<RwLock<NifiClient>>,
+    tx: mpsc::Sender<AppEvent>,
+    component_kind: crate::client::NodeKind,
+    component_id: String,
+    current_audit: crate::cluster::AccessAuditState,
+) -> JoinHandle<()> {
+    tokio::task::spawn_local(async move {
+        let guard = client.read().await;
+        let (result, audit) = crate::client::access::fetch_component_access_with_audit(
+            &guard,
+            component_kind,
+            &component_id,
+            current_audit,
+        )
+        .await;
+        drop(guard);
+        let _ = tx
+            .send(AppEvent::Data(ViewPayload::Browser(
+                BrowserPayload::AccessModalLoaded {
+                    component_id,
+                    result,
+                    audit,
+                },
+            )))
+            .await;
+    })
+}
+
+/// One-shot identity drill-in fetch. Emits `BrowserPayload::IdentityModalLoaded`
+/// on success or `BrowserPayload::IdentityModalFailed` on error.
+pub fn spawn_identity_modal_fetch(
+    client: Arc<RwLock<NifiClient>>,
+    tx: mpsc::Sender<AppEvent>,
+    identity_kind: crate::view::browser::state::identity_modal::IdentityKind,
+    identity_id: String,
+) -> JoinHandle<()> {
+    tokio::task::spawn_local(async move {
+        let result = {
+            let guard = client.read().await;
+            crate::client::access::fetch_identity_grants(&guard, identity_kind, &identity_id).await
+        };
+        match result {
+            Ok(result) => {
+                let _ = tx
+                    .send(AppEvent::Data(ViewPayload::Browser(
+                        BrowserPayload::IdentityModalLoaded {
+                            identity_id,
+                            result,
+                        },
+                    )))
+                    .await;
+            }
+            Err(e) => {
+                let _ = tx
+                    .send(AppEvent::Data(ViewPayload::Browser(
+                        BrowserPayload::IdentityModalFailed {
+                            identity_id,
+                            err: format!("{e}"),
+                        },
+                    )))
+                    .await;
+            }
+        }
+    })
+}
+
 /// Owns the polling worker's `JoinHandle` plus the listing-request id
 /// once the worker has POSTed it. Drop aborts the worker and (if a
 /// request id is known) fires `DELETE /flowfile-queues/{q}/listing-requests/{r}`

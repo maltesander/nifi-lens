@@ -407,6 +407,33 @@ pub async fn run(
                     state.browser.action_history_modal_handle =
                         Some(crate::app::worker::AbortOnDrop::new(h));
                 }
+                PendingIntent::SpawnAccessModalFetch {
+                    component_id,
+                    component_kind,
+                } => {
+                    let h = crate::view::browser::worker::spawn_access_modal_fetch(
+                        client.clone(),
+                        tx.clone(),
+                        component_kind,
+                        component_id,
+                        state.cluster.access_audit,
+                    );
+                    state.browser.access_modal_handle =
+                        Some(crate::app::worker::AbortOnDrop::new(h));
+                }
+                PendingIntent::SpawnIdentityModalFetch {
+                    identity_id,
+                    identity_kind,
+                } => {
+                    let h = crate::view::browser::worker::spawn_identity_modal_fetch(
+                        client.clone(),
+                        tx.clone(),
+                        identity_kind,
+                        identity_id,
+                    );
+                    state.browser.identity_modal_handle =
+                        Some(crate::app::worker::AbortOnDrop::new(h));
+                }
                 PendingIntent::SpawnSparklineFetchLoop { kind, id, cadence } => {
                     let h = crate::view::browser::worker::spawn_sparkline_fetch_loop(
                         client.clone(),

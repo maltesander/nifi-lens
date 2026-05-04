@@ -2420,6 +2420,47 @@ pub(crate) fn handle_browser_payload(state: &mut AppState, payload: crate::event
                 peek.apply_error(&queue_id, &uuid, err);
             }
         }
+        BrowserPayload::AccessModalLoaded {
+            component_id,
+            result,
+            audit,
+        } => {
+            state.cluster.access_audit = audit;
+            if let Some(modal) = state.browser.access_modal.as_mut()
+                && modal.component_id == component_id
+            {
+                modal.apply_fetch(result);
+                state.browser.access_modal_handle = None;
+            }
+        }
+        BrowserPayload::AccessModalFailed { component_id, err } => {
+            if let Some(modal) = state.browser.access_modal.as_mut()
+                && modal.component_id == component_id
+            {
+                modal.status = crate::view::browser::state::access_modal::ModalStatus::Failed(err);
+                state.browser.access_modal_handle = None;
+            }
+        }
+        BrowserPayload::IdentityModalLoaded {
+            identity_id,
+            result,
+        } => {
+            if let Some(modal) = state.browser.identity_modal.as_mut()
+                && modal.identity_id == identity_id
+            {
+                modal.apply_fetch(result);
+                state.browser.identity_modal_handle = None;
+            }
+        }
+        BrowserPayload::IdentityModalFailed { identity_id, err } => {
+            if let Some(modal) = state.browser.identity_modal.as_mut()
+                && modal.identity_id == identity_id
+            {
+                modal.status =
+                    crate::view::browser::state::identity_modal::IdentityStatus::Failed(err);
+                state.browser.identity_modal_handle = None;
+            }
+        }
     }
 }
 
