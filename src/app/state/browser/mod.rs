@@ -227,10 +227,35 @@ impl ViewKeyHandler for BrowserHandler {
                 | CommonVerb::SearchPrev
                 | CommonVerb::Close,
             ) => {}
-            // T16 will wire the real dispatch; placeholder keeps the match
-            // exhaustive until then.
             BrowserVerb::OpenAccess => {
-                return Some(UpdateResult::default());
+                // Defensive: enabled() gates this verb to UUID-bearing rows in
+                // Browser when access auditor is supported. Belt-and-suspenders
+                // mirroring the OpenActionHistory pattern.
+                let Some(component_id) = state.browser.selected_component_id() else {
+                    return Some(UpdateResult::default());
+                };
+                let Some(&arena_idx) = state.browser.visible.get(state.browser.selected) else {
+                    return Some(UpdateResult::default());
+                };
+                let node = &state.browser.nodes[arena_idx];
+                let kind = match node.kind {
+                    crate::client::NodeKind::Folder(_) => return Some(UpdateResult::default()),
+                    other => other,
+                };
+                let label = node.name.clone();
+                state
+                    .browser
+                    .open_access_modal(component_id.clone(), kind, label);
+                return Some(UpdateResult {
+                    redraw: true,
+                    intent: Some(super::PendingIntent::SpawnAccessModalFetch {
+                        component_id,
+                        component_kind: kind,
+                    }),
+                    tracer_followup: None,
+                    sparkline_followup: None,
+                    queue_listing_followup: None,
+                });
             }
         }
         Some(UpdateResult {

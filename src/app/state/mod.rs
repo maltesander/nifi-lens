@@ -868,6 +868,19 @@ pub enum PendingIntent {
     /// explicit variant so future observability hooks have a clean hook
     /// point.
     DropQueueListing,
+    /// Spawn the Browser access modal's 5-axis fan-out worker. Handle
+    /// stored on `BrowserState.access_modal_handle`. Aborted on close /
+    /// refresh / context switch.
+    SpawnAccessModalFetch {
+        component_id: String,
+        component_kind: crate::client::NodeKind,
+    },
+    /// Spawn the Browser identity-drill-in worker. Handle stored on
+    /// `BrowserState.identity_modal_handle`. Aborted on close.
+    SpawnIdentityModalFetch {
+        identity_id: String,
+        identity_kind: crate::view::browser::state::identity_modal::IdentityKind,
+    },
     Quit,
 }
 

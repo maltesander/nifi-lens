@@ -3865,3 +3865,26 @@ fn selected_component_id_returns_none_for_non_watch_kinds() {
         );
     }
 }
+
+// ---------------------------------------------------------------------------
+// OpenAccess dispatch arm
+// ---------------------------------------------------------------------------
+
+#[test]
+fn open_access_emits_spawn_intent_and_opens_modal() {
+    use crate::cluster::AccessAuditState;
+    use crate::input::{BrowserVerb, ViewVerb};
+
+    let mut state = make_state_with_processor_selected("proc-1", "FetchKafka");
+    state.cluster.access_audit = AccessAuditState::Supported;
+    let result =
+        BrowserHandler::handle_verb(&mut state, ViewVerb::Browser(BrowserVerb::OpenAccess))
+            .expect("handled");
+    assert!(result.redraw);
+    assert!(state.browser.access_modal.is_some());
+    let intent = result.intent.expect("intent emitted");
+    assert!(
+        matches!(intent, PendingIntent::SpawnAccessModalFetch { .. }),
+        "expected SpawnAccessModalFetch, got {intent:?}",
+    );
+}
