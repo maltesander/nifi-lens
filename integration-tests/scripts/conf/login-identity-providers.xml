@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<!--
+  Single-user login provider for the nifilens integration test fixture.
+  Hash is bcrypt for "adminpassword123" (cost 12). Test fixture only -
+  do not reuse anywhere else.
+-->
+<loginIdentityProviders>
+    <provider>
+        <identifier>single-user-provider</identifier>
+        <class>org.apache.nifi.authentication.single.user.SingleUserLoginIdentityProvider</class>
+        <property name="Username">admin</property>
+        <property name="Password">$2b$12$nPwn07nSDqjtL5jY0cWUAuNi0Dg850NLGpa59PXjfD1qQkFPB2iEq</property>
+    </provider>
+</loginIdentityProviders>

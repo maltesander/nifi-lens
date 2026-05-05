@@ -1,5 +1,6 @@
 //! nifilens-fixture-seeder entry point.
 
+mod access_fixture;
 mod cleanup;
 mod cli;
 mod entities;
@@ -106,8 +107,10 @@ async fn run(args: Args) -> Result<(), SeederError> {
         return Ok(());
     }
 
+    access_fixture::bootstrap_admin_policies(&client).await?;
     cleanup::nuke_and_repave(&client).await?;
     fixture::seed(&client, client.detected_version(), args.break_after).await?;
+    access_fixture::seed(&client).await?;
 
     Ok(())
 }

@@ -16,6 +16,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   per-identity view of every (action, resource) grant cluster-wide, with
   cross-links back to Browser arena entries for resolvable resources.
   Read-only. Gracefully disables on clusters with no authorizer configured.
+
+### Changed
+
+- Integration test fixture switched from NiFi `single-user-authorizer` to
+  `managed-authorizer` with file-based providers. Now seeded with `admin`
+  / `alice` / `bob` / `carol` users and an `ops-team` group, plus
+  realistic component-level policies on the `orders-pipeline` and
+  `versioned-clean` PGs. Live integration coverage now exercises the
+  access-policies-audit feature end-to-end
+  (`tests/integration_browser_access.rs`).
 - **Reporting tasks visibility on Overview**: a Components-panel row showing
   `running / stopped / invalid` counts plus a `t`-launched master-detail
   modal with properties, validation errors, parameter-ref annotations, and
