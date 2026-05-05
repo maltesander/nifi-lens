@@ -271,6 +271,42 @@ already covered there.
   modal snapshots `GroupKey` + `GroupDetails` on open so subsequent
   ring mutations don't disturb it; `Enter` is intentionally a no-op
   inside it.
+- **Access fixture (managed-authorizer)** — the integration test fixture
+  runs NiFi's `managed-authorizer` with `FileUserGroupProvider` +
+  `FileAccessPolicyProvider`. Two pre-baked XMLs in
+  `integration-tests/scripts/conf/` configure it; `users.xml` and
+  `authorizations.xml` are NOT pre-baked — NiFi auto-creates both on
+  first start using `Initial User Identity 1-5`
+  (admin/alice/bob/carol plus the cluster-node DN `CN=localhost`) and
+  `Initial Admin Identity = admin`
+  in `userGroupProvider`, plus `Node Identity 1 = CN=localhost` in
+  `accessPolicyProvider` to seed the `/proxy` write policy. The
+  cluster-node DN must be listed as `Initial User Identity X` in
+  `userGroupProvider` (not `Node Identity X`, which is silently ignored
+  there) for FileAccessPolicyProvider to find the user when seeding the
+  proxy policy. The bcrypt admin password hash uses `$2b$` prefix —
+  NiFi's `BCryptPasswordEncoder.matches` calls `verifyStrict` against
+  `VERSION_2B` and rejects `$2a$` hashes. The seeder's
+  `bootstrap_admin_policies` (in
+  `integration-tests/seeder/src/access_fixture.rs`) runs BEFORE
+  nuke-and-repave and grants admin per-root-PG policies that NiFi's
+  Initial Admin doesn't auto-create in clustered mode (the root PG
+  UUID isn't known when the FileAccessPolicyProvider initializes).
+  CN=localhost is added alongside admin on every fixture-side `/data`
+  policy because cluster federation walks the proxy chain and requires
+  *each* user in the chain to have access. `/data/process-groups`
+  inheritance only walks one level (component → parent PG), so
+  `grant_data_recursively` + `grant_component_data_recursively` walk
+  the full marker hierarchy and add explicit policies on every PG,
+  processor, and connection. Public input ports also need
+  `/data-transfer/input-ports/{id}` write per-port for the RPG → S2S
+  handshake to enumerate them (NiFi rejects a wildcard
+  `/data-transfer/input-ports` policy). The `seed_access_fixture` pass
+  creates the `ops-team` group via REST and attaches realistic
+  component-level policies on top. Cleanup intentionally does NOT
+  delete users or groups — they're persistent across seeder runs;
+  only PG-scoped policies get auto-deleted by NiFi when their parent
+  PGs are nuked.
 - **Access modal — inheritance & auth-disabled** —
   `BrowserVerb::OpenAccess` (`u`) opens a 5-axis matrix modal whose
   worker fans out

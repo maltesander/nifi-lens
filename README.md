@@ -710,6 +710,18 @@ audit / bulletin / queue evidence the demo investigates. Default is
 `0s` (immediate); the mutation is value-gated and idempotent, so
 re-running against an already-broken fixture is a no-op.
 
+**Authorizer:** the fixture uses NiFi's `managed-authorizer` with
+file-based providers. Four user identities are seeded (`admin`,
+`alice`, `bob`, `carol`) plus an `ops-team` group containing `alice`
+and `carol`. Only `admin` ever logs in (password `adminpassword123`);
+the other identities exist as policy targets so the **Access** modal
+renders meaningful forensic output. The seeder pass `seed_access_fixture`
+(in `integration-tests/seeder/src/access_fixture.rs`) attaches
+component-level policies — `ops-team` on `orders-pipeline` and `bob`
+on `versioned-clean` — on top of admin's bootstrap policies. All
+credentials in `integration-tests/` are test-fixture-only; do not reuse
+anywhere else.
+
 ## License
 
 Apache-2.0. See [`LICENSE`](LICENSE).
