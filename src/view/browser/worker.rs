@@ -735,7 +735,6 @@ mod tests {
     use std::sync::Arc;
 
     use tokio::sync::{RwLock, mpsc};
-    use tokio::task::LocalSet;
 
     use crate::client::NifiClient;
     use crate::event::{AppEvent, BrowserPayload, ViewPayload};
@@ -789,18 +788,9 @@ mod tests {
         let client = test_client(&server).await;
         let (tx, mut rx) = mpsc::channel::<AppEvent>(8);
 
-        let local = LocalSet::new();
-        local
-            .run_until(async {
-                let h = super::spawn_parameter_context_modal_fetch(
-                    client,
-                    tx,
-                    "pg-1".into(),
-                    "ctx-a".into(),
-                );
-                h.await.expect("worker completed");
-            })
-            .await;
+        let h =
+            super::spawn_parameter_context_modal_fetch(client, tx, "pg-1".into(), "ctx-a".into());
+        h.await.expect("worker completed");
 
         let ev = rx.recv().await.expect("event emitted");
         match ev {
@@ -851,39 +841,29 @@ mod tests {
         let client = test_client(&server).await;
         let (tx, mut rx) = mpsc::channel::<AppEvent>(8);
         let signal = Arc::new(Notify::new());
-        let local = tokio::task::LocalSet::new();
-
-        local
-            .run_until(async {
-                let h = super::spawn_action_history_modal_fetch(
-                    client,
-                    tx,
-                    "proc-1".into(),
-                    signal.clone(),
-                );
-                let ev = tokio::time::timeout(std::time::Duration::from_secs(2), rx.recv())
-                    .await
-                    .expect("event received in time")
-                    .expect("event present");
-                match ev {
-                    AppEvent::Data(ViewPayload::Browser(BrowserPayload::ActionHistoryPage {
-                        source_id,
-                        offset,
-                        actions,
-                        total,
-                    })) => {
-                        assert_eq!(source_id, "proc-1");
-                        assert_eq!(offset, 0);
-                        assert_eq!(actions.len(), 1);
-                        assert_eq!(actions[0].id, Some(42));
-                        assert_eq!(total, Some(1));
-                    }
-                    _ => panic!("expected ActionHistoryPage"),
-                }
-                // Worker exits because the paginator is exhausted; aborting is harmless.
-                h.abort();
-            })
-            .await;
+        let h =
+            super::spawn_action_history_modal_fetch(client, tx, "proc-1".into(), signal.clone());
+        let ev = tokio::time::timeout(std::time::Duration::from_secs(2), rx.recv())
+            .await
+            .expect("event received in time")
+            .expect("event present");
+        match ev {
+            AppEvent::Data(ViewPayload::Browser(BrowserPayload::ActionHistoryPage {
+                source_id,
+                offset,
+                actions,
+                total,
+            })) => {
+                assert_eq!(source_id, "proc-1");
+                assert_eq!(offset, 0);
+                assert_eq!(actions.len(), 1);
+                assert_eq!(actions[0].id, Some(42));
+                assert_eq!(total, Some(1));
+            }
+            _ => panic!("expected ActionHistoryPage"),
+        }
+        // Worker exits because the paginator is exhausted; aborting is harmless.
+        h.abort();
     }
 
     #[tokio::test(flavor = "current_thread")]
@@ -903,31 +883,22 @@ mod tests {
         let client = test_client(&server).await;
         let (tx, mut rx) = mpsc::channel::<AppEvent>(8);
         let signal = Arc::new(Notify::new());
-        let local = tokio::task::LocalSet::new();
-        local
-            .run_until(async {
-                let _h = super::spawn_action_history_modal_fetch(
-                    client,
-                    tx,
-                    "proc-1".into(),
-                    signal.clone(),
-                );
-                let ev = tokio::time::timeout(std::time::Duration::from_secs(2), rx.recv())
-                    .await
-                    .expect("event received")
-                    .expect("event present");
-                match ev {
-                    AppEvent::Data(ViewPayload::Browser(BrowserPayload::ActionHistoryError {
-                        source_id,
-                        err,
-                    })) => {
-                        assert_eq!(source_id, "proc-1");
-                        assert!(!err.is_empty());
-                    }
-                    _ => panic!("expected ActionHistoryError"),
-                }
-            })
-            .await;
+        let _h =
+            super::spawn_action_history_modal_fetch(client, tx, "proc-1".into(), signal.clone());
+        let ev = tokio::time::timeout(std::time::Duration::from_secs(2), rx.recv())
+            .await
+            .expect("event received")
+            .expect("event present");
+        match ev {
+            AppEvent::Data(ViewPayload::Browser(BrowserPayload::ActionHistoryError {
+                source_id,
+                err,
+            })) => {
+                assert_eq!(source_id, "proc-1");
+                assert!(!err.is_empty());
+            }
+            _ => panic!("expected ActionHistoryError"),
+        }
     }
 
     #[tokio::test(flavor = "current_thread")]
@@ -959,43 +930,38 @@ mod tests {
 
         let client = test_client(&server).await;
         let (tx, mut rx) = mpsc::channel::<AppEvent>(16);
-        let local = LocalSet::new();
-        local
-            .run_until(async {
-                let _h = super::spawn_sparkline_fetch_loop(
-                    client,
-                    tx,
-                    ComponentKind::Processor,
-                    "p-1".into(),
-                    std::time::Duration::from_millis(50),
+        let _h = super::spawn_sparkline_fetch_loop(
+            client,
+            tx,
+            ComponentKind::Processor,
+            "p-1".into(),
+            std::time::Duration::from_millis(50),
+        );
+        let ev = tokio::time::timeout(std::time::Duration::from_secs(2), rx.recv())
+            .await
+            .expect("first event")
+            .expect("event present");
+        match ev {
+            AppEvent::SparklineUpdate { kind, id, series } => {
+                assert!(matches!(kind, ComponentKind::Processor));
+                assert_eq!(id, "p-1");
+                assert_eq!(series.buckets[0].in_count, 0);
+            }
+            _ => panic!("expected SparklineUpdate"),
+        }
+        let ev = tokio::time::timeout(std::time::Duration::from_secs(2), rx.recv())
+            .await
+            .expect("second event")
+            .expect("event present");
+        match ev {
+            AppEvent::SparklineUpdate { series, .. } => {
+                assert_eq!(
+                    series.buckets[0].in_count, 10,
+                    "second tick must reflect updated mock counter"
                 );
-                let ev = tokio::time::timeout(std::time::Duration::from_secs(2), rx.recv())
-                    .await
-                    .expect("first event")
-                    .expect("event present");
-                match ev {
-                    AppEvent::SparklineUpdate { kind, id, series } => {
-                        assert!(matches!(kind, ComponentKind::Processor));
-                        assert_eq!(id, "p-1");
-                        assert_eq!(series.buckets[0].in_count, 0);
-                    }
-                    _ => panic!("expected SparklineUpdate"),
-                }
-                let ev = tokio::time::timeout(std::time::Duration::from_secs(2), rx.recv())
-                    .await
-                    .expect("second event")
-                    .expect("event present");
-                match ev {
-                    AppEvent::SparklineUpdate { series, .. } => {
-                        assert_eq!(
-                            series.buckets[0].in_count, 10,
-                            "second tick must reflect updated mock counter"
-                        );
-                    }
-                    _ => panic!("expected SparklineUpdate"),
-                }
-            })
-            .await;
+            }
+            _ => panic!("expected SparklineUpdate"),
+        }
     }
 
     #[tokio::test(flavor = "current_thread")]
@@ -1013,29 +979,24 @@ mod tests {
 
         let client = test_client(&server).await;
         let (tx, mut rx) = mpsc::channel::<AppEvent>(8);
-        let local = LocalSet::new();
-        local
-            .run_until(async {
-                let _h = super::spawn_sparkline_fetch_loop(
-                    client,
-                    tx,
-                    ComponentKind::Processor,
-                    "missing".into(),
-                    std::time::Duration::from_millis(50),
-                );
-                let ev = tokio::time::timeout(std::time::Duration::from_secs(2), rx.recv())
-                    .await
-                    .expect("event")
-                    .expect("event present");
-                match ev {
-                    AppEvent::SparklineEndpointMissing { kind, id } => {
-                        assert!(matches!(kind, ComponentKind::Processor));
-                        assert_eq!(id, "missing");
-                    }
-                    _ => panic!("expected SparklineEndpointMissing"),
-                }
-            })
-            .await;
+        let _h = super::spawn_sparkline_fetch_loop(
+            client,
+            tx,
+            ComponentKind::Processor,
+            "missing".into(),
+            std::time::Duration::from_millis(50),
+        );
+        let ev = tokio::time::timeout(std::time::Duration::from_secs(2), rx.recv())
+            .await
+            .expect("event")
+            .expect("event present");
+        match ev {
+            AppEvent::SparklineEndpointMissing { kind, id } => {
+                assert!(matches!(kind, ComponentKind::Processor));
+                assert_eq!(id, "missing");
+            }
+            _ => panic!("expected SparklineEndpointMissing"),
+        }
     }
 
     /// Verify the worker emits `ParameterContextModalFailed` when the
@@ -1056,18 +1017,13 @@ mod tests {
         let client = test_client(&server).await;
         let (tx, mut rx) = mpsc::channel::<AppEvent>(8);
 
-        let local = LocalSet::new();
-        local
-            .run_until(async {
-                let h = super::spawn_parameter_context_modal_fetch(
-                    client,
-                    tx,
-                    "pg-2".into(),
-                    "ctx-missing".into(),
-                );
-                h.await.expect("worker completed");
-            })
-            .await;
+        let h = super::spawn_parameter_context_modal_fetch(
+            client,
+            tx,
+            "pg-2".into(),
+            "ctx-missing".into(),
+        );
+        h.await.expect("worker completed");
 
         let ev = rx.recv().await.expect("event emitted");
         match ev {
@@ -1084,7 +1040,7 @@ mod tests {
 
     /// `QueueListingHandle::drop` aborts the worker and fires
     /// `DELETE /flowfile-queues/{id}/listing-requests/{request_id}` on
-    /// the same `LocalSet`, so cleanup happens uniformly across
+    /// the tokio runtime, so cleanup happens uniformly across
     /// selection-move, tab-switch, and app-shutdown.
     #[tokio::test(flavor = "current_thread")]
     async fn drop_fires_delete_when_request_id_known() {
@@ -1104,26 +1060,20 @@ mod tests {
             .mount(&server)
             .await;
 
-        let local = LocalSet::new();
-        local
-            .run_until(async {
-                let client = test_client(&server).await;
-                let request_id = Arc::new(StdMutex::new(Some("req-42".to_string())));
+        let client = test_client(&server).await;
+        let request_id = Arc::new(StdMutex::new(Some("req-42".to_string())));
 
-                let handle =
-                    super::QueueListingHandle::new_for_test("q1".to_string(), request_id, client);
-                drop(handle);
+        let handle = super::QueueListingHandle::new_for_test("q1".to_string(), request_id, client);
+        drop(handle);
 
-                // Give the spawn_local cleanup task time to run + complete
-                // the HTTP request. wiremock's `expect(1)` checked at
-                // server.verify() catches under-fire, but we want to give
-                // the spawned future a fair chance first.
-                for _ in 0..30 {
-                    tokio::task::yield_now().await;
-                    tokio::time::sleep(StdDuration::from_millis(20)).await;
-                }
-            })
-            .await;
+        // Give the spawn_cleanup cleanup task time to run + complete
+        // the HTTP request. wiremock's `expect(1)` checked at
+        // server.verify() catches under-fire, but we want to give
+        // the spawned future a fair chance first.
+        for _ in 0..30 {
+            tokio::task::yield_now().await;
+            tokio::time::sleep(StdDuration::from_millis(20)).await;
+        }
 
         server.verify().await;
     }
@@ -1229,84 +1179,77 @@ mod tests {
             .mount(&server)
             .await;
 
-        let local = LocalSet::new();
-        local
-            .run_until(async {
-                let client = test_client(&server).await;
-                let (tx, mut rx) = mpsc::channel::<AppEvent>(64);
+        let client = test_client(&server).await;
+        let (tx, mut rx) = mpsc::channel::<AppEvent>(64);
 
-                let handle = super::spawn_queue_listing_fetch(
-                    client,
-                    tx,
-                    "q1".to_string(),
-                    StdDuration::from_secs(10),
-                );
+        let handle = super::spawn_queue_listing_fetch(
+            client,
+            tx,
+            "q1".to_string(),
+            StdDuration::from_secs(10),
+        );
 
-                // 1. RequestIdAssigned must arrive first.
-                let ev = tokio::time::timeout(StdDuration::from_secs(5), rx.recv())
-                    .await
-                    .expect("timeout waiting for RequestIdAssigned")
-                    .expect("channel closed");
-                match ev {
-                    AppEvent::Data(ViewPayload::Browser(
-                        BrowserPayload::QueueListingRequestIdAssigned {
-                            queue_id,
-                            request_id,
-                        },
-                    )) => {
-                        assert_eq!(queue_id, "q1");
-                        assert_eq!(request_id, "req-1");
-                    }
-                    _ => panic!("expected QueueListingRequestIdAssigned"),
+        // 1. RequestIdAssigned must arrive first.
+        let ev = tokio::time::timeout(StdDuration::from_secs(5), rx.recv())
+            .await
+            .expect("timeout waiting for RequestIdAssigned")
+            .expect("channel closed");
+        match ev {
+            AppEvent::Data(ViewPayload::Browser(
+                BrowserPayload::QueueListingRequestIdAssigned {
+                    queue_id,
+                    request_id,
+                },
+            )) => {
+                assert_eq!(queue_id, "q1");
+                assert_eq!(request_id, "req-1");
+            }
+            _ => panic!("expected QueueListingRequestIdAssigned"),
+        }
+
+        // 2. Collect payloads until QueueListingComplete.
+        let mut progress_count = 0u32;
+        let mut complete_payload = None;
+        for _ in 0..10 {
+            let ev = tokio::time::timeout(StdDuration::from_secs(5), rx.recv())
+                .await
+                .expect("timeout waiting for progress/complete")
+                .expect("channel closed");
+            match ev {
+                AppEvent::Data(ViewPayload::Browser(BrowserPayload::QueueListingProgress {
+                    ..
+                })) => {
+                    progress_count += 1;
                 }
-
-                // 2. Collect payloads until QueueListingComplete.
-                let mut progress_count = 0u32;
-                let mut complete_payload = None;
-                for _ in 0..10 {
-                    let ev = tokio::time::timeout(StdDuration::from_secs(5), rx.recv())
-                        .await
-                        .expect("timeout waiting for progress/complete")
-                        .expect("channel closed");
-                    match ev {
-                        AppEvent::Data(ViewPayload::Browser(
-                            BrowserPayload::QueueListingProgress { .. },
-                        )) => {
-                            progress_count += 1;
-                        }
-                        AppEvent::Data(ViewPayload::Browser(
-                            BrowserPayload::QueueListingComplete {
-                                queue_id,
-                                rows,
-                                total,
-                                truncated,
-                            },
-                        )) => {
-                            assert_eq!(queue_id, "q1");
-                            assert_eq!(rows.len(), 1, "expected 1 row");
-                            assert_eq!(rows[0].uuid, "ff-aaaa");
-                            assert_eq!(total, 1);
-                            assert!(!truncated);
-                            complete_payload = Some(());
-                            break;
-                        }
-                        _ => panic!("unexpected payload"),
-                    }
+                AppEvent::Data(ViewPayload::Browser(BrowserPayload::QueueListingComplete {
+                    queue_id,
+                    rows,
+                    total,
+                    truncated,
+                })) => {
+                    assert_eq!(queue_id, "q1");
+                    assert_eq!(rows.len(), 1, "expected 1 row");
+                    assert_eq!(rows[0].uuid, "ff-aaaa");
+                    assert_eq!(total, 1);
+                    assert!(!truncated);
+                    complete_payload = Some(());
+                    break;
                 }
-                assert!(
-                    progress_count >= 2,
-                    "expected ≥2 Progress emits (30%, 80%); got {progress_count}"
-                );
-                assert!(complete_payload.is_some(), "expected QueueListingComplete");
+                _ => panic!("unexpected payload"),
+            }
+        }
+        assert!(
+            progress_count >= 2,
+            "expected ≥2 Progress emits (30%, 80%); got {progress_count}"
+        );
+        assert!(complete_payload.is_some(), "expected QueueListingComplete");
 
-                // 3. Drop the handle → spawns DELETE on the LocalSet.
-                drop(handle);
-                for _ in 0..30 {
-                    tokio::task::yield_now().await;
-                    tokio::time::sleep(StdDuration::from_millis(20)).await;
-                }
-            })
-            .await;
+        // 3. Drop the handle → spawns DELETE via spawn_cleanup.
+        drop(handle);
+        for _ in 0..30 {
+            tokio::task::yield_now().await;
+            tokio::time::sleep(StdDuration::from_millis(20)).await;
+        }
 
         server.verify().await;
     }
@@ -1371,52 +1314,47 @@ mod tests {
             .mount(&server)
             .await;
 
-        let local = LocalSet::new();
-        local
-            .run_until(async {
-                let client = test_client(&server).await;
-                let (tx, mut rx) = mpsc::channel::<AppEvent>(64);
+        let client = test_client(&server).await;
+        let (tx, mut rx) = mpsc::channel::<AppEvent>(64);
 
-                let handle = super::spawn_queue_listing_fetch(
-                    client,
-                    tx,
-                    "q1".to_string(),
-                    StdDuration::from_secs(1), // short timeout
-                );
+        let handle = super::spawn_queue_listing_fetch(
+            client,
+            tx,
+            "q1".to_string(),
+            StdDuration::from_secs(1), // short timeout
+        );
 
-                // Skip RequestIdAssigned and any Progress emits; hunt for Timeout.
-                let mut saw_timeout = false;
-                for _ in 0..20 {
-                    let ev = tokio::time::timeout(StdDuration::from_secs(5), rx.recv())
-                        .await
-                        .expect("timeout waiting for payload")
-                        .expect("channel closed");
-                    match ev {
-                        AppEvent::Data(ViewPayload::Browser(
-                            BrowserPayload::QueueListingTimeout { queue_id },
-                        )) => {
-                            assert_eq!(queue_id, "q1");
-                            saw_timeout = true;
-                            break;
-                        }
-                        AppEvent::Data(ViewPayload::Browser(
-                            BrowserPayload::QueueListingRequestIdAssigned { .. }
-                            | BrowserPayload::QueueListingProgress { .. },
-                        )) => {
-                            // These are expected before the timeout fires.
-                        }
-                        _ => panic!("unexpected payload"),
-                    }
+        // Skip RequestIdAssigned and any Progress emits; hunt for Timeout.
+        let mut saw_timeout = false;
+        for _ in 0..20 {
+            let ev = tokio::time::timeout(StdDuration::from_secs(5), rx.recv())
+                .await
+                .expect("timeout waiting for payload")
+                .expect("channel closed");
+            match ev {
+                AppEvent::Data(ViewPayload::Browser(BrowserPayload::QueueListingTimeout {
+                    queue_id,
+                })) => {
+                    assert_eq!(queue_id, "q1");
+                    saw_timeout = true;
+                    break;
                 }
-                assert!(saw_timeout, "expected QueueListingTimeout to be emitted");
-
-                drop(handle);
-                for _ in 0..10 {
-                    tokio::task::yield_now().await;
-                    tokio::time::sleep(StdDuration::from_millis(20)).await;
+                AppEvent::Data(ViewPayload::Browser(
+                    BrowserPayload::QueueListingRequestIdAssigned { .. }
+                    | BrowserPayload::QueueListingProgress { .. },
+                )) => {
+                    // These are expected before the timeout fires.
                 }
-            })
-            .await;
+                _ => panic!("unexpected payload"),
+            }
+        }
+        assert!(saw_timeout, "expected QueueListingTimeout to be emitted");
+
+        drop(handle);
+        for _ in 0..10 {
+            tokio::task::yield_now().await;
+            tokio::time::sleep(StdDuration::from_millis(20)).await;
+        }
     }
 
     /// When the worker hasn't recorded a request id yet (POST hasn't
@@ -1439,22 +1377,16 @@ mod tests {
             .mount(&server)
             .await;
 
-        let local = LocalSet::new();
-        local
-            .run_until(async {
-                let client = test_client(&server).await;
-                let request_id = Arc::new(StdMutex::new(None));
+        let client = test_client(&server).await;
+        let request_id = Arc::new(StdMutex::new(None));
 
-                let handle =
-                    super::QueueListingHandle::new_for_test("q1".to_string(), request_id, client);
-                drop(handle);
+        let handle = super::QueueListingHandle::new_for_test("q1".to_string(), request_id, client);
+        drop(handle);
 
-                for _ in 0..10 {
-                    tokio::task::yield_now().await;
-                    tokio::time::sleep(StdDuration::from_millis(20)).await;
-                }
-            })
-            .await;
+        for _ in 0..10 {
+            tokio::task::yield_now().await;
+            tokio::time::sleep(StdDuration::from_millis(20)).await;
+        }
 
         server.verify().await;
     }
@@ -1492,43 +1424,38 @@ mod tests {
             .mount(&server)
             .await;
 
-        let local = LocalSet::new();
-        local
-            .run_until(async {
-                let client = test_client(&server).await;
-                let (tx, mut rx) = mpsc::channel::<AppEvent>(8);
-                let _handle = super::spawn_flowfile_peek_fetch(
-                    client,
-                    tx,
-                    "q1".to_string(),
-                    "ff-aaaa".to_string(),
-                    None,
-                );
+        let client = test_client(&server).await;
+        let (tx, mut rx) = mpsc::channel::<AppEvent>(8);
+        let _handle = super::spawn_flowfile_peek_fetch(
+            client,
+            tx,
+            "q1".to_string(),
+            "ff-aaaa".to_string(),
+            None,
+        );
 
-                let payload = tokio::time::timeout(StdDuration::from_secs(2), rx.recv())
-                    .await
-                    .expect("payload arrived")
-                    .expect("non-empty");
-                match payload {
-                    AppEvent::Data(ViewPayload::Browser(BrowserPayload::FlowfilePeek {
-                        uuid,
-                        attrs,
-                        content_claim,
-                        mime_type,
-                        ..
-                    })) => {
-                        assert_eq!(uuid, "ff-aaaa");
-                        assert_eq!(mime_type.as_deref(), Some("application/x-parquet"));
-                        assert_eq!(attrs.get("record.count").map(String::as_str), Some("1000"),);
-                        let cc = content_claim.expect("content claim populated");
-                        assert_eq!(cc.container, "default");
-                        assert_eq!(cc.section, "1234");
-                        assert_eq!(cc.identifier, "abc");
-                        assert_eq!(cc.file_size, 1024);
-                    }
-                    _ => panic!("expected FlowfilePeek"),
-                }
-            })
-            .await;
+        let payload = tokio::time::timeout(StdDuration::from_secs(2), rx.recv())
+            .await
+            .expect("payload arrived")
+            .expect("non-empty");
+        match payload {
+            AppEvent::Data(ViewPayload::Browser(BrowserPayload::FlowfilePeek {
+                uuid,
+                attrs,
+                content_claim,
+                mime_type,
+                ..
+            })) => {
+                assert_eq!(uuid, "ff-aaaa");
+                assert_eq!(mime_type.as_deref(), Some("application/x-parquet"));
+                assert_eq!(attrs.get("record.count").map(String::as_str), Some("1000"),);
+                let cc = content_claim.expect("content claim populated");
+                assert_eq!(cc.container, "default");
+                assert_eq!(cc.section, "1234");
+                assert_eq!(cc.identifier, "abc");
+                assert_eq!(cc.file_size, 1024);
+            }
+            _ => panic!("expected FlowfilePeek"),
+        }
     }
 }
