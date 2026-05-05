@@ -31,7 +31,7 @@ fn rebuild_arena_from_cluster_populates_browser_state_and_flow_index() {
         parent_idx: Some(0),
         kind: NodeKind::Processor,
         id: "gen".into(),
-        group_id: "root".into(),
+        group_id: crate::client::ROOT_GROUP_ID.into(),
         name: "Gen".into(),
         status_summary: NodeStatusSummary::Processor {
             run_status: "Running".into(),
@@ -59,9 +59,9 @@ fn open_in_browser_target_switches_tab_and_expands_ancestors() {
             RawNode {
                 parent_idx: None,
                 kind: NodeKind::ProcessGroup,
-                id: "root".into(),
-                group_id: "root".into(),
-                name: "root".into(),
+                id: crate::client::ROOT_GROUP_ID.into(),
+                group_id: crate::client::ROOT_GROUP_ID.into(),
+                name: crate::client::ROOT_GROUP_ID.into(),
                 status_summary: NodeStatusSummary::ProcessGroup {
                     running: 0,
                     stopped: 0,
@@ -73,7 +73,7 @@ fn open_in_browser_target_switches_tab_and_expands_ancestors() {
                 parent_idx: Some(0),
                 kind: NodeKind::ProcessGroup,
                 id: "ingest".into(),
-                group_id: "root".into(),
+                group_id: crate::client::ROOT_GROUP_ID.into(),
                 name: "ingest".into(),
                 status_summary: NodeStatusSummary::ProcessGroup {
                     running: 0,
@@ -118,7 +118,7 @@ fn open_in_browser_target_warns_when_id_not_in_arena() {
     let c = tiny_config();
     let outcome = Ok(crate::event::IntentOutcome::OpenInBrowserTarget {
         component_id: "ghost".into(),
-        group_id: "root".into(),
+        group_id: crate::client::ROOT_GROUP_ID.into(),
     });
     update(&mut s, AppEvent::IntentOutcome(outcome), &c);
     assert_eq!(s.current_tab, ViewId::Browser);
@@ -273,10 +273,10 @@ fn f_with_index_opens_fuzzy_find_modal() {
     s.flow_index = Some(FlowIndex {
         entries: vec![FlowIndexEntry {
             id: "p".into(),
-            group_id: "root".into(),
+            group_id: crate::client::ROOT_GROUP_ID.into(),
             kind: NodeKind::Processor,
             name: "P".into(),
-            group_path: "root".into(),
+            group_path: crate::client::ROOT_GROUP_ID.into(),
             state: crate::view::browser::state::StateBadge::Processor {
                 glyph: '\u{25CF}',
                 style: crate::theme::success(),
@@ -299,7 +299,7 @@ fn fuzzy_find_modal_enter_emits_open_in_browser_intent() {
             group_id: "g".into(),
             kind: NodeKind::Processor,
             name: "PutKafka".into(),
-            group_path: "root".into(),
+            group_path: crate::client::ROOT_GROUP_ID.into(),
             state: crate::view::browser::state::StateBadge::Processor {
                 glyph: '\u{25CF}',
                 style: crate::theme::success(),
@@ -330,7 +330,7 @@ fn fuzzy_find_modal_esc_closes_without_goto() {
             group_id: "g".into(),
             kind: NodeKind::Processor,
             name: "X".into(),
-            group_path: "root".into(),
+            group_path: crate::client::ROOT_GROUP_ID.into(),
             state: crate::view::browser::state::StateBadge::Processor {
                 glyph: '\u{25CF}',
                 style: crate::theme::success(),
@@ -467,8 +467,8 @@ fn three_level_browser_state() -> (AppState, Config) {
             RawNode {
                 parent_idx: None,
                 kind: NodeKind::ProcessGroup,
-                id: "root".into(),
-                group_id: "root".into(),
+                id: crate::client::ROOT_GROUP_ID.into(),
+                group_id: crate::client::ROOT_GROUP_ID.into(),
                 name: "Root".into(),
                 status_summary: NodeStatusSummary::ProcessGroup {
                     running: 0,
@@ -481,7 +481,7 @@ fn three_level_browser_state() -> (AppState, Config) {
                 parent_idx: Some(0),
                 kind: NodeKind::ProcessGroup,
                 id: "pipeline".into(),
-                group_id: "root".into(),
+                group_id: crate::client::ROOT_GROUP_ID.into(),
                 name: "Pipeline".into(),
                 status_summary: NodeStatusSummary::ProcessGroup {
                     running: 0,
@@ -936,7 +936,7 @@ fn fresh_browser_on_processor_with_bulletins() -> (AppState, crate::config::Conf
         message: "test bulletin".into(),
         source_id: "gen".into(),
         source_name: "Gen".into(),
-        group_id: "root".into(),
+        group_id: crate::client::ROOT_GROUP_ID.into(),
         source_type: "PROCESSOR".into(),
         level: "WARNING".into(),
         timestamp_iso: String::new(),
@@ -1018,8 +1018,8 @@ fn t_on_focused_pg_recent_bulletins_emits_crosslink_for_row_source() {
     s.browser.details.insert(
         0,
         NodeDetail::ProcessGroup(ProcessGroupDetail {
-            id: "root".into(),
-            name: "root".into(),
+            id: crate::client::ROOT_GROUP_ID.into(),
+            name: crate::client::ROOT_GROUP_ID.into(),
             parent_group_id: None,
             running: 0,
             stopped: 0,
@@ -1047,7 +1047,7 @@ fn t_on_focused_pg_recent_bulletins_emits_crosslink_for_row_source() {
         source_id: "p1".into(),
         source_name: "p1".into(),
         source_type: "PROCESSOR".into(),
-        group_id: "root".into(),
+        group_id: crate::client::ROOT_GROUP_ID.into(),
         timestamp_iso: "".into(),
         timestamp_human: "".into(),
     });
@@ -1058,7 +1058,7 @@ fn t_on_focused_pg_recent_bulletins_emits_crosslink_for_row_source() {
         source_id: "p2".into(),
         source_name: "p2".into(),
         source_type: "PROCESSOR".into(),
-        group_id: "root".into(),
+        group_id: crate::client::ROOT_GROUP_ID.into(),
         timestamp_iso: "".into(),
         timestamp_human: "".into(),
     });
@@ -1119,8 +1119,8 @@ fn enter_on_focused_pg_child_groups_drills_in() {
     s.browser.details.insert(
         0,
         NodeDetail::ProcessGroup(ProcessGroupDetail {
-            id: "root".into(),
-            name: "root".into(),
+            id: crate::client::ROOT_GROUP_ID.into(),
+            name: crate::client::ROOT_GROUP_ID.into(),
             parent_group_id: None,
             running: 0,
             stopped: 0,
@@ -1164,9 +1164,9 @@ fn seed_browser_with_processor(s: &mut AppState) {
             RawNode {
                 parent_idx: None,
                 kind: NodeKind::ProcessGroup,
-                id: "root".into(),
-                group_id: "root".into(),
-                name: "root".into(),
+                id: crate::client::ROOT_GROUP_ID.into(),
+                group_id: crate::client::ROOT_GROUP_ID.into(),
+                name: crate::client::ROOT_GROUP_ID.into(),
                 status_summary: NodeStatusSummary::ProcessGroup {
                     running: 0,
                     stopped: 0,
@@ -1178,7 +1178,7 @@ fn seed_browser_with_processor(s: &mut AppState) {
                 parent_idx: Some(0),
                 kind: NodeKind::Processor,
                 id: "gen".into(),
-                group_id: "root".into(),
+                group_id: crate::client::ROOT_GROUP_ID.into(),
                 name: "Gen".into(),
                 status_summary: NodeStatusSummary::Processor {
                     run_status: "Running".into(),
@@ -1206,9 +1206,9 @@ fn seed_browser_with_child_pg(s: &mut AppState) {
             RawNode {
                 parent_idx: None,
                 kind: NodeKind::ProcessGroup,
-                id: "root".into(),
-                group_id: "root".into(),
-                name: "root".into(),
+                id: crate::client::ROOT_GROUP_ID.into(),
+                group_id: crate::client::ROOT_GROUP_ID.into(),
+                name: crate::client::ROOT_GROUP_ID.into(),
                 status_summary: NodeStatusSummary::ProcessGroup {
                     running: 0,
                     stopped: 0,
@@ -1220,7 +1220,7 @@ fn seed_browser_with_child_pg(s: &mut AppState) {
                 parent_idx: Some(0),
                 kind: NodeKind::ProcessGroup,
                 id: "ingest".into(),
-                group_id: "root".into(),
+                group_id: crate::client::ROOT_GROUP_ID.into(),
                 name: "ingest".into(),
                 status_summary: NodeStatusSummary::ProcessGroup {
                     running: 0,
@@ -1540,9 +1540,9 @@ fn descend_on_folder_toggles_expansion() {
                 RawNode {
                     parent_idx: None,
                     kind: NodeKind::ProcessGroup,
-                    id: "root".into(),
-                    group_id: "root".into(),
-                    name: "root".into(),
+                    id: crate::client::ROOT_GROUP_ID.into(),
+                    group_id: crate::client::ROOT_GROUP_ID.into(),
+                    name: crate::client::ROOT_GROUP_ID.into(),
                     status_summary: NodeStatusSummary::ProcessGroup {
                         running: 0,
                         stopped: 0,
@@ -1554,7 +1554,7 @@ fn descend_on_folder_toggles_expansion() {
                     parent_idx: Some(0),
                     kind: NodeKind::ControllerService,
                     id: "cs".into(),
-                    group_id: "root".into(),
+                    group_id: crate::client::ROOT_GROUP_ID.into(),
                     name: "pool".into(),
                     status_summary: NodeStatusSummary::ControllerService {
                         state: "ENABLED".into(),
@@ -1615,9 +1615,9 @@ fn descend_on_referencing_component_emits_goto() {
         parent: None,
         children: vec![1],
         kind: NodeKind::ProcessGroup,
-        id: "root".into(),
-        group_id: "root".into(),
-        name: "root".into(),
+        id: crate::client::ROOT_GROUP_ID.into(),
+        group_id: crate::client::ROOT_GROUP_ID.into(),
+        name: crate::client::ROOT_GROUP_ID.into(),
         status_summary: NodeStatusSummary::ProcessGroup {
             running: 0,
             stopped: 0,
@@ -1631,7 +1631,7 @@ fn descend_on_referencing_component_emits_goto() {
         children: vec![],
         kind: NodeKind::ControllerService,
         id: "cs".into(),
-        group_id: "root".into(),
+        group_id: crate::client::ROOT_GROUP_ID.into(),
         name: "pool".into(),
         status_summary: NodeStatusSummary::ControllerService {
             state: "ENABLED".into(),
@@ -1648,7 +1648,7 @@ fn descend_on_referencing_component_emits_goto() {
         type_name: "T".into(),
         bundle: "".into(),
         state: "ENABLED".into(),
-        parent_group_id: Some("root".into()),
+        parent_group_id: Some(crate::client::ROOT_GROUP_ID.into()),
         properties: vec![],
         validation_errors: vec![],
         bulletin_level: "INFO".into(),
@@ -1719,9 +1719,9 @@ fn descend_on_pg_controller_service_emits_goto() {
         parent: None,
         children: vec![1],
         kind: NodeKind::ProcessGroup,
-        id: "root".into(),
-        group_id: "root".into(),
-        name: "root".into(),
+        id: crate::client::ROOT_GROUP_ID.into(),
+        group_id: crate::client::ROOT_GROUP_ID.into(),
+        name: crate::client::ROOT_GROUP_ID.into(),
         status_summary: NodeStatusSummary::ProcessGroup {
             running: 0,
             stopped: 0,
@@ -1735,7 +1735,7 @@ fn descend_on_pg_controller_service_emits_goto() {
         children: vec![2],
         kind: NodeKind::ProcessGroup,
         id: "ingest".into(),
-        group_id: "root".into(),
+        group_id: crate::client::ROOT_GROUP_ID.into(),
         name: "ingest".into(),
         status_summary: NodeStatusSummary::ProcessGroup {
             running: 0,
@@ -1765,7 +1765,7 @@ fn descend_on_pg_controller_service_emits_goto() {
     let pg = ProcessGroupDetail {
         id: "ingest".into(),
         name: "ingest".into(),
-        parent_group_id: Some("root".into()),
+        parent_group_id: Some(crate::client::ROOT_GROUP_ID.into()),
         running: 0,
         stopped: 0,
         invalid: 0,
@@ -1827,9 +1827,9 @@ fn properties_hotkey_opens_modal_on_cs_tree_row() {
         parent: None,
         children: vec![1],
         kind: NodeKind::ProcessGroup,
-        id: "root".into(),
-        group_id: "root".into(),
-        name: "root".into(),
+        id: crate::client::ROOT_GROUP_ID.into(),
+        group_id: crate::client::ROOT_GROUP_ID.into(),
+        name: crate::client::ROOT_GROUP_ID.into(),
         status_summary: NodeStatusSummary::ProcessGroup {
             running: 0,
             stopped: 0,
@@ -1843,7 +1843,7 @@ fn properties_hotkey_opens_modal_on_cs_tree_row() {
         children: vec![],
         kind: NodeKind::ControllerService,
         id: "cs".into(),
-        group_id: "root".into(),
+        group_id: crate::client::ROOT_GROUP_ID.into(),
         name: "pool".into(),
         status_summary: NodeStatusSummary::ControllerService {
             state: "ENABLED".into(),
@@ -1878,9 +1878,9 @@ fn browser_state_on_connection_endpoints(row: usize) -> (AppState, crate::config
         parent: None,
         children: vec![1],
         kind: NodeKind::ProcessGroup,
-        id: "root".into(),
-        group_id: "root".into(),
-        name: "root".into(),
+        id: crate::client::ROOT_GROUP_ID.into(),
+        group_id: crate::client::ROOT_GROUP_ID.into(),
+        name: crate::client::ROOT_GROUP_ID.into(),
         status_summary: NodeStatusSummary::ProcessGroup {
             running: 0,
             stopped: 0,
@@ -1894,7 +1894,7 @@ fn browser_state_on_connection_endpoints(row: usize) -> (AppState, crate::config
         children: vec![],
         kind: NodeKind::Connection,
         id: "conn".into(),
-        group_id: "root".into(),
+        group_id: crate::client::ROOT_GROUP_ID.into(),
         name: "src→dst".into(),
         status_summary: NodeStatusSummary::Connection {
             fill_percent: 0,
@@ -1919,11 +1919,11 @@ fn browser_state_on_connection_endpoints(row: usize) -> (AppState, crate::config
             source_id: "src-proc".into(),
             source_name: "Source".into(),
             source_type: "PROCESSOR".into(),
-            source_group_id: "root".into(),
+            source_group_id: crate::client::ROOT_GROUP_ID.into(),
             destination_id: "dst-proc".into(),
             destination_name: "Dest".into(),
             destination_type: "PROCESSOR".into(),
-            destination_group_id: "root".into(),
+            destination_group_id: crate::client::ROOT_GROUP_ID.into(),
             selected_relationships: vec!["success".into()],
             available_relationships: vec!["success".into()],
             back_pressure_object_threshold: 0,
@@ -1969,7 +1969,7 @@ fn descend_on_focused_endpoints_row_zero_emits_open_in_browser_for_source() {
             group_id,
         })) => {
             assert_eq!(component_id, "src-proc");
-            assert_eq!(group_id, "root");
+            assert_eq!(group_id, crate::client::ROOT_GROUP_ID);
         }
         other => panic!("expected Goto(OpenInBrowser {{ src-proc }}), got {other:?}"),
     }
@@ -1989,7 +1989,7 @@ fn descend_on_focused_endpoints_row_one_emits_open_in_browser_for_destination() 
             group_id,
         })) => {
             assert_eq!(component_id, "dst-proc");
-            assert_eq!(group_id, "root");
+            assert_eq!(group_id, crate::client::ROOT_GROUP_ID);
         }
         other => panic!("expected Goto(OpenInBrowser {{ dst-proc }}), got {other:?}"),
     }
@@ -2012,7 +2012,7 @@ fn descend_on_focused_properties_row_with_resolvable_uuid_emits_goto() {
         children: vec![],
         kind: NodeKind::ControllerService,
         id: cs_uuid.into(),
-        group_id: "root".into(),
+        group_id: crate::client::ROOT_GROUP_ID.into(),
         name: "http-pool".into(),
         status_summary: NodeStatusSummary::ControllerService {
             state: "ENABLED".into(),
@@ -2049,7 +2049,7 @@ fn descend_on_focused_properties_row_with_resolvable_uuid_emits_goto() {
             group_id,
         })) => {
             assert_eq!(component_id, cs_uuid);
-            assert_eq!(group_id, "root");
+            assert_eq!(group_id, crate::client::ROOT_GROUP_ID);
         }
         other => panic!("expected Goto(OpenInBrowser), got {other:?}"),
     }
@@ -2104,7 +2104,7 @@ fn descend_on_focused_connections_row_emits_open_in_browser_for_opposite() {
         children: vec![],
         kind: NodeKind::Connection,
         id: "c-out".into(),
-        group_id: "root".into(),
+        group_id: crate::client::ROOT_GROUP_ID.into(),
         name: "gen→sink".into(),
         status_summary: NodeStatusSummary::Connection {
             fill_percent: 0,
@@ -2346,7 +2346,7 @@ fn properties_modal_descend_on_uuid_emits_open_in_browser_and_closes() {
         children: vec![],
         kind: NodeKind::ControllerService,
         id: cs_uuid.clone(),
-        group_id: "root".into(),
+        group_id: crate::client::ROOT_GROUP_ID.into(),
         name: "fixture-json-reader".into(),
         status_summary: NodeStatusSummary::ControllerService {
             state: "ENABLED".into(),
@@ -2440,7 +2440,7 @@ fn browser_with_bound_pg_and_processor(prop_value: &str) -> (AppState, String, u
     use crate::view::browser::state::NodeDetail;
 
     let (mut s, _c) = seeded_browser_state();
-    let pg_id = "root".to_string();
+    let pg_id = crate::client::ROOT_GROUP_ID.to_string();
 
     // Stamp a parameter context ref onto the root PG (arena 0).
     s.browser.nodes[0].parameter_context_ref = Some(ParameterContextRef {
@@ -2641,8 +2641,11 @@ fn state_with_pc_modal_loaded() -> AppState {
         name: "my-context".into(),
     });
     // Open the modal in Loading state, then immediately install a chain.
-    s.browser
-        .open_parameter_context_modal("root".into(), "root".into(), None);
+    s.browser.open_parameter_context_modal(
+        crate::client::ROOT_GROUP_ID.into(),
+        crate::client::ROOT_GROUP_ID.into(),
+        None,
+    );
     let chain = vec![ParameterContextNode {
         id: "ctx-1".into(),
         name: "my-context".into(),
@@ -2666,7 +2669,7 @@ fn state_with_pc_modal_loaded() -> AppState {
         fetch_error: None,
     }];
     s.browser
-        .apply_parameter_context_modal_loaded("root".into(), chain);
+        .apply_parameter_context_modal_loaded(crate::client::ROOT_GROUP_ID.into(), chain);
     assert!(
         matches!(
             s.browser.parameter_modal.as_ref().map(|m| &m.load),
@@ -2898,7 +2901,7 @@ fn descend_on_parameter_context_section_dispatches_cross_link() {
         arena_idx,
         NodeDetail::ProcessGroup(ProcessGroupDetail {
             id: pg_id.clone(),
-            name: "root".into(),
+            name: crate::client::ROOT_GROUP_ID.into(),
             parent_group_id: None,
             running: 0,
             stopped: 0,
@@ -2927,7 +2930,7 @@ fn descend_on_parameter_context_section_dispatches_cross_link() {
             Some(PendingIntent::Goto(CrossLink::OpenParameterContextModal {
                 ref pg_id,
                 preselect: None,
-            })) if pg_id == "root"
+            })) if pg_id == crate::client::ROOT_GROUP_ID
         ),
         "Descend on ParameterContext section must dispatch OpenParameterContextModal, got {:?}",
         result.intent
@@ -2996,8 +2999,11 @@ fn state_with_pc_modal_loaded_three_contexts() -> AppState {
         id: "ctx-leaf".into(),
         name: "leaf".into(),
     });
-    s.browser
-        .open_parameter_context_modal("root".into(), "root".into(), None);
+    s.browser.open_parameter_context_modal(
+        crate::client::ROOT_GROUP_ID.into(),
+        crate::client::ROOT_GROUP_ID.into(),
+        None,
+    );
 
     fn entry(name: &str, value: &str) -> ParameterEntry {
         ParameterEntry {
@@ -3026,14 +3032,14 @@ fn state_with_pc_modal_loaded_three_contexts() -> AppState {
         },
         ParameterContextNode {
             id: "ctx-root".into(),
-            name: "root".into(),
+            name: crate::client::ROOT_GROUP_ID.into(),
             parameters: vec![entry("c", "3")],
             inherited_ids: vec![],
             fetch_error: None,
         },
     ];
     s.browser
-        .apply_parameter_context_modal_loaded("root".into(), chain);
+        .apply_parameter_context_modal_loaded(crate::client::ROOT_GROUP_ID.into(), chain);
     s
 }
 
@@ -3134,9 +3140,9 @@ fn make_state_with_selected_kind(kind: NodeKind) -> AppState {
         parent: None,
         children: vec![1],
         kind: NodeKind::ProcessGroup,
-        id: "root".into(),
-        group_id: "root".into(),
-        name: "root".into(),
+        id: crate::client::ROOT_GROUP_ID.into(),
+        group_id: crate::client::ROOT_GROUP_ID.into(),
+        name: crate::client::ROOT_GROUP_ID.into(),
         status_summary: NodeStatusSummary::ProcessGroup {
             running: 0,
             stopped: 0,
@@ -3185,7 +3191,7 @@ fn make_state_with_selected_kind(kind: NodeKind) -> AppState {
         children: vec![],
         kind,
         id: "target".into(),
-        group_id: "root".into(),
+        group_id: crate::client::ROOT_GROUP_ID.into(),
         name: "target".into(),
         status_summary,
         parameter_context_ref: None,
@@ -3669,7 +3675,7 @@ fn refresh_sparkline_processor_selection_emits_intent_and_opens_state() {
         .browser
         .nodes
         .iter()
-        .position(|n| n.id == "root")
+        .position(|n| n.id == crate::client::ROOT_GROUP_ID)
         .unwrap();
     state.browser.expanded.insert(root_idx);
     crate::view::browser::state::rebuild_visible(&mut state.browser);
@@ -3706,7 +3712,7 @@ fn refresh_sparkline_same_selection_is_noop() {
         .browser
         .nodes
         .iter()
-        .position(|n| n.id == "root")
+        .position(|n| n.id == crate::client::ROOT_GROUP_ID)
         .unwrap();
     state.browser.expanded.insert(root_idx);
     crate::view::browser::state::rebuild_visible(&mut state.browser);

@@ -76,9 +76,9 @@ pub(super) fn seeded_browser_state() -> (AppState, Config) {
             RawNode {
                 parent_idx: None,
                 kind: NodeKind::ProcessGroup,
-                id: "root".into(),
-                group_id: "root".into(),
-                name: "root".into(),
+                id: crate::client::ROOT_GROUP_ID.into(),
+                group_id: crate::client::ROOT_GROUP_ID.into(),
+                name: crate::client::ROOT_GROUP_ID.into(),
                 status_summary: NodeStatusSummary::ProcessGroup {
                     running: 0,
                     stopped: 0,
@@ -90,7 +90,7 @@ pub(super) fn seeded_browser_state() -> (AppState, Config) {
                 parent_idx: Some(0),
                 kind: NodeKind::Processor,
                 id: "gen".into(),
-                group_id: "root".into(),
+                group_id: crate::client::ROOT_GROUP_ID.into(),
                 name: "Gen".into(),
                 status_summary: NodeStatusSummary::Processor {
                     run_status: "Running".into(),
@@ -100,7 +100,7 @@ pub(super) fn seeded_browser_state() -> (AppState, Config) {
                 parent_idx: Some(0),
                 kind: NodeKind::ProcessGroup,
                 id: "ingest".into(),
-                group_id: "root".into(),
+                group_id: crate::client::ROOT_GROUP_ID.into(),
                 name: "ingest".into(),
                 status_summary: NodeStatusSummary::ProcessGroup {
                     running: 0,
@@ -445,7 +445,7 @@ fn cross_link_open_in_browser_pushes_history() {
     s.current_tab = ViewId::Bulletins;
     let outcome = Ok(IntentOutcome::OpenInBrowserTarget {
         component_id: "gen".into(),
-        group_id: "root".into(),
+        group_id: crate::client::ROOT_GROUP_ID.into(),
     });
     update(&mut s, AppEvent::IntentOutcome(outcome), &c);
     assert!(s.history.can_go_back(), "back stack should have an entry");
@@ -866,7 +866,7 @@ fn seed_one_bulletin(state: &mut AppState) {
         source_id: "src-42".into(),
         source_name: "Proc-42".into(),
         source_type: "PROCESSOR".into(),
-        group_id: "root".into(),
+        group_id: crate::client::ROOT_GROUP_ID.into(),
         timestamp_iso: "2026-04-14T00:00:00Z".into(),
         timestamp_human: String::new(),
     });
@@ -1109,9 +1109,9 @@ fn selection_cross_links_empty_on_folder_row() {
                 RawNode {
                     parent_idx: None,
                     kind: NodeKind::ProcessGroup,
-                    id: "root".into(),
-                    group_id: "root".into(),
-                    name: "root".into(),
+                    id: crate::client::ROOT_GROUP_ID.into(),
+                    group_id: crate::client::ROOT_GROUP_ID.into(),
+                    name: crate::client::ROOT_GROUP_ID.into(),
                     status_summary: NodeStatusSummary::ProcessGroup {
                         running: 0,
                         stopped: 0,
@@ -1123,7 +1123,7 @@ fn selection_cross_links_empty_on_folder_row() {
                     parent_idx: Some(0),
                     kind: NodeKind::ControllerService,
                     id: "cs".into(),
-                    group_id: "root".into(),
+                    group_id: crate::client::ROOT_GROUP_ID.into(),
                     name: "pool".into(),
                     status_summary: NodeStatusSummary::ControllerService {
                         state: "ENABLED".into(),
@@ -1189,7 +1189,7 @@ fn bulletins_jump_resolves_rpg_source_id() {
                     kind: NodeKind::ProcessGroup,
                     id: PG_ID.into(),
                     group_id: PG_ID.into(),
-                    name: "root".into(),
+                    name: crate::client::ROOT_GROUP_ID.into(),
                     status_summary: NodeStatusSummary::ProcessGroup {
                         running: 0,
                         stopped: 0,
@@ -1539,7 +1539,7 @@ mod queue_listing_reducer_tests {
             children: vec![],
             kind: NodeKind::Connection,
             id: "q1".into(),
-            group_id: "root".into(),
+            group_id: crate::client::ROOT_GROUP_ID.into(),
             name: "Q1".into(),
             status_summary: NodeStatusSummary::Connection {
                 fill_percent: 0,
@@ -1570,7 +1570,7 @@ mod queue_listing_reducer_tests {
             children: vec![],
             kind: NodeKind::Processor,
             id: "p1".into(),
-            group_id: "root".into(),
+            group_id: crate::client::ROOT_GROUP_ID.into(),
             name: "P1".into(),
             status_summary: NodeStatusSummary::Processor {
                 run_status: "Running".into(),

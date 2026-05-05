@@ -381,7 +381,7 @@ mod tests {
     fn cross_link_open_in_browser_returns_target_outcome() {
         let outcome = IntentDispatcher::handle_pure(&Intent::Goto(CrossLink::OpenInBrowser {
             component_id: "proc-1".into(),
-            group_id: "root".into(),
+            group_id: crate::client::ROOT_GROUP_ID.into(),
         }))
         .expect("JumpTo must be handled by handle_pure")
         .expect("JumpTo returns Ok(...)");
@@ -391,7 +391,7 @@ mod tests {
                 group_id,
             } => {
                 assert_eq!(component_id, "proc-1");
-                assert_eq!(group_id, "root");
+                assert_eq!(group_id, crate::client::ROOT_GROUP_ID);
             }
             other => panic!("expected OpenInBrowserTarget, got {other:?}"),
         }
@@ -432,7 +432,7 @@ mod tests {
         assert_eq!(
             Intent::Goto(CrossLink::OpenInBrowser {
                 component_id: "x".into(),
-                group_id: "root".into(),
+                group_id: crate::client::ROOT_GROUP_ID.into(),
             })
             .name(),
             "goto Browser"
@@ -610,7 +610,7 @@ mod tests {
         assert!(
             !Intent::Goto(CrossLink::OpenInBrowser {
                 component_id: "x".into(),
-                group_id: "root".into(),
+                group_id: crate::client::ROOT_GROUP_ID.into(),
             })
             .is_write()
         );

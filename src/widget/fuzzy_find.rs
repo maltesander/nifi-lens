@@ -526,7 +526,7 @@ mod tests {
             entries: vec![
                 FlowIndexEntry {
                     id: "p1".into(),
-                    group_id: "root".into(),
+                    group_id: crate::client::ROOT_GROUP_ID.into(),
                     kind: NodeKind::Processor,
                     name: "PutKafka".into(),
                     group_path: "root/publish".into(),
@@ -539,10 +539,10 @@ mod tests {
                 },
                 FlowIndexEntry {
                     id: "p2".into(),
-                    group_id: "root".into(),
+                    group_id: crate::client::ROOT_GROUP_ID.into(),
                     kind: NodeKind::Processor,
                     name: "GenerateFlowFile".into(),
-                    group_path: "root".into(),
+                    group_path: crate::client::ROOT_GROUP_ID.into(),
                     state: StateBadge::Processor {
                         glyph: '\u{25CF}',
                         style: crate::theme::success(),
@@ -552,7 +552,7 @@ mod tests {
                 },
                 FlowIndexEntry {
                     id: "cs1".into(),
-                    group_id: "root".into(),
+                    group_id: crate::client::ROOT_GROUP_ID.into(),
                     kind: NodeKind::ControllerService,
                     name: "kafka-brokers".into(),
                     group_path: "(controller)".into(),
@@ -636,7 +636,7 @@ mod tests {
             entries: vec![
                 FlowIndexEntry {
                     id: "pg1".into(),
-                    group_id: "root".into(),
+                    group_id: crate::client::ROOT_GROUP_ID.into(),
                     kind: NodeKind::ProcessGroup,
                     name: "auth".into(),
                     group_path: "(root)".into(),
@@ -646,10 +646,10 @@ mod tests {
                 },
                 FlowIndexEntry {
                     id: "p1".into(),
-                    group_id: "root".into(),
+                    group_id: crate::client::ROOT_GROUP_ID.into(),
                     kind: NodeKind::Processor,
                     name: "auth".into(),
-                    group_path: "root".into(),
+                    group_path: crate::client::ROOT_GROUP_ID.into(),
                     state: StateBadge::Processor {
                         glyph: '\u{25CF}',
                         style: crate::theme::success(),
@@ -929,10 +929,10 @@ mod tests {
             entries: vec![
                 FlowIndexEntry {
                     id: "proc1".into(),
-                    group_id: "root".into(),
+                    group_id: crate::client::ROOT_GROUP_ID.into(),
                     kind: NodeKind::Processor,
                     name: "GenerateFlowFile".into(),
-                    group_path: "root".into(),
+                    group_path: crate::client::ROOT_GROUP_ID.into(),
                     state: StateBadge::Processor {
                         glyph: '\u{25CF}',
                         style: crate::theme::success(),
@@ -942,10 +942,10 @@ mod tests {
                 },
                 FlowIndexEntry {
                     id: "rpg1".into(),
-                    group_id: "root".into(),
+                    group_id: crate::client::ROOT_GROUP_ID.into(),
                     kind: NodeKind::RemoteProcessGroup,
                     name: "RemoteCluster".into(),
-                    group_path: "root".into(),
+                    group_path: crate::client::ROOT_GROUP_ID.into(),
                     state: StateBadge::Port,
                     haystack: "remotecluster   rpg   root".into(),
                     version_state: None,

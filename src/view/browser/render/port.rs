@@ -209,7 +209,7 @@ mod snapshots {
             state: "RUNNING".into(),
             comments: "accepts from edge agents".into(),
             concurrent_tasks: 3,
-            parent_group_id: Some("root".into()),
+            parent_group_id: Some(crate::client::ROOT_GROUP_ID.into()),
         };
         let state = BrowserState::new();
         let bulletins: VecDeque<BulletinSnapshot> = VecDeque::new();

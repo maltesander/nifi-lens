@@ -616,7 +616,7 @@ mod tests {
     fn q(id: &str, pct: u32) -> QueueSnapshot {
         QueueSnapshot {
             id: id.into(),
-            group_id: "root".into(),
+            group_id: crate::client::ROOT_GROUP_ID.into(),
             name: format!("{id}-name"),
             source_name: "src".into(),
             destination_name: "dst".into(),
@@ -635,7 +635,7 @@ mod tests {
             source_id: source_id.into(),
             source_name: format!("Proc-{source_id}"),
             source_type: "PROCESSOR".into(),
-            group_id: "root".into(),
+            group_id: crate::client::ROOT_GROUP_ID.into(),
             timestamp_iso: iso.into(),
             timestamp_human: String::new(),
         }

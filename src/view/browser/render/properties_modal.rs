@@ -185,9 +185,9 @@ mod tests {
             parent: None,
             children: vec![1, 2],
             kind: NodeKind::ProcessGroup,
-            id: "root".into(),
+            id: crate::client::ROOT_GROUP_ID.into(),
             group_id: String::new(),
-            name: "root".into(),
+            name: crate::client::ROOT_GROUP_ID.into(),
             status_summary: NodeStatusSummary::ProcessGroup {
                 running: 0,
                 stopped: 0,
@@ -202,7 +202,7 @@ mod tests {
             children: vec![],
             kind: NodeKind::Processor,
             id: "gen".into(),
-            group_id: "root".into(),
+            group_id: crate::client::ROOT_GROUP_ID.into(),
             name: "Gen".into(),
             status_summary: NodeStatusSummary::Processor {
                 run_status: "Running".into(),
@@ -216,7 +216,7 @@ mod tests {
             children: vec![],
             kind: NodeKind::ControllerService,
             id: cs_uuid.clone(),
-            group_id: "root".into(),
+            group_id: crate::client::ROOT_GROUP_ID.into(),
             name: "fixture-json-reader".into(),
             status_summary: NodeStatusSummary::ControllerService {
                 state: "ENABLED".into(),

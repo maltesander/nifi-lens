@@ -459,7 +459,7 @@ fn apply_node_detail_lands_rpg_payload_in_details_cache() {
         detail: NodeDetail::RemoteProcessGroup(RemoteProcessGroupDetail {
             id: "rpg-1".into(),
             name: "Sink".into(),
-            parent_group_id: Some("root".into()),
+            parent_group_id: Some(crate::client::ROOT_GROUP_ID.into()),
             target_uri: "https://remote/nifi".into(),
             target_secure: true,
             transport_protocol: "HTTP".into(),
@@ -598,7 +598,7 @@ fn build_flow_index_populates_cs_state_badge() {
         parent: None,
         children: vec![1],
         kind: NodeKind::ProcessGroup,
-        id: "root".into(),
+        id: crate::client::ROOT_GROUP_ID.into(),
         group_id: String::new(),
         name: "Root".into(),
         status_summary: NodeStatusSummary::ProcessGroup {
@@ -614,7 +614,7 @@ fn build_flow_index_populates_cs_state_badge() {
         children: vec![],
         kind: NodeKind::ControllerService,
         id: "cs1".into(),
-        group_id: "root".into(),
+        group_id: crate::client::ROOT_GROUP_ID.into(),
         name: "kafka-brokers".into(),
         status_summary: NodeStatusSummary::ControllerService {
             state: "ENABLED".into(),
@@ -636,7 +636,7 @@ fn build_flow_index_populates_invalid_count_for_pg() {
         parent: None,
         children: vec![],
         kind: NodeKind::ProcessGroup,
-        id: "root".into(),
+        id: crate::client::ROOT_GROUP_ID.into(),
         group_id: String::new(),
         name: "Root".into(),
         status_summary: NodeStatusSummary::ProcessGroup {
@@ -648,7 +648,11 @@ fn build_flow_index_populates_invalid_count_for_pg() {
         parameter_context_ref: None,
     });
     let idx = build_flow_index(&s);
-    let pg = idx.entries.iter().find(|e| e.id == "root").unwrap();
+    let pg = idx
+        .entries
+        .iter()
+        .find(|e| e.id == crate::client::ROOT_GROUP_ID)
+        .unwrap();
     match &pg.state {
         StateBadge::Pg { invalid } => assert_eq!(*invalid, 2),
         _ => panic!("expected Pg state badge"),
@@ -835,8 +839,8 @@ fn pg_health_rollup_green_when_all_running() {
             RawNode {
                 parent_idx: None,
                 kind: NodeKind::ProcessGroup,
-                id: "root".into(),
-                group_id: "root".into(),
+                id: crate::client::ROOT_GROUP_ID.into(),
+                group_id: crate::client::ROOT_GROUP_ID.into(),
                 name: "Root".into(),
                 status_summary: NodeStatusSummary::ProcessGroup {
                     running: 1,
@@ -849,7 +853,7 @@ fn pg_health_rollup_green_when_all_running() {
                 parent_idx: Some(0),
                 kind: NodeKind::Processor,
                 id: "p1".into(),
-                group_id: "root".into(),
+                group_id: crate::client::ROOT_GROUP_ID.into(),
                 name: "P1".into(),
                 status_summary: NodeStatusSummary::Processor {
                     run_status: "RUNNING".into(),
@@ -871,8 +875,8 @@ fn pg_health_rollup_yellow_when_any_stopped() {
             RawNode {
                 parent_idx: None,
                 kind: NodeKind::ProcessGroup,
-                id: "root".into(),
-                group_id: "root".into(),
+                id: crate::client::ROOT_GROUP_ID.into(),
+                group_id: crate::client::ROOT_GROUP_ID.into(),
                 name: "Root".into(),
                 status_summary: NodeStatusSummary::ProcessGroup {
                     running: 1,
@@ -885,7 +889,7 @@ fn pg_health_rollup_yellow_when_any_stopped() {
                 parent_idx: Some(0),
                 kind: NodeKind::Processor,
                 id: "p1".into(),
-                group_id: "root".into(),
+                group_id: crate::client::ROOT_GROUP_ID.into(),
                 name: "P1".into(),
                 status_summary: NodeStatusSummary::Processor {
                     run_status: "RUNNING".into(),
@@ -895,7 +899,7 @@ fn pg_health_rollup_yellow_when_any_stopped() {
                 parent_idx: Some(0),
                 kind: NodeKind::Processor,
                 id: "p2".into(),
-                group_id: "root".into(),
+                group_id: crate::client::ROOT_GROUP_ID.into(),
                 name: "P2".into(),
                 status_summary: NodeStatusSummary::Processor {
                     run_status: "STOPPED".into(),
@@ -917,8 +921,8 @@ fn pg_health_rollup_red_when_any_invalid_even_if_some_stopped() {
             RawNode {
                 parent_idx: None,
                 kind: NodeKind::ProcessGroup,
-                id: "root".into(),
-                group_id: "root".into(),
+                id: crate::client::ROOT_GROUP_ID.into(),
+                group_id: crate::client::ROOT_GROUP_ID.into(),
                 name: "Root".into(),
                 status_summary: NodeStatusSummary::ProcessGroup {
                     running: 0,
@@ -931,7 +935,7 @@ fn pg_health_rollup_red_when_any_invalid_even_if_some_stopped() {
                 parent_idx: Some(0),
                 kind: NodeKind::Processor,
                 id: "p1".into(),
-                group_id: "root".into(),
+                group_id: crate::client::ROOT_GROUP_ID.into(),
                 name: "P1".into(),
                 status_summary: NodeStatusSummary::Processor {
                     run_status: "STOPPED".into(),
@@ -941,7 +945,7 @@ fn pg_health_rollup_red_when_any_invalid_even_if_some_stopped() {
                 parent_idx: Some(0),
                 kind: NodeKind::Processor,
                 id: "p2".into(),
-                group_id: "root".into(),
+                group_id: crate::client::ROOT_GROUP_ID.into(),
                 name: "P2".into(),
                 status_summary: NodeStatusSummary::Processor {
                     run_status: "INVALID".into(),
@@ -964,8 +968,8 @@ fn pg_health_rollup_recurses_into_child_pgs() {
             RawNode {
                 parent_idx: None,
                 kind: NodeKind::ProcessGroup,
-                id: "root".into(),
-                group_id: "root".into(),
+                id: crate::client::ROOT_GROUP_ID.into(),
+                group_id: crate::client::ROOT_GROUP_ID.into(),
                 name: "Root".into(),
                 status_summary: NodeStatusSummary::ProcessGroup {
                     running: 0,
@@ -978,7 +982,7 @@ fn pg_health_rollup_recurses_into_child_pgs() {
                 parent_idx: Some(0),
                 kind: NodeKind::ProcessGroup,
                 id: "inner".into(),
-                group_id: "root".into(),
+                group_id: crate::client::ROOT_GROUP_ID.into(),
                 name: "inner".into(),
                 status_summary: NodeStatusSummary::ProcessGroup {
                     running: 0,
@@ -1013,8 +1017,8 @@ fn pg_health_rollup_green_for_empty_pg() {
         nodes: vec![RawNode {
             parent_idx: None,
             kind: NodeKind::ProcessGroup,
-            id: "root".into(),
-            group_id: "root".into(),
+            id: crate::client::ROOT_GROUP_ID.into(),
+            group_id: crate::client::ROOT_GROUP_ID.into(),
             name: "Root".into(),
             status_summary: NodeStatusSummary::ProcessGroup {
                 running: 0,
@@ -1037,8 +1041,8 @@ fn child_process_groups_returns_direct_children_with_counts() {
             RawNode {
                 parent_idx: None,
                 kind: NodeKind::ProcessGroup,
-                id: "root".into(),
-                group_id: "root".into(),
+                id: crate::client::ROOT_GROUP_ID.into(),
+                group_id: crate::client::ROOT_GROUP_ID.into(),
                 name: "Root".into(),
                 status_summary: NodeStatusSummary::ProcessGroup {
                     running: 0,
@@ -1051,7 +1055,7 @@ fn child_process_groups_returns_direct_children_with_counts() {
                 parent_idx: Some(0),
                 kind: NodeKind::ProcessGroup,
                 id: "noisy".into(),
-                group_id: "root".into(),
+                group_id: crate::client::ROOT_GROUP_ID.into(),
                 name: "noisy".into(),
                 status_summary: NodeStatusSummary::ProcessGroup {
                     running: 3,
@@ -1064,7 +1068,7 @@ fn child_process_groups_returns_direct_children_with_counts() {
                 parent_idx: Some(0),
                 kind: NodeKind::ProcessGroup,
                 id: "healthy".into(),
-                group_id: "root".into(),
+                group_id: crate::client::ROOT_GROUP_ID.into(),
                 name: "healthy".into(),
                 status_summary: NodeStatusSummary::ProcessGroup {
                     running: 5,
@@ -1077,7 +1081,7 @@ fn child_process_groups_returns_direct_children_with_counts() {
                 parent_idx: Some(0),
                 kind: NodeKind::Connection,
                 id: "c1".into(),
-                group_id: "root".into(),
+                group_id: crate::client::ROOT_GROUP_ID.into(),
                 name: "conn".into(),
                 status_summary: NodeStatusSummary::Connection {
                     fill_percent: 10,
@@ -1094,7 +1098,7 @@ fn child_process_groups_returns_direct_children_with_counts() {
     };
     let mut s = BrowserState::new();
     apply_tree_snapshot(&mut s, snap);
-    let kids = s.child_process_groups("root");
+    let kids = s.child_process_groups(crate::client::ROOT_GROUP_ID);
     assert_eq!(kids.len(), 2);
     assert_eq!(kids[0].name, "noisy");
     assert_eq!(kids[0].running, 3);
@@ -1392,9 +1396,9 @@ fn drill_into_group_expands_ancestors_and_selects_child() {
         parent: None,
         children: vec![1],
         kind: NodeKind::ProcessGroup,
-        id: "root".into(),
+        id: crate::client::ROOT_GROUP_ID.into(),
         group_id: String::new(),
-        name: "root".into(),
+        name: crate::client::ROOT_GROUP_ID.into(),
         status_summary: NodeStatusSummary::ProcessGroup {
             running: 0,
             stopped: 0,
@@ -1408,7 +1412,7 @@ fn drill_into_group_expands_ancestors_and_selects_child() {
         children: vec![2],
         kind: NodeKind::ProcessGroup,
         id: "ingest".into(),
-        group_id: "root".into(),
+        group_id: crate::client::ROOT_GROUP_ID.into(),
         name: "ingest".into(),
         status_summary: NodeStatusSummary::ProcessGroup {
             running: 0,
@@ -1466,7 +1470,9 @@ fn cs(id: &str, parent: Option<usize>, state: &str) -> RawNode {
         parent_idx: parent,
         kind: NodeKind::ControllerService,
         id: id.into(),
-        group_id: parent.map(|_| "root".to_string()).unwrap_or_default(),
+        group_id: parent
+            .map(|_| crate::client::ROOT_GROUP_ID.to_string())
+            .unwrap_or_default(),
         name: id.into(),
         status_summary: NodeStatusSummary::ControllerService {
             state: state.into(),
@@ -1673,9 +1679,9 @@ fn connections_for_processor_splits_in_and_out_edges() {
         parent: None,
         children: vec![1, 2, 3, 4],
         kind: NodeKind::ProcessGroup,
-        id: "root".into(),
-        group_id: "root".into(),
-        name: "root".into(),
+        id: crate::client::ROOT_GROUP_ID.into(),
+        group_id: crate::client::ROOT_GROUP_ID.into(),
+        name: crate::client::ROOT_GROUP_ID.into(),
         status_summary: NodeStatusSummary::ProcessGroup {
             running: 0,
             stopped: 0,
@@ -1690,7 +1696,7 @@ fn connections_for_processor_splits_in_and_out_edges() {
             children: vec![],
             kind: NodeKind::Processor,
             id: id.into(),
-            group_id: "root".into(),
+            group_id: crate::client::ROOT_GROUP_ID.into(),
             name: name.into(),
             status_summary: NodeStatusSummary::Processor {
                 run_status: "Running".into(),
@@ -1703,7 +1709,7 @@ fn connections_for_processor_splits_in_and_out_edges() {
         children: vec![],
         kind: NodeKind::Connection,
         id: "conn-ab".into(),
-        group_id: "root".into(),
+        group_id: crate::client::ROOT_GROUP_ID.into(),
         name: "A→B".into(),
         status_summary: NodeStatusSummary::Connection {
             fill_percent: 0,
@@ -1721,7 +1727,7 @@ fn connections_for_processor_splits_in_and_out_edges() {
         children: vec![],
         kind: NodeKind::Connection,
         id: "conn-ba".into(),
-        group_id: "root".into(),
+        group_id: crate::client::ROOT_GROUP_ID.into(),
         name: "B→A".into(),
         status_summary: NodeStatusSummary::Connection {
             fill_percent: 0,
@@ -1774,7 +1780,7 @@ fn connections_for_processor_falls_back_to_empty_group_id_for_unresolvable_oppos
         children: vec![],
         kind: NodeKind::Connection,
         id: "conn-x".into(),
-        group_id: "root".into(),
+        group_id: crate::client::ROOT_GROUP_ID.into(),
         name: "x".into(),
         status_summary: NodeStatusSummary::Connection {
             fill_percent: 0,
@@ -1897,9 +1903,9 @@ fn section_len_connections_counts_processor_edges() {
         parent: None,
         children: vec![1, 2, 3],
         kind: NodeKind::ProcessGroup,
-        id: "root".into(),
-        group_id: "root".into(),
-        name: "root".into(),
+        id: crate::client::ROOT_GROUP_ID.into(),
+        group_id: crate::client::ROOT_GROUP_ID.into(),
+        name: crate::client::ROOT_GROUP_ID.into(),
         status_summary: NodeStatusSummary::ProcessGroup {
             running: 0,
             stopped: 0,
@@ -1913,7 +1919,7 @@ fn section_len_connections_counts_processor_edges() {
         children: vec![],
         kind: NodeKind::Processor,
         id: "proc".into(),
-        group_id: "root".into(),
+        group_id: crate::client::ROOT_GROUP_ID.into(),
         name: "proc".into(),
         status_summary: NodeStatusSummary::Processor {
             run_status: "Running".into(),
@@ -1926,7 +1932,7 @@ fn section_len_connections_counts_processor_edges() {
             children: vec![],
             kind: NodeKind::Connection,
             id: id.into(),
-            group_id: "root".into(),
+            group_id: crate::client::ROOT_GROUP_ID.into(),
             name: id.into(),
             status_summary: NodeStatusSummary::Connection {
                 fill_percent: 0,
@@ -1986,7 +1992,7 @@ fn property_rows_marks_uuid_values_that_resolve() {
         children: vec![],
         kind: crate::client::NodeKind::ControllerService,
         id: cs_uuid.clone(),
-        group_id: "root".into(),
+        group_id: crate::client::ROOT_GROUP_ID.into(),
         name: "fixture-json-reader".into(),
         status_summary: crate::client::NodeStatusSummary::ControllerService {
             state: "ENABLED".into(),
@@ -2039,7 +2045,7 @@ fn rebuild_arena_from_cluster_uses_snapshot_root_pg() {
 
     let nodes = &state.browser.nodes;
     assert_eq!(nodes.len(), 1, "arena must have exactly the root PG node");
-    assert_eq!(nodes[0].id, "root");
+    assert_eq!(nodes[0].id, crate::client::ROOT_GROUP_ID);
     assert!(matches!(nodes[0].kind, NodeKind::ProcessGroup));
     assert!(state.flow_index.is_some(), "flow index must be rebuilt");
 }
@@ -2104,7 +2110,7 @@ fn rebuild_arena_is_idempotent_for_same_inputs() {
                     id: "cs-1".into(),
                     name: "fixture-reader".into(),
                     state: "ENABLED".into(),
-                    parent_group_id: "root".into(),
+                    parent_group_id: crate::client::ROOT_GROUP_ID.into(),
                 },
             ]),
             meta,

@@ -444,7 +444,7 @@ mod snapshots {
         ProcessGroupDetail {
             id: "ingest".into(),
             name: "ingest".into(),
-            parent_group_id: Some("root".into()),
+            parent_group_id: Some(crate::client::ROOT_GROUP_ID.into()),
             running: 3,
             stopped: 1,
             invalid: 0,
@@ -547,7 +547,7 @@ mod snapshots {
         let d = ProcessGroupDetail {
             id: "ingest".into(),
             name: "ingest".into(),
-            parent_group_id: Some("root".into()),
+            parent_group_id: Some(crate::client::ROOT_GROUP_ID.into()),
             running: 3,
             stopped: 1,
             invalid: 0,
@@ -717,7 +717,7 @@ mod snapshots {
         let d = ProcessGroupDetail {
             id: pg_uuid.into(),
             name: "ingest".into(),
-            parent_group_id: Some("root".into()),
+            parent_group_id: Some(crate::client::ROOT_GROUP_ID.into()),
             running: 1,
             stopped: 0,
             invalid: 0,
@@ -736,7 +736,7 @@ mod snapshots {
             children: vec![],
             kind: NodeKind::ProcessGroup,
             id: pg_uuid.into(),
-            group_id: "root".into(),
+            group_id: crate::client::ROOT_GROUP_ID.into(),
             name: "ingest".into(),
             status_summary: NodeStatusSummary::ProcessGroup {
                 running: 1,
@@ -821,7 +821,7 @@ mod snapshots {
         let d = ProcessGroupDetail {
             id: pg_uuid.into(),
             name: "ingest".into(),
-            parent_group_id: Some("root".into()),
+            parent_group_id: Some(crate::client::ROOT_GROUP_ID.into()),
             running: 0,
             stopped: 0,
             invalid: 0,
@@ -838,7 +838,7 @@ mod snapshots {
             children: vec![],
             kind: NodeKind::ProcessGroup,
             id: pg_uuid.into(),
-            group_id: "root".into(),
+            group_id: crate::client::ROOT_GROUP_ID.into(),
             name: "ingest".into(),
             status_summary: NodeStatusSummary::ProcessGroup {
                 running: 0,

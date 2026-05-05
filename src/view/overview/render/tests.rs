@@ -188,7 +188,7 @@ fn snapshot_healthy_cluster() {
             bytes_queued: 4096,
             connections: vec![QueueSnapshot {
                 id: "c1".into(),
-                group_id: "root".into(),
+                group_id: crate::client::ROOT_GROUP_ID.into(),
                 name: "ingest → enrich".into(),
                 source_name: "Generate".into(),
                 destination_name: "Enrich".into(),
@@ -294,7 +294,7 @@ fn snapshot_unhealthy_cluster() {
     let queues = (0..5)
         .map(|i| QueueSnapshot {
             id: format!("c{i}"),
-            group_id: "root".into(),
+            group_id: crate::client::ROOT_GROUP_ID.into(),
             name: format!("q{i}"),
             source_name: "Generate".into(),
             destination_name: format!("Proc{i}"),
@@ -322,7 +322,7 @@ fn snapshot_unhealthy_cluster() {
             source_id: format!("proc-{}", i % 3),
             source_name: format!("Proc{}", i % 3),
             source_type: "PROCESSOR".into(),
-            group_id: "root".into(),
+            group_id: crate::client::ROOT_GROUP_ID.into(),
             timestamp_iso: "2026-04-11T10:14:10Z".into(),
             timestamp_human: String::new(),
         })
@@ -701,7 +701,7 @@ fn queues_panel_scrolls_to_selected() {
         .enumerate()
         .map(|(i, &name)| QueueSnapshot {
             id: format!("c{i}"),
-            group_id: "root".into(),
+            group_id: crate::client::ROOT_GROUP_ID.into(),
             name: name.into(),
             source_name: "Src".into(),
             destination_name: "Dst".into(),

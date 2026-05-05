@@ -390,7 +390,7 @@ fn fake_summary(id: i64, uuid: &str) -> ProvenanceEventSummary {
         component_id: COMP_ID.to_string(),
         component_name: "MyProcessor".to_string(),
         component_type: "GenerateFlowFile".to_string(),
-        group_id: "root".to_string(),
+        group_id: crate::client::ROOT_GROUP_ID.to_string(),
         flow_file_uuid: uuid.to_string(),
         relationship: None,
         details: None,
