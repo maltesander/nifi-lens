@@ -11,6 +11,14 @@ prop_replace 'nifi.security.truststore'         "${TRUSTSTORE_PATH}"
 prop_replace 'nifi.security.truststoreType'     "${TRUSTSTORE_TYPE}"
 prop_replace 'nifi.security.truststorePasswd'   "${TRUSTSTORE_PASSWORD}"
 
+# Point NiFi at the identifiers defined in our pre-baked authorizers.xml /
+# login-identity-providers.xml. The default `nifi.properties` still names
+# `single-user-authorizer`, which our managed-authorizer config doesn't
+# define, so without these overrides startup fails with
+# "Configured Authorizer [single-user-authorizer] not found".
+prop_replace 'nifi.security.user.authorizer'                'managed-authorizer'
+prop_replace 'nifi.security.user.login.identity.provider'   'single-user-provider'
+
 # Site-to-site listening, optional. When `REMOTE_INPUT_HOST` is set we enable
 # HTTP-based site-to-site (piggybacks on the regular web port, no new port
 # exposure needed). Required for Remote Process Groups in this fixture to
