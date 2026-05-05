@@ -322,6 +322,7 @@ mod tests {
     use crate::app::state::{AppState, PendingIntent, ViewId};
     use crate::client::BulletinSnapshot;
     use crossterm::event::{KeyCode, KeyModifiers};
+    use serial_test::serial;
 
     /// Merge the given bulletins into the cluster-owned ring and mirror
     /// them into `state.bulletins` via `redraw_bulletins` — the
@@ -799,6 +800,7 @@ mod tests {
     }
 
     #[test]
+    #[serial(clipboard)]
     fn paste_inserts_clipboard_text_into_search() {
         let mut s = fresh_state();
         let c = tiny_config();
@@ -825,6 +827,7 @@ mod tests {
     }
 
     #[test]
+    #[serial(clipboard)]
     fn cut_cancels_text_input_mode() {
         // Verifies the structural behaviour of 'x' (cancel text-input) without
         // relying on clipboard availability.  A separate integration scenario
@@ -1037,6 +1040,7 @@ mod tests {
     }
 
     #[test]
+    #[serial(clipboard)]
     fn modal_open_c_copies_raw_message() {
         let mut s = fresh_state();
         let c = tiny_config();

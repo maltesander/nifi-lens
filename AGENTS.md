@@ -49,18 +49,23 @@ nifi-lens/
 
 ## Architecture
 
-`nifi-lens` is a "ratatui + tokio" TUI. A single multi-thread runtime
-plus a main-thread `LocalSet` owns everything; **state is mutated only
-on the UI task** (no locks, no races). The UI loop drains an internal
-`AppEvent` channel, mutates state, and redraws (60 fps cap, only on
-state change). A terminal task converts `crossterm::Event` →
-`AppEvent::Input`. All cluster polling is owned by `ClusterStore`
-(below); on-demand detail fetches go through view-local workers under
-`WorkerRegistry` (`src/app/worker.rs`), which also drives
-`cluster.subscribe` / `unsubscribe` on tab change. All workers use
-`tokio::task::spawn_local` because `nifi-rust-client` dynamic traits
-return `!Send` futures. User actions route through a single `Intent`
-enum + dispatcher.
+`nifi-lens` is a "ratatui + tokio" TUI. A single multi-thread `tokio`
+runtime owns everything; the main UI task is parked on the OS main
+thread via `rt.block_on(...)` because ratatui's `Terminal` is
+naturally single-thread, but **state is mutated only on the UI task**
+(no locks, no races) by convention, not by `!Send` constraints. The
+UI loop drains an internal `AppEvent` channel, mutates state, and
+redraws (60 fps cap, only on state change). A terminal task converts
+`crossterm::Event` → `AppEvent::Input`. All cluster polling is owned
+by `ClusterStore` (below); on-demand detail fetches go through
+view-local workers under `WorkerRegistry` (`src/app/worker.rs`),
+which also drives `cluster.subscribe` / `unsubscribe` on tab change.
+All workers use `tokio::spawn`; wrapper futures on `NifiClient` are
+`Send` (asserted by `tests/send_regression.rs`). RAII guards that
+fire-and-forget cleanup HTTP DELETEs from `Drop` use
+`app::cleanup::spawn_cleanup` so they no-op silently if the runtime
+is gone. User actions route through a single `Intent` enum +
+dispatcher.
 
 **Modal conventions:** every full-screen modal owns a `*ModalVerb`
 enum that embeds `Common(CommonVerb)` for shared chords
@@ -76,8 +81,8 @@ impl per modal). Search uses `widget::search`. Below
 `controller_services`, `controller_status`, `system_diagnostics`,
 `bulletins`, `connections_by_pg`, `about`, `cluster_nodes`,
 `tls_certs`, `version_control`, `parameter_context_bindings`,
-`reporting_tasks`). Each runs as an independent `spawn_local` future,
-emits `AppEvent::ClusterUpdate` on success, and sleeps for its base
+`reporting_tasks`). Each runs as an independent `tokio::spawn`
+future, emits `AppEvent::ClusterUpdate` on success, and sleeps for its base
 cadence — scaled adaptively up to `max_interval` based on measured
 latency, with ±`jitter_percent/100` jitter. Cadences live under
 `[polling.cluster]` (humantime); see README "Configuration".

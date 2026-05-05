@@ -161,7 +161,7 @@ pub const MODAL_CHUNK_BYTES: usize = 8 * crate::bytes::MIB as usize;
 
 /// One pending fetch request — the reducer returns these instead of
 /// spawning directly so `AppState` code can route through the
-/// `tokio::spawn_local` wiring.
+/// `tokio::spawn` wiring.
 #[derive(Debug, Clone, Copy)]
 pub struct ModalFetchRequest {
     pub event_id: i64,

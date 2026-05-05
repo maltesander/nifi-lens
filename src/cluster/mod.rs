@@ -1,8 +1,8 @@
 //! Central cluster-state store.
 //!
 //! Owns every periodic NiFi poll for the active context. One
-//! [`fetcher`] task per [`ClusterEndpoint`] runs on the main-thread
-//! `LocalSet`, writes results into a shared [`ClusterSnapshot`]
+//! [`fetcher`] task per [`ClusterEndpoint`] runs on the multi-thread
+//! tokio runtime, writes results into a shared [`ClusterSnapshot`]
 //! through [`ClusterStore`], and emits `AppEvent::ClusterUpdate` so
 //! the UI loop can fan out `AppEvent::ClusterChanged(endpoint)` to
 //! subscribed views.

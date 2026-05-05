@@ -1,8 +1,8 @@
 //! Events tab worker: submits a provenance query and polls until done.
 //!
 //! Mirrors `src/view/tracer/worker.rs` — a one-shot submit → poll loop →
-//! best-effort server cleanup task spawned on the main-thread `LocalSet`
-//! because the dynamic NiFi client's futures are `!Send`. Also hosts
+//! best-effort server cleanup task spawned via
+//! [`crate::app::cleanup::spawn_cleanup`]. Also hosts
 //! [`spawn_watch`], the long-running tail worker driving the Watch
 //! sub-mode (Task 11 / 12).
 
@@ -28,7 +28,7 @@ const POLL_INTERVAL: Duration = Duration::from_millis(750);
 const POLL_TIMEOUT: Duration = Duration::from_secs(60);
 
 /// RAII guard for a server-side provenance query: when dropped, fires a
-/// best-effort `DELETE /provenance/{id}` via `spawn_local`. Owned by
+/// best-effort `DELETE /provenance/{id}` via `app::cleanup::spawn_cleanup`. Owned by
 /// `spawn_query`'s async closure so cleanup happens whether the closure
 /// returns normally, encounters an error, or panics during poll.
 struct ProvenanceQueryGuard {
@@ -51,9 +51,7 @@ impl Drop for ProvenanceQueryGuard {
     fn drop(&mut self) {
         let client = self.client.clone();
         let handle = self.handle.clone();
-        // Drop runs on the worker's task which lives on the main-thread
-        // LocalSet — spawn_local is the correct primitive.
-        tokio::task::spawn_local(async move {
+        crate::app::cleanup::spawn_cleanup(async move {
             let guard = client.read().await;
             if let Err(err) = guard.delete_provenance_query(&handle).await {
                 tracing::warn!(
@@ -83,7 +81,7 @@ pub fn spawn_query(
     tx: mpsc::Sender<AppEvent>,
     query: ProvenanceQuery,
 ) -> JoinHandle<()> {
-    tokio::task::spawn_local(async move {
+    tokio::spawn(async move {
         // Submit. On error, no cleanup needed (no server-side query exists).
         let handle = {
             let guard = client.read().await;
@@ -196,7 +194,7 @@ pub fn spawn_cancel(
     client: Arc<RwLock<NifiClient>>,
     handle: ProvenanceQueryHandle,
 ) -> JoinHandle<()> {
-    tokio::task::spawn_local(async move {
+    tokio::spawn(async move {
         let guard = client.read().await;
         if let Err(err) = guard.delete_provenance_query(&handle).await {
             tracing::warn!(
@@ -259,8 +257,7 @@ fn parse_nifi_event_time(s: &str) -> Option<SystemTime> {
 /// backoff (5s → 10s → 30s → 60s, capped), sleep, and retry. RAII
 /// guard fires `DELETE /provenance/{id}` on every exit path
 /// including `JoinHandle::abort()` — we reuse `ProvenanceQueryGuard`
-/// from `spawn_query`. Worker uses `tokio::task::spawn_local` because
-/// the dynamic NiFi futures are `!Send`.
+/// from `spawn_query`.
 pub fn spawn_watch(
     client: Arc<RwLock<NifiClient>>,
     tx: mpsc::Sender<AppEvent>,
@@ -270,7 +267,7 @@ pub fn spawn_watch(
     cadence: Duration,
     detail_concurrency: usize,
 ) -> JoinHandle<()> {
-    tokio::task::spawn_local(async move {
+    tokio::spawn(async move {
         let mut cursor = initial_cursor;
         let mut ewma_per_sec: f32 = 0.0;
         let mut detail_fetch_errors: u64 = 0;
@@ -568,53 +565,49 @@ mod tests {
         let client = test_client(&server).await;
         let (tx, mut rx) = mpsc::channel::<AppEvent>(64);
 
-        let local = tokio::task::LocalSet::new();
-        local
-            .run_until(async {
-                let predicate = Predicate::parse("filename =~ /^invoice-/").expect("parse");
-                let narrow = ProvenanceQuery {
-                    component_id: Some("c".into()),
-                    event_types: vec![],
-                    max_results: 1000,
-                    ..Default::default()
-                };
-                let handle = spawn_watch(
-                    client.clone(),
-                    tx,
-                    narrow,
-                    predicate,
-                    None,
-                    Duration::from_millis(50),
-                    4,
-                );
+        let predicate = Predicate::parse("filename =~ /^invoice-/").expect("parse");
+        let narrow = ProvenanceQuery {
+            component_id: Some("c".into()),
+            event_types: vec![],
+            max_results: 1000,
+            ..Default::default()
+        };
+        let handle = spawn_watch(
+            client.clone(),
+            tx,
+            narrow,
+            predicate,
+            None,
+            Duration::from_millis(50),
+            4,
+        );
 
-                let mut got_match = false;
-                let mut got_tick = false;
-                for _ in 0..20 {
-                    match tokio::time::timeout(Duration::from_secs(2), rx.recv()).await {
-                        Ok(Some(AppEvent::Data(ViewPayload::Events(
-                            EventsPayload::WatchMatch { summary, attrs },
-                        )))) => {
-                            assert_eq!(summary.event_id, 1);
-                            assert!(attrs.iter().any(|a| a.key == "filename"));
-                            got_match = true;
-                        }
-                        Ok(Some(AppEvent::Data(ViewPayload::Events(
-                            EventsPayload::WatchTick { .. },
-                        )))) => {
-                            got_tick = true;
-                        }
-                        _ => break,
-                    }
-                    if got_match && got_tick {
-                        break;
-                    }
+        let mut got_match = false;
+        let mut got_tick = false;
+        for _ in 0..20 {
+            match tokio::time::timeout(Duration::from_secs(2), rx.recv()).await {
+                Ok(Some(AppEvent::Data(ViewPayload::Events(EventsPayload::WatchMatch {
+                    summary,
+                    attrs,
+                })))) => {
+                    assert_eq!(summary.event_id, 1);
+                    assert!(attrs.iter().any(|a| a.key == "filename"));
+                    got_match = true;
                 }
-                handle.abort();
-                assert!(got_match, "expected at least one WatchMatch");
-                assert!(got_tick, "expected at least one WatchTick");
-            })
-            .await;
+                Ok(Some(AppEvent::Data(ViewPayload::Events(EventsPayload::WatchTick {
+                    ..
+                })))) => {
+                    got_tick = true;
+                }
+                _ => break,
+            }
+            if got_match && got_tick {
+                break;
+            }
+        }
+        handle.abort();
+        assert!(got_match, "expected at least one WatchMatch");
+        assert!(got_tick, "expected at least one WatchTick");
     }
 
     /// Test B — submit failure → `WatchFailed`, then on retry the
@@ -664,60 +657,55 @@ mod tests {
         let client = test_client(&server).await;
         let (tx, mut rx) = mpsc::channel::<AppEvent>(64);
 
-        let local = tokio::task::LocalSet::new();
-        local
-            .run_until(async {
-                let handle = spawn_watch(
-                    client.clone(),
-                    tx,
-                    ProvenanceQuery {
-                        component_id: Some("c".into()),
-                        event_types: vec![],
-                        max_results: 1000,
-                        ..Default::default()
-                    },
-                    Predicate::default(),
-                    None,
-                    Duration::from_millis(50),
-                    4,
-                );
+        let handle = spawn_watch(
+            client.clone(),
+            tx,
+            ProvenanceQuery {
+                component_id: Some("c".into()),
+                event_types: vec![],
+                max_results: 1000,
+                ..Default::default()
+            },
+            Predicate::default(),
+            None,
+            Duration::from_millis(50),
+            4,
+        );
 
-                let mut got_failed = false;
-                let mut got_tick = false;
-                // Generous overall deadline. The first iteration emits
-                // WatchFailed quickly (no sleep before), then sleeps 5s
-                // backoff, then the recovery iteration emits WatchTick.
-                let deadline = std::time::Instant::now() + Duration::from_secs(10);
-                while std::time::Instant::now() < deadline && !(got_failed && got_tick) {
-                    let remaining = deadline.saturating_duration_since(std::time::Instant::now());
-                    match tokio::time::timeout(remaining, rx.recv()).await {
-                        Ok(Some(AppEvent::Data(ViewPayload::Events(
-                            EventsPayload::WatchFailed { .. },
-                        )))) => {
-                            got_failed = true;
-                        }
-                        Ok(Some(AppEvent::Data(ViewPayload::Events(
-                            EventsPayload::WatchTick { .. },
-                        )))) => {
-                            got_tick = true;
-                        }
-                        Ok(_) => {}
-                        Err(_) => break,
-                    }
+        let mut got_failed = false;
+        let mut got_tick = false;
+        // Generous overall deadline. The first iteration emits
+        // WatchFailed quickly (no sleep before), then sleeps 5s
+        // backoff, then the recovery iteration emits WatchTick.
+        let deadline = std::time::Instant::now() + Duration::from_secs(10);
+        while std::time::Instant::now() < deadline && !(got_failed && got_tick) {
+            let remaining = deadline.saturating_duration_since(std::time::Instant::now());
+            match tokio::time::timeout(remaining, rx.recv()).await {
+                Ok(Some(AppEvent::Data(ViewPayload::Events(EventsPayload::WatchFailed {
+                    ..
+                })))) => {
+                    got_failed = true;
                 }
-                handle.abort();
-                assert!(got_failed, "expected WatchFailed after submit 500");
-                assert!(got_tick, "expected WatchTick after recovery");
-            })
-            .await;
+                Ok(Some(AppEvent::Data(ViewPayload::Events(EventsPayload::WatchTick {
+                    ..
+                })))) => {
+                    got_tick = true;
+                }
+                Ok(_) => {}
+                Err(_) => break,
+            }
+        }
+        handle.abort();
+        assert!(got_failed, "expected WatchFailed after submit 500");
+        assert!(got_tick, "expected WatchTick after recovery");
     }
 
     /// Test C — abort fires `DELETE` through the RAII guard. We let
     /// the worker submit and start polling (the poll mock returns
     /// `finished=false` so the worker stays in the poll loop), then
     /// abort the `JoinHandle`. Drop on `ProvenanceQueryGuard` spawns
-    /// the DELETE on the LocalSet; we keep the LocalSet alive after
-    /// abort to drive that follow-up task.
+    /// the DELETE via spawn_cleanup; we wait briefly after abort
+    /// to give the follow-up task time to run.
     #[tokio::test(flavor = "current_thread")]
     async fn spawn_watch_aborts_cleanly_and_fires_delete() {
         let server = MockServer::start().await;
@@ -754,35 +742,30 @@ mod tests {
         let client = test_client(&server).await;
         let (tx, _rx) = mpsc::channel::<AppEvent>(64);
 
-        let local = tokio::task::LocalSet::new();
-        local
-            .run_until(async {
-                let handle = spawn_watch(
-                    client.clone(),
-                    tx,
-                    ProvenanceQuery {
-                        component_id: Some("c".into()),
-                        max_results: 1000,
-                        event_types: vec![],
-                        ..Default::default()
-                    },
-                    Predicate::default(),
-                    None,
-                    Duration::from_millis(50),
-                    4,
-                );
-                // Let the worker submit + start polling.
-                tokio::time::sleep(Duration::from_millis(900)).await;
-                handle.abort();
-                // Drive the LocalSet so the DELETE task spawned by
-                // ProvenanceQueryGuard::drop gets to run.
-                tokio::time::sleep(Duration::from_millis(500)).await;
-                assert!(
-                    delete_called.load(Ordering::SeqCst),
-                    "expected DELETE to fire on abort",
-                );
-            })
-            .await;
+        let handle = spawn_watch(
+            client.clone(),
+            tx,
+            ProvenanceQuery {
+                component_id: Some("c".into()),
+                max_results: 1000,
+                event_types: vec![],
+                ..Default::default()
+            },
+            Predicate::default(),
+            None,
+            Duration::from_millis(50),
+            4,
+        );
+        // Let the worker submit + start polling.
+        tokio::time::sleep(Duration::from_millis(900)).await;
+        handle.abort();
+        // Wait so the DELETE task spawned by
+        // ProvenanceQueryGuard::drop gets to run.
+        tokio::time::sleep(Duration::from_millis(500)).await;
+        assert!(
+            delete_called.load(Ordering::SeqCst),
+            "expected DELETE to fire on abort",
+        );
     }
 
     #[test]

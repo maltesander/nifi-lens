@@ -1,5 +1,6 @@
 //! App run loop, terminal guard, and panic hook.
 
+pub mod cleanup;
 pub mod history;
 pub(crate) mod navigation;
 pub mod state;
@@ -259,7 +260,7 @@ pub async fn run(
                 } => {
                     let dispatcher = dispatcher.clone();
                     let tx = tx.clone();
-                    tokio::task::spawn_local(async move {
+                    tokio::spawn(async move {
                         let outcome = dispatcher
                             .dispatch(Intent::DeleteLineageQuery {
                                 query_id,
@@ -502,7 +503,7 @@ pub async fn run(
                     if let Some(intent) = intent {
                         let dispatcher = dispatcher.clone();
                         let tx = tx.clone();
-                        tokio::task::spawn_local(async move {
+                        tokio::spawn(async move {
                             let outcome = dispatcher.dispatch(intent).await;
                             let _ = tx.send(AppEvent::IntentOutcome(outcome)).await;
                         });
@@ -645,7 +646,7 @@ fn spawn_tick_task(tx: mpsc::Sender<AppEvent>) {
 /// the warn falls silent as soon as capacity recovers. Spawned alongside
 /// the input/tick tasks; aborts when the runtime shuts down.
 fn spawn_channel_saturation_watchdog(tx: mpsc::Sender<AppEvent>, low_water: usize, total: usize) {
-    tokio::task::spawn_local(async move {
+    tokio::spawn(async move {
         let mut sleep = tokio::time::interval(std::time::Duration::from_secs(1));
         sleep.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
         loop {
@@ -707,54 +708,44 @@ mod channel_saturation_tests {
     #[tokio::test(flavor = "current_thread", start_paused = true)]
     #[traced_test]
     async fn warns_when_capacity_below_low_water() {
-        let local = tokio::task::LocalSet::new();
-        local
-            .run_until(async {
-                let (tx, _rx) = mpsc::channel::<AppEvent>(20);
-                // Fill 15 of 20 slots → only 5 remaining → below low_water of 16.
-                for _ in 0..15 {
-                    tx.send(AppEvent::Tick).await.expect("channel open");
-                }
-                spawn_channel_saturation_watchdog(tx.clone(), 16, 20);
+        let (tx, _rx) = mpsc::channel::<AppEvent>(20);
+        // Fill 15 of 20 slots → only 5 remaining → below low_water of 16.
+        for _ in 0..15 {
+            tx.send(AppEvent::Tick).await.expect("channel open");
+        }
+        spawn_channel_saturation_watchdog(tx.clone(), 16, 20);
 
-                // Advance virtual time past the first 1s tick.
-                tokio::time::advance(std::time::Duration::from_millis(1100)).await;
-                tokio::task::yield_now().await;
+        // Advance virtual time past the first 1s tick.
+        tokio::time::advance(std::time::Duration::from_millis(1100)).await;
+        tokio::task::yield_now().await;
 
-                logs_assert(|lines: &[&str]| {
-                    let any_warn = lines.iter().any(|l| l.contains("near saturation"));
-                    if any_warn {
-                        Ok(())
-                    } else {
-                        Err("expected near-saturation warn".into())
-                    }
-                });
-            })
-            .await;
+        logs_assert(|lines: &[&str]| {
+            let any_warn = lines.iter().any(|l| l.contains("near saturation"));
+            if any_warn {
+                Ok(())
+            } else {
+                Err("expected near-saturation warn".into())
+            }
+        });
     }
 
     #[tokio::test(flavor = "current_thread", start_paused = true)]
     #[traced_test]
     async fn no_warn_when_capacity_healthy() {
-        let local = tokio::task::LocalSet::new();
-        local
-            .run_until(async {
-                let (tx, _rx) = mpsc::channel::<AppEvent>(20);
-                // Empty channel → 20 remaining → above low_water of 16.
-                spawn_channel_saturation_watchdog(tx.clone(), 16, 20);
+        let (tx, _rx) = mpsc::channel::<AppEvent>(20);
+        // Empty channel → 20 remaining → above low_water of 16.
+        spawn_channel_saturation_watchdog(tx.clone(), 16, 20);
 
-                tokio::time::advance(std::time::Duration::from_millis(1100)).await;
-                tokio::task::yield_now().await;
+        tokio::time::advance(std::time::Duration::from_millis(1100)).await;
+        tokio::task::yield_now().await;
 
-                logs_assert(|lines: &[&str]| {
-                    let any_warn = lines.iter().any(|l| l.contains("near saturation"));
-                    if !any_warn {
-                        Ok(())
-                    } else {
-                        Err("unexpected near-saturation warn".into())
-                    }
-                });
-            })
-            .await;
+        logs_assert(|lines: &[&str]| {
+            let any_warn = lines.iter().any(|l| l.contains("near saturation"));
+            if !any_warn {
+                Ok(())
+            } else {
+                Err("unexpected near-saturation warn".into())
+            }
+        });
     }
 }

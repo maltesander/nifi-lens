@@ -170,7 +170,7 @@ impl std::fmt::Debug for ClusterStore {
 
 impl ClusterStore {
     /// Constructs an empty store. Call `spawn_fetchers` to start the
-    /// per-endpoint tasks on the current `LocalSet`.
+    /// per-endpoint tasks on the tokio runtime.
     ///
     /// `bulletins_capacity` sizes the cluster-owned `BulletinRing` and
     /// is sourced from `config.bulletins.ring_size` by callers. Passing
@@ -269,7 +269,7 @@ impl ClusterStore {
         }
     }
 
-    /// Spawn every per-endpoint fetch task on the current `LocalSet`.
+    /// Spawn every per-endpoint fetch task on the tokio runtime.
     /// Tasks 2–8 each add one arm.
     pub fn spawn_fetchers(&mut self, client: Arc<RwLock<NifiClient>>, tx: mpsc::Sender<AppEvent>) {
         let status_cfg = FetchTaskConfig {
@@ -735,87 +735,87 @@ mod tests {
 
     #[tokio::test(flavor = "current_thread", start_paused = true)]
     async fn subscribe_wakes_waiter_on_first_subscriber() {
-        let local = tokio::task::LocalSet::new();
-        local
-            .run_until(async {
-                let mut store = ClusterStore::new(
-                    ClusterPollingConfig::default(),
-                    5000,
-                    "https://nifi.test:8443".into(),
-                );
-                let notify = store.notify_for(ClusterEndpoint::RootPgStatus);
-                let flag = std::rc::Rc::new(std::cell::Cell::new(false));
-                let flag_clone = flag.clone();
+        use std::sync::Arc;
+        use std::sync::atomic::{AtomicBool, Ordering};
 
-                let waiter = tokio::task::spawn_local(async move {
-                    notify.notified().await;
-                    flag_clone.set(true);
-                });
+        let mut store = ClusterStore::new(
+            ClusterPollingConfig::default(),
+            5000,
+            "https://nifi.test:8443".into(),
+        );
+        let notify = store.notify_for(ClusterEndpoint::RootPgStatus);
+        let flag = Arc::new(AtomicBool::new(false));
+        let flag_clone = flag.clone();
 
-                // Before subscribe, the waiter hasn't woken.
-                tokio::task::yield_now().await;
-                assert!(!flag.get(), "waiter fired before subscribe");
+        let waiter = tokio::spawn(async move {
+            notify.notified().await;
+            flag_clone.store(true, Ordering::SeqCst);
+        });
 
-                // Subscribing (0 → 1 transition) must call notify_one() internally.
-                store.subscribe(ClusterEndpoint::RootPgStatus, ViewId::Overview);
-                tokio::task::yield_now().await;
-                assert!(flag.get(), "waiter did not wake on first subscribe");
-                assert_eq!(store.subscribers.count(ClusterEndpoint::RootPgStatus), 1);
+        // Before subscribe, the waiter hasn't woken.
+        tokio::task::yield_now().await;
+        assert!(
+            !flag.load(Ordering::SeqCst),
+            "waiter fired before subscribe"
+        );
 
-                waiter.abort();
-            })
-            .await;
+        // Subscribing (0 → 1 transition) must call notify_one() internally.
+        store.subscribe(ClusterEndpoint::RootPgStatus, ViewId::Overview);
+        tokio::task::yield_now().await;
+        assert!(
+            flag.load(Ordering::SeqCst),
+            "waiter did not wake on first subscribe"
+        );
+        assert_eq!(store.subscribers.count(ClusterEndpoint::RootPgStatus), 1);
+
+        waiter.abort();
     }
 
     #[tokio::test(flavor = "current_thread", start_paused = true)]
     async fn force_wakes_waiter() {
-        let local = tokio::task::LocalSet::new();
-        local
-            .run_until(async {
-                let store = ClusterStore::new(
-                    ClusterPollingConfig::default(),
-                    5000,
-                    "https://nifi.test:8443".into(),
-                );
-                let notify = store.notify_for(ClusterEndpoint::ControllerStatus);
-                let flag = std::rc::Rc::new(std::cell::Cell::new(false));
-                let flag_clone = flag.clone();
+        use std::sync::Arc;
+        use std::sync::atomic::{AtomicBool, Ordering};
 
-                let waiter = tokio::task::spawn_local(async move {
-                    notify.notified().await;
-                    flag_clone.set(true);
-                });
+        let store = ClusterStore::new(
+            ClusterPollingConfig::default(),
+            5000,
+            "https://nifi.test:8443".into(),
+        );
+        let notify = store.notify_for(ClusterEndpoint::ControllerStatus);
+        let flag = Arc::new(AtomicBool::new(false));
+        let flag_clone = flag.clone();
 
-                tokio::task::yield_now().await;
-                assert!(!flag.get(), "waiter fired before force");
+        let waiter = tokio::spawn(async move {
+            notify.notified().await;
+            flag_clone.store(true, Ordering::SeqCst);
+        });
 
-                store.force(ClusterEndpoint::ControllerStatus);
-                tokio::task::yield_now().await;
-                assert!(flag.get(), "waiter did not wake on force()");
+        tokio::task::yield_now().await;
+        assert!(!flag.load(Ordering::SeqCst), "waiter fired before force");
 
-                waiter.abort();
-            })
-            .await;
+        store.force(ClusterEndpoint::ControllerStatus);
+        tokio::task::yield_now().await;
+        assert!(
+            flag.load(Ordering::SeqCst),
+            "waiter did not wake on force()"
+        );
+
+        waiter.abort();
     }
 
     #[tokio::test(flavor = "current_thread")]
     async fn shutdown_then_new_is_clean() {
-        let local = tokio::task::LocalSet::new();
-        local
-            .run_until(async {
-                let mut store = ClusterStore::new(
-                    ClusterPollingConfig::default(),
-                    5000,
-                    "https://nifi.test:8443".into(),
-                );
-                // Pretend we spawned something.
-                store.handles.push(tokio::task::spawn_local(async {}));
-                store.shutdown();
-                assert!(store.handles.is_empty());
-                // Drop would also call shutdown — must be idempotent.
-                store.shutdown();
-            })
-            .await;
+        let mut store = ClusterStore::new(
+            ClusterPollingConfig::default(),
+            5000,
+            "https://nifi.test:8443".into(),
+        );
+        // Pretend we spawned something.
+        store.handles.push(tokio::spawn(async {}));
+        store.shutdown();
+        assert!(store.handles.is_empty());
+        // Drop would also call shutdown — must be idempotent.
+        store.shutdown();
     }
 
     #[test]

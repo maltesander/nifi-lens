@@ -1,8 +1,8 @@
 //! Tracer tab one-shot worker functions.
 //!
-//! All workers use `tokio::task::spawn_local` because `nifi-rust-client`
-//! dynamic dispatch traits return `!Send` futures, and all workers run under
-//! the main-thread `LocalSet` (see `lib::run_inner`).
+//! All workers use `tokio::spawn` on the multi-thread runtime; futures
+//! returned by the `NifiClient` wrapper are `Send` (asserted by
+//! `tests/send_regression.rs`).
 //!
 //! Unlike the Bulletins / Browser workers (which are owned by `WorkerRegistry`
 //! and loop forever), Tracer workers are one-shot: they perform a single
@@ -19,7 +19,7 @@ use crate::client::{ContentSide, NifiClient};
 use crate::event::{AppEvent, TracerPayload, ViewPayload};
 
 /// RAII guard for a server-side lineage query: when dropped, fires a
-/// best-effort `DELETE /provenance-events/lineage/{id}` via `spawn_local`.
+/// best-effort `DELETE /provenance-events/lineage/{id}` via `app::cleanup::spawn_cleanup`.
 /// Owned by `spawn_lineage`'s async closure so cleanup happens whether
 /// the closure returns normally, encounters an error, or panics.
 struct LineageQueryGuard {
@@ -55,7 +55,7 @@ impl Drop for LineageQueryGuard {
         let client = self.client.clone();
         let query_id = self.query_id.clone();
         let cluster_node_id = self.cluster_node_id.clone();
-        tokio::task::spawn_local(async move {
+        crate::app::cleanup::spawn_cleanup(async move {
             let guard = client.read().await;
             if let Err(err) = guard
                 .delete_lineage(&query_id, cluster_node_id.as_deref())
@@ -78,7 +78,7 @@ pub fn spawn_latest_events(
     tx: mpsc::Sender<AppEvent>,
     component_id: String,
 ) -> JoinHandle<()> {
-    tokio::task::spawn_local(async move {
+    tokio::spawn(async move {
         let guard = client.read().await;
         match guard.latest_events(&component_id, 20).await {
             Ok(snap) => {
@@ -122,7 +122,7 @@ pub fn spawn_lineage(
     tx: mpsc::Sender<AppEvent>,
     uuid: String,
 ) -> JoinHandle<()> {
-    tokio::task::spawn_local(async move {
+    tokio::spawn(async move {
         // Step 1: submit. On error, no cleanup needed (no server-side query exists).
         let (query_id, cluster_node_id) = {
             let guard = client.read().await;
@@ -224,7 +224,7 @@ pub fn spawn_event_detail(
     tx: mpsc::Sender<AppEvent>,
     event_id: i64,
 ) -> JoinHandle<()> {
-    tokio::task::spawn_local(async move {
+    tokio::spawn(async move {
         let guard = client.read().await;
         match guard.get_provenance_event(event_id).await {
             Ok(detail) => {
@@ -259,7 +259,7 @@ pub fn spawn_content(
     event_id: i64,
     side: ContentSide,
 ) -> JoinHandle<()> {
-    tokio::task::spawn_local(async move {
+    tokio::spawn(async move {
         let guard = client.read().await;
         match guard
             .provenance_content(
@@ -303,7 +303,7 @@ pub fn spawn_save(
     event_id: i64,
     side: ContentSide,
 ) -> JoinHandle<()> {
-    tokio::task::spawn_local(async move {
+    tokio::spawn(async move {
         use futures::StreamExt;
         use tokio::io::AsyncWriteExt;
 
@@ -365,7 +365,7 @@ pub fn spawn_delete_lineage(
     query_id: String,
     cluster_node_id: Option<String>,
 ) -> JoinHandle<()> {
-    tokio::task::spawn_local(async move {
+    tokio::spawn(async move {
         let guard = client.read().await;
         if let Err(err) = guard
             .delete_lineage(&query_id, cluster_node_id.as_deref())
@@ -395,7 +395,7 @@ pub fn spawn_modal_chunk(
     offset: usize,
     len: usize,
 ) -> JoinHandle<()> {
-    tokio::task::spawn_local(async move {
+    tokio::spawn(async move {
         let guard = client.read().await;
         match guard
             .provenance_content_range(event_id, side, offset, len)

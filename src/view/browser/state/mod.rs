@@ -1699,9 +1699,9 @@ impl BrowserState {
     }
 
     /// Close the peek modal. Aborts the in-flight peek fetch handle
-    /// (if any) — the handle's drop on `JoinHandle<()>` from
-    /// `spawn_local` does NOT abort the task, so the explicit `.abort()`
-    /// is needed to stop a pending GET if the user closes mid-fetch.
+    /// (if any) — `JoinHandle<()>::drop` does NOT abort the task, so
+    /// the explicit `.abort()` is needed to stop a pending GET if the
+    /// user closes mid-fetch.
     pub fn close_queue_listing_peek_modal(&mut self) {
         if let Some(listing) = self.queue_listing.as_mut()
             && let Some(mut peek) = listing.peek.take()

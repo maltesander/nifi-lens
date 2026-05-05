@@ -269,8 +269,7 @@ fn grant_from_entity(
 /// do not apply to the given `kind` return `AxisOutcome::NotApplicable`
 /// immediately without issuing a network request.
 ///
-/// The futures returned by the dynamic client are `!Send` — this
-/// function must be called from within a `tokio::task::LocalSet`.
+/// Wrapper futures are `Send` (asserted by `tests/send_regression.rs`).
 pub async fn fetch_component_access(
     client: &NifiClient,
     kind: crate::client::NodeKind,
