@@ -7,8 +7,8 @@
 //! worker's only remaining job is servicing on-demand per-node detail
 //! fetches the reducer emits via the `detail_tx` side channel.
 //!
-//! Runs under the main-thread `LocalSet` (see `lib::run_inner`) because
-//! `nifi-rust-client`'s dynamic dispatch traits return `!Send` futures.
+//! Runs on the multi-thread tokio runtime; futures returned by the
+//! `NifiClient` wrapper are `Send` (asserted by `tests/send_regression.rs`).
 
 use std::sync::{Arc, Mutex};
 
@@ -26,7 +26,7 @@ pub fn spawn(
     tx: mpsc::Sender<AppEvent>,
     mut detail_rx: mpsc::UnboundedReceiver<DetailRequest>,
 ) -> JoinHandle<()> {
-    tokio::task::spawn_local(async move {
+    tokio::spawn(async move {
         loop {
             let Some(req) = detail_rx.recv().await else {
                 tracing::debug!("browser worker: detail channel closed, exiting");
@@ -101,7 +101,7 @@ pub fn spawn_parameter_context_modal_fetch(
     pg_id: String,
     bound_context_id: String,
 ) -> tokio::task::JoinHandle<()> {
-    tokio::task::spawn_local(async move {
+    tokio::spawn(async move {
         let result = crate::client::parameter_context::fetch_chain(client, &bound_context_id).await;
         let payload = match result {
             crate::client::parameter_context::ChainFetchResult::Loaded(chain) => {
@@ -130,7 +130,7 @@ pub fn spawn_action_history_modal_fetch(
     signal: std::sync::Arc<tokio::sync::Notify>,
 ) -> JoinHandle<()> {
     const PAGE_SIZE: u32 = 100;
-    tokio::task::spawn_local(async move {
+    tokio::spawn(async move {
         let mut offset: u32 = 0;
         loop {
             let res = {
@@ -212,7 +212,7 @@ pub fn spawn_sparkline_fetch_loop(
     id: String,
     cadence: std::time::Duration,
 ) -> JoinHandle<()> {
-    tokio::task::spawn_local(async move {
+    tokio::spawn(async move {
         tracing::debug!(?kind, %id, ?cadence, "sparkline worker started");
         loop {
             let res = {
@@ -263,7 +263,7 @@ pub fn spawn_version_control_modal_fetch(
     tx: mpsc::Sender<AppEvent>,
     pg_id: String,
 ) -> JoinHandle<()> {
-    tokio::task::spawn_local(async move {
+    tokio::spawn(async move {
         let res = {
             let guard = client.read().await;
             futures::future::try_join(
@@ -317,7 +317,7 @@ pub fn spawn_queue_listing_fetch(
     let q_id = queue_id.clone();
     let client_for_worker = client.clone();
 
-    let join = tokio::task::spawn_local(async move {
+    let join = tokio::spawn(async move {
         let started = std::time::Instant::now();
 
         // Phase 1: POST listing request.
@@ -488,7 +488,7 @@ pub fn spawn_flowfile_peek_fetch(
     uuid: String,
     cluster_node_id: Option<String>,
 ) -> JoinHandle<()> {
-    tokio::task::spawn_local(async move {
+    tokio::spawn(async move {
         let result = {
             let guard = client.read().await;
             crate::client::queues::get_flowfile(
@@ -580,7 +580,7 @@ pub fn spawn_access_modal_fetch(
     component_id: String,
     current_audit: crate::cluster::AccessAuditState,
 ) -> JoinHandle<()> {
-    tokio::task::spawn_local(async move {
+    tokio::spawn(async move {
         let guard = client.read().await;
         let (result, audit) = crate::client::access::fetch_component_access_with_audit(
             &guard,
@@ -610,7 +610,7 @@ pub fn spawn_identity_modal_fetch(
     identity_kind: crate::view::browser::state::identity_modal::IdentityKind,
     identity_id: String,
 ) -> JoinHandle<()> {
-    tokio::task::spawn_local(async move {
+    tokio::spawn(async move {
         let result = {
             let guard = client.read().await;
             crate::client::access::fetch_identity_grants(&guard, identity_kind, &identity_id).await
@@ -643,7 +643,7 @@ pub fn spawn_identity_modal_fetch(
 /// Owns the polling worker's `JoinHandle` plus the listing-request id
 /// once the worker has POSTed it. Drop aborts the worker and (if a
 /// request id is known) fires `DELETE /flowfile-queues/{q}/listing-requests/{r}`
-/// best-effort on the same `LocalSet` we're already on.
+/// best-effort via `app::cleanup::spawn_cleanup`.
 ///
 /// Constructed by `spawn_queue_listing_fetch`; the
 /// `new_for_test` constructor exists to exercise Drop semantics
