@@ -10,6 +10,7 @@ use crate::view::browser::state::{
     FlowIndex, FlowIndexEntry, MAX_DETAIL_SECTIONS, PropertiesModalState,
 };
 use crossterm::event::{KeyCode, KeyModifiers};
+use serial_test::serial;
 use std::time::SystemTime;
 
 #[test]
@@ -863,6 +864,7 @@ fn down_inside_focused_properties_clamps_at_max() {
 // -----------------------------------------------------------------------
 
 #[test]
+#[serial(clipboard)]
 fn c_in_focused_properties_copies_value_and_emits_banner() {
     let (mut s, c) = fresh_browser_on_processor_with_properties();
     // Enter detail focus on Properties (section 0) via Descend (Enter).
@@ -889,6 +891,7 @@ fn c_in_focused_properties_copies_value_and_emits_banner() {
 /// succeeded, and re-attempted if the first failed (e.g. headless
 /// CI with no X display).
 #[test]
+#[serial(clipboard)]
 fn c_lazily_initializes_and_reuses_persistent_clipboard_handle() {
     let (mut s, c) = seeded_browser_state();
 
@@ -2287,6 +2290,7 @@ fn properties_modal_page_and_home_end() {
 }
 
 #[test]
+#[serial(clipboard)]
 fn properties_modal_c_copies_selected_value() {
     use crate::client::ProcessorDetail;
     use crate::view::browser::state::{NodeDetail, PropertiesModalState};
