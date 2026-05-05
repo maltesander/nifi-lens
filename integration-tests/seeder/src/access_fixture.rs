@@ -96,6 +96,10 @@ pub async fn bootstrap_admin_policies(client: &DynamicClient) -> Result<()> {
     // listed alongside admin because the cross-cluster RPG presents the
     // shared keystore cert (CN=localhost), not admin's bearer token.
     ensure_policy(client, "read", "/site-to-site", &[&admin_id, &node_id]).await?;
+    // /data-transfer/input-ports/{id} write is added per-port from
+    // fixture::orders::remote_targets via grant_data_transfer_policy as
+    // each public input port is created — NiFi rejects a wildcard
+    // /data-transfer/input-ports policy ("An unexpected type of resource").
 
     tracing::info!("admin bootstrap policies complete");
     Ok(())
@@ -112,6 +116,23 @@ pub async fn seed(client: &DynamicClient) -> Result<()> {
     let ops_team_id = lookup_or_create_group(client, GROUP_NAME, &[&alice_id, &carol_id]).await?;
 
     let marker_id = lookup_child_pg_id_by_name(client, "root", FIXTURE_MARKER_NAME).await?;
+
+    // NiFi's /data policy inheritance walks one level up (component →
+    // parent PG); it does NOT walk further up the PG hierarchy. So a
+    // single /data/process-groups/{root} policy doesn't cover deeply
+    // nested processors / connections. Explicitly grant admin /data on
+    // every PG under the marker so the component-→-PG inheritance has
+    // somewhere to land. Without this, queue-listing requests return
+    // 403 ("Unable to view the data for Processor X") even though the
+    // /policies effective lookup says admin has access.
+    grant_admin_data_recursively(client, &admin_id, &marker_id).await?;
+    // The /data/process-groups inheritance is one-level only. In a
+    // 2-node cluster the queue-listing two-stage commit re-checks
+    // /data/processors/{id} on each node and our parent-PG policy
+    // doesn't cascade — grant admin /data on every processor + every
+    // connection under the marker explicitly. Bounded ~50 components.
+    grant_admin_component_data_recursively(client, &admin_id, &marker_id).await?;
+
     let orders_pg_id = lookup_child_pg_id_by_name(client, &marker_id, ORDERS_PG_NAME).await?;
     let versioned_clean_pg_id =
         lookup_child_pg_id_by_name(client, &marker_id, VERSIONED_CLEAN_PG_NAME).await?;
@@ -301,9 +322,35 @@ async fn lookup_or_create_group(
     Ok(id)
 }
 
+/// Grants admin + the cluster-node identity (CN=localhost) write
+/// access to `/data-transfer/input-ports/{port_id}`. Called from
+/// `fixture::orders::remote_targets` immediately after each public
+/// input port is created.
+///
+/// Required because the `/site-to-site` controller listing filters
+/// public input ports by `Write - /data-transfer/input-ports/{id}` —
+/// without this policy CN=localhost sees zero remote input ports during
+/// the RPG handshake even though it has read on the port itself via
+/// /process-groups/{root} inheritance. NiFi does not support a
+/// wildcard policy on /data-transfer/input-ports, so the policy must
+/// be created per-port.
+pub async fn grant_data_transfer_policy(client: &DynamicClient, port_id: &str) -> Result<()> {
+    let admin_id = lookup_user_id(client, "admin").await?;
+    let node_id = lookup_user_id(client, "CN=localhost").await?;
+    ensure_policy(
+        client,
+        "write",
+        &format!("/data-transfer/input-ports/{port_id}"),
+        &[&admin_id, &node_id],
+    )
+    .await
+}
+
 /// Same shape as `create_policy` but no-ops if the (action, resource)
-/// already exists. Used by `bootstrap_admin_policies`, which may run
-/// against a partially-bootstrapped cluster.
+/// already exists *as an explicit policy on `resource`*. NiFi's
+/// `GET /policies/{action}/{resource}` returns the *effective* policy,
+/// which may be an inherited parent's policy — distinguishing requires
+/// comparing `component.resource` to the requested resource.
 async fn ensure_policy(
     client: &DynamicClient,
     action: &str,
@@ -320,9 +367,22 @@ async fn ensure_policy(
         .policies()
         .get_access_policy_for_resource(action, resource_for_lookup)
         .await;
-    if existing.is_ok() {
-        tracing::info!(action, resource, "policy already present; skipping");
-        return Ok(());
+    if let Ok(entity) = existing {
+        let effective_resource = entity
+            .component
+            .as_ref()
+            .and_then(|c| c.resource.as_deref())
+            .unwrap_or("");
+        if effective_resource == resource {
+            tracing::info!(action, resource, "policy already present; skipping");
+            return Ok(());
+        }
+        tracing::info!(
+            action,
+            resource,
+            inherited_from = effective_resource,
+            "creating explicit policy (effective is inherited)",
+        );
     }
     create_policy(client, action, resource, &[], user_ids).await
 }
@@ -390,6 +450,158 @@ async fn create_policy(
             source: Box::new(e),
         })?;
     tracing::info!(action, resource, "access policy created");
+    Ok(())
+}
+
+/// Walk every PG under `pg_id` (depth-first) and ensure admin has
+/// /data/process-groups/{id} R+W on each. The orders-pipeline and
+/// versioned-clean PGs are skipped — `seed` adds those itself with
+/// the appropriate fixture identities (admin + ops-team / admin + bob).
+async fn grant_admin_data_recursively(
+    client: &DynamicClient,
+    admin_id: &str,
+    pg_id: &str,
+) -> Result<()> {
+    let listing = client
+        .processgroups()
+        .get_process_groups(pg_id)
+        .await
+        .map_err(|e| SeederError::Api {
+            message: format!("GET /process-groups/{pg_id}/process-groups for admin /data walk"),
+            source: Box::new(e),
+        })?;
+    let groups = listing.process_groups.unwrap_or_default();
+    for child in groups {
+        let child_id = child
+            .component
+            .as_ref()
+            .and_then(|c| c.id.clone())
+            .or_else(|| child.id.clone());
+        let child_name = child
+            .component
+            .as_ref()
+            .and_then(|c| c.name.clone())
+            .unwrap_or_default();
+        let Some(child_id) = child_id else { continue };
+        // orders-pipeline + versioned-clean get fixture-specific
+        // policies further down in `seed`; the recursive walk would
+        // otherwise plant admin-only policies here that those calls
+        // would 409-collide with.
+        if child_name != ORDERS_PG_NAME && child_name != VERSIONED_CLEAN_PG_NAME {
+            ensure_policy(
+                client,
+                "read",
+                &format!("/data/process-groups/{child_id}"),
+                &[admin_id],
+            )
+            .await?;
+            ensure_policy(
+                client,
+                "write",
+                &format!("/data/process-groups/{child_id}"),
+                &[admin_id],
+            )
+            .await?;
+        }
+        Box::pin(grant_admin_data_recursively(client, admin_id, &child_id)).await?;
+    }
+    Ok(())
+}
+
+/// Walk every processor + connection under `pg_id` (depth-first) and
+/// grant admin /data/processors/{id} R+W and /data/connections/{id} R+W.
+/// NiFi's /data inheritance only walks one level (component → parent PG)
+/// so even with /data/process-groups/{X} R+W, processors INSIDE a
+/// child PG of X aren't covered.
+async fn grant_admin_component_data_recursively(
+    client: &DynamicClient,
+    admin_id: &str,
+    pg_id: &str,
+) -> Result<()> {
+    let processors = client
+        .processgroups()
+        .get_processors(pg_id, None)
+        .await
+        .map_err(|e| SeederError::Api {
+            message: format!("GET /process-groups/{pg_id}/processors"),
+            source: Box::new(e),
+        })?;
+    for proc in processors.processors.unwrap_or_default() {
+        let proc_id = proc
+            .component
+            .as_ref()
+            .and_then(|c| c.id.clone())
+            .or_else(|| proc.id.clone());
+        if let Some(id) = proc_id {
+            ensure_policy(
+                client,
+                "read",
+                &format!("/data/processors/{id}"),
+                &[admin_id],
+            )
+            .await?;
+            ensure_policy(
+                client,
+                "write",
+                &format!("/data/processors/{id}"),
+                &[admin_id],
+            )
+            .await?;
+        }
+    }
+
+    let connections = client
+        .processgroups()
+        .get_connections(pg_id)
+        .await
+        .map_err(|e| SeederError::Api {
+            message: format!("GET /process-groups/{pg_id}/connections"),
+            source: Box::new(e),
+        })?;
+    for conn in connections.connections.unwrap_or_default() {
+        let conn_id = conn
+            .component
+            .as_ref()
+            .and_then(|c| c.id.clone())
+            .or_else(|| conn.id.clone());
+        if let Some(id) = conn_id {
+            ensure_policy(
+                client,
+                "read",
+                &format!("/data/connections/{id}"),
+                &[admin_id],
+            )
+            .await?;
+            ensure_policy(
+                client,
+                "write",
+                &format!("/data/connections/{id}"),
+                &[admin_id],
+            )
+            .await?;
+        }
+    }
+
+    let listing = client
+        .processgroups()
+        .get_process_groups(pg_id)
+        .await
+        .map_err(|e| SeederError::Api {
+            message: format!("GET /process-groups/{pg_id}/process-groups for /data walk"),
+            source: Box::new(e),
+        })?;
+    for child in listing.process_groups.unwrap_or_default() {
+        let child_id = child
+            .component
+            .as_ref()
+            .and_then(|c| c.id.clone())
+            .or_else(|| child.id.clone());
+        let Some(child_id) = child_id else { continue };
+        Box::pin(grant_admin_component_data_recursively(
+            client, admin_id, &child_id,
+        ))
+        .await?;
+    }
     Ok(())
 }
 

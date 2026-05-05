@@ -9,6 +9,7 @@
 
 use nifi_rust_client::dynamic::DynamicClient;
 
+use crate::access_fixture::grant_data_transfer_policy;
 use crate::entities::{make_port, make_processor, props};
 use crate::error::{Result, SeederError};
 use crate::fixture::common::{
@@ -79,6 +80,12 @@ async fn build_target(client: &DynamicClient, pg_id: &str, port_name: &str) -> R
     wait_for_valid(client, &log_id, port_name).await?;
     start_processor(client, &log_id).await?;
     start_input_port(client, &port_id).await?;
+
+    // Under managed-authorizer the /site-to-site listing filters public
+    // input ports by Write - /data-transfer/input-ports/{id}. Without
+    // this RPG handshakes from sink-eu/sink-apac would discover zero
+    // ports and time out.
+    grant_data_transfer_policy(client, &port_id).await?;
 
     Ok(port_id)
 }
