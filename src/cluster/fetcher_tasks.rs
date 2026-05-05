@@ -459,7 +459,7 @@ pub(crate) fn spawn_about(
 /// rather than waiting a full `base_interval`. This also means the
 /// fetcher implicitly inherits jitter from RootPgStatus (the publisher's
 /// own jittered cadence drives `changed()`), so the inner `sleep` stays
-/// unjittered — see plan note line 1646.
+/// unjittered.
 pub(crate) fn spawn_connections_by_pg(
     client: Arc<RwLock<NifiClient>>,
     tx: mpsc::Sender<AppEvent>,

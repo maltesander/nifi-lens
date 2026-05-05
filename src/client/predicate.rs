@@ -1,7 +1,9 @@
 //! Attribute-matching predicate language for the Events watch sub-mode.
 //!
-//! See `docs/superpowers/specs/2026-05-01-attribute-watcher-design.md`
-//! for grammar. Parser is hand-rolled, no `nom` / `serde` dependency.
+//! Grammar: `attr op literal (AND …)*` with `= / != / =~ / !~` and
+//! `/.../` regex literals. Missing-attribute semantics: `=` / `=~` are
+//! false; `!=` / `!~` are true. Parser is hand-rolled — no `nom` /
+//! `serde` dependency.
 
 use regex::Regex;
 use snafu::Snafu;
