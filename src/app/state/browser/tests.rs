@@ -210,44 +210,43 @@ fn on_browser_tab_r_force_notifies_cluster_endpoints() {
         .unwrap();
     local.block_on(async {
         use crate::cluster::ClusterEndpoint;
-        let local_set = tokio::task::LocalSet::new();
-        local_set
-            .run_until(async {
-                let (mut s, c) = seeded_browser_state();
-                let notifies: Vec<_> = [
-                    ClusterEndpoint::RootPgStatus,
-                    ClusterEndpoint::ControllerServices,
-                    ClusterEndpoint::ConnectionsByPg,
-                ]
-                .into_iter()
-                .map(|ep| s.cluster.notify_for(ep))
-                .collect();
-                let flags: Vec<_> = (0..3)
-                    .map(|_| std::rc::Rc::new(std::cell::Cell::new(false)))
-                    .collect();
-                let waiters: Vec<_> = notifies
-                    .iter()
-                    .zip(flags.iter())
-                    .map(|(notify, flag)| {
-                        let notify = notify.clone();
-                        let flag = flag.clone();
-                        tokio::task::spawn_local(async move {
-                            notify.notified().await;
-                            flag.set(true);
-                        })
-                    })
-                    .collect();
-                tokio::task::yield_now().await;
-                update(&mut s, key(KeyCode::Char('r'), KeyModifiers::NONE), &c);
-                tokio::task::yield_now().await;
-                for (i, flag) in flags.iter().enumerate() {
-                    assert!(flag.get(), "endpoint #{i} notify did not fire on r");
-                }
-                for w in waiters {
-                    w.abort();
-                }
+        use std::sync::Arc;
+        use std::sync::atomic::{AtomicBool, Ordering};
+
+        let (mut s, c) = seeded_browser_state();
+        let notifies: Vec<_> = [
+            ClusterEndpoint::RootPgStatus,
+            ClusterEndpoint::ControllerServices,
+            ClusterEndpoint::ConnectionsByPg,
+        ]
+        .into_iter()
+        .map(|ep| s.cluster.notify_for(ep))
+        .collect();
+        let flags: Vec<_> = (0..3).map(|_| Arc::new(AtomicBool::new(false))).collect();
+        let waiters: Vec<_> = notifies
+            .iter()
+            .zip(flags.iter())
+            .map(|(notify, flag)| {
+                let notify = notify.clone();
+                let flag = flag.clone();
+                tokio::spawn(async move {
+                    notify.notified().await;
+                    flag.store(true, Ordering::SeqCst);
+                })
             })
-            .await;
+            .collect();
+        tokio::task::yield_now().await;
+        update(&mut s, key(KeyCode::Char('r'), KeyModifiers::NONE), &c);
+        tokio::task::yield_now().await;
+        for (i, flag) in flags.iter().enumerate() {
+            assert!(
+                flag.load(Ordering::SeqCst),
+                "endpoint #{i} notify did not fire on r"
+            );
+        }
+        for w in waiters {
+            w.abort();
+        }
     });
 }
 
@@ -3378,30 +3377,24 @@ fn apply_action_history_error_preserves_handle_when_source_id_stale() {
         .build()
         .unwrap();
     rt.block_on(async {
-        let local = tokio::task::LocalSet::new();
-        local
-            .run_until(async {
-                let h = tokio::task::spawn_local(async {
-                    tokio::time::sleep(std::time::Duration::from_secs(60)).await;
-                });
-                state.browser.action_history_modal_handle =
-                    Some(crate::app::worker::AbortOnDrop::new(h));
-                // Stale error from the previously-open proc-1 modal.
-                let payload = BrowserPayload::ActionHistoryError {
-                    source_id: "proc-1".into(),
-                    err: "stale".into(),
-                };
-                handle_browser_payload(&mut state, payload);
-                let m = state.browser.action_history_modal.as_ref().unwrap();
-                // Modal state untouched.
-                assert!(m.error.is_none(), "stale error must not mutate the modal");
-                // Handle preserved.
-                assert!(
-                    state.browser.action_history_modal_handle.is_some(),
-                    "stale error must not clear the handle for the active modal"
-                );
-            })
-            .await;
+        let h = tokio::spawn(async {
+            tokio::time::sleep(std::time::Duration::from_secs(60)).await;
+        });
+        state.browser.action_history_modal_handle = Some(crate::app::worker::AbortOnDrop::new(h));
+        // Stale error from the previously-open proc-1 modal.
+        let payload = BrowserPayload::ActionHistoryError {
+            source_id: "proc-1".into(),
+            err: "stale".into(),
+        };
+        handle_browser_payload(&mut state, payload);
+        let m = state.browser.action_history_modal.as_ref().unwrap();
+        // Modal state untouched.
+        assert!(m.error.is_none(), "stale error must not mutate the modal");
+        // Handle preserved.
+        assert!(
+            state.browser.action_history_modal_handle.is_some(),
+            "stale error must not clear the handle for the active modal"
+        );
     });
 }
 
