@@ -36,9 +36,10 @@ nifi-lens/
     ├── cli.rs                  # clap derive
     ├── error.rs                # NifiLensError (snafu)
     ├── logging.rs              # tracing-subscriber + rotating file
-    ├── theme.rs / timestamp.rs / event.rs / layout.rs / test_support.rs
+    ├── bytes.rs / theme.rs / timestamp.rs / event.rs / layout.rs / test_support.rs
     ├── config/                 # schema, loader, init
     ├── client/                 # NifiClient wrapper (Deref) + TLS + events
+    │   └── tracer/             # provenance content fetch + tabular/text classifiers
     ├── cluster/                # ClusterStore + fetcher tasks + snapshot + subscriber
     ├── input/                  # KeyMap + typed action enums (FocusAction, Verb, …)
     ├── app/                    # run loop, per-view state reducers, ui, navigation, worker

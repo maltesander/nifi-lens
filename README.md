@@ -419,6 +419,38 @@ Pages auto-load as you scroll past the bottom of the loaded tail.
 | `n` / `N`                  | Next / previous search match                |
 | `c`                        | Copy the selected row as TSV                |
 
+#### Access modal
+
+Opened with `u` on a UUID-bearing component. Five-axis matrix of
+identities × (view / mod / data / oper / pol). Inherited cells render `↑`.
+
+| Key                            | Action                                              |
+|--------------------------------|-----------------------------------------------------|
+| `↑` / `↓`                      | Move row cursor                                     |
+| `PgUp` / `PgDn`                | Scroll one viewport                                 |
+| `Home` / `End`                 | Jump to first / last row                            |
+| `Enter`                        | Drill into the focused identity (Identity modal)    |
+| `/` · `n` / `N`                | Open search · next / previous match                 |
+| `c`                            | Copy the focused row                                |
+| `r`                            | Force refresh                                       |
+| `Esc`                          | Close                                               |
+
+#### Identity modal
+
+Opened from the Access modal via `Enter` on a user or group row. Lists
+every (action, resource) grant cluster-wide, grouped by resource bucket.
+
+| Key                            | Action                                              |
+|--------------------------------|-----------------------------------------------------|
+| `↑` / `↓`                      | Move grant cursor                                   |
+| `PgUp` / `PgDn`                | Scroll one viewport                                 |
+| `Home` / `End`                 | Jump to first / last grant                          |
+| `Enter`                        | Cross-link to the Browser arena entry (UUID grants) |
+| `/` · `n` / `N`                | Open search · next / previous match                 |
+| `c`                            | Copy the focused grant                              |
+| `r`                            | Force refresh                                       |
+| `Esc`                          | Close (returns to Access modal)                     |
+
 ### Events
 
 | Key                              | Action                                                  |
