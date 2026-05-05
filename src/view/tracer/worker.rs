@@ -55,7 +55,7 @@ impl Drop for LineageQueryGuard {
         let client = self.client.clone();
         let query_id = self.query_id.clone();
         let cluster_node_id = self.cluster_node_id.clone();
-        tokio::task::spawn_local(async move {
+        crate::app::cleanup::spawn_cleanup(async move {
             let guard = client.read().await;
             if let Err(err) = guard
                 .delete_lineage(&query_id, cluster_node_id.as_deref())
