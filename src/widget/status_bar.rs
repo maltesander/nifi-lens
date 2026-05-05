@@ -199,9 +199,10 @@ mod tests {
             out.contains("init:"),
             "init chip should appear when endpoints are still loading"
         );
+        let expected = format!("0/{}", crate::cluster::ClusterEndpoint::COUNT);
         assert!(
-            out.contains("0/11"),
-            "expected 0/11 endpoints ready on fresh state"
+            out.contains(&expected),
+            "expected `{expected}` endpoints ready on fresh state; got: {out:?}"
         );
     }
 
