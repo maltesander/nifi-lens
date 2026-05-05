@@ -597,13 +597,20 @@ fn collect_counts(
         }
     }
     if let Some(rpgs) = snapshot.remote_process_group_status_snapshots.as_ref() {
+        use crate::client::status::TransmissionStatus;
         for entity in rpgs {
             let Some(snap) = entity.remote_process_group_status_snapshot.as_ref() else {
                 continue;
             };
             out.remote_process_groups.total += 1;
-            match snap.transmission_status.as_deref() {
-                Some("Transmitting") => out.remote_process_groups.transmitting += 1,
+            match snap
+                .transmission_status
+                .as_deref()
+                .map(TransmissionStatus::from_wire)
+            {
+                Some(TransmissionStatus::Transmitting) => {
+                    out.remote_process_groups.transmitting += 1
+                }
                 _ => out.remote_process_groups.not_transmitting += 1,
             }
         }

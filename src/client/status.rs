@@ -167,6 +167,50 @@ impl PortStatus {
     }
 }
 
+/// `transmission_status` from `RemoteProcessGroupStatusDto`. NiFi
+/// documents only `"Transmitting"` and `"Not Transmitting"`; anything
+/// else (including the empty string before the first snapshot lands)
+/// maps to `Unknown` and renders as the muted state.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TransmissionStatus {
+    Transmitting,
+    NotTransmitting,
+    Unknown,
+}
+
+impl TransmissionStatus {
+    /// Parse a NiFi-wire transmission status (case-insensitive). Unknown
+    /// and empty strings collapse to `Unknown`.
+    pub fn from_wire(s: &str) -> Self {
+        if s.eq_ignore_ascii_case("Transmitting") {
+            Self::Transmitting
+        } else if s.eq_ignore_ascii_case("Not Transmitting") {
+            Self::NotTransmitting
+        } else {
+            Self::Unknown
+        }
+    }
+
+    /// Glyph + style used by the RPG run-icon column. Transmitting uses
+    /// the accent ▶; everything else (including unknown) uses the muted
+    /// ■ — we deliberately don't try to interpret intermediate states
+    /// that NiFi doesn't document.
+    pub fn icon(self) -> (char, Style) {
+        match self {
+            Self::Transmitting => ('▶', theme::accent()),
+            Self::NotTransmitting | Self::Unknown => ('■', theme::muted()),
+        }
+    }
+
+    /// Style used for the transmission-state span in panel titles.
+    pub fn style(self) -> Style {
+        match self {
+            Self::Transmitting => theme::accent(),
+            Self::NotTransmitting | Self::Unknown => theme::muted(),
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -362,6 +406,54 @@ mod tests {
         assert_eq!(PortStatus::from_wire("VALIDATING"), PortStatus::Validating);
         assert_eq!(PortStatus::from_wire(""), PortStatus::Unknown);
         assert_eq!(PortStatus::from_wire("GARBAGE"), PortStatus::Unknown);
+    }
+
+    #[test]
+    fn transmission_status_from_wire_case_insensitive() {
+        assert_eq!(
+            TransmissionStatus::from_wire("Transmitting"),
+            TransmissionStatus::Transmitting
+        );
+        assert_eq!(
+            TransmissionStatus::from_wire("transmitting"),
+            TransmissionStatus::Transmitting
+        );
+        assert_eq!(
+            TransmissionStatus::from_wire("Not Transmitting"),
+            TransmissionStatus::NotTransmitting
+        );
+        assert_eq!(
+            TransmissionStatus::from_wire("NOT TRANSMITTING"),
+            TransmissionStatus::NotTransmitting
+        );
+        assert_eq!(
+            TransmissionStatus::from_wire(""),
+            TransmissionStatus::Unknown
+        );
+        assert_eq!(
+            TransmissionStatus::from_wire("Validating"),
+            TransmissionStatus::Unknown
+        );
+    }
+
+    #[test]
+    fn transmission_status_icon_and_style() {
+        assert_eq!(TransmissionStatus::Transmitting.icon().0, '▶');
+        assert_eq!(
+            TransmissionStatus::Transmitting.icon().1,
+            crate::theme::accent()
+        );
+        assert_eq!(TransmissionStatus::NotTransmitting.icon().0, '■');
+        assert_eq!(
+            TransmissionStatus::NotTransmitting.icon().1,
+            crate::theme::muted()
+        );
+        assert_eq!(TransmissionStatus::Unknown.icon().0, '■');
+        assert_eq!(
+            TransmissionStatus::Transmitting.style(),
+            crate::theme::accent()
+        );
+        assert_eq!(TransmissionStatus::Unknown.style(), crate::theme::muted());
     }
 
     #[test]

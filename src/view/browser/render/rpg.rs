@@ -132,11 +132,8 @@ pub fn render(
 /// Build the outer panel title:
 /// ` <name> · remote process group · <transmission_status> `.
 fn build_header_title(d: &RemoteProcessGroupDetail) -> Line<'_> {
-    let trans_style = if d.transmission_status == "Transmitting" {
-        theme::accent()
-    } else {
-        theme::muted()
-    };
+    let trans_style =
+        crate::client::status::TransmissionStatus::from_wire(&d.transmission_status).style();
     Line::from(vec![
         Span::raw(" "),
         Span::styled(d.name.as_str(), theme::accent()),
