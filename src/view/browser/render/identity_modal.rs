@@ -4,7 +4,7 @@ use crate::theme;
 use crate::view::browser::state::identity_modal::{
     IdentityModalState, IdentityStatus, ResourceBucket,
 };
-use crate::widget::modal::render_too_small;
+use crate::widget::modal::{LoadGate, render_load_gate, render_too_small};
 use crate::widget::panel::Panel;
 use ratatui::Frame;
 use ratatui::layout::Rect;
@@ -30,22 +30,13 @@ pub fn render_identity_modal(frame: &mut Frame, area: Rect, state: &mut Identity
     let inner = block.inner(area);
     frame.render_widget(block, area);
 
-    match &state.status {
-        IdentityStatus::Loading => {
-            frame.render_widget(
-                Paragraph::new(Span::styled("loading…", theme::muted())),
-                inner,
-            );
-            return;
-        }
-        IdentityStatus::Failed(err) => {
-            frame.render_widget(
-                Paragraph::new(Span::styled(format!("failed: {err}"), theme::error())),
-                inner,
-            );
-            return;
-        }
-        IdentityStatus::Loaded => {}
+    let gate = match &state.status {
+        IdentityStatus::Loading => LoadGate::Loading,
+        IdentityStatus::Failed(err) => LoadGate::Failed(err),
+        IdentityStatus::Loaded => LoadGate::Loaded,
+    };
+    if render_load_gate(frame, inner, gate) {
+        return;
     }
 
     let mut lines: Vec<Line<'_>> = Vec::new();

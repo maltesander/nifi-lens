@@ -33,6 +33,39 @@ pub fn render_too_small(frame: &mut Frame, area: Rect) -> bool {
     true
 }
 
+/// Three-state load gate shared by per-component modals (Access,
+/// Identity) whose render bodies branch on a `Loading / Failed / Loaded`
+/// status enum. Each modal owns its own status type; the conversion to
+/// `LoadGate` happens at the call site.
+pub enum LoadGate<'a> {
+    Loading,
+    Failed(&'a str),
+    Loaded,
+}
+
+/// Render the modal load-status placeholder for `Loading` / `Failed`,
+/// or do nothing for `Loaded`. Returns `true` when a placeholder was
+/// drawn — callers should short-circuit their normal render.
+pub fn render_load_gate(frame: &mut Frame, area: Rect, gate: LoadGate<'_>) -> bool {
+    match gate {
+        LoadGate::Loading => {
+            frame.render_widget(
+                Paragraph::new(Span::styled("loading…", theme::muted())),
+                area,
+            );
+            true
+        }
+        LoadGate::Failed(err) => {
+            frame.render_widget(
+                Paragraph::new(Span::styled(format!("failed: {err}"), theme::error())),
+                area,
+            );
+            true
+        }
+        LoadGate::Loaded => false,
+    }
+}
+
 /// Render a footer hint strip from a slice of verbs. Filters out verbs
 /// where `show_in_hint_bar()` returns false or `hint()` is empty, then
 /// formats the survivors as `[chord] hint · [chord] hint` rendered with
@@ -68,6 +101,47 @@ mod tests {
             assert!(!degraded);
         })
         .unwrap();
+    }
+
+    #[test]
+    fn load_gate_loaded_returns_false_and_renders_nothing() {
+        let mut term = Terminal::new(TestBackend::new(40, 1)).unwrap();
+        let mut drew = true;
+        term.draw(|frame| {
+            drew = render_load_gate(frame, frame.area(), LoadGate::Loaded);
+        })
+        .unwrap();
+        assert!(!drew);
+        let out = format!("{}", term.backend());
+        assert!(!out.contains("loading"), "out was:\n{out}");
+        assert!(!out.contains("failed"), "out was:\n{out}");
+    }
+
+    #[test]
+    fn load_gate_loading_renders_placeholder_and_returns_true() {
+        let mut term = Terminal::new(TestBackend::new(40, 1)).unwrap();
+        let mut drew = false;
+        term.draw(|frame| {
+            drew = render_load_gate(frame, frame.area(), LoadGate::Loading);
+        })
+        .unwrap();
+        assert!(drew);
+        let out = format!("{}", term.backend());
+        assert!(out.contains("loading"), "out was:\n{out}");
+    }
+
+    #[test]
+    fn load_gate_failed_renders_error_and_returns_true() {
+        let mut term = Terminal::new(TestBackend::new(40, 1)).unwrap();
+        let mut drew = false;
+        term.draw(|frame| {
+            drew = render_load_gate(frame, frame.area(), LoadGate::Failed("boom"));
+        })
+        .unwrap();
+        assert!(drew);
+        let out = format!("{}", term.backend());
+        assert!(out.contains("failed"), "out was:\n{out}");
+        assert!(out.contains("boom"), "out was:\n{out}");
     }
 
     #[test]

@@ -36,6 +36,12 @@ pub fn disabled() -> Style {
     Style::default().fg(Color::DarkGray)
 }
 
+/// Style for tenant-group rows (distinct from individual users) in
+/// access-policy listings.
+pub fn group() -> Style {
+    Style::default().fg(Color::Magenta)
+}
+
 pub fn bold() -> Style {
     Style::default().add_modifier(Modifier::BOLD)
 }

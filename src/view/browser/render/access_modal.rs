@@ -2,10 +2,10 @@
 
 use crate::theme;
 use crate::view::browser::state::access_modal::{AccessModalState, Axis, MatrixCell, ModalStatus};
-use crate::widget::modal::render_too_small;
+use crate::widget::modal::{LoadGate, render_load_gate, render_too_small};
 use ratatui::Frame;
 use ratatui::layout::Rect;
-use ratatui::style::{Color, Style};
+use ratatui::style::Style;
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Clear, Paragraph};
 
@@ -29,22 +29,13 @@ pub fn render_access_modal(frame: &mut Frame, area: Rect, state: &mut AccessModa
     let inner = block.inner(area);
     frame.render_widget(block, area);
 
-    match &state.status {
-        ModalStatus::Loading => {
-            frame.render_widget(
-                Paragraph::new(Span::styled("loading…", theme::muted())),
-                inner,
-            );
-            return;
-        }
-        ModalStatus::Failed(err) => {
-            frame.render_widget(
-                Paragraph::new(Span::styled(format!("failed: {err}"), theme::error())),
-                inner,
-            );
-            return;
-        }
-        ModalStatus::Loaded => {}
+    let gate = match &state.status {
+        ModalStatus::Loading => LoadGate::Loading,
+        ModalStatus::Failed(err) => LoadGate::Failed(err),
+        ModalStatus::Loaded => LoadGate::Loaded,
+    };
+    if render_load_gate(frame, inner, gate) {
+        return;
     }
 
     // Header + legend each take 1 row; the rest is data rows.
@@ -79,7 +70,7 @@ pub fn render_access_modal(frame: &mut Frame, area: Rect, state: &mut AccessModa
         let row_style = if idx == state.scroll.selected {
             theme::cursor_row()
         } else if row.is_group {
-            Style::default().fg(Color::Magenta)
+            theme::group()
         } else {
             Style::default()
         };
