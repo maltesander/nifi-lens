@@ -36,61 +36,61 @@ pub async fn bootstrap_admin_policies(client: &DynamicClient) -> Result<()> {
     let node_id = lookup_user_id(client, "CN=localhost").await?;
     let root_id = lookup_root_pg_id(client).await?;
 
-    // CN=localhost is on the /process-groups/{root} read policy so the
-    // S2S handshake can enumerate public input ports nested inside the
-    // remote-targets PG; the RPG reads via the node identity, not
-    // admin's bearer token.
-    let read_pg_users: &[&str] = &[&admin_id, &node_id];
-    let write_pg_users: &[&str] = &[&admin_id];
+    // CN=localhost is on every fixture policy because cluster
+    // federation walks the proxy chain when authorizing replicated
+    // requests (admin → CN=localhost). NiFi requires *each* user in the
+    // chain to have access on the resource — admin alone isn't enough,
+    // even though /proxy write covers the impersonation step.
+    let admin_and_node: &[&str] = &[&admin_id, &node_id];
     ensure_policy(
         client,
         "read",
         &format!("/process-groups/{root_id}"),
-        read_pg_users,
+        admin_and_node,
     )
     .await?;
     ensure_policy(
         client,
         "write",
         &format!("/process-groups/{root_id}"),
-        write_pg_users,
+        admin_and_node,
     )
     .await?;
     ensure_policy(
         client,
         "read",
         &format!("/data/process-groups/{root_id}"),
-        &[&admin_id],
+        admin_and_node,
     )
     .await?;
     ensure_policy(
         client,
         "write",
         &format!("/data/process-groups/{root_id}"),
-        &[&admin_id],
+        admin_and_node,
     )
     .await?;
     ensure_policy(
         client,
         "write",
         &format!("/operate/process-groups/{root_id}"),
-        &[&admin_id],
+        admin_and_node,
     )
     .await?;
-    ensure_policy(client, "read", "/parameter-contexts", &[&admin_id]).await?;
-    ensure_policy(client, "write", "/parameter-contexts", &[&admin_id]).await?;
-    ensure_policy(client, "read", "/provenance", &[&admin_id]).await?;
-    ensure_policy(client, "read", "/provenance-data", &[&admin_id]).await?;
+    ensure_policy(client, "read", "/parameter-contexts", admin_and_node).await?;
+    ensure_policy(client, "write", "/parameter-contexts", admin_and_node).await?;
+    ensure_policy(client, "read", "/provenance", admin_and_node).await?;
+    ensure_policy(client, "read", "/provenance-data", admin_and_node).await?;
     ensure_policy(
         client,
         "read",
         &format!("/provenance-data/process-groups/{root_id}"),
-        &[&admin_id],
+        admin_and_node,
     )
     .await?;
-    ensure_policy(client, "read", "/counters", &[&admin_id]).await?;
-    ensure_policy(client, "write", "/counters", &[&admin_id]).await?;
-    ensure_policy(client, "read", "/system", &[&admin_id]).await?;
+    ensure_policy(client, "read", "/counters", admin_and_node).await?;
+    ensure_policy(client, "write", "/counters", admin_and_node).await?;
+    ensure_policy(client, "read", "/system", admin_and_node).await?;
     // Required for the RPG → site-to-site handshake the orders-pipeline
     // fixture relies on for input port discovery. The node identity is
     // listed alongside admin because the cross-cluster RPG presents the
@@ -117,21 +117,24 @@ pub async fn seed(client: &DynamicClient) -> Result<()> {
 
     let marker_id = lookup_child_pg_id_by_name(client, "root", FIXTURE_MARKER_NAME).await?;
 
+    let node_id = lookup_user_id(client, "CN=localhost").await?;
+    let admin_and_node: &[&str] = &[&admin_id, &node_id];
+
     // NiFi's /data policy inheritance walks one level up (component →
     // parent PG); it does NOT walk further up the PG hierarchy. So a
     // single /data/process-groups/{root} policy doesn't cover deeply
-    // nested processors / connections. Explicitly grant admin /data on
-    // every PG under the marker so the component-→-PG inheritance has
+    // nested processors / connections. Explicitly grant /data on every
+    // PG under the marker so the component-→-PG inheritance has
     // somewhere to land. Without this, queue-listing requests return
     // 403 ("Unable to view the data for Processor X") even though the
     // /policies effective lookup says admin has access.
-    grant_admin_data_recursively(client, &admin_id, &marker_id).await?;
+    grant_data_recursively(client, admin_and_node, &marker_id).await?;
     // The /data/process-groups inheritance is one-level only. In a
     // 2-node cluster the queue-listing two-stage commit re-checks
     // /data/processors/{id} on each node and our parent-PG policy
-    // doesn't cascade — grant admin /data on every processor + every
+    // doesn't cascade — grant /data on every processor + every
     // connection under the marker explicitly. Bounded ~50 components.
-    grant_admin_component_data_recursively(client, &admin_id, &marker_id).await?;
+    grant_component_data_recursively(client, admin_and_node, &marker_id).await?;
 
     let orders_pg_id = lookup_child_pg_id_by_name(client, &marker_id, ORDERS_PG_NAME).await?;
     let versioned_clean_pg_id =
@@ -148,7 +151,7 @@ pub async fn seed(client: &DynamicClient) -> Result<()> {
         "read",
         &format!("/process-groups/{orders_pg_id}"),
         &[&ops_team_id],
-        &[&admin_id],
+        &[&admin_id, &node_id],
     )
     .await?;
     create_policy(
@@ -156,7 +159,7 @@ pub async fn seed(client: &DynamicClient) -> Result<()> {
         "write",
         &format!("/process-groups/{orders_pg_id}"),
         &[&ops_team_id],
-        &[&admin_id],
+        &[&admin_id, &node_id],
     )
     .await?;
     create_policy(
@@ -164,7 +167,7 @@ pub async fn seed(client: &DynamicClient) -> Result<()> {
         "read",
         &format!("/data/process-groups/{orders_pg_id}"),
         &[&ops_team_id],
-        &[&admin_id],
+        &[&admin_id, &node_id],
     )
     .await?;
     create_policy(
@@ -172,7 +175,7 @@ pub async fn seed(client: &DynamicClient) -> Result<()> {
         "write",
         &format!("/data/process-groups/{orders_pg_id}"),
         &[],
-        &[&admin_id],
+        &[&admin_id, &node_id],
     )
     .await?;
     create_policy(
@@ -180,7 +183,7 @@ pub async fn seed(client: &DynamicClient) -> Result<()> {
         "write",
         &format!("/operate/process-groups/{orders_pg_id}"),
         &[&ops_team_id],
-        &[&admin_id],
+        &[&admin_id, &node_id],
     )
     .await?;
 
@@ -189,7 +192,7 @@ pub async fn seed(client: &DynamicClient) -> Result<()> {
         "read",
         &format!("/process-groups/{versioned_clean_pg_id}"),
         &[],
-        &[&bob_id, &admin_id],
+        &[&bob_id, &admin_id, &node_id],
     )
     .await?;
     create_policy(
@@ -197,7 +200,7 @@ pub async fn seed(client: &DynamicClient) -> Result<()> {
         "write",
         &format!("/process-groups/{versioned_clean_pg_id}"),
         &[],
-        &[&admin_id],
+        &[&admin_id, &node_id],
     )
     .await?;
     create_policy(
@@ -205,7 +208,7 @@ pub async fn seed(client: &DynamicClient) -> Result<()> {
         "read",
         &format!("/data/process-groups/{versioned_clean_pg_id}"),
         &[],
-        &[&bob_id, &admin_id],
+        &[&bob_id, &admin_id, &node_id],
     )
     .await?;
     create_policy(
@@ -213,7 +216,7 @@ pub async fn seed(client: &DynamicClient) -> Result<()> {
         "write",
         &format!("/data/process-groups/{versioned_clean_pg_id}"),
         &[],
-        &[&admin_id],
+        &[&admin_id, &node_id],
     )
     .await?;
 
@@ -457,11 +460,7 @@ async fn create_policy(
 /// /data/process-groups/{id} R+W on each. The orders-pipeline and
 /// versioned-clean PGs are skipped — `seed` adds those itself with
 /// the appropriate fixture identities (admin + ops-team / admin + bob).
-async fn grant_admin_data_recursively(
-    client: &DynamicClient,
-    admin_id: &str,
-    pg_id: &str,
-) -> Result<()> {
+async fn grant_data_recursively(client: &DynamicClient, users: &[&str], pg_id: &str) -> Result<()> {
     let listing = client
         .processgroups()
         .get_process_groups(pg_id)
@@ -492,18 +491,18 @@ async fn grant_admin_data_recursively(
                 client,
                 "read",
                 &format!("/data/process-groups/{child_id}"),
-                &[admin_id],
+                users,
             )
             .await?;
             ensure_policy(
                 client,
                 "write",
                 &format!("/data/process-groups/{child_id}"),
-                &[admin_id],
+                users,
             )
             .await?;
         }
-        Box::pin(grant_admin_data_recursively(client, admin_id, &child_id)).await?;
+        Box::pin(grant_data_recursively(client, users, &child_id)).await?;
     }
     Ok(())
 }
@@ -513,9 +512,9 @@ async fn grant_admin_data_recursively(
 /// NiFi's /data inheritance only walks one level (component → parent PG)
 /// so even with /data/process-groups/{X} R+W, processors INSIDE a
 /// child PG of X aren't covered.
-async fn grant_admin_component_data_recursively(
+async fn grant_component_data_recursively(
     client: &DynamicClient,
-    admin_id: &str,
+    users: &[&str],
     pg_id: &str,
 ) -> Result<()> {
     let processors = client
@@ -533,20 +532,8 @@ async fn grant_admin_component_data_recursively(
             .and_then(|c| c.id.clone())
             .or_else(|| proc.id.clone());
         if let Some(id) = proc_id {
-            ensure_policy(
-                client,
-                "read",
-                &format!("/data/processors/{id}"),
-                &[admin_id],
-            )
-            .await?;
-            ensure_policy(
-                client,
-                "write",
-                &format!("/data/processors/{id}"),
-                &[admin_id],
-            )
-            .await?;
+            ensure_policy(client, "read", &format!("/data/processors/{id}"), users).await?;
+            ensure_policy(client, "write", &format!("/data/processors/{id}"), users).await?;
         }
     }
 
@@ -565,20 +552,8 @@ async fn grant_admin_component_data_recursively(
             .and_then(|c| c.id.clone())
             .or_else(|| conn.id.clone());
         if let Some(id) = conn_id {
-            ensure_policy(
-                client,
-                "read",
-                &format!("/data/connections/{id}"),
-                &[admin_id],
-            )
-            .await?;
-            ensure_policy(
-                client,
-                "write",
-                &format!("/data/connections/{id}"),
-                &[admin_id],
-            )
-            .await?;
+            ensure_policy(client, "read", &format!("/data/connections/{id}"), users).await?;
+            ensure_policy(client, "write", &format!("/data/connections/{id}"), users).await?;
         }
     }
 
@@ -597,10 +572,7 @@ async fn grant_admin_component_data_recursively(
             .and_then(|c| c.id.clone())
             .or_else(|| child.id.clone());
         let Some(child_id) = child_id else { continue };
-        Box::pin(grant_admin_component_data_recursively(
-            client, admin_id, &child_id,
-        ))
-        .await?;
+        Box::pin(grant_component_data_recursively(client, users, &child_id)).await?;
     }
     Ok(())
 }
