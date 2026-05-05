@@ -10,6 +10,11 @@
 
 use super::{ContentRender, TabularFormat};
 
+/// Cap on the byte slice fed to [`hex_dump`] for the Hex fallback. We
+/// only ever show the head of the body — the modal's `Hex` view exists
+/// to confirm "this is binary" rather than to display the full payload.
+const HEX_PREVIEW_BYTES: usize = 4096;
+
 /// Classifies raw bytes into a [`ContentRender`] variant.
 ///
 /// Two-stage pipeline:
@@ -18,12 +23,13 @@ use super::{ContentRender, TabularFormat};
 ///    [`decode_parquet`], `Obj\x01` → [`decode_avro`]. Decoder
 ///    errors fall back to `Hex` with a `tracing::warn!` log.
 /// 2. Otherwise: empty → `Empty`; valid UTF-8 → `Text` (JSON
-///    pretty-print when parseable); else → `Hex` of the first 4 KiB.
+///    pretty-print when parseable); else → `Hex` of the first
+///    `HEX_PREVIEW_BYTES` bytes.
 pub fn classify_content(bytes: Vec<u8>) -> ContentRender {
     if let Some(format) = detect_tabular_format(&bytes) {
-        // Snapshot the first 4 KiB for the Hex-fallback branch BEFORE
-        // moving `bytes` into the decoder thread.
-        let head_for_hex: Vec<u8> = bytes[..bytes.len().min(4096)].to_vec();
+        // Snapshot the head for the Hex-fallback branch BEFORE moving
+        // `bytes` into the decoder thread.
+        let head_for_hex: Vec<u8> = bytes[..bytes.len().min(HEX_PREVIEW_BYTES)].to_vec();
         let result = match format {
             TabularFormat::Parquet => decode_with_timeout("parquet", bytes, |b| decode_parquet(&b)),
             TabularFormat::Avro => decode_with_timeout("avro", bytes, |b| decode_avro(&b)),
@@ -145,7 +151,7 @@ pub fn classify_text_or_hex_no_pretty(bytes: Vec<u8>) -> ContentRender {
         Err(err) => {
             let bytes = err.into_bytes();
             ContentRender::Hex {
-                first_4k: hex_dump(&bytes[..bytes.len().min(4096)]),
+                first_4k: hex_dump(&bytes[..bytes.len().min(HEX_PREVIEW_BYTES)]),
             }
         }
     }
@@ -171,7 +177,7 @@ fn classify_text_or_hex(bytes: Vec<u8>) -> ContentRender {
         Err(err) => {
             let bytes = err.into_bytes();
             ContentRender::Hex {
-                first_4k: hex_dump(&bytes[..bytes.len().min(4096)]),
+                first_4k: hex_dump(&bytes[..bytes.len().min(HEX_PREVIEW_BYTES)]),
             }
         }
     }
