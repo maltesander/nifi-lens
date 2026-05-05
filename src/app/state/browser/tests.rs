@@ -2673,7 +2673,7 @@ fn state_with_pc_modal_loaded() -> AppState {
     assert!(
         matches!(
             s.browser.parameter_modal.as_ref().map(|m| &m.load),
-            Some(ParameterContextLoad::Loaded { .. })
+            Some(ParameterContextLoad::Loaded(_))
         ),
         "modal must be Loaded"
     );

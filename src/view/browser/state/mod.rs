@@ -649,7 +649,7 @@ impl BrowserState {
         if let Some(modal) = self.parameter_modal.as_mut()
             && modal.originating_pg_id == pg_id
         {
-            modal.load = ParameterContextLoad::Loaded { chain };
+            modal.load = ParameterContextLoad::Loaded(chain);
         }
     }
 
@@ -659,7 +659,7 @@ impl BrowserState {
         if let Some(modal) = self.parameter_modal.as_mut()
             && modal.originating_pg_id == pg_id
         {
-            modal.load = ParameterContextLoad::Error { message: err };
+            modal.load = ParameterContextLoad::Failed(err);
         }
     }
 

@@ -4,8 +4,12 @@
 
 use crate::client::ComponentDiffSection;
 use crate::cluster::snapshot::VersionControlSummary;
+use crate::widget::modal::LoadStatus;
 use crate::widget::scroll::BidirectionalScrollState;
 use crate::widget::search::SearchState;
+
+/// Diff payload load state for the Version-control modal.
+pub type VersionControlDifferenceLoad = LoadStatus<Vec<ComponentDiffSection>>;
 
 #[derive(Debug, Clone)]
 pub struct VersionControlModalState {
@@ -22,13 +26,6 @@ pub struct VersionControlModalState {
     pub search: Option<SearchState>,
 }
 
-#[derive(Debug, Clone)]
-pub enum VersionControlDifferenceLoad {
-    Pending,
-    Loaded(Vec<ComponentDiffSection>),
-    Failed(String),
-}
-
 impl VersionControlModalState {
     pub fn pending(
         pg_id: String,
@@ -39,7 +36,7 @@ impl VersionControlModalState {
             pg_id,
             pg_name,
             identity,
-            differences: VersionControlDifferenceLoad::Pending,
+            differences: LoadStatus::Loading,
             show_environmental: false,
             scroll: BidirectionalScrollState::default(),
             search: None,
@@ -54,7 +51,7 @@ impl VersionControlModalState {
     /// this mirrors the renderer's `visible` filter.
     pub fn searchable_body(&self) -> String {
         let mut out = String::new();
-        if let VersionControlDifferenceLoad::Loaded(sections) = &self.differences {
+        if let LoadStatus::Loaded(sections) = &self.differences {
             let visible: Vec<_> = sections
                 .iter()
                 .filter_map(|s| {

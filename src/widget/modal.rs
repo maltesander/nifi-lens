@@ -36,11 +36,42 @@ pub fn render_too_small(frame: &mut Frame, area: Rect) -> bool {
 /// Three-state load gate shared by per-component modals (Access,
 /// Identity) whose render bodies branch on a `Loading / Failed / Loaded`
 /// status enum. Each modal owns its own status type; the conversion to
-/// `LoadGate` happens at the call site.
+/// `LoadGate` happens at the call site (or via `LoadStatus::as_load_gate`).
 pub enum LoadGate<'a> {
     Loading,
     Failed(&'a str),
     Loaded,
+}
+
+/// Generic owned-payload load status used by modals whose loaded data
+/// lives inside the `Loaded` variant (Parameter context, Version
+/// control diff). Modals where data lives in sibling fields keep their
+/// own bespoke status enum and convert to `LoadGate` directly.
+#[derive(Debug, Clone, Default)]
+pub enum LoadStatus<T> {
+    #[default]
+    Loading,
+    Failed(String),
+    Loaded(T),
+}
+
+impl<T> LoadStatus<T> {
+    /// Borrow the loaded payload, if any.
+    pub fn loaded(&self) -> Option<&T> {
+        match self {
+            Self::Loaded(t) => Some(t),
+            _ => None,
+        }
+    }
+
+    /// Project to a `LoadGate` for use with `render_load_gate`.
+    pub fn as_load_gate(&self) -> LoadGate<'_> {
+        match self {
+            Self::Loading => LoadGate::Loading,
+            Self::Failed(err) => LoadGate::Failed(err),
+            Self::Loaded(_) => LoadGate::Loaded,
+        }
+    }
 }
 
 /// Render the modal load-status placeholder for `Loading` / `Failed`,
@@ -128,6 +159,30 @@ mod tests {
         assert!(drew);
         let out = format!("{}", term.backend());
         assert!(out.contains("loading"), "out was:\n{out}");
+    }
+
+    #[test]
+    fn load_status_default_is_loading() {
+        let s: LoadStatus<i32> = LoadStatus::default();
+        assert!(matches!(s, LoadStatus::Loading));
+        assert!(s.loaded().is_none());
+    }
+
+    #[test]
+    fn load_status_loaded_exposes_payload_and_gates_loaded() {
+        let s: LoadStatus<i32> = LoadStatus::Loaded(42);
+        assert_eq!(s.loaded(), Some(&42));
+        assert!(matches!(s.as_load_gate(), LoadGate::Loaded));
+    }
+
+    #[test]
+    fn load_status_failed_carries_message_to_gate() {
+        let s: LoadStatus<i32> = LoadStatus::Failed("boom".into());
+        assert!(s.loaded().is_none());
+        match s.as_load_gate() {
+            LoadGate::Failed(err) => assert_eq!(err, "boom"),
+            _ => panic!("expected Failed"),
+        }
     }
 
     #[test]

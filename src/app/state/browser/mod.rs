@@ -1278,7 +1278,7 @@ fn handle_version_control_modal_verb(
             let Some(modal) = state.browser.version_modal.as_mut() else {
                 return UpdateResult::default();
             };
-            modal.differences = crate::view::browser::state::VersionControlDifferenceLoad::Pending;
+            modal.differences = crate::view::browser::state::VersionControlDifferenceLoad::Loading;
             let pg_id = modal.pg_id.clone();
             // Dropping the search index too — body is changing.
             modal.search = None;
@@ -1464,7 +1464,7 @@ fn handle_parameter_context_modal_verb(
                 match modal.focused_pane {
                     ParameterContextPane::Sidebar => {
                         let chain_len = match &modal.load {
-                            crate::view::browser::state::parameter_context_modal::ParameterContextLoad::Loaded { chain } => chain.len(),
+                            crate::view::browser::state::parameter_context_modal::ParameterContextLoad::Loaded(chain) => chain.len(),
                             _ => 0,
                         };
                         if chain_len > 0 {
@@ -1497,7 +1497,7 @@ fn handle_parameter_context_modal_verb(
                 match modal.focused_pane {
                     ParameterContextPane::Sidebar => {
                         let chain_len = match &modal.load {
-                            crate::view::browser::state::parameter_context_modal::ParameterContextLoad::Loaded { chain } => chain.len(),
+                            crate::view::browser::state::parameter_context_modal::ParameterContextLoad::Loaded(chain) => chain.len(),
                             _ => 0,
                         };
                         if chain_len > 0 {
@@ -1529,7 +1529,7 @@ fn handle_parameter_context_modal_verb(
                 match modal.focused_pane {
                     ParameterContextPane::Sidebar => {
                         let chain_len = match &modal.load {
-                            crate::view::browser::state::parameter_context_modal::ParameterContextLoad::Loaded { chain } => chain.len(),
+                            crate::view::browser::state::parameter_context_modal::ParameterContextLoad::Loaded(chain) => chain.len(),
                             _ => 0,
                         };
                         if chain_len > 0 {
@@ -1576,7 +1576,7 @@ fn parameter_context_modal_copy_text(
     use crate::view::browser::state::parameter_context_modal::{ParameterContextLoad, resolve};
     let modal = browser.parameter_modal.as_ref()?;
     let chain = match &modal.load {
-        ParameterContextLoad::Loaded { chain } => chain,
+        ParameterContextLoad::Loaded(chain) => chain,
         _ => return None,
     };
     let resolved = resolve(chain, modal.preselect.as_deref());

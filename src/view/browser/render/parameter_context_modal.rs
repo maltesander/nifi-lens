@@ -78,16 +78,14 @@ pub fn render(
 
     // Compute used_by once and thread it into render_header and render_used_by.
     let ctx_id = match &modal.load {
-        ParameterContextLoad::Loaded { chain } => {
-            chain.first().map(|n| n.id.as_str()).unwrap_or("")
-        }
+        ParameterContextLoad::Loaded(chain) => chain.first().map(|n| n.id.as_str()).unwrap_or(""),
         _ => "",
     };
     let used_by = used_by_pgs(snapshot, ctx_id, browser);
 
     // Outer frame — title shows context name + id prefix (first 6 chars).
     let (ctx_name, ctx_id_prefix) = match &modal.load {
-        ParameterContextLoad::Loaded { chain } => {
+        ParameterContextLoad::Loaded(chain) => {
             let name = chain
                 .first()
                 .map(|n| n.name.as_str())
@@ -138,7 +136,7 @@ fn render_header(
     used_by: &[UsedByRow],
 ) {
     let (ctx_name, chain_names) = match &modal.load {
-        ParameterContextLoad::Loaded { chain } => {
+        ParameterContextLoad::Loaded(chain) => {
             let name = chain.first().map(|n| n.name.as_str()).unwrap_or("?");
             let names: Vec<&str> = chain.iter().map(|n| n.name.as_str()).collect();
             (name, names)
@@ -235,7 +233,7 @@ fn render_sidebar(frame: &mut Frame, area: Rect, modal: &ParameterContextModalSt
     frame.render_widget(block, area);
 
     let chain = match &modal.load {
-        ParameterContextLoad::Loaded { chain } => chain,
+        ParameterContextLoad::Loaded(chain) => chain,
         ParameterContextLoad::Loading => {
             frame.render_widget(
                 Paragraph::new(Line::from(Span::styled("loading…", theme::muted())))
@@ -244,7 +242,7 @@ fn render_sidebar(frame: &mut Frame, area: Rect, modal: &ParameterContextModalSt
             );
             return;
         }
-        ParameterContextLoad::Error { .. } => {
+        ParameterContextLoad::Failed(_) => {
             return;
         }
     };
@@ -293,7 +291,7 @@ fn render_params(
             let line = Line::from(Span::styled("loading…", theme::muted()));
             frame.render_widget(Paragraph::new(line).alignment(Alignment::Center), area);
         }
-        ParameterContextLoad::Error { message } => {
+        ParameterContextLoad::Failed(message) => {
             let lines = vec![
                 Line::from(Span::styled("failed to load:", theme::error())),
                 Line::from(Span::styled(message.clone(), theme::error())),
@@ -302,7 +300,7 @@ fn render_params(
             ];
             frame.render_widget(Paragraph::new(lines), area);
         }
-        ParameterContextLoad::Loaded { chain } => {
+        ParameterContextLoad::Loaded(chain) => {
             if modal.show_used_by {
                 render_used_by(frame, area, modal, used_by);
                 return;
@@ -767,8 +765,8 @@ fn render_footer_status(frame: &mut Frame, area: Rect, modal: &ParameterContextM
 
     let status = match &modal.load {
         ParameterContextLoad::Loading => "loading…".to_string(),
-        ParameterContextLoad::Error { .. } => "failed — press r to retry".to_string(),
-        ParameterContextLoad::Loaded { chain } => {
+        ParameterContextLoad::Failed(_) => "failed — press r to retry".to_string(),
+        ParameterContextLoad::Loaded(chain) => {
             // Count unique resolved names (shadowed duplicates excluded) so the
             // count matches what the resolved-flat view actually shows.
             let unique = resolve(chain, None).len();
@@ -819,7 +817,7 @@ mod tests {
     fn loaded_modal(chain: Vec<ParameterContextNode>) -> ParameterContextModalState {
         let mut m =
             ParameterContextModalState::pending("pg-1".into(), "/flows/payments-prod".into(), None);
-        m.load = ParameterContextLoad::Loaded { chain };
+        m.load = ParameterContextLoad::Loaded(chain);
         m
     }
 
@@ -886,9 +884,7 @@ mod tests {
     #[test]
     fn error_state_shows_error_and_retry_hint() {
         let mut modal = ParameterContextModalState::pending("pg".into(), "/pg".into(), None);
-        modal.load = ParameterContextLoad::Error {
-            message: "context unreachable: timeout".into(),
-        };
+        modal.load = ParameterContextLoad::Failed("context unreachable: timeout".into());
         let browser = BrowserState::new();
         let snapshot = ClusterSnapshot::default();
         let mut term = Terminal::new(test_backend(24)).unwrap();

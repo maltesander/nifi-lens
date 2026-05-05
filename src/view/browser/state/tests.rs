@@ -2386,7 +2386,7 @@ fn open_version_control_modal_captures_pg_id_and_identity() {
     assert_eq!(modal.pg_name, "ingest");
     assert!(matches!(
         modal.differences,
-        crate::view::browser::state::VersionControlDifferenceLoad::Pending
+        crate::view::browser::state::VersionControlDifferenceLoad::Loading
     ));
     assert!(!modal.show_environmental);
     assert!(modal.identity.is_some());
@@ -2435,7 +2435,7 @@ fn modal_loaded_event_with_mismatched_pg_id_is_ignored() {
     );
     assert!(matches!(
         state.version_modal.as_ref().unwrap().differences,
-        VersionControlDifferenceLoad::Pending
+        VersionControlDifferenceLoad::Loading
     ));
 }
 
@@ -2509,7 +2509,7 @@ fn modal_failed_event_with_mismatched_pg_id_is_ignored() {
     // Mismatched pg_id: modal stays in Pending — failure was for a stale fetch.
     assert!(matches!(
         state.version_modal.as_ref().unwrap().differences,
-        VersionControlDifferenceLoad::Pending
+        VersionControlDifferenceLoad::Loading
     ));
 }
 

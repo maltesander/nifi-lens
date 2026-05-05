@@ -4,8 +4,12 @@
 //! when the worker resolves the chain.
 
 use crate::client::parameter_context::{ParameterContextNode, ParameterEntry};
+use crate::widget::modal::LoadStatus;
 use crate::widget::scroll::VerticalScrollState;
 use crate::widget::search::SearchState;
+
+/// Async load state for the Parameter context modal's chain payload.
+pub type ParameterContextLoad = LoadStatus<Vec<ParameterContextNode>>;
 
 /// Which pane of the parameter-context modal has keyboard focus.
 /// Default is `Sidebar` — the user starts on the chain list and
@@ -40,13 +44,6 @@ pub struct ParameterContextModalState {
     pub show_used_by: bool,
     pub scroll: VerticalScrollState,
     pub search: Option<SearchState>,
-}
-
-#[derive(Debug, Clone)]
-pub enum ParameterContextLoad {
-    Loading,
-    Loaded { chain: Vec<ParameterContextNode> },
-    Error { message: String },
 }
 
 impl ParameterContextModalState {
@@ -95,7 +92,7 @@ impl ParameterContextModalState {
         const FROM_W: usize = 18;
 
         let chain = match &self.load {
-            ParameterContextLoad::Loaded { chain } => chain,
+            ParameterContextLoad::Loaded(chain) => chain,
             _ => return String::new(),
         };
         let mut out = String::new();

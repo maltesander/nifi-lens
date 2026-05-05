@@ -116,7 +116,7 @@ fn render_identity(frame: &mut Frame, area: Rect, modal: &VersionControlModalSta
 
 fn render_diff_body(frame: &mut Frame, area: Rect, modal: &VersionControlModalState) {
     match &modal.differences {
-        VersionControlDifferenceLoad::Pending => {
+        VersionControlDifferenceLoad::Loading => {
             let line = Line::from(Span::styled("loading…", theme::muted()));
             frame.render_widget(Paragraph::new(line).alignment(Alignment::Center), area);
         }
@@ -276,7 +276,7 @@ fn render_footer_status(frame: &mut Frame, area: Rect, modal: &VersionControlMod
         "env hidden"
     };
     let status = match &modal.differences {
-        VersionControlDifferenceLoad::Pending => "loading…".to_string(),
+        VersionControlDifferenceLoad::Loading => "loading…".to_string(),
         VersionControlDifferenceLoad::Failed(_) => "failed — press r to retry".to_string(),
         VersionControlDifferenceLoad::Loaded(sections) => {
             let mut diff_count = 0usize;
