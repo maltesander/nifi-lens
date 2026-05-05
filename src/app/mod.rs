@@ -1,5 +1,6 @@
 //! App run loop, terminal guard, and panic hook.
 
+pub mod cleanup;
 pub mod history;
 pub(crate) mod navigation;
 pub mod state;
