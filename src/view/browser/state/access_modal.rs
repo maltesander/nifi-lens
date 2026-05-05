@@ -1,7 +1,10 @@
 //! State and types for the per-component Access modal.
 //!
-//! See `docs/superpowers/specs/2026-05-04-access-policies-audit-design.md`
-//! for the design (gitignored — local only).
+//! Five user-facing audit axes (view / modify component, view / modify
+//! data, view / modify policies). Each axis maps to one
+//! `(action, resource)` pair on `/policies/{action}/{resource}`. Drill-in
+//! reuses the inline `accessPolicies` on `UserDto` / `UserGroupDto`, so a
+//! single `tenants/{...}/{id}` round-trip is sufficient.
 
 use crate::client::NodeKind;
 

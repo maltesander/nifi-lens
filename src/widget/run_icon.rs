@@ -12,19 +12,10 @@ pub fn processor_run_icon(run_status: &str) -> (char, Style) {
     crate::client::status::ProcessorStatus::from_wire(run_status).icon()
 }
 
-/// Tree-row prefix glyph for a Remote Process Group.
-///
-/// `▶` accent for `transmission_status == "Transmitting"`, `■` muted
-/// otherwise. Anything other than `"Transmitting"` (including the
-/// empty string before the first snapshot lands) renders as the muted
-/// square — we deliberately don't try to interpret intermediate
-/// states that NiFi does not document.
+/// Tree-row prefix glyph for a Remote Process Group. Delegates to
+/// `TransmissionStatus::icon` after parsing the wire string.
 pub fn transmission_icon(transmission_status: &str) -> (char, Style) {
-    if transmission_status == "Transmitting" {
-        ('▶', crate::theme::accent())
-    } else {
-        ('■', crate::theme::muted())
-    }
+    crate::client::status::TransmissionStatus::from_wire(transmission_status).icon()
 }
 
 #[cfg(test)]

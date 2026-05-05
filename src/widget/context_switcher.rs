@@ -1,17 +1,18 @@
 use ratatui::Frame;
-use ratatui::layout::{Constraint, Direction, Layout, Rect};
+use ratatui::layout::{Constraint, Rect};
 use ratatui::style::Style;
 use ratatui::text::Span;
 use ratatui::widgets::Clear;
 
 use crate::app::state::ContextSwitcherState;
+use crate::layout::center_percent;
 use crate::theme;
 
 pub fn render(frame: &mut Frame, area: Rect, state: &ContextSwitcherState) {
     use ratatui::widgets::{Cell, Row, Table, TableState};
 
     let height = (state.entries.len() as u16 + 5).clamp(7, 20);
-    let modal = center(area, 70, height);
+    let modal = center_percent(area, 70, height);
     frame.render_widget(Clear, modal);
 
     let block = crate::widget::panel::Panel::new(" Switch Context (K) ").into_block();
@@ -68,25 +69,6 @@ pub fn render(frame: &mut Frame, area: Rect, state: &ContextSwitcherState) {
     let mut ts = TableState::default();
     ts.select(Some(state.cursor));
     frame.render_stateful_widget(table, inner, &mut ts);
-}
-
-fn center(area: Rect, pct_x: u16, height: u16) -> Rect {
-    let vertical = Layout::default()
-        .direction(Direction::Vertical)
-        .constraints([
-            Constraint::Fill(1),
-            Constraint::Length(height),
-            Constraint::Fill(1),
-        ])
-        .split(area);
-    Layout::default()
-        .direction(Direction::Horizontal)
-        .constraints([
-            Constraint::Percentage((100 - pct_x) / 2),
-            Constraint::Percentage(pct_x),
-            Constraint::Percentage((100 - pct_x) / 2),
-        ])
-        .split(vertical[1])[1]
 }
 
 #[cfg(test)]

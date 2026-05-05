@@ -63,9 +63,9 @@ pub(crate) fn fresh_state() -> AppState {
 
 /// Construct a minimal `RootPgStatusSnapshot` for Browser reducer tests
 /// that don't care about the aggregate counts. Populates `nodes` with a
-/// single root PG (id `"root"`, name `"root"`) and mirrors that id into
-/// `process_group_ids` so the connections-by-PG watch channel stays in
-/// sync.
+/// single root PG (id `crate::client::ROOT_GROUP_ID`, name `"root"`)
+/// and mirrors that id into `process_group_ids` so the
+/// connections-by-PG watch channel stays in sync.
 pub(crate) fn tiny_root_pg_status() -> RootPgStatusSnapshot {
     RootPgStatusSnapshot {
         flow_files_queued: 0,
@@ -76,11 +76,11 @@ pub(crate) fn tiny_root_pg_status() -> RootPgStatusSnapshot {
         output_port_count: 0,
         processors: ProcessorStateCounts::default(),
         remote_process_groups: crate::client::RemoteProcessGroupCounts::default(),
-        process_group_ids: vec!["root".into()],
+        process_group_ids: vec![crate::client::ROOT_GROUP_ID.into()],
         nodes: vec![RawNode {
             parent_idx: None,
             kind: NodeKind::ProcessGroup,
-            id: "root".into(),
+            id: crate::client::ROOT_GROUP_ID.into(),
             group_id: String::new(),
             name: "root".into(),
             status_summary: NodeStatusSummary::ProcessGroup {

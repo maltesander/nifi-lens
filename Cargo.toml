@@ -59,6 +59,7 @@ uuid = { version = "1", features = ["v4"] }
 x509-parser = "0.18"
 
 [dev-dependencies]
+filetime = "0.2"
 insta = { version = "1", features = ["filters"] }
 rcgen = "0.14"
 serial_test = "3"

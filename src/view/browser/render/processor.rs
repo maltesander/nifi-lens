@@ -508,7 +508,7 @@ mod snapshots {
                 source_id: "put-kafka-1".into(),
                 source_name: "PutKafka".into(),
                 source_type: "PROCESSOR".into(),
-                group_id: "root".into(),
+                group_id: crate::client::ROOT_GROUP_ID.into(),
                 timestamp_iso: format!("2026-04-13T10:14:{:02}.000Z", 10 + i),
                 timestamp_human: format!("04/13/2026 10:14:{:02} UTC", 10 + i),
             });
@@ -589,7 +589,7 @@ mod snapshots {
             children: vec![],
             kind: NodeKind::ControllerService,
             id: cs_uuid.into(),
-            group_id: "root".into(),
+            group_id: crate::client::ROOT_GROUP_ID.into(),
             name: "fixture-json-reader".into(),
             status_summary: NodeStatusSummary::ControllerService {
                 state: "ENABLED".into(),
@@ -666,7 +666,7 @@ mod snapshots {
                 children: vec![],
                 kind: NodeKind::Processor,
                 id: id.into(),
-                group_id: "root".into(),
+                group_id: crate::client::ROOT_GROUP_ID.into(),
                 name: name.into(),
                 status_summary: NodeStatusSummary::Processor {
                     run_status: "Running".into(),
@@ -679,7 +679,7 @@ mod snapshots {
             children: vec![],
             kind: NodeKind::Connection,
             id: "c-in".into(),
-            group_id: "root".into(),
+            group_id: crate::client::ROOT_GROUP_ID.into(),
             name: "gen→enrich".into(),
             status_summary: NodeStatusSummary::Connection {
                 fill_percent: 0,
@@ -697,7 +697,7 @@ mod snapshots {
             children: vec![],
             kind: NodeKind::Connection,
             id: "c-out".into(),
-            group_id: "root".into(),
+            group_id: crate::client::ROOT_GROUP_ID.into(),
             name: "enrich→publish".into(),
             status_summary: NodeStatusSummary::Connection {
                 fill_percent: 0,

@@ -1094,7 +1094,7 @@ mod tests {
 
         let mut pg = ProcessGroupStatusSnapshotDto::default();
         pg.id = Some("pg-1".into());
-        pg.name = Some("root".into());
+        pg.name = Some(crate::client::ROOT_GROUP_ID.into());
         pg.remote_process_group_status_snapshots = Some(vec![rpg_entity]);
 
         let mut out = Vec::new();

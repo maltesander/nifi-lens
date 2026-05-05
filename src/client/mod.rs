@@ -29,6 +29,12 @@ use semver::Version;
 use crate::config::{ResolvedAuth, ResolvedContext};
 use crate::error::NifiLensError;
 
+/// NiFi's documented alias for the root process group's UUID. The
+/// `/flow/process-groups/{id}` endpoints accept this literal in place
+/// of the actual UUID; we rely on it to bootstrap the snapshot before
+/// the real id is known.
+pub(crate) const ROOT_GROUP_ID: &str = "root";
+
 /// Try to classify a boxed library error into a specific `NifiLensError`
 /// variant with a targeted hint, falling back to a caller-provided
 /// generic constructor when no specific match is found.
@@ -281,7 +287,7 @@ impl NifiClient {
         let entity = self
             .inner
             .flow()
-            .get_process_group_status("root", Some(true), None, None)
+            .get_process_group_status(ROOT_GROUP_ID, Some(true), None, None)
             .await
             .map_err(|err| {
                 classify_or_fallback(&self.context_name, Box::new(err), |source| {
@@ -314,13 +320,19 @@ impl NifiClient {
         let listing = self
             .inner
             .flow()
-            .get_controller_services_from_group("root", Some(false), Some(true), Some(false), None)
+            .get_controller_services_from_group(
+                ROOT_GROUP_ID,
+                Some(false),
+                Some(true),
+                Some(false),
+                None,
+            )
             .await
             .map_err(|err| {
                 classify_or_fallback(&self.context_name, Box::new(err), |source| {
                     NifiLensError::ControllerServicesListFailed {
                         context: self.context_name.clone(),
-                        id: "root".to_string(),
+                        id: ROOT_GROUP_ID.to_string(),
                         source,
                     }
                 })
@@ -597,13 +609,20 @@ fn collect_counts(
         }
     }
     if let Some(rpgs) = snapshot.remote_process_group_status_snapshots.as_ref() {
+        use crate::client::status::TransmissionStatus;
         for entity in rpgs {
             let Some(snap) = entity.remote_process_group_status_snapshot.as_ref() else {
                 continue;
             };
             out.remote_process_groups.total += 1;
-            match snap.transmission_status.as_deref() {
-                Some("Transmitting") => out.remote_process_groups.transmitting += 1,
+            match snap
+                .transmission_status
+                .as_deref()
+                .map(TransmissionStatus::from_wire)
+            {
+                Some(TransmissionStatus::Transmitting) => {
+                    out.remote_process_groups.transmitting += 1
+                }
                 _ => out.remote_process_groups.not_transmitting += 1,
             }
         }
@@ -928,14 +947,14 @@ mod root_pg_status_snapshot_tests {
         child_a.process_group_status_snapshots = Some(vec![pg_entity(grandchild)]);
         let child_b = pg_with_id("childB");
 
-        let mut root = pg_with_id("root");
+        let mut root = pg_with_id(ROOT_GROUP_ID);
         root.process_group_status_snapshots = Some(vec![pg_entity(child_a), pg_entity(child_b)]);
 
         let snap = RootPgStatusSnapshot::from_aggregate(&root);
         assert_eq!(
             snap.pg_ids(),
             vec![
-                "root".to_string(),
+                ROOT_GROUP_ID.to_string(),
                 "childA".to_string(),
                 "grandchild".to_string(),
                 "childB".to_string(),
@@ -975,7 +994,7 @@ mod root_pg_status_snapshot_tests {
             entity
         };
         let mut pg = ProcessGroupStatusSnapshotDto::default();
-        pg.id = Some("root".into());
+        pg.id = Some(ROOT_GROUP_ID.into());
         pg.remote_process_group_status_snapshots = Some(vec![
             mk_rpg("Transmitting"),
             mk_rpg("Transmitting"),

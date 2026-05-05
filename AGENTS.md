@@ -217,13 +217,18 @@ Shared helpers worth knowing about before reinventing them:
 - `src/widget/scroll.rs` — `VerticalScrollState` /
   `BidirectionalScrollState`.
 - `src/widget/filter_bar.rs` — `FilterChip` + `build_chip_line`.
-- `src/widget/search.rs` — `SearchState` + `compute_matches`.
+- `src/widget/search.rs` — `SearchState` + `compute_matches` +
+  `render_search_input` (`/ {query}_` footer prompt).
 - `src/layout.rs` — `split_header_body_footer` / `split_two_rows` /
-  `split_two_cols`.
+  `split_two_cols` / `center_percent` / `center_absolute`.
 - `src/bytes.rs` — `KIB` / `MIB` / `GIB` + `format_bytes` /
   `format_bytes_int`. Prefer over raw `N * 1024 * 1024`.
 - `src/client/status.rs` — `ProcessorStatus` /
-  `ControllerServiceState` typed enums.
+  `ControllerServiceState` / `PortStatus` / `TransmissionStatus`
+  typed enums.
+- `src/client/mod.rs` — `ROOT_GROUP_ID` (NiFi's documented `"root"`
+  alias for the root process group). Use this rather than the bare
+  `"root"` literal.
 - `src/timestamp.rs` — `format_age` / `format_age_secs`.
 - `src/test_support.rs` — `fresh_state`, `tiny_config`,
   `default_fetch_duration`, `test_backend(height)` and

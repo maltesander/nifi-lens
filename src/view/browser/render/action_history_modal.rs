@@ -222,12 +222,7 @@ fn render_footer_status(frame: &mut Frame, area: Rect, modal: &ActionHistoryModa
     if let Some(s) = modal.search.as_ref()
         && s.input_active
     {
-        let line = Line::from(vec![
-            Span::styled("/ ".to_string(), theme::accent()),
-            Span::raw(s.query.clone()),
-            Span::styled("_".to_string(), theme::search_cursor()),
-        ]);
-        frame.render_widget(Paragraph::new(line), area);
+        crate::widget::search::render_search_input(frame, area, s);
         return;
     }
     render_footer_hint(frame, area);

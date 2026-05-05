@@ -1653,9 +1653,9 @@ mod tests {
                 RawNode {
                     parent_idx: None,
                     kind: NodeKind::ProcessGroup,
-                    id: "root".into(),
-                    group_id: "root".into(),
-                    name: "root".into(),
+                    id: crate::client::ROOT_GROUP_ID.into(),
+                    group_id: crate::client::ROOT_GROUP_ID.into(),
+                    name: crate::client::ROOT_GROUP_ID.into(),
                     status_summary: NodeStatusSummary::ProcessGroup {
                         running: 0,
                         stopped: 0,
@@ -1667,7 +1667,7 @@ mod tests {
                     parent_idx: Some(0),
                     kind: NodeKind::Processor,
                     id: "gen".into(),
-                    group_id: "root".into(),
+                    group_id: crate::client::ROOT_GROUP_ID.into(),
                     name: "Gen".into(),
                     status_summary: NodeStatusSummary::Processor {
                         run_status: "Running".into(),
@@ -1766,9 +1766,9 @@ mod tests {
                 nodes: vec![RawNode {
                     parent_idx: None,
                     kind: NodeKind::ProcessGroup,
-                    id: "root".into(),
-                    group_id: "root".into(),
-                    name: "root".into(),
+                    id: crate::client::ROOT_GROUP_ID.into(),
+                    group_id: crate::client::ROOT_GROUP_ID.into(),
+                    name: crate::client::ROOT_GROUP_ID.into(),
                     status_summary: NodeStatusSummary::ProcessGroup {
                         running: 0,
                         stopped: 0,

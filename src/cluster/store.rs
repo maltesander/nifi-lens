@@ -90,9 +90,7 @@ impl ClusterUpdate {
 ///
 /// Single-user-authorizer is **not** `Unsupported` — it returns
 /// `200` on `/policies/{action}/{resource}` with the implicit
-/// admin-only policy. See
-/// `docs/superpowers/specs/2026-05-04-access-policies-audit-design.md`
-/// for the full detection table.
+/// admin-only policy.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub enum AccessAuditState {
     #[default]
@@ -881,7 +879,7 @@ mod tests {
             output_port_count: 0,
             processors: crate::client::ProcessorStateCounts::default(),
             remote_process_groups: crate::client::RemoteProcessGroupCounts::default(),
-            process_group_ids: vec!["root".into(), "child".into()],
+            process_group_ids: vec![crate::client::ROOT_GROUP_ID.into(), "child".into()],
             nodes: vec![],
         };
         store.apply_update(ClusterUpdate::RootPgStatus(Ok(fake_pg), meta()));
@@ -891,7 +889,10 @@ mod tests {
         let published: Vec<String> = store.pg_ids_rx.borrow().clone();
         assert_eq!(
             published,
-            vec!["root".to_string(), "child".to_string()],
+            vec![
+                crate::client::ROOT_GROUP_ID.to_string(),
+                "child".to_string()
+            ],
             "publish_pg_ids must mirror the Ready snapshot's id list"
         );
     }
@@ -904,7 +905,7 @@ mod tests {
             source_id: format!("src-{id}"),
             source_name: format!("Proc-{id}"),
             source_type: "PROCESSOR".into(),
-            group_id: "root".into(),
+            group_id: crate::client::ROOT_GROUP_ID.into(),
             timestamp_iso: "2026-04-14T00:00:00Z".into(),
             timestamp_human: String::new(),
         }

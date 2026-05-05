@@ -2,6 +2,13 @@
 //! bodies. Extracted from the Bulletins detail modal so the Tracer
 //! content viewer modal can reuse them verbatim.
 
+use ratatui::Frame;
+use ratatui::layout::Rect;
+use ratatui::text::{Line, Span};
+use ratatui::widgets::Paragraph;
+
+use crate::theme;
+
 /// A substring match in a pre-wrap body. Byte offsets into the specific
 /// line (split on `\n`); `line_idx` is the pre-wrap line index.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -25,6 +32,18 @@ pub struct SearchState {
     pub matches: Vec<MatchSpan>,
     /// Index into `matches`; `None` when `matches` is empty.
     pub current: Option<usize>,
+}
+
+/// Render the in-progress search input as `/ {query}_` on the given
+/// row. Used by every modal whose footer collapses into a search bar
+/// while [`SearchState::input_active`] is set.
+pub fn render_search_input(frame: &mut Frame, area: Rect, search: &SearchState) {
+    let line = Line::from(vec![
+        Span::styled("/ ".to_string(), theme::accent()),
+        Span::raw(search.query.clone()),
+        Span::styled("_".to_string(), theme::search_cursor()),
+    ]);
+    frame.render_widget(Paragraph::new(line), area);
 }
 
 /// Case-insensitive, non-overlapping substring search. Returns matches

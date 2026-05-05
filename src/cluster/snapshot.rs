@@ -250,7 +250,6 @@ impl ClusterSnapshot {
     /// readiness is signalled by `meta.is_some()` (set on the first
     /// fetch, success or fail).
     pub fn ready_count(&self) -> (usize, usize) {
-        let total = 11;
         let simple = [
             !matches!(self.about, EndpointState::Loading),
             !matches!(self.controller_status, EndpointState::Loading),
@@ -261,6 +260,7 @@ impl ClusterSnapshot {
             !matches!(self.system_diagnostics, EndpointState::Loading),
             !matches!(self.version_control, EndpointState::Loading),
             !matches!(self.parameter_context_bindings, EndpointState::Loading),
+            !matches!(self.reporting_tasks, EndpointState::Loading),
         ];
         let mut ready = simple.iter().filter(|r| **r).count();
         if self.bulletins.meta.is_some() {
@@ -269,7 +269,7 @@ impl ClusterSnapshot {
         if !self.connections_by_pg.is_empty() {
             ready += 1;
         }
-        (ready, total)
+        (ready, ClusterEndpoint::COUNT)
     }
 
     /// Returns the `next_interval` from the latest `FetchMeta` for
@@ -533,9 +533,9 @@ mod tests {
     }
 
     #[test]
-    fn ready_count_starts_at_zero_of_eleven() {
+    fn ready_count_starts_at_zero_of_total() {
         let snap = ClusterSnapshot::default();
-        assert_eq!(snap.ready_count(), (0, 11));
+        assert_eq!(snap.ready_count(), (0, ClusterEndpoint::COUNT));
     }
 
     #[test]
@@ -543,7 +543,7 @@ mod tests {
         let mut snap = ClusterSnapshot::default();
         snap.about.apply(Ok(AboutSnapshot::default()), fake_meta());
         let (ready, total) = snap.ready_count();
-        assert_eq!(total, 11);
+        assert_eq!(total, ClusterEndpoint::COUNT);
         assert_eq!(ready, 1);
     }
 
@@ -552,14 +552,14 @@ mod tests {
         let mut snap = ClusterSnapshot::default();
         snap.controller_status
             .apply(Err(NifiLensError::WritesNotImplemented), fake_meta());
-        assert_eq!(snap.ready_count(), (1, 11));
+        assert_eq!(snap.ready_count(), (1, ClusterEndpoint::COUNT));
     }
 
     #[test]
     fn ready_count_bulletins_ready_when_meta_set() {
         let mut snap = ClusterSnapshot::default();
         snap.bulletins.meta = Some(fake_meta());
-        assert_eq!(snap.ready_count(), (1, 11));
+        assert_eq!(snap.ready_count(), (1, ClusterEndpoint::COUNT));
     }
 
     #[test]
@@ -567,7 +567,7 @@ mod tests {
         let mut snap = ClusterSnapshot::default();
         snap.connections_by_pg
             .insert("pg-x".into(), EndpointState::Loading);
-        assert_eq!(snap.ready_count(), (1, 11));
+        assert_eq!(snap.ready_count(), (1, ClusterEndpoint::COUNT));
     }
 
     #[test]
@@ -608,9 +608,19 @@ mod tests {
             .apply(Ok(VersionControlMap::default()), fake_meta());
         snap.parameter_context_bindings
             .apply(Ok(ParameterContextBindingsMap::default()), fake_meta());
+        snap.reporting_tasks.apply(
+            Ok(ReportingTasksSnapshot {
+                tasks: vec![],
+                fetched_at: Instant::now(),
+            }),
+            fake_meta(),
+        );
         snap.bulletins.meta = Some(fake_meta());
         snap.connections_by_pg
             .insert("pg-x".into(), EndpointState::Loading);
-        assert_eq!(snap.ready_count(), (11, 11));
+        assert_eq!(
+            snap.ready_count(),
+            (ClusterEndpoint::COUNT, ClusterEndpoint::COUNT)
+        );
     }
 }

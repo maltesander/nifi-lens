@@ -42,6 +42,32 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   active runtime. No user-visible behaviour change; the parquet/avro
   classification and per-PG fan-out fetchers gain real parallelism.
 
+### Fixed
+
+- Status bar `init: X/N endpoints ready` chip now counts the
+  `reporting_tasks` fetcher (previously hard-coded `/11` even though the
+  store owns 12 endpoints, so the chip never reached `12/12`).
+- Logging directory is created `0o700` in a single syscall on unix,
+  closing a brief race window between `mkdir` and `chmod`. Daily log
+  files are pruned at startup to keep the most recent 14, capping
+  on-disk growth.
+
+### Internal
+
+- Centralised `TransmissionStatus` typed enum (`client::status`) for
+  RPG transmission state; replaced ad-hoc string compares.
+- Production-side `client::ROOT_GROUP_ID` constant for NiFi's documented
+  root-PG alias; replaced literal `"root"` strings across reducers,
+  fixtures, and tests.
+- Extracted shared modal helpers: `layout::center_percent` /
+  `layout::center_absolute` (was duplicated four times) and
+  `widget::search::render_search_input` (footer search-bar prompt was
+  duplicated across the version-control, parameter-context, and
+  action-history modals).
+- Tracer hex-fallback cap is now a named `HEX_PREVIEW_BYTES` constant.
+- Node-detail render fixtures use `bytes::GIB` instead of inline
+  `1024_u64.pow(3)` literals.
+
 ## [0.9.0] — 2026-04-30
 
 ### Added

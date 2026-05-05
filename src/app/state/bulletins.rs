@@ -350,7 +350,7 @@ mod tests {
                 source_id: "seed-src".into(),
                 source_name: "Seed".into(),
                 source_type: "PROCESSOR".into(),
-                group_id: "root".into(),
+                group_id: crate::client::ROOT_GROUP_ID.into(),
                 timestamp_iso: "2026-04-14T00:00:01Z".into(),
                 timestamp_human: String::new(),
             }],
@@ -367,7 +367,7 @@ mod tests {
                 source_id: format!("src-{i}"),
                 source_name: format!("S{i}"),
                 source_type: "PROCESSOR".into(),
-                group_id: "root".into(),
+                group_id: crate::client::ROOT_GROUP_ID.into(),
                 timestamp_iso: format!("2026-04-14T00:00:{:02}Z", i),
                 timestamp_human: String::new(),
             })
@@ -389,7 +389,7 @@ mod tests {
                 source_id: "a".into(),
                 source_name: "A".into(),
                 source_type: "PROCESSOR".into(),
-                group_id: "root".into(),
+                group_id: crate::client::ROOT_GROUP_ID.into(),
                 timestamp_iso: "2026-04-11T10:14:22Z".into(),
                 timestamp_human: String::new(),
             }],
@@ -465,7 +465,7 @@ mod tests {
                 source_id: "proc-1".into(),
                 source_name: "A".into(),
                 source_type: "PROCESSOR".into(),
-                group_id: "root".into(),
+                group_id: crate::client::ROOT_GROUP_ID.into(),
                 timestamp_iso: "2026-04-11T10:14:22Z".into(),
                 timestamp_human: String::new(),
             }],
@@ -477,7 +477,7 @@ mod tests {
                 group_id,
             })) => {
                 assert_eq!(component_id, "proc-1");
-                assert_eq!(group_id, "root");
+                assert_eq!(group_id, crate::client::ROOT_GROUP_ID);
             }
             other => panic!("expected JumpTo(OpenInBrowser), got {other:?}"),
         }
@@ -685,7 +685,7 @@ mod tests {
                     source_id: "a".into(),
                     source_name: "A".into(),
                     source_type: "PROCESSOR".into(),
-                    group_id: "root".into(),
+                    group_id: crate::client::ROOT_GROUP_ID.into(),
                     timestamp_iso: "2026-04-11T10:14:22Z".into(),
                     timestamp_human: String::new(),
                 },
@@ -696,7 +696,7 @@ mod tests {
                     source_id: "b".into(),
                     source_name: "B".into(),
                     source_type: "PROCESSOR".into(),
-                    group_id: "root".into(),
+                    group_id: crate::client::ROOT_GROUP_ID.into(),
                     timestamp_iso: "2026-04-11T10:14:23Z".into(),
                     timestamp_human: String::new(),
                 },

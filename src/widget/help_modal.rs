@@ -156,7 +156,7 @@ fn push_section_lines(lines: &mut Vec<Line<'static>>, sections: &[HelpSection]) 
 /// `content_modal_open` controls whether the "Content viewer" section
 /// is appended when the Tracer tab is active.
 pub fn render(frame: &mut Frame, area: Rect, active_view: ViewId, content_modal_open: bool) {
-    let modal = center(area, 80, 27);
+    let modal = crate::layout::center_absolute(area, 80, 27);
     frame.render_widget(Clear, modal);
 
     let block = Block::default()
@@ -200,20 +200,6 @@ pub fn render(frame: &mut Frame, area: Rect, active_view: ViewId, content_modal_
         Paragraph::new(right_lines).wrap(Wrap { trim: false }),
         cols[1],
     );
-}
-
-fn center(area: Rect, width: u16, height: u16) -> Rect {
-    // Clamp to area so we don't overflow on narrow terminals.
-    let width = width.min(area.width);
-    let height = height.min(area.height);
-    let x = area.x + (area.width.saturating_sub(width)) / 2;
-    let y = area.y + (area.height.saturating_sub(height)) / 2;
-    Rect {
-        x,
-        y,
-        width,
-        height,
-    }
 }
 
 #[cfg(test)]

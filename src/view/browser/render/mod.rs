@@ -1025,9 +1025,9 @@ mod snapshots {
                 RawNode {
                     parent_idx: None,
                     kind: NodeKind::ProcessGroup,
-                    id: "root".into(),
-                    group_id: "root".into(),
-                    name: "root".into(),
+                    id: crate::client::ROOT_GROUP_ID.into(),
+                    group_id: crate::client::ROOT_GROUP_ID.into(),
+                    name: crate::client::ROOT_GROUP_ID.into(),
                     status_summary: NodeStatusSummary::ProcessGroup {
                         running: 5,
                         stopped: 1,
@@ -1039,7 +1039,7 @@ mod snapshots {
                     parent_idx: Some(0),
                     kind: NodeKind::Processor,
                     id: "gen".into(),
-                    group_id: "root".into(),
+                    group_id: crate::client::ROOT_GROUP_ID.into(),
                     name: "GenerateFlowFile".into(),
                     status_summary: NodeStatusSummary::Processor {
                         run_status: "Running".into(),
@@ -1049,7 +1049,7 @@ mod snapshots {
                     parent_idx: Some(0),
                     kind: NodeKind::Connection,
                     id: "c1".into(),
-                    group_id: "root".into(),
+                    group_id: crate::client::ROOT_GROUP_ID.into(),
                     name: "gen→upd".into(),
                     status_summary: NodeStatusSummary::Connection {
                         fill_percent: 34,
@@ -1098,9 +1098,9 @@ mod snapshots {
                 RawNode {
                     parent_idx: None,
                     kind: NodeKind::ProcessGroup,
-                    id: "root".into(),
-                    group_id: "root".into(),
-                    name: "root".into(),
+                    id: crate::client::ROOT_GROUP_ID.into(),
+                    group_id: crate::client::ROOT_GROUP_ID.into(),
+                    name: crate::client::ROOT_GROUP_ID.into(),
                     status_summary: NodeStatusSummary::ProcessGroup {
                         running: 1,
                         stopped: 0,
@@ -1112,7 +1112,7 @@ mod snapshots {
                     parent_idx: Some(0),
                     kind: NodeKind::Processor,
                     id: "p".into(),
-                    group_id: "root".into(),
+                    group_id: crate::client::ROOT_GROUP_ID.into(),
                     name: "Generate".into(),
                     status_summary: NodeStatusSummary::Processor {
                         run_status: "Running".into(),
@@ -1122,7 +1122,7 @@ mod snapshots {
                     parent_idx: Some(0),
                     kind: NodeKind::Connection,
                     id: "c".into(),
-                    group_id: "root".into(),
+                    group_id: crate::client::ROOT_GROUP_ID.into(),
                     name: "q1".into(),
                     status_summary: NodeStatusSummary::Connection {
                         fill_percent: 0,
@@ -1138,7 +1138,7 @@ mod snapshots {
                     parent_idx: Some(0),
                     kind: NodeKind::ControllerService,
                     id: "cs".into(),
-                    group_id: "root".into(),
+                    group_id: crate::client::ROOT_GROUP_ID.into(),
                     name: "pool".into(),
                     status_summary: NodeStatusSummary::ControllerService {
                         state: "ENABLED".into(),

@@ -86,27 +86,20 @@ pub fn init(args: &Args) -> Result<(WorkerGuard, StderrToggle), NifiLensError> {
     let no_color = resolve_no_color(args.no_color, std::env::var_os("NO_COLOR").as_deref());
     USE_COLOR.set(!no_color).ok();
 
-    // 1. Resolve log directory.
+    // 1. Resolve log directory and create it 0o700 in one syscall on unix
+    //    so there is no chmod race between `mkdir` and `set_permissions`.
     let log_dir = resolve_log_dir()?;
-    std::fs::create_dir_all(&log_dir).map_err(|source| NifiLensError::Io { source })?;
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::PermissionsExt;
-        let mut perms = std::fs::metadata(&log_dir)
-            .map_err(|source| NifiLensError::Io { source })?
-            .permissions();
-        perms.set_mode(0o700);
-        std::fs::set_permissions(&log_dir, perms).map_err(|source| NifiLensError::Io { source })?;
-    }
+    create_log_dir(&log_dir)?;
 
-    // 2. Rotating appender. Daily rotation keeps the implementation simple.
-    //    A later revision can add a startup pruning pass to keep only the 5
-    //    most recent files if size-based rotation is still unavailable in
-    //    the installed `tracing-appender` version.
-    let file_appender = rolling::daily(&log_dir, "nifilens.log");
+    // 2. Prune old daily files at startup. tracing-appender's `rolling::daily`
+    //    has no built-in retention cap, so we sweep before adding a new file.
+    prune_log_files(&log_dir, LOG_FILE_PREFIX, LOG_FILE_RETENTION);
+
+    // 3. Rotating appender. Daily rotation keeps the implementation simple.
+    let file_appender = rolling::daily(&log_dir, LOG_FILE_PREFIX);
     let (non_blocking, worker_guard) = tracing_appender::non_blocking(file_appender);
 
-    // 3. Build the filter. --debug and --log-level are mutually exclusive
+    // 4. Build the filter. --debug and --log-level are mutually exclusive
     //    at the CLI layer, so we don't worry about precedence between them.
     let level = if let Some(level) = args.log_level {
         level.as_tracing_filter().to_string()
@@ -124,13 +117,13 @@ pub fn init(args: &Args) -> Result<(WorkerGuard, StderrToggle), NifiLensError> {
         source: Box::new(err),
     })?;
 
-    // 4. File layer (always ANSI-off).
+    // 5. File layer (always ANSI-off).
     let file_layer = fmt::layer()
         .compact()
         .with_ansi(false)
         .with_writer(non_blocking);
 
-    // 5. Stderr layer wrapped in a reload handle so we can toggle it off.
+    // 6. Stderr layer wrapped in a reload handle so we can toggle it off.
     let stderr_boxed: DynLayer = make_stderr_layer(!no_color);
     let (stderr_reload, stderr_handle) = reload::Layer::new(Some(stderr_boxed));
     let stderr_toggle = StderrToggle {
@@ -163,6 +156,61 @@ pub fn init(args: &Args) -> Result<(WorkerGuard, StderrToggle), NifiLensError> {
         })?;
 
     Ok((worker_guard, stderr_toggle))
+}
+
+/// Daily file basename — `tracing-appender` appends `.YYYY-MM-DD`.
+const LOG_FILE_PREFIX: &str = "nifilens.log";
+
+/// Maximum number of rotated daily log files to keep.
+const LOG_FILE_RETENTION: usize = 14;
+
+/// Create the log directory. On unix the dir is created `0o700` in a
+/// single syscall via `DirBuilder::mode`, so there is no chmod race
+/// between `mkdir` and `set_permissions`.
+fn create_log_dir(log_dir: &std::path::Path) -> Result<(), NifiLensError> {
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::DirBuilderExt;
+        let mut builder = std::fs::DirBuilder::new();
+        builder.recursive(true).mode(0o700);
+        builder
+            .create(log_dir)
+            .map_err(|source| NifiLensError::Io { source })?;
+    }
+    #[cfg(not(unix))]
+    {
+        std::fs::create_dir_all(log_dir).map_err(|source| NifiLensError::Io { source })?;
+    }
+    Ok(())
+}
+
+/// Sweep `dir` for files starting with `prefix` and keep only the
+/// `keep` most recent (by mtime). Best-effort — failures are silently
+/// ignored: a stale file is preferable to refusing to start the TUI.
+fn prune_log_files(dir: &std::path::Path, prefix: &str, keep: usize) {
+    let Ok(entries) = std::fs::read_dir(dir) else {
+        return;
+    };
+    let mut files: Vec<(PathBuf, std::time::SystemTime)> = entries
+        .flatten()
+        .filter_map(|entry| {
+            let path = entry.path();
+            let name = path.file_name()?.to_str()?;
+            if !name.starts_with(prefix) {
+                return None;
+            }
+            let mtime = entry.metadata().ok()?.modified().ok()?;
+            Some((path, mtime))
+        })
+        .collect();
+    if files.len() <= keep {
+        return;
+    }
+    // Newest first; drop everything past `keep`.
+    files.sort_by(|a, b| b.1.cmp(&a.1));
+    for (path, _) in files.into_iter().skip(keep) {
+        let _ = std::fs::remove_file(path);
+    }
 }
 
 fn resolve_log_dir() -> Result<PathBuf, NifiLensError> {
@@ -201,6 +249,57 @@ mod tests {
     fn resolve_log_dir_errors_when_default_missing() {
         let err = resolve_log_dir_from(None).unwrap_err();
         assert!(matches!(err, NifiLensError::Io { .. }));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn create_log_dir_sets_0700_atomically() {
+        use std::os::unix::fs::PermissionsExt;
+        let tmp = tempfile::tempdir().unwrap();
+        let target = tmp.path().join("nested/log");
+        create_log_dir(&target).unwrap();
+        let mode = std::fs::metadata(&target).unwrap().permissions().mode();
+        // The mode includes the file-type bits; mask down to the perm bits.
+        assert_eq!(mode & 0o777, 0o700);
+    }
+
+    #[test]
+    fn prune_log_files_keeps_newest_n() {
+        use std::time::{Duration, SystemTime};
+        let tmp = tempfile::tempdir().unwrap();
+        // Five files with strictly increasing mtimes.
+        let mut paths = Vec::new();
+        for i in 0..5 {
+            let p = tmp
+                .path()
+                .join(format!("nifilens.log.2026-05-{:02}", i + 1));
+            std::fs::write(&p, b"x").unwrap();
+            let mtime = SystemTime::UNIX_EPOCH + Duration::from_secs(1_700_000_000 + i as u64 * 60);
+            filetime::set_file_mtime(&p, filetime::FileTime::from_system_time(mtime)).unwrap();
+            paths.push(p);
+        }
+        // Unrelated file must not be touched.
+        let other = tmp.path().join("unrelated.txt");
+        std::fs::write(&other, b"x").unwrap();
+
+        prune_log_files(tmp.path(), "nifilens.log", 2);
+
+        // Newest two remain; older three gone.
+        assert!(!paths[0].exists());
+        assert!(!paths[1].exists());
+        assert!(!paths[2].exists());
+        assert!(paths[3].exists());
+        assert!(paths[4].exists());
+        assert!(other.exists());
+    }
+
+    #[test]
+    fn prune_log_files_noop_when_under_cap() {
+        let tmp = tempfile::tempdir().unwrap();
+        let p = tmp.path().join("nifilens.log.2026-05-01");
+        std::fs::write(&p, b"x").unwrap();
+        prune_log_files(tmp.path(), "nifilens.log", 14);
+        assert!(p.exists());
     }
 
     #[test]

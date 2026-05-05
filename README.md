@@ -153,9 +153,10 @@ Press `?` inside the tool for a context-aware help modal. A hint line at
 the bottom shows relevant keybindings for the current view.
 
 While cluster fetchers are still booting, the status bar shows an
-`init: X/11 endpoints ready` chip. The chip disappears once every
-endpoint has produced its first snapshot (success or graceful
-failure both count). On a slow cluster it may take 10–20 seconds.
+`init: X/N endpoints ready` chip (`N` is the total number of cluster
+endpoints). The chip disappears once every endpoint has produced its
+first snapshot (success or graceful failure both count). On a slow
+cluster it may take 10–20 seconds.
 
 ## Compatibility
 
