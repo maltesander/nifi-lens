@@ -69,6 +69,44 @@ pub fn split_two_cols(area: Rect, first: Constraint) -> [Rect; 2] {
     [cols[0], cols[1]]
 }
 
+/// Center a rect inside `area`: width is `pct_x` percent of `area.width`,
+/// height is fixed in rows. Used by modals that want a percentage-driven
+/// horizontal footprint.
+pub fn center_percent(area: Rect, pct_x: u16, height: u16) -> Rect {
+    let vertical = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([
+            Constraint::Fill(1),
+            Constraint::Length(height),
+            Constraint::Fill(1),
+        ])
+        .split(area);
+    Layout::default()
+        .direction(Direction::Horizontal)
+        .constraints([
+            Constraint::Percentage((100 - pct_x) / 2),
+            Constraint::Percentage(pct_x),
+            Constraint::Percentage((100 - pct_x) / 2),
+        ])
+        .split(vertical[1])[1]
+}
+
+/// Center a rect inside `area` with absolute width and height in cells.
+/// Both dimensions are clamped to `area` so modals don't overflow on
+/// narrow terminals.
+pub fn center_absolute(area: Rect, width: u16, height: u16) -> Rect {
+    let width = width.min(area.width);
+    let height = height.min(area.height);
+    let x = area.x + area.width.saturating_sub(width) / 2;
+    let y = area.y + area.height.saturating_sub(height) / 2;
+    Rect {
+        x,
+        y,
+        width,
+        height,
+    }
+}
+
 #[cfg(test)]
 mod split_helper_tests {
     use super::*;
@@ -122,5 +160,33 @@ mod split_helper_tests {
         assert_eq!(h.height + b.height + f.height, area.height);
         // Body is zero-sized; headers are clamped to the available space.
         assert_eq!(b.height, 0);
+    }
+
+    #[test]
+    fn center_percent_fits_inside_area() {
+        let area = Rect::new(0, 0, 100, 30);
+        let r = center_percent(area, 60, 10);
+        assert_eq!(r.width, 60);
+        assert_eq!(r.height, 10);
+        assert!(r.x >= area.x && r.x + r.width <= area.x + area.width);
+        assert!(r.y >= area.y && r.y + r.height <= area.y + area.height);
+    }
+
+    #[test]
+    fn center_absolute_clamps_to_area() {
+        let area = Rect::new(0, 0, 30, 10);
+        let r = center_absolute(area, 100, 100);
+        assert_eq!(r.width, 30);
+        assert_eq!(r.height, 10);
+    }
+
+    #[test]
+    fn center_absolute_centers_smaller_rect() {
+        let area = Rect::new(0, 0, 80, 24);
+        let r = center_absolute(area, 40, 12);
+        assert_eq!(r.width, 40);
+        assert_eq!(r.height, 12);
+        assert_eq!(r.x, 20);
+        assert_eq!(r.y, 6);
     }
 }

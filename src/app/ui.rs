@@ -158,32 +158,13 @@ fn render_error_detail(frame: &mut Frame, area: Rect, state: &AppState) {
         .title(" Error detail (e/Esc to close) ")
         .borders(Borders::ALL);
     let p = Paragraph::new(text).block(block);
-    let modal = center(
+    let modal = crate::layout::center_percent(
         area,
         crate::layout::ERROR_DETAIL_MODAL_WIDTH_PCT,
         crate::layout::ERROR_DETAIL_MODAL_HEIGHT,
     );
     frame.render_widget(Clear, modal);
     frame.render_widget(p, modal);
-}
-
-fn center(area: Rect, pct_x: u16, height: u16) -> Rect {
-    let vertical = Layout::default()
-        .direction(Direction::Vertical)
-        .constraints([
-            Constraint::Fill(1),
-            Constraint::Length(height),
-            Constraint::Fill(1),
-        ])
-        .split(area);
-    Layout::default()
-        .direction(Direction::Horizontal)
-        .constraints([
-            Constraint::Percentage((100 - pct_x) / 2),
-            Constraint::Percentage(pct_x),
-            Constraint::Percentage((100 - pct_x) / 2),
-        ])
-        .split(vertical[1])[1]
 }
 
 #[cfg(test)]

@@ -40,7 +40,7 @@ impl SaveEventContentState {
 
 /// Renders the save modal centered on screen.
 pub fn render(frame: &mut Frame, area: Rect, state: &SaveEventContentState) {
-    let modal = center(area, 70, 7);
+    let modal = crate::layout::center_percent(area, 70, 7);
     frame.render_widget(Clear, modal);
 
     let block = Block::default()
@@ -82,25 +82,6 @@ pub fn render(frame: &mut Frame, area: Rect, state: &SaveEventContentState) {
         Span::raw(" cancel"),
     ]));
     frame.render_widget(footer, chunks[3]);
-}
-
-fn center(area: Rect, pct_x: u16, height: u16) -> Rect {
-    let vertical = Layout::default()
-        .direction(Direction::Vertical)
-        .constraints([
-            Constraint::Fill(1),
-            Constraint::Length(height),
-            Constraint::Fill(1),
-        ])
-        .split(area);
-    Layout::default()
-        .direction(Direction::Horizontal)
-        .constraints([
-            Constraint::Percentage((100 - pct_x) / 2),
-            Constraint::Percentage(pct_x),
-            Constraint::Percentage((100 - pct_x) / 2),
-        ])
-        .split(vertical[1])[1]
 }
 
 #[cfg(test)]
