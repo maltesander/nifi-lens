@@ -1,8 +1,8 @@
 //! Events tab worker: submits a provenance query and polls until done.
 //!
 //! Mirrors `src/view/tracer/worker.rs` — a one-shot submit → poll loop →
-//! best-effort server cleanup task spawned on the main-thread `LocalSet`
-//! because the dynamic NiFi client's futures are `!Send`. Also hosts
+//! best-effort server cleanup task spawned via
+//! [`crate::app::cleanup::spawn_cleanup`]. Also hosts
 //! [`spawn_watch`], the long-running tail worker driving the Watch
 //! sub-mode (Task 11 / 12).
 
@@ -28,7 +28,7 @@ const POLL_INTERVAL: Duration = Duration::from_millis(750);
 const POLL_TIMEOUT: Duration = Duration::from_secs(60);
 
 /// RAII guard for a server-side provenance query: when dropped, fires a
-/// best-effort `DELETE /provenance/{id}` via `spawn_local`. Owned by
+/// best-effort `DELETE /provenance/{id}` via `app::cleanup::spawn_cleanup`. Owned by
 /// `spawn_query`'s async closure so cleanup happens whether the closure
 /// returns normally, encounters an error, or panics during poll.
 struct ProvenanceQueryGuard {
@@ -81,7 +81,7 @@ pub fn spawn_query(
     tx: mpsc::Sender<AppEvent>,
     query: ProvenanceQuery,
 ) -> JoinHandle<()> {
-    tokio::task::spawn_local(async move {
+    tokio::spawn(async move {
         // Submit. On error, no cleanup needed (no server-side query exists).
         let handle = {
             let guard = client.read().await;
@@ -194,7 +194,7 @@ pub fn spawn_cancel(
     client: Arc<RwLock<NifiClient>>,
     handle: ProvenanceQueryHandle,
 ) -> JoinHandle<()> {
-    tokio::task::spawn_local(async move {
+    tokio::spawn(async move {
         let guard = client.read().await;
         if let Err(err) = guard.delete_provenance_query(&handle).await {
             tracing::warn!(
@@ -257,8 +257,7 @@ fn parse_nifi_event_time(s: &str) -> Option<SystemTime> {
 /// backoff (5s → 10s → 30s → 60s, capped), sleep, and retry. RAII
 /// guard fires `DELETE /provenance/{id}` on every exit path
 /// including `JoinHandle::abort()` — we reuse `ProvenanceQueryGuard`
-/// from `spawn_query`. Worker uses `tokio::task::spawn_local` because
-/// the dynamic NiFi futures are `!Send`.
+/// from `spawn_query`.
 pub fn spawn_watch(
     client: Arc<RwLock<NifiClient>>,
     tx: mpsc::Sender<AppEvent>,
@@ -268,7 +267,7 @@ pub fn spawn_watch(
     cadence: Duration,
     detail_concurrency: usize,
 ) -> JoinHandle<()> {
-    tokio::task::spawn_local(async move {
+    tokio::spawn(async move {
         let mut cursor = initial_cursor;
         let mut ewma_per_sec: f32 = 0.0;
         let mut detail_fetch_errors: u64 = 0;
