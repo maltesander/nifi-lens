@@ -260,7 +260,7 @@ pub async fn run(
                 } => {
                     let dispatcher = dispatcher.clone();
                     let tx = tx.clone();
-                    tokio::task::spawn_local(async move {
+                    tokio::spawn(async move {
                         let outcome = dispatcher
                             .dispatch(Intent::DeleteLineageQuery {
                                 query_id,
@@ -503,7 +503,7 @@ pub async fn run(
                     if let Some(intent) = intent {
                         let dispatcher = dispatcher.clone();
                         let tx = tx.clone();
-                        tokio::task::spawn_local(async move {
+                        tokio::spawn(async move {
                             let outcome = dispatcher.dispatch(intent).await;
                             let _ = tx.send(AppEvent::IntentOutcome(outcome)).await;
                         });
@@ -646,7 +646,7 @@ fn spawn_tick_task(tx: mpsc::Sender<AppEvent>) {
 /// the warn falls silent as soon as capacity recovers. Spawned alongside
 /// the input/tick tasks; aborts when the runtime shuts down.
 fn spawn_channel_saturation_watchdog(tx: mpsc::Sender<AppEvent>, low_water: usize, total: usize) {
-    tokio::task::spawn_local(async move {
+    tokio::spawn(async move {
         let mut sleep = tokio::time::interval(std::time::Duration::from_secs(1));
         sleep.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
         loop {
