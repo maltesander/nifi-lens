@@ -16,6 +16,7 @@ use crate::view::browser::state::parameter_context_modal::ParameterContextPane;
 use crate::view::browser::state::{
     BrowserState, ParameterContextLoad, ParameterContextModalState, ResolvedParameter, resolve,
 };
+use crate::widget::modal::LOADING_LABEL;
 use crate::widget::panel::Panel;
 use crate::widget::search::{MatchSpan, SearchState};
 
@@ -162,7 +163,7 @@ fn render_header(
     let chain_line = if chain_names.is_empty() {
         Line::from(vec![
             Span::styled(format!("{:<10}", "Chain"), theme::muted()),
-            Span::styled("loading…", theme::muted()),
+            Span::styled(LOADING_LABEL, theme::muted()),
         ])
     } else {
         let mut spans = vec![Span::styled(format!("{:<10}", "Chain"), theme::muted())];
@@ -236,7 +237,7 @@ fn render_sidebar(frame: &mut Frame, area: Rect, modal: &ParameterContextModalSt
         ParameterContextLoad::Loaded(chain) => chain,
         ParameterContextLoad::Loading => {
             frame.render_widget(
-                Paragraph::new(Line::from(Span::styled("loading…", theme::muted())))
+                Paragraph::new(Line::from(Span::styled(LOADING_LABEL, theme::muted())))
                     .alignment(Alignment::Center),
                 inner,
             );
@@ -288,7 +289,7 @@ fn render_params(
 ) {
     match &modal.load {
         ParameterContextLoad::Loading => {
-            let line = Line::from(Span::styled("loading…", theme::muted()));
+            let line = Line::from(Span::styled(LOADING_LABEL, theme::muted()));
             frame.render_widget(Paragraph::new(line).alignment(Alignment::Center), area);
         }
         ParameterContextLoad::Failed(message) => {
@@ -764,7 +765,7 @@ fn render_footer_status(frame: &mut Frame, area: Rect, modal: &ParameterContextM
     }
 
     let status = match &modal.load {
-        ParameterContextLoad::Loading => "loading…".to_string(),
+        ParameterContextLoad::Loading => LOADING_LABEL.to_string(),
         ParameterContextLoad::Failed(_) => "failed — press r to retry".to_string(),
         ParameterContextLoad::Loaded(chain) => {
             // Count unique resolved names (shadowed duplicates excluded) so the
@@ -873,7 +874,7 @@ mod tests {
         term.draw(|f| render(f, f.area(), &modal, &browser, &snapshot))
             .unwrap();
         let output = format!("{}", term.backend());
-        // Both the sidebar and the right pane show "loading…"
+        // Both the sidebar and the right pane show `loading…`
         let count = output.matches("loading").count();
         assert!(
             count >= 1,

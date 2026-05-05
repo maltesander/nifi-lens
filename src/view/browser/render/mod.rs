@@ -35,6 +35,7 @@ use ratatui::widgets::{Block, Borders, Paragraph};
 use crate::client::{FolderKind, NodeKind, NodeStatusSummary};
 use crate::theme;
 use crate::view::browser::state::{BrowserState, FlowIndex, NodeDetail, PgHealth};
+use crate::widget::modal::LOADING_LABEL;
 
 /// Render an "Identity" Panel containing caller-built lines.
 ///
@@ -143,7 +144,7 @@ pub(super) fn render_inline_sparkline_strip(
 
     let Some(sparkline) = sparkline else {
         frame.render_widget(
-            Paragraph::new(Line::from(Span::styled("loading…", theme::muted()))),
+            Paragraph::new(Line::from(Span::styled(LOADING_LABEL, theme::muted()))),
             area,
         );
         return;
@@ -159,7 +160,7 @@ pub(super) fn render_inline_sparkline_strip(
 
     let Some(series) = sparkline.series.as_ref() else {
         frame.render_widget(
-            Paragraph::new(Line::from(Span::styled("loading…", theme::muted()))),
+            Paragraph::new(Line::from(Span::styled(LOADING_LABEL, theme::muted()))),
             area,
         );
         return;
@@ -655,7 +656,7 @@ fn render_detail(
             let lines = vec![
                 header_line,
                 Line::from(""),
-                Line::from(Span::styled("loading…", theme::muted())),
+                Line::from(Span::styled(LOADING_LABEL, theme::muted())),
             ];
             frame.render_widget(Paragraph::new(lines), detail_area);
         }

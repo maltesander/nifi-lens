@@ -17,6 +17,7 @@ use crate::client::{
     RemoteProcessGroupCounts, ReportingTaskCounts,
 };
 use crate::theme;
+use crate::widget::modal::LOADING_LABEL;
 
 /// Five-row Components table — process groups, processors, controller
 /// services, remote process groups, reporting tasks. Display-only; not
@@ -24,7 +25,7 @@ use crate::theme;
 ///
 /// All projections are sourced from `OverviewState` fields mirrored
 /// from `AppState.cluster.snapshot` by the `redraw_*` reducers. The
-/// renderer shows "loading…" until both `root_pg_status` and
+/// renderer shows `loading…` until both `root_pg_status` and
 /// `controller_status` have landed in the cluster snapshot. The CS row
 /// degrades to "cs list unavailable" when `state.cs_counts` is `None`.
 /// The reporting-tasks row degrades to "rt list unavailable" when
@@ -32,7 +33,7 @@ use crate::theme;
 pub(super) fn render_components_table(frame: &mut Frame, area: Rect, state: &OverviewState) {
     let (Some(controller), Some(root_pg)) = (state.controller.as_ref(), state.root_pg.as_ref())
     else {
-        let line = Line::from(Span::styled("loading…", theme::muted()));
+        let line = Line::from(Span::styled(LOADING_LABEL, theme::muted()));
         frame.render_widget(Paragraph::new(line), area);
         return;
     };

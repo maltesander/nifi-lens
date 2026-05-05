@@ -20,6 +20,7 @@ use crate::cluster::snapshot::BulletinRing;
 use crate::input::{OverviewReportingTasksVerb, Verb};
 use crate::theme;
 use crate::view::overview::reporting_tasks_modal::{ModalPaneFocus, ReportingTasksModalState};
+use crate::widget::modal::LOADING_LABEL;
 use crate::widget::panel::Panel;
 
 /// A view-model wrapper around the cluster snapshot's
@@ -89,7 +90,7 @@ pub fn render(
             );
         }
         MaybeSnapshot::Loading => {
-            render_centered(frame, rows[0], "loading…", theme::muted());
+            render_centered(frame, rows[0], LOADING_LABEL, theme::muted());
         }
         MaybeSnapshot::Ready(snapshot) => {
             let cols = Layout::default()

@@ -20,6 +20,11 @@ pub const MIN_WIDTH: u16 = 60;
 /// Minimum viewport height below which a full-screen modal degrades.
 pub const MIN_HEIGHT: u16 = 20;
 
+/// Canonical "still loading" placeholder shown by every modal whose
+/// data is fetched asynchronously. Single source of truth so the text
+/// (and its trailing horizontal-ellipsis) stays consistent.
+pub const LOADING_LABEL: &str = "loading…";
+
 /// Render the "terminal too small" degradation IF the area is below
 /// the minimum. Returns `true` when the modal degraded — callers should
 /// short-circuit their normal render in that case.
@@ -81,7 +86,7 @@ pub fn render_load_gate(frame: &mut Frame, area: Rect, gate: LoadGate<'_>) -> bo
     match gate {
         LoadGate::Loading => {
             frame.render_widget(
-                Paragraph::new(Span::styled("loading…", theme::muted())),
+                Paragraph::new(Span::styled(LOADING_LABEL, theme::muted())),
                 area,
             );
             true

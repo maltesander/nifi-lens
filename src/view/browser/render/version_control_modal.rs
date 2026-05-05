@@ -11,6 +11,7 @@ use ratatui::widgets::{Block, Borders, Clear, Paragraph};
 use crate::theme;
 use crate::view::browser::state::version_control_modal::short_id;
 use crate::view::browser::state::{VersionControlDifferenceLoad, VersionControlModalState};
+use crate::widget::modal::LOADING_LABEL;
 use crate::widget::panel::Panel;
 use crate::widget::search::{MatchSpan, SearchState};
 
@@ -56,7 +57,7 @@ fn render_identity(frame: &mut Frame, area: Rect, modal: &VersionControlModalSta
         Some(s) => s,
         None => {
             frame.render_widget(
-                Paragraph::new(Line::from(Span::styled("loading…", theme::muted()))),
+                Paragraph::new(Line::from(Span::styled(LOADING_LABEL, theme::muted()))),
                 inner,
             );
             return;
@@ -117,7 +118,7 @@ fn render_identity(frame: &mut Frame, area: Rect, modal: &VersionControlModalSta
 fn render_diff_body(frame: &mut Frame, area: Rect, modal: &VersionControlModalState) {
     match &modal.differences {
         VersionControlDifferenceLoad::Loading => {
-            let line = Line::from(Span::styled("loading…", theme::muted()));
+            let line = Line::from(Span::styled(LOADING_LABEL, theme::muted()));
             frame.render_widget(Paragraph::new(line).alignment(Alignment::Center), area);
         }
         VersionControlDifferenceLoad::Failed(err) => {
@@ -276,7 +277,7 @@ fn render_footer_status(frame: &mut Frame, area: Rect, modal: &VersionControlMod
         "env hidden"
     };
     let status = match &modal.differences {
-        VersionControlDifferenceLoad::Loading => "loading…".to_string(),
+        VersionControlDifferenceLoad::Loading => LOADING_LABEL.to_string(),
         VersionControlDifferenceLoad::Failed(_) => "failed — press r to retry".to_string(),
         VersionControlDifferenceLoad::Loaded(sections) => {
             let mut diff_count = 0usize;
