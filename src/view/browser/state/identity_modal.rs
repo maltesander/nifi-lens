@@ -62,16 +62,25 @@ pub enum GrantSource {
     ViaGroup(String),
 }
 
+/// NiFi axis-prefix path segments. The first three correspond directly
+/// to `Axis::resource_prefix()` for `ViewData` / `Operate` /
+/// `ManagePolicies`; `PROVENANCE_DATA` is a NiFi quirk that maps to the
+/// same axis as `DATA` (`ViewData`).
+const DATA_AXIS_PREFIX: &str = "/data";
+const OPERATE_AXIS_PREFIX: &str = "/operate";
+const POLICIES_AXIS_PREFIX: &str = "/policies";
+const PROVENANCE_DATA_AXIS_PREFIX: &str = "/provenance-data";
+
 impl ResourceBucket {
     /// Resolve a NiFi resource path to a render bucket. Strips
     /// leading `/data/` / `/operate/` / `/policies/` axis segments
     /// before matching the kind segment.
     pub fn from_resource(resource: &str) -> Self {
         let trimmed = resource
-            .strip_prefix("/data")
-            .or_else(|| resource.strip_prefix("/operate"))
-            .or_else(|| resource.strip_prefix("/policies"))
-            .or_else(|| resource.strip_prefix("/provenance-data"))
+            .strip_prefix(DATA_AXIS_PREFIX)
+            .or_else(|| resource.strip_prefix(OPERATE_AXIS_PREFIX))
+            .or_else(|| resource.strip_prefix(POLICIES_AXIS_PREFIX))
+            .or_else(|| resource.strip_prefix(PROVENANCE_DATA_AXIS_PREFIX))
             .unwrap_or(resource);
         let trimmed = trimmed.trim_start_matches('/');
         match trimmed.split_once('/').map(|(k, _)| k).unwrap_or(trimmed) {
@@ -106,27 +115,28 @@ impl ResourceBucket {
 }
 
 /// Map an `(action, resource)` pair from a TenantEntity's
-/// `accessPolicies` array to a known `Axis`, if any.
+/// `accessPolicies` array to a known `Axis`, if any. The action
+/// strings (`"read"` / `"write"`) mirror `Axis::action()`.
 pub fn axis_from_action_and_resource(action: &str, resource: &str) -> Option<Axis> {
     match (action, resource_axis_segment(resource)) {
         ("read", "") => Some(Axis::ViewComponent),
         ("write", "") => Some(Axis::ModifyComponent),
-        ("read", "/data") => Some(Axis::ViewData),
-        ("write", "/operate") => Some(Axis::Operate),
-        ("write", "/policies") => Some(Axis::ManagePolicies),
+        ("read", DATA_AXIS_PREFIX) => Some(Axis::ViewData),
+        ("write", OPERATE_AXIS_PREFIX) => Some(Axis::Operate),
+        ("write", POLICIES_AXIS_PREFIX) => Some(Axis::ManagePolicies),
         _ => None,
     }
 }
 
-fn resource_axis_segment(resource: &str) -> &str {
+fn resource_axis_segment(resource: &str) -> &'static str {
     if resource.starts_with("/data/") {
-        "/data"
+        DATA_AXIS_PREFIX
     } else if resource.starts_with("/operate/") {
-        "/operate"
+        OPERATE_AXIS_PREFIX
     } else if resource.starts_with("/policies/") {
-        "/policies"
+        POLICIES_AXIS_PREFIX
     } else if resource.starts_with("/provenance-data/") {
-        "/data"
+        DATA_AXIS_PREFIX
     } else {
         ""
     }

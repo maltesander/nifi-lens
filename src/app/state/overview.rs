@@ -163,19 +163,12 @@ fn handle_reporting_tasks_modal_verb(
     match verb {
         // ---- Esc cascade: search → close modal ----
         V::Common(CommonVerb::Close) => {
+            let snap = state.cluster.snapshot.reporting_tasks.latest().cloned();
             let modal = state.overview.reporting_tasks_modal.as_mut()?;
             if !modal.search.query.is_empty() {
-                // Clear search and refilter.
                 modal.search.query.clear();
-                let snap = state.cluster.snapshot.reporting_tasks.latest();
                 if let Some(snap) = snap {
-                    let snap = snap.clone();
-                    state
-                        .overview
-                        .reporting_tasks_modal
-                        .as_mut()
-                        .unwrap()
-                        .refilter(&snap);
+                    modal.refilter(&snap);
                 }
                 return redraw();
             }
