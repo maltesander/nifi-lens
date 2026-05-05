@@ -14,7 +14,14 @@
         <property name="Initial User Identity 2">alice</property>
         <property name="Initial User Identity 3">bob</property>
         <property name="Initial User Identity 4">carol</property>
-        <property name="Node Identity 1">CN=localhost</property>
+        <!--
+          The cluster nodes present TLS client certs with Subject DN
+          CN=localhost (single shared keystore). Listed here as an
+          Initial User Identity so it's added to users.xml; referenced
+          again in accessPolicyProvider's Node Identity 1 to seed the
+          /proxy write policy.
+        -->
+        <property name="Initial User Identity 5">CN=localhost</property>
     </userGroupProvider>
     <accessPolicyProvider>
         <identifier>file-access-policy-provider</identifier>
@@ -22,6 +29,13 @@
         <property name="User Group Provider">file-user-group-provider</property>
         <property name="Authorizations File">./conf/authorizations.xml</property>
         <property name="Initial Admin Identity">admin</property>
+        <!--
+          Node Identity 1 here generates the /proxy write policy + the
+          per-node bootstrap policies that let cluster nodes federate
+          API calls to each other. Without it, /tenants/users returns
+          "Authentication Proxy Server not trusted" (403).
+        -->
+        <property name="Node Identity 1">CN=localhost</property>
     </accessPolicyProvider>
     <authorizer>
         <identifier>managed-authorizer</identifier>

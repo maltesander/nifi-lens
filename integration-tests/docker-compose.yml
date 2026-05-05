@@ -29,8 +29,12 @@ services:
       nifi-registry:
         condition: service_healthy
     healthcheck:
+      # 401 from /nifi-api/access/config proves the authorizer + login-identity
+      # provider beans loaded (Spring context completed); a Spring failure
+      # produces 503/connection-refused instead. A 200 also passes — older
+      # NiFi versions answered without auth.
       test:
-        ["CMD-SHELL", "curl -kfsS -H 'Host: localhost:8443' -o /dev/null https://$$(hostname):8443/nifi-api/access/config || exit 1"]
+        ["CMD-SHELL", "code=$$(curl -ksS -o /dev/null -w '%{http_code}' -H 'Host: localhost:8443' https://$$(hostname):8443/nifi-api/access/config); [ \"$$code\" = 200 ] || [ \"$$code\" = 401 ]"]
       interval: 10s
       timeout: 5s
       retries: 18
@@ -103,8 +107,12 @@ services:
       - ./scripts/nars/nifi-hadoop-libraries-nar-2.9.0.nar:/opt/nifi/nifi-current/lib/nifi-hadoop-libraries-nar-2.9.0.nar:ro
       - ./scripts/nars/nifi-parquet-nar-2.9.0.nar:/opt/nifi/nifi-current/lib/nifi-parquet-nar-2.9.0.nar:ro
     healthcheck:
+      # 401 from /nifi-api/access/config proves the authorizer + login-identity
+      # provider beans loaded (Spring context completed); a Spring failure
+      # produces 503/connection-refused instead. A 200 also passes — older
+      # NiFi versions answered without auth.
       test:
-        ["CMD-SHELL", "curl -kfsS -H 'Host: localhost:8443' -o /dev/null https://$$(hostname):8443/nifi-api/access/config || exit 1"]
+        ["CMD-SHELL", "code=$$(curl -ksS -o /dev/null -w '%{http_code}' -H 'Host: localhost:8443' https://$$(hostname):8443/nifi-api/access/config); [ \"$$code\" = 200 ] || [ \"$$code\" = 401 ]"]
       interval: 10s
       timeout: 5s
       retries: 18
@@ -146,8 +154,12 @@ services:
       - ./scripts/nars/nifi-hadoop-libraries-nar-2.9.0.nar:/opt/nifi/nifi-current/lib/nifi-hadoop-libraries-nar-2.9.0.nar:ro
       - ./scripts/nars/nifi-parquet-nar-2.9.0.nar:/opt/nifi/nifi-current/lib/nifi-parquet-nar-2.9.0.nar:ro
     healthcheck:
+      # 401 from /nifi-api/access/config proves the authorizer + login-identity
+      # provider beans loaded (Spring context completed); a Spring failure
+      # produces 503/connection-refused instead. A 200 also passes — older
+      # NiFi versions answered without auth.
       test:
-        ["CMD-SHELL", "curl -kfsS -H 'Host: localhost:8443' -o /dev/null https://$$(hostname):8443/nifi-api/access/config || exit 1"]
+        ["CMD-SHELL", "code=$$(curl -ksS -o /dev/null -w '%{http_code}' -H 'Host: localhost:8443' https://$$(hostname):8443/nifi-api/access/config); [ \"$$code\" = 200 ] || [ \"$$code\" = 401 ]"]
       interval: 10s
       timeout: 5s
       retries: 18

@@ -9,6 +9,6 @@
         <identifier>single-user-provider</identifier>
         <class>org.apache.nifi.authentication.single.user.SingleUserLoginIdentityProvider</class>
         <property name="Username">admin</property>
-        <property name="Password">$2a$12$nPwn07nSDqjtL5jY0cWUAuNi0Dg850NLGpa59PXjfD1qQkFPB2iEq</property>
+        <property name="Password">$2b$12$nPwn07nSDqjtL5jY0cWUAuNi0Dg850NLGpa59PXjfD1qQkFPB2iEq</property>
     </provider>
 </loginIdentityProviders>
