@@ -51,9 +51,7 @@ impl Drop for ProvenanceQueryGuard {
     fn drop(&mut self) {
         let client = self.client.clone();
         let handle = self.handle.clone();
-        // Drop runs on the worker's task which lives on the main-thread
-        // LocalSet — spawn_local is the correct primitive.
-        tokio::task::spawn_local(async move {
+        crate::app::cleanup::spawn_cleanup(async move {
             let guard = client.read().await;
             if let Err(err) = guard.delete_provenance_query(&handle).await {
                 tracing::warn!(
