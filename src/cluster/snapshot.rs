@@ -4,7 +4,7 @@
 //! # Threading model
 //!
 //! - Fetcher tasks ([`crate::cluster::fetcher_tasks`]) are pure producers:
-//!   they run on the main-thread `LocalSet`, fetch from NiFi, and emit
+//!   they run on the multi-thread tokio runtime, fetch from NiFi, and emit
 //!   `AppEvent::ClusterUpdate(ClusterUpdate::*)` on the central channel.
 //! - The UI loop is the sole mutator: on receiving a `ClusterUpdate` it
 //!   calls `ClusterStore::apply_update`, which routes to the matching
