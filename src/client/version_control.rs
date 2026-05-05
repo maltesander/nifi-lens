@@ -167,12 +167,14 @@ impl NifiClient {
         let context = self.context_name().to_string();
         let mut map = VersionControlMap::default();
         let concurrency = concurrency.max(1);
-        let mut stream = stream::iter(pg_ids.iter().map(|pg_id| {
-            let pg_id = pg_id.clone();
-            async move {
-                let res = self.version_information_optional(&pg_id).await;
-                (pg_id, res)
-            }
+        // `.cloned()` is required (not redundant): without it the closure
+        // takes `&String` and the resulting async block borrows the
+        // iterator's lifetime, breaking the `'static` bound when this
+        // future is awaited from a `tokio::spawn` task.
+        #[allow(clippy::redundant_iter_cloned)]
+        let mut stream = stream::iter(pg_ids.iter().cloned().map(|pg_id| async move {
+            let res = self.version_information_optional(&pg_id).await;
+            (pg_id, res)
         }))
         .buffer_unordered(concurrency);
         while let Some((pg_id, res)) = stream.next().await {

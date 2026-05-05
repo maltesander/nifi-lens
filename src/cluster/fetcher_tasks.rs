@@ -1,5 +1,5 @@
 //! Per-endpoint fetch task implementations. Each function spawns one
-//! `tokio::task::spawn_local` task on the current `LocalSet` and
+//! `tokio::spawn` task on the multi-thread runtime and
 //! returns its `JoinHandle<()>`.
 //!
 //! Tasks 2–8 each add one function here; the store's `spawn_fetchers`
@@ -49,7 +49,7 @@ pub(crate) fn spawn_controller_status(
     tx: mpsc::Sender<AppEvent>,
     cfg: FetchTaskConfig,
 ) -> JoinHandle<()> {
-    tokio::task::spawn_local(async move {
+    tokio::spawn(async move {
         let mut next_interval = cfg.base_interval;
         loop {
             if cfg.gated && !subscribers_present(&cfg.subscriber_counter) {
@@ -103,7 +103,7 @@ pub(crate) fn spawn_root_pg_status(
     tx: mpsc::Sender<AppEvent>,
     cfg: FetchTaskConfig,
 ) -> JoinHandle<()> {
-    tokio::task::spawn_local(async move {
+    tokio::spawn(async move {
         let mut next_interval = cfg.base_interval;
         loop {
             if cfg.gated && !subscribers_present(&cfg.subscriber_counter) {
@@ -153,7 +153,7 @@ pub(crate) fn spawn_controller_services(
     tx: mpsc::Sender<AppEvent>,
     cfg: FetchTaskConfig,
 ) -> JoinHandle<()> {
-    tokio::task::spawn_local(async move {
+    tokio::spawn(async move {
         let mut next_interval = cfg.base_interval;
         loop {
             if cfg.gated && !subscribers_present(&cfg.subscriber_counter) {
@@ -203,7 +203,7 @@ pub(crate) fn spawn_reporting_tasks(
     tx: mpsc::Sender<AppEvent>,
     cfg: FetchTaskConfig,
 ) -> JoinHandle<()> {
-    tokio::task::spawn_local(async move {
+    tokio::spawn(async move {
         let mut next_interval = cfg.base_interval;
         loop {
             if cfg.gated && !subscribers_present(&cfg.subscriber_counter) {
@@ -253,7 +253,7 @@ pub(crate) fn spawn_bulletins(
     cursor: Arc<AtomicI64>,
     cfg: FetchTaskConfig,
 ) -> JoinHandle<()> {
-    tokio::task::spawn_local(async move {
+    tokio::spawn(async move {
         let mut next_interval = cfg.base_interval;
         loop {
             if cfg.gated && !subscribers_present(&cfg.subscriber_counter) {
@@ -325,7 +325,7 @@ pub(crate) fn spawn_system_diagnostics(
     tx: mpsc::Sender<AppEvent>,
     cfg: FetchTaskConfig,
 ) -> JoinHandle<()> {
-    tokio::task::spawn_local(async move {
+    tokio::spawn(async move {
         let mut next_interval = cfg.base_interval;
         // `None` before first success, `Some(true)` after a nodewise
         // success, `Some(false)` after an aggregate-fallback success.
@@ -410,7 +410,7 @@ pub(crate) fn spawn_about(
     tx: mpsc::Sender<AppEvent>,
     cfg: FetchTaskConfig,
 ) -> JoinHandle<()> {
-    tokio::task::spawn_local(async move {
+    tokio::spawn(async move {
         let mut next_interval = cfg.base_interval;
         loop {
             if cfg.gated && !subscribers_present(&cfg.subscriber_counter) {
@@ -466,7 +466,7 @@ pub(crate) fn spawn_connections_by_pg(
     mut pg_ids_rx: watch::Receiver<Vec<String>>,
     cfg: FetchTaskConfig,
 ) -> JoinHandle<()> {
-    tokio::task::spawn_local(async move {
+    tokio::spawn(async move {
         let mut next_interval = cfg.base_interval;
         loop {
             if cfg.gated && !subscribers_present(&cfg.subscriber_counter) {
@@ -545,7 +545,7 @@ pub(crate) fn spawn_cluster_nodes(
     tx: mpsc::Sender<AppEvent>,
     cfg: FetchTaskConfig,
 ) -> JoinHandle<()> {
-    tokio::task::spawn_local(async move {
+    tokio::spawn(async move {
         let mut next_interval = cfg.base_interval;
         let mut standalone_logged = false;
         loop {
@@ -741,8 +741,12 @@ async fn run_parallel(
     // a single accessor into each fan-out future. Each future borrows
     // its own accessor from the held guard — the guard outlives the
     // stream, so the borrow is sound.
-    let stream = stream::iter(pg_ids.iter().map(|pg_id| {
-        let pg_id = pg_id.clone();
+    // `.cloned()` is required (not redundant): without it the closure
+    // takes `&String` and the resulting async block borrows the
+    // iterator's lifetime, breaking the `'static` bound on the
+    // surrounding `tokio::spawn` future.
+    #[allow(clippy::redundant_iter_cloned)]
+    let stream = stream::iter(pg_ids.iter().cloned().map(|pg_id| {
         let pgs = guard.processgroups();
         let ctx = context.clone();
         async move {
@@ -848,7 +852,7 @@ pub(crate) fn spawn_tls_certs(
     cfg: FetchTaskConfig,
 ) -> JoinHandle<()> {
     const PROBE_TIMEOUT: Duration = Duration::from_secs(5);
-    tokio::task::spawn_local(async move {
+    tokio::spawn(async move {
         let mut next_interval = cfg.base_interval;
         let mut http_logged = false;
 
@@ -920,7 +924,7 @@ pub(crate) fn spawn_version_control(
     mut pg_ids_rx: watch::Receiver<Vec<String>>,
     cfg: FetchTaskConfig,
 ) -> JoinHandle<()> {
-    tokio::task::spawn_local(async move {
+    tokio::spawn(async move {
         let mut next_interval = cfg.base_interval;
         loop {
             if cfg.gated && !subscribers_present(&cfg.subscriber_counter) {
@@ -992,7 +996,7 @@ pub(crate) fn spawn_parameter_context_bindings(
     mut pg_ids_rx: watch::Receiver<Vec<String>>,
     cfg: FetchTaskConfig,
 ) -> JoinHandle<()> {
-    tokio::task::spawn_local(async move {
+    tokio::spawn(async move {
         let mut next_interval = cfg.base_interval;
         loop {
             if cfg.gated && !subscribers_present(&cfg.subscriber_counter) {
