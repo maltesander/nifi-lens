@@ -117,10 +117,10 @@ fn render_content(frame: &mut Frame, area: Rect, state: &mut AppState) {
             if let Some(modal) = state.browser.action_history_modal.as_ref() {
                 crate::view::browser::render::action_history_modal::render(frame, area, modal);
             }
-            if let Some(modal) = state.browser.access_modal.as_ref() {
+            if let Some(modal) = state.browser.access_modal.as_mut() {
                 crate::view::browser::render::access_modal::render_access_modal(frame, area, modal);
             }
-            if let Some(modal) = state.browser.identity_modal.as_ref() {
+            if let Some(modal) = state.browser.identity_modal.as_mut() {
                 crate::view::browser::render::identity_modal::render_identity_modal(
                     frame, area, modal,
                 );

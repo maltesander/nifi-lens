@@ -3,7 +3,7 @@ source: src/view/browser/render/access_modal.rs
 expression: "format!(\"{}\", term.backend())"
 ---
 "┌ Access · EnrichOrders ───────────────────────────────────────────────────────────────────────────┐"
-"│identity                      view  mod   data  oper  pol                                         │"
+"│identity                      view   mod    data   oper   pol                                     │"
 "│alice@corp                    ✓      ✓      ↑      ↑      —                                       │"
 "│bob@corp                      ✓      —      —      —      —                                       │"
 "│ops-team                      ✓      ✓      —      ↑      —                                       │"

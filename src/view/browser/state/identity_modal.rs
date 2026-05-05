@@ -40,6 +40,21 @@ pub enum ResourceBucket {
     Global,
 }
 
+/// Canonical bucket display order. `apply_fetch` sorts `grants` by this
+/// so the rendered row order matches the index used by `selected`.
+pub(crate) const BUCKET_ORDER: &[ResourceBucket] = &[
+    ResourceBucket::ProcessGroups,
+    ResourceBucket::Processors,
+    ResourceBucket::ControllerServices,
+    ResourceBucket::InputPorts,
+    ResourceBucket::OutputPorts,
+    ResourceBucket::RemoteProcessGroups,
+    ResourceBucket::Connections,
+    ResourceBucket::ReportingTasks,
+    ResourceBucket::ParameterContexts,
+    ResourceBucket::Global,
+];
+
 /// How an identity gained a grant — directly, or via group membership.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum GrantSource {
@@ -230,25 +245,19 @@ impl IdentityModalState {
         self.grants = result.grants;
         self.group_memberships = result.group_memberships;
         self.status = IdentityStatus::Loaded;
+        self.grants.sort_by_key(|g| {
+            BUCKET_ORDER
+                .iter()
+                .position(|b| *b == g.bucket)
+                .unwrap_or(usize::MAX)
+        });
         self.scroll.clamp_to_content(self.grants.len());
     }
 
     /// Group grants by `ResourceBucket` in the canonical bucket order.
     /// Sections with no grants are omitted.
     pub fn grouped_by_bucket(&self) -> Vec<(ResourceBucket, Vec<&IdentityGrant>)> {
-        const ORDER: &[ResourceBucket] = &[
-            ResourceBucket::ProcessGroups,
-            ResourceBucket::Processors,
-            ResourceBucket::ControllerServices,
-            ResourceBucket::InputPorts,
-            ResourceBucket::OutputPorts,
-            ResourceBucket::RemoteProcessGroups,
-            ResourceBucket::Connections,
-            ResourceBucket::ReportingTasks,
-            ResourceBucket::ParameterContexts,
-            ResourceBucket::Global,
-        ];
-        ORDER
+        BUCKET_ORDER
             .iter()
             .filter_map(|bucket| {
                 let group: Vec<&IdentityGrant> =

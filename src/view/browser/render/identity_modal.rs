@@ -1,15 +1,18 @@
 //! Render for the drill-in Identity modal.
 
 use crate::theme;
-use crate::view::browser::state::identity_modal::{IdentityModalState, IdentityStatus};
+use crate::view::browser::state::identity_modal::{
+    IdentityModalState, IdentityStatus, ResourceBucket,
+};
 use crate::widget::modal::render_too_small;
 use crate::widget::panel::Panel;
 use ratatui::Frame;
 use ratatui::layout::Rect;
+use ratatui::style::Style;
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Clear, Paragraph};
 
-pub fn render_identity_modal(frame: &mut Frame, area: Rect, state: &IdentityModalState) {
+pub fn render_identity_modal(frame: &mut Frame, area: Rect, state: &mut IdentityModalState) {
     if render_too_small(frame, area) {
         return;
     }
@@ -56,21 +59,42 @@ pub fn render_identity_modal(frame: &mut Frame, area: Rect, state: &IdentityModa
     )));
     lines.push(Line::raw(""));
 
-    for (bucket, grants) in state.grouped_by_bucket() {
-        lines.push(Line::from(Span::styled(
-            format!("▸ {}", bucket.header()),
-            theme::accent(),
-        )));
-        for grant in grants {
-            lines.push(Line::from(vec![
-                Span::raw("  "),
-                Span::raw(grant.resource.clone()),
-            ]));
+    // Walk grants in canonical (post-sort) order, emitting section
+    // headers on bucket transitions, and recording each grant's line
+    // position so the renderer can scroll the selected grant into view.
+    let mut grant_line_pos: Vec<usize> = Vec::with_capacity(state.grants.len());
+    let mut current_bucket: Option<ResourceBucket> = None;
+    for (i, grant) in state.grants.iter().enumerate() {
+        if Some(grant.bucket) != current_bucket {
+            if current_bucket.is_some() {
+                lines.push(Line::raw(""));
+            }
+            lines.push(Line::from(Span::styled(
+                format!("▸ {}", grant.bucket.header()),
+                theme::accent(),
+            )));
+            current_bucket = Some(grant.bucket);
         }
-        lines.push(Line::raw(""));
+        grant_line_pos.push(lines.len());
+        let row_style = if i == state.scroll.selected {
+            theme::cursor_row()
+        } else {
+            Style::default()
+        };
+        lines.push(Line::from(vec![
+            Span::styled("  ", row_style),
+            Span::styled(grant.resource.clone(), row_style),
+        ]));
     }
 
-    frame.render_widget(Paragraph::new(lines), inner);
+    state.scroll.last_viewport_rows = inner.height as usize;
+    if let Some(target_line) = grant_line_pos.get(state.scroll.selected).copied() {
+        state.scroll.scroll_to_visible(target_line);
+    }
+    state.scroll.clamp_to_content(lines.len());
+    let scroll_offset = u16::try_from(state.scroll.offset).unwrap_or(u16::MAX);
+
+    frame.render_widget(Paragraph::new(lines).scroll((scroll_offset, 0)), inner);
 }
 
 #[cfg(test)]
@@ -131,10 +155,10 @@ mod tests {
     #[test]
     fn snapshot_loaded_drill_in() {
         let mut term = Terminal::new(test_backend(22)).unwrap();
-        let state = loaded_state();
+        let mut state = loaded_state();
         term.draw(|f| {
             let area = Rect::new(0, 0, TEST_BACKEND_WIDTH, 22);
-            render_identity_modal(f, area, &state);
+            render_identity_modal(f, area, &mut state);
         })
         .unwrap();
         assert_snapshot!(format!("{}", term.backend()));
@@ -143,10 +167,10 @@ mod tests {
     #[test]
     fn snapshot_drill_in_too_small() {
         let mut term = Terminal::new(TestBackend::new(40, 10)).unwrap();
-        let state = loaded_state();
+        let mut state = loaded_state();
         term.draw(|f| {
             let area = Rect::new(0, 0, 40, 10);
-            render_identity_modal(f, area, &state);
+            render_identity_modal(f, area, &mut state);
         })
         .unwrap();
         assert_snapshot!(format!("{}", term.backend()));

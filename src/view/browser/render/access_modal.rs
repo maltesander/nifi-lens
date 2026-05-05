@@ -11,7 +11,7 @@ use ratatui::widgets::{Clear, Paragraph};
 
 use crate::widget::panel::Panel;
 
-pub fn render_access_modal(frame: &mut Frame, area: Rect, state: &AccessModalState) {
+pub fn render_access_modal(frame: &mut Frame, area: Rect, state: &mut AccessModalState) {
     if render_too_small(frame, area) {
         return;
     }
@@ -49,15 +49,25 @@ pub fn render_access_modal(frame: &mut Frame, area: Rect, state: &AccessModalSta
 
     // Header + legend each take 1 row; the rest is data rows.
     let visible_rows = inner.height.saturating_sub(2) as usize;
+    let selected = state.scroll.selected;
+    let matrix_len = state.matrix.len();
+    state.scroll.last_viewport_rows = visible_rows;
+    state.scroll.scroll_to_visible(selected);
+    state.scroll.clamp_to_content(matrix_len);
     let header_off = state.scroll.offset;
 
     let mut lines: Vec<Line<'_>> = Vec::with_capacity(visible_rows + 2);
 
-    // Header row
-    lines.push(Line::from(vec![
-        Span::styled(format!("{:<28}", "identity"), theme::muted()),
-        Span::styled("  view  mod   data  oper  pol ", theme::muted()),
-    ]));
+    // Header row — must match the per-cell format below so columns align.
+    let mut header_spans: Vec<Span<'_>> =
+        vec![Span::styled(format!("{:<28}", "identity"), theme::muted())];
+    for axis in Axis::ALL {
+        header_spans.push(Span::styled(
+            format!("  {:<5}", axis.header()),
+            theme::muted(),
+        ));
+    }
+    lines.push(Line::from(header_spans));
 
     for (idx, row) in state
         .matrix
@@ -177,10 +187,10 @@ mod tests {
     #[test]
     fn snapshot_loaded_matrix() {
         let mut term = Terminal::new(test_backend(20)).unwrap();
-        let state = loaded_state();
+        let mut state = loaded_state();
         term.draw(|f| {
             let area = Rect::new(0, 0, TEST_BACKEND_WIDTH, 20);
-            render_access_modal(f, area, &state);
+            render_access_modal(f, area, &mut state);
         })
         .unwrap();
         assert_snapshot!(format!("{}", term.backend()));
@@ -189,10 +199,11 @@ mod tests {
     #[test]
     fn snapshot_loading_state() {
         let mut term = Terminal::new(test_backend(20)).unwrap();
-        let state = AccessModalState::new("p1".into(), NodeKind::Processor, "EnrichOrders".into());
+        let mut state =
+            AccessModalState::new("p1".into(), NodeKind::Processor, "EnrichOrders".into());
         term.draw(|f| {
             let area = Rect::new(0, 0, TEST_BACKEND_WIDTH, 20);
-            render_access_modal(f, area, &state);
+            render_access_modal(f, area, &mut state);
         })
         .unwrap();
         assert_snapshot!(format!("{}", term.backend()));
@@ -202,10 +213,10 @@ mod tests {
     fn snapshot_too_small() {
         // Below MIN_WIDTH × MIN_HEIGHT (60 × 20) the render degrades.
         let mut term = Terminal::new(TestBackend::new(40, 10)).unwrap();
-        let state = loaded_state();
+        let mut state = loaded_state();
         term.draw(|f| {
             let area = Rect::new(0, 0, 40, 10);
-            render_access_modal(f, area, &state);
+            render_access_modal(f, area, &mut state);
         })
         .unwrap();
         assert_snapshot!(format!("{}", term.backend()));
