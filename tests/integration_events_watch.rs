@@ -135,69 +135,64 @@ async fn watch_emits_match_for_fx_rate_processor_in_fixture() {
         let client = Arc::new(RwLock::new(client));
         let (tx, mut rx) = mpsc::channel::<AppEvent>(64);
 
-        let local = tokio::task::LocalSet::new();
-        local
-            .run_until(async {
-                let handle = spawn_watch(
-                    client.clone(),
-                    tx,
-                    narrow,
-                    predicate,
-                    None,
-                    Duration::from_secs(2),
-                    16,
-                );
+        let handle = spawn_watch(
+            client.clone(),
+            tx,
+            narrow,
+            predicate,
+            None,
+            Duration::from_secs(2),
+            16,
+        );
 
-                let mut got_match = false;
-                let deadline = std::time::Instant::now() + Duration::from_secs(60);
-                while std::time::Instant::now() < deadline {
-                    let remaining = deadline.saturating_duration_since(std::time::Instant::now());
-                    let recv_budget = std::cmp::min(remaining, Duration::from_secs(5));
-                    match tokio::time::timeout(recv_budget, rx.recv()).await {
-                        Ok(Some(AppEvent::Data(ViewPayload::Events(
-                            EventsPayload::WatchMatch { summary, attrs },
-                        )))) => {
-                            eprintln!(
-                                "  WatchMatch: event_id={} attrs={}",
-                                summary.event_id,
-                                attrs.len()
-                            );
-                            got_match = true;
-                            break;
-                        }
-                        Ok(Some(AppEvent::Data(ViewPayload::Events(
-                            EventsPayload::WatchTick {
-                                events_per_sec_ewma,
-                                scanned,
-                                matched,
-                                ..
-                            },
-                        )))) => {
-                            eprintln!(
-                                "  WatchTick: ewma={events_per_sec_ewma:.2} \
-                                 scanned={scanned} matched={matched}"
-                            );
-                        }
-                        Ok(Some(AppEvent::Data(ViewPayload::Events(
-                            EventsPayload::WatchFailed { error, retry_in_ms },
-                        )))) => {
-                            eprintln!("  WatchFailed: error={error} retry_in_ms={retry_in_ms}");
-                        }
-                        Ok(_) => continue,
-                        Err(_) => continue,
-                    }
+        let mut got_match = false;
+        let deadline = std::time::Instant::now() + Duration::from_secs(60);
+        while std::time::Instant::now() < deadline {
+            let remaining = deadline.saturating_duration_since(std::time::Instant::now());
+            let recv_budget = std::cmp::min(remaining, Duration::from_secs(5));
+            match tokio::time::timeout(recv_budget, rx.recv()).await {
+                Ok(Some(AppEvent::Data(ViewPayload::Events(EventsPayload::WatchMatch {
+                    summary,
+                    attrs,
+                })))) => {
+                    eprintln!(
+                        "  WatchMatch: event_id={} attrs={}",
+                        summary.event_id,
+                        attrs.len()
+                    );
+                    got_match = true;
+                    break;
                 }
+                Ok(Some(AppEvent::Data(ViewPayload::Events(EventsPayload::WatchTick {
+                    events_per_sec_ewma,
+                    scanned,
+                    matched,
+                    ..
+                })))) => {
+                    eprintln!(
+                        "  WatchTick: ewma={events_per_sec_ewma:.2} \
+                         scanned={scanned} matched={matched}"
+                    );
+                }
+                Ok(Some(AppEvent::Data(ViewPayload::Events(EventsPayload::WatchFailed {
+                    error,
+                    retry_in_ms,
+                })))) => {
+                    eprintln!("  WatchFailed: error={error} retry_in_ms={retry_in_ms}");
+                }
+                Ok(_) => continue,
+                Err(_) => continue,
+            }
+        }
 
-                handle.abort();
-                // Brief grace so the RAII Drop's spawn_local DELETE
-                // can fire before the LocalSet shuts down.
-                tokio::time::sleep(Duration::from_millis(300)).await;
+        handle.abort();
+        // Brief grace so the RAII Drop's spawn_cleanup DELETE
+        // can fire before the runtime shuts down.
+        tokio::time::sleep(Duration::from_millis(300)).await;
 
-                assert!(
-                    got_match,
-                    "expected at least one WatchMatch within 60s on {version}"
-                );
-            })
-            .await;
+        assert!(
+            got_match,
+            "expected at least one WatchMatch within 60s on {version}"
+        );
     }
 }
