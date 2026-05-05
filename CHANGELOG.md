@@ -35,6 +35,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   Browser / Tracer rows opens Events pre-narrowed to a component.
 - Config: `[events] watch_buffer_size`, `[events] watch_retry_max`,
   `[polling.cluster] events_tail`.
+- Internal: removed the main-thread `LocalSet` workaround. All polling
+  fetchers and view workers now run on a single multi-thread tokio
+  runtime via `tokio::spawn`. Drop-side cleanup HTTP DELETEs use a new
+  `app::cleanup::spawn_cleanup` helper that silently no-ops outside an
+  active runtime. No user-visible behaviour change; the parquet/avro
+  classification and per-PG fan-out fetchers gain real parallelism.
 
 ## [0.9.0] — 2026-04-30
 
