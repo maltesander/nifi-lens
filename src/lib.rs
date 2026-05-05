@@ -79,7 +79,23 @@ fn run_inner(args: cli::Args) -> Result<ExitCode, NifiLensError> {
             }
         },
         None => {
-            let (config, resolved) = config::loader::load(&args)?;
+            let (config, resolved) = match config::loader::load(&args) {
+                Ok(v) => v,
+                Err(NifiLensError::ConfigMissing { path }) => {
+                    match config::init::try_bootstrap(&path, args.config.is_some())? {
+                        Some(msg) => {
+                            eprintln!("no config file at {}", msg.missing_path.display());
+                            eprintln!("wrote template to {}", msg.written_path.display());
+                            eprintln!(
+                                "edit it with your cluster URL and credentials, then re-run nifilens"
+                            );
+                            return Ok(ExitCode::SUCCESS);
+                        }
+                        None => return Err(NifiLensError::ConfigMissing { path }),
+                    }
+                }
+                Err(e) => return Err(e),
+            };
             let rt = tokio::runtime::Builder::new_multi_thread()
                 .enable_all()
                 .build()

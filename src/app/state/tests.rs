@@ -189,9 +189,47 @@ fn help_modal_toggles() {
     let mut s = fresh_state();
     let c = tiny_config();
     update(&mut s, key(KeyCode::Char('?'), KeyModifiers::NONE), &c);
-    assert!(matches!(s.modal, Some(Modal::Help)));
+    assert!(matches!(s.modal, Some(Modal::Help(_))));
     update(&mut s, key(KeyCode::Char('?'), KeyModifiers::NONE), &c);
     assert!(s.modal.is_none());
+}
+
+#[test]
+fn help_modal_arrow_keys_scroll() {
+    // Open Help on Browser tab — its verb list overflows the
+    // estimate ceiling on every reasonable terminal size, so Down
+    // should advance scroll.
+    let mut s = fresh_state();
+    let c = tiny_config();
+    s.current_tab = ViewId::Browser;
+    update(&mut s, key(KeyCode::Char('?'), KeyModifiers::NONE), &c);
+    update(&mut s, key(KeyCode::Down, KeyModifiers::NONE), &c);
+    let scroll = match &s.modal {
+        Some(Modal::Help(hs)) => hs.scroll,
+        _ => panic!("expected Help modal open"),
+    };
+    assert_eq!(scroll, 1, "Down should advance scroll by 1");
+
+    update(&mut s, key(KeyCode::Up, KeyModifiers::NONE), &c);
+    let scroll = match &s.modal {
+        Some(Modal::Help(hs)) => hs.scroll,
+        _ => panic!("expected Help modal still open"),
+    };
+    assert_eq!(scroll, 0, "Up should walk scroll back to 0");
+
+    update(&mut s, key(KeyCode::PageDown, KeyModifiers::NONE), &c);
+    let scroll = match &s.modal {
+        Some(Modal::Help(hs)) => hs.scroll,
+        _ => panic!("expected Help modal still open"),
+    };
+    assert!(scroll > 1, "PgDn should advance more than Down");
+
+    update(&mut s, key(KeyCode::Home, KeyModifiers::NONE), &c);
+    let scroll = match &s.modal {
+        Some(Modal::Help(hs)) => hs.scroll,
+        _ => panic!("expected Help modal still open"),
+    };
+    assert_eq!(scroll, 0, "Home should jump to top");
 }
 
 #[test]

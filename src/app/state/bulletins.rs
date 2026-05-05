@@ -3,15 +3,24 @@
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 
 use super::{AppState, UpdateResult, ViewKeyHandler};
-use crate::input::{BulletinsVerb, CommonVerb, FocusAction, GoTarget, Severity, ViewVerb};
+use crate::input::{
+    BulletinsDetailModalVerb, BulletinsVerb, CommonVerb, FocusAction, GoTarget, Severity, ViewVerb,
+};
 
 /// Zero-sized dispatch struct for the Bulletins tab.
 pub(crate) struct BulletinsHandler;
 
 impl ViewKeyHandler for BulletinsHandler {
     fn handle_verb(state: &mut AppState, verb: ViewVerb) -> Option<UpdateResult> {
+        // The detail modal owns its own verb enum routed via the gate;
+        // anything else falling through while the modal is open should
+        // be ignored (the gate also passes scroll keys through to
+        // `handle_focus`).
+        if let ViewVerb::BulletinsDetailModal(v) = verb {
+            return Some(handle_detail_modal_verb(state, v));
+        }
         if state.bulletins.detail_modal.is_some() {
-            return handle_modal_verb(state, verb);
+            return Some(UpdateResult::default());
         }
         let bv = match verb {
             ViewVerb::Bulletins(v) => v,
@@ -173,17 +182,16 @@ fn handle_modal_focus(state: &mut AppState, action: FocusAction) -> Option<Updat
     })
 }
 
-/// Handles verb dispatch while the detail modal is open.
-fn handle_modal_verb(state: &mut AppState, verb: ViewVerb) -> Option<UpdateResult> {
-    let bv = match verb {
-        ViewVerb::Bulletins(v) => v,
-        _ => return Some(UpdateResult::default()),
-    };
-    match bv {
-        BulletinsVerb::Common(CommonVerb::OpenSearch) => state.bulletins.modal_search_open(),
-        BulletinsVerb::Common(CommonVerb::SearchNext) => state.bulletins.modal_search_cycle_next(),
-        BulletinsVerb::Common(CommonVerb::SearchPrev) => state.bulletins.modal_search_cycle_prev(),
-        BulletinsVerb::Common(CommonVerb::Copy) => {
+/// Handles verb dispatch while the detail modal is open. Receives the
+/// modal-scoped `BulletinsDetailModalVerb` from the gate; outer-tab
+/// chords are silently swallowed by the gate before reaching us.
+fn handle_detail_modal_verb(state: &mut AppState, v: BulletinsDetailModalVerb) -> UpdateResult {
+    use BulletinsDetailModalVerb as V;
+    match v {
+        V::Common(CommonVerb::OpenSearch) => state.bulletins.modal_search_open(),
+        V::Common(CommonVerb::SearchNext) => state.bulletins.modal_search_cycle_next(),
+        V::Common(CommonVerb::SearchPrev) => state.bulletins.modal_search_cycle_prev(),
+        V::Common(CommonVerb::Copy) => {
             if let Some(msg) = state.bulletins.modal_copy_message() {
                 let preview: String = msg.chars().take(40).collect();
                 match state.copy_to_clipboard(msg) {
@@ -192,19 +200,19 @@ fn handle_modal_verb(state: &mut AppState, verb: ViewVerb) -> Option<UpdateResul
                 }
             }
         }
-        // Everything else is swallowed while the modal is open — no
-        // filter toggles, no pause, no group cycle. OpenDetail is a
-        // no-op (already open). Refresh / Close are no-ops here (Close
-        // is handled by FocusAction::Ascend).
-        _ => {}
+        V::Common(CommonVerb::Close) => state.bulletins.close_detail_modal(),
+        // Refresh is a no-op — the detail modal is a static snapshot
+        // taken when the user pressed `i`; the live Bulletins ring
+        // keeps updating in the background.
+        V::Common(CommonVerb::Refresh) => {}
     }
-    Some(UpdateResult {
+    UpdateResult {
         redraw: true,
         intent: None,
         tracer_followup: None,
         sparkline_followup: None,
         queue_listing_followup: None,
-    })
+    }
 }
 
 /// Handles text-input keypresses while modal search input is active.

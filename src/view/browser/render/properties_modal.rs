@@ -4,7 +4,7 @@
 use ratatui::Frame;
 use ratatui::layout::{Constraint, Layout, Rect};
 use ratatui::text::{Line, Span};
-use ratatui::widgets::{Block, Borders, Cell, Clear, Paragraph, Row, Table, TableState, Wrap};
+use ratatui::widgets::{Cell, Clear, Paragraph, Row, Table, TableState, Wrap};
 
 use crate::layout;
 use crate::theme;
@@ -58,12 +58,11 @@ pub fn render_properties_modal(
         format!(" \u{2195}{}/{} ", selected + 1, total)
     };
 
-    let block = Block::default()
-        .borders(Borders::ALL)
-        .title(format!(
-            " Properties \u{2014} {name} \u{2014} esc to close "
-        ))
-        .title_bottom(scroll_label);
+    let block = crate::widget::panel::Panel::new(format!(
+        " Properties \u{2014} {name} \u{2014} esc to close "
+    ))
+    .into_block()
+    .title_bottom(scroll_label);
     let inner = block.inner(rect);
     frame.render_widget(Clear, rect);
     frame.render_widget(block, rect);

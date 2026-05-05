@@ -1,5 +1,6 @@
 ---
 source: src/view/tracer/render.rs
+assertion_line: 1131
 expression: snap(&state)
 ---
 "┏ Lineage ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┓"
@@ -23,7 +24,7 @@ expression: snap(&state)
 "│                                                                                                                      │"
 "│                                                                                                                      │"
 "│                                                                                                                      │"
-"│                                                 Loading event detail…                                                │"
+"│                                                       loading…                                                       │"
 "│                                                                                                                      │"
 "│                                                                                                                      │"
 "│                                                                                                                      │"

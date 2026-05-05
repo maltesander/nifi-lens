@@ -29,6 +29,7 @@ use crate::theme;
 use crate::timestamp::format_age_secs;
 use crate::view::bulletins::state::{BulletinsState, ComponentType, GroupedRow};
 use crate::widget::filter_bar::{FilterChip, build_chip_line};
+use crate::widget::modal::LOADING_LABEL;
 use crate::widget::panel::Panel;
 use crate::widget::severity::{format_severity_label, severity_style};
 
@@ -46,7 +47,7 @@ pub fn render(
         .last_fetched_at
         .and_then(|fetched| SystemTime::now().duration_since(fetched).ok())
         .map(|d| format!(" last {} ago ", format_age_secs(d.as_secs())))
-        .unwrap_or_else(|| " connecting… ".to_string());
+        .unwrap_or_else(|| format!(" {LOADING_LABEL} "));
 
     let rows = crate::layout::split_header_body_footer(
         area,
@@ -157,7 +158,7 @@ fn render_filter_bar(frame: &mut Frame, area: Rect, state: &BulletinsState) {
         let group_label = state.group_mode.label();
         Line::from(Span::styled(
             format!(
-                "— T type · / text · G group: {group_label} · M mute · c copy · P pause · R clear —"
+                "— 1·2·3 sev · T type · / text · G group: {group_label} · M mute · c copy · P pause · R clear —"
             ),
             theme::muted(),
         ))

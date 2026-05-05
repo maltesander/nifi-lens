@@ -507,7 +507,7 @@ impl AppState {
 
 #[derive(Debug)]
 pub enum Modal {
-    Help,
+    Help(crate::widget::help_modal::HelpState),
     ContextSwitcher(ContextSwitcherState),
     ErrorDetail,
     FuzzyFind(crate::widget::fuzzy_find::FuzzyFindState),
@@ -1415,7 +1415,7 @@ fn handle_key(state: &mut AppState, key: KeyEvent, config: &Config) -> UpdateRes
             //    (e.g. Shift+K is a printable char in the filter bar).
         }
         InputEvent::App(AppAction::Help) => {
-            state.modal = Some(Modal::Help);
+            state.modal = Some(Modal::Help(crate::widget::help_modal::HelpState::new()));
             return UpdateResult {
                 redraw: true,
                 intent: None,
@@ -1579,9 +1579,56 @@ fn handle_key(state: &mut AppState, key: KeyEvent, config: &Config) -> UpdateRes
     // Modal-specific handling takes priority.
     if let Some(modal) = state.modal.as_mut() {
         match modal {
-            Modal::Help => {
+            Modal::Help(hs) => {
                 if matches!(key.code, KeyCode::Esc | KeyCode::Char('?')) {
                     state.modal = None;
+                    return UpdateResult {
+                        redraw: true,
+                        intent: None,
+                        tracer_followup: None,
+                        sparkline_followup: None,
+                        queue_listing_followup: None,
+                    };
+                }
+                // Scroll keys. The render path clamps `scroll` against
+                // the actual area on every frame, so the dispatcher uses
+                // a generous ceiling here (the section-row count) and
+                // lets render saturate it; the next frame writes back a
+                // clamped value.
+                let general = crate::widget::help_modal::general_sections();
+                let tab_secs = crate::widget::help_modal::tab_sections(
+                    state.current_tab,
+                    state.tracer.content_modal.is_some(),
+                );
+                let ceiling = crate::widget::help_modal::estimate_max_scroll(&general, &tab_secs);
+                let consumed = match key.code {
+                    KeyCode::Up => {
+                        hs.scroll_by(-1, ceiling);
+                        true
+                    }
+                    KeyCode::Down => {
+                        hs.scroll_by(1, ceiling);
+                        true
+                    }
+                    KeyCode::PageUp => {
+                        hs.scroll_by(-10, ceiling);
+                        true
+                    }
+                    KeyCode::PageDown => {
+                        hs.scroll_by(10, ceiling);
+                        true
+                    }
+                    KeyCode::Home => {
+                        hs.scroll_top();
+                        true
+                    }
+                    KeyCode::End => {
+                        hs.scroll_bottom(ceiling);
+                        true
+                    }
+                    _ => false,
+                };
+                if consumed {
                     return UpdateResult {
                         redraw: true,
                         intent: None,

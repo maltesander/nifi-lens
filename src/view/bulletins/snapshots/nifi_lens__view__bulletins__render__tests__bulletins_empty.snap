@@ -1,12 +1,13 @@
 ---
 source: src/view/bulletins/render.rs
-expression: render_to_string(&state)
+assertion_line: 586
+expression: render_to_string(&mut state)
 ---
 "┌ Filters ─────────────────────────────────────────────────────────────────────────────────────────────────────────────┐"
 "│[E 0] [W 0] [I 0]   type: All   text: (none)                                                                          │"
-"│— T type · / text · G group: source+msg · M mute · c copy · P pause · R clear —                                       │"
+"│— 1·2·3 sev · T type · / text · G group: source+msg · M mute · c copy · P pause · R clear —                           │"
 "└──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┘"
-"┌ Bulletins ────────────────────────────────────────────────────────────────────────────────────────────── connecting… ┐"
+"┌ Bulletins ───────────────────────────────────────────────────────────────────────────────────────────────── loading… ┐"
 "│                                                                                                                      │"
 "│                                                                                                                      │"
 "│                                                                                                                      │"

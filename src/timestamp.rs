@@ -224,7 +224,7 @@ pub fn synthesize_iso_from_time_only(raw: &str, now: OffsetDateTime) -> Option<S
 /// Returns an em-dash for `None`.
 pub fn format_age(d: Option<Duration>) -> String {
     let Some(d) = d else {
-        return "\u{2014}".to_string();
+        return crate::theme::PLACEHOLDER_DASH.to_string();
     };
     format_age_secs(d.as_secs())
 }

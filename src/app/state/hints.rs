@@ -223,11 +223,18 @@ fn modal_hints(modal: &Modal) -> Vec<crate::widget::hint_bar::HintSpan> {
 
     use crate::widget::hint_bar::HintSpan;
     match modal {
-        Modal::Help => vec![HintSpan {
-            key: Cow::Borrowed("Esc"),
-            action: Cow::Borrowed("close"),
-            enabled: true,
-        }],
+        Modal::Help(_) => vec![
+            HintSpan {
+                key: Cow::Borrowed("\u{2191}/\u{2193}"),
+                action: Cow::Borrowed("scroll"),
+                enabled: true,
+            },
+            HintSpan {
+                key: Cow::Borrowed("Esc"),
+                action: Cow::Borrowed("close"),
+                enabled: true,
+            },
+        ],
         Modal::ContextSwitcher(_) => vec![
             HintSpan {
                 key: Cow::Borrowed("\u{2191}/\u{2193}"),

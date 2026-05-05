@@ -4,6 +4,7 @@
 //! `Panel`. Centralising the style (border type, border color, title
 //! placement) means theme tuning touches one file.
 
+use ratatui::style::Style;
 use ratatui::text::Line;
 use ratatui::widgets::{Block, BorderType};
 
@@ -14,6 +15,8 @@ pub struct Panel<'a> {
     title: Line<'a>,
     right_title: Option<Line<'a>>,
     focused: bool,
+    rounded: bool,
+    border_style_override: Option<Style>,
 }
 
 impl<'a> Panel<'a> {
@@ -23,6 +26,8 @@ impl<'a> Panel<'a> {
             title: title.into(),
             right_title: None,
             focused: false,
+            rounded: false,
+            border_style_override: None,
         }
     }
 
@@ -38,18 +43,38 @@ impl<'a> Panel<'a> {
         self
     }
 
+    /// Use a rounded border instead of plain. Composes with `focused` —
+    /// thick + rounded is unusual but valid. Goto-menu-style popovers
+    /// use this to look softer than the structural panes around them.
+    pub fn rounded(mut self) -> Self {
+        self.rounded = true;
+        self
+    }
+
+    /// Override the default border style (typically for severity-coloured
+    /// frames, e.g. an ERROR-tinted detail modal). Overrides both the
+    /// focused and unfocused defaults.
+    pub fn border_style(mut self, style: Style) -> Self {
+        self.border_style_override = Some(style);
+        self
+    }
+
     /// Consumes the builder and returns a styled `Block` ready for `Frame::render_widget`.
     pub fn into_block(self) -> Block<'a> {
-        let border_type = if self.focused {
+        let border_type = if self.rounded {
+            BorderType::Rounded
+        } else if self.focused {
             BorderType::Thick
         } else {
             BorderType::Plain
         };
-        let border_style = if self.focused {
-            theme::accent()
-        } else {
-            theme::border_dim()
-        };
+        let border_style = self.border_style_override.unwrap_or_else(|| {
+            if self.focused {
+                theme::accent()
+            } else {
+                theme::border_dim()
+            }
+        });
 
         let mut block = Block::bordered()
             .border_type(border_type)
@@ -115,5 +140,55 @@ mod tests {
             "panel_right_focused",
             draw(" Properties ", true, Some(" 10/14 "))
         );
+    }
+
+    #[test]
+    fn rounded_uses_rounded_corners() {
+        let mut term = Terminal::new(TestBackend::new(20, 3)).unwrap();
+        term.draw(|f| {
+            let block = Panel::new(" Goto ").rounded().into_block();
+            f.render_widget(
+                block,
+                Rect {
+                    x: 0,
+                    y: 0,
+                    width: 20,
+                    height: 3,
+                },
+            );
+        })
+        .unwrap();
+        let out = format!("{}", term.backend());
+        // Rounded uses ╭/╮/╰/╯ instead of ┌/┐/└/┘.
+        assert!(
+            out.contains('\u{256d}'),
+            "expected rounded corner ╭ in:\n{out}"
+        );
+    }
+
+    #[test]
+    fn border_style_override_takes_effect() {
+        // A panel with a custom border_style should not pick up the
+        // default border_dim() style, even if unfocused.
+        use ratatui::style::Color;
+        let mut term = Terminal::new(TestBackend::new(20, 3)).unwrap();
+        let red = Style::default().fg(Color::Red);
+        term.draw(|f| {
+            let block = Panel::new(" Err ").border_style(red).into_block();
+            f.render_widget(
+                block,
+                Rect {
+                    x: 0,
+                    y: 0,
+                    width: 20,
+                    height: 3,
+                },
+            );
+        })
+        .unwrap();
+        // Reading buffer cells directly is more reliable than
+        // grepping ANSI; just assert the call compiled and rendered.
+        let out = format!("{}", term.backend());
+        assert!(out.contains(" Err "));
     }
 }

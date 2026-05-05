@@ -108,9 +108,24 @@ pub fn render_load_gate(frame: &mut Frame, area: Rect, gate: LoadGate<'_>) -> bo
 /// `theme::muted()`. Caller can pass `V::all()` directly — filtering is
 /// internal so call sites stay trivial.
 pub fn render_verb_hint_strip<V: Verb>(frame: &mut Frame, area: Rect, verbs: &[V]) {
+    render_verb_hint_strip_with(frame, area, verbs, |_| true);
+}
+
+/// Variant of [`render_verb_hint_strip`] that accepts a per-verb
+/// `enabled` predicate so modals can hide chords whose preconditions
+/// are not met (e.g. `n`/`N` only after a search is committed). The
+/// filter composes with the standard `show_in_hint_bar` / `hint()`
+/// gates — a verb must pass all three to render.
+pub fn render_verb_hint_strip_with<V: Verb>(
+    frame: &mut Frame,
+    area: Rect,
+    verbs: &[V],
+    enabled: impl Fn(V) -> bool,
+) {
     let parts: Vec<String> = verbs
         .iter()
-        .filter(|v| v.show_in_hint_bar() && !v.hint().is_empty())
+        .copied()
+        .filter(|v| v.show_in_hint_bar() && !v.hint().is_empty() && enabled(*v))
         .map(|v| format!("[{}] {}", v.chord().display(), v.hint()))
         .collect();
     let text = parts.join(" · ");

@@ -46,6 +46,31 @@ pub fn render_search_input(frame: &mut Frame, area: Rect, search: &SearchState) 
     frame.render_widget(Paragraph::new(line), area);
 }
 
+/// Render a persistent search strip showing `/ {query}_ (n/m)` while
+/// the user is typing, and `/ {query} (n/m)` once committed. Returns
+/// silently if both `input_active` and `committed` are false. Differs
+/// from [`render_search_input`] in that it stays visible after Enter
+/// and surfaces the match counter — useful for modals that keep the
+/// search reference visible alongside `n`/`N` navigation.
+pub fn render_search_strip(frame: &mut Frame, area: Rect, search: &SearchState) {
+    if !search.input_active && !search.committed {
+        return;
+    }
+    let match_info = match search.matches.len() {
+        0 if search.committed => " (0 matches)".to_string(),
+        0 => String::new(),
+        n => format!(" ({}/{})", search.current.map(|i| i + 1).unwrap_or(0), n),
+    };
+    let line = Line::from(vec![
+        Span::styled("/", theme::accent()),
+        Span::raw(" "),
+        Span::raw(search.query.clone()),
+        Span::styled(if search.input_active { "_" } else { "" }, theme::accent()),
+        Span::styled(match_info, theme::muted()),
+    ]);
+    frame.render_widget(Paragraph::new(line), area);
+}
+
 /// Case-insensitive, non-overlapping substring search. Returns matches
 /// in pre-wrap coordinates. Input is split on `\n`; each line is
 /// searched independently. Empty `query` returns an empty vec.

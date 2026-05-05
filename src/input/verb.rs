@@ -1332,9 +1332,72 @@ impl Verb for IdentityModalVerb {
     }
 }
 
+/// Verbs active only while the Bulletins detail modal is open. Body
+/// scrolling (Up/Down/PgUp/PgDn/Home/End) flows through `FocusAction`
+/// via the gate's `scroll_passthrough`; this enum only owns the
+/// modal-scoped chord set (`Common(...)` cascades).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum BulletinsDetailModalVerb {
+    Common(CommonVerb),
+}
+
+impl Verb for BulletinsDetailModalVerb {
+    fn chord(self) -> Chord {
+        match self {
+            Self::Common(c) => c.chord(),
+        }
+    }
+    fn label(self) -> &'static str {
+        match self {
+            Self::Common(c) => c.label(),
+        }
+    }
+    fn hint(self) -> &'static str {
+        match self {
+            Self::Common(c) => c.hint(),
+        }
+    }
+    fn priority(self) -> u8 {
+        50
+    }
+    fn show_in_hint_bar(self) -> bool {
+        // Show all the Common verbs the modal handles. SearchNext /
+        // SearchPrev are gated by `enabled()` (only after commit).
+        matches!(
+            self,
+            Self::Common(CommonVerb::Close)
+                | Self::Common(CommonVerb::OpenSearch)
+                | Self::Common(CommonVerb::SearchNext)
+                | Self::Common(CommonVerb::SearchPrev)
+                | Self::Common(CommonVerb::Copy)
+        )
+    }
+    fn enabled(self, ctx: &HintContext<'_>) -> bool {
+        let Some(modal) = ctx.state.bulletins.detail_modal.as_ref() else {
+            return false;
+        };
+        match self {
+            Self::Common(CommonVerb::SearchNext) | Self::Common(CommonVerb::SearchPrev) => {
+                modal.search.as_ref().map(|s| s.committed).unwrap_or(false)
+            }
+            _ => true,
+        }
+    }
+    fn all() -> &'static [Self] {
+        &[
+            Self::Common(CommonVerb::Close),
+            Self::Common(CommonVerb::OpenSearch),
+            Self::Common(CommonVerb::SearchNext),
+            Self::Common(CommonVerb::SearchPrev),
+            Self::Common(CommonVerb::Copy),
+        ]
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum ViewVerb {
     Bulletins(BulletinsVerb),
+    BulletinsDetailModal(BulletinsDetailModalVerb),
     Browser(BrowserVerb),
     BrowserQueue(BrowserQueueVerb),
     BrowserPeek(BrowserPeekVerb),

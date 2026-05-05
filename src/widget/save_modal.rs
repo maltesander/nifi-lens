@@ -3,7 +3,7 @@
 use ratatui::Frame;
 use ratatui::layout::{Constraint, Direction, Layout, Rect};
 use ratatui::text::{Line, Span};
-use ratatui::widgets::{Block, Borders, Clear, Paragraph};
+use ratatui::widgets::{Clear, Paragraph};
 
 /// State for the save-to-file modal, holding the event id, content side,
 /// and the user-editable file path.
@@ -43,10 +43,9 @@ pub fn render(frame: &mut Frame, area: Rect, state: &SaveEventContentState) {
     let modal = crate::layout::center_percent(area, 70, 7);
     frame.render_widget(Clear, modal);
 
-    let block = Block::default()
-        .title(" Save content ")
-        .borders(Borders::ALL)
-        .border_style(crate::theme::accent());
+    let block = crate::widget::panel::Panel::new(" Save content ")
+        .border_style(crate::theme::accent())
+        .into_block();
 
     let inner = block.inner(modal);
     frame.render_widget(block, modal);

@@ -1,6 +1,6 @@
 //! `nifilens config init` — writes a commented template at the default path.
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use snafu::ResultExt;
 
@@ -110,6 +110,36 @@ tabular = "64 MiB"    # parquet/avro fetched bytes per side
 diff    = "16 MiB"    # bytes fed into the unified text diff per side
 "#;
 
+/// First-run guidance produced by `try_bootstrap`. The caller prints
+/// these paths to stderr and exits cleanly so the user can edit the
+/// freshly-written template before launching for real.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct BootstrapMessage {
+    pub missing_path: PathBuf,
+    pub written_path: PathBuf,
+}
+
+/// Decide whether a missing config file should auto-bootstrap. Returns
+/// `Ok(Some(_))` after writing a template at the platform default; the
+/// caller prints guidance and exits. Returns `Ok(None)` when the user
+/// explicitly passed `--config <path>` — in that case the caller should
+/// propagate the original `ConfigMissing` error so the user knows their
+/// explicit path is wrong (not that we silently bootstrapped a different
+/// file).
+pub fn try_bootstrap(
+    missing_path: &Path,
+    user_supplied_config_path: bool,
+) -> Result<Option<BootstrapMessage>, NifiLensError> {
+    if user_supplied_config_path {
+        return Ok(None);
+    }
+    let written_path = write_template(false)?;
+    Ok(Some(BootstrapMessage {
+        missing_path: missing_path.to_path_buf(),
+        written_path,
+    }))
+}
+
 pub fn write_template(force: bool) -> Result<PathBuf, NifiLensError> {
     let path = resolve_path(None);
 
@@ -149,6 +179,16 @@ pub fn write_template(force: bool) -> Result<PathBuf, NifiLensError> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn try_bootstrap_returns_none_when_user_supplied_config() {
+        // User passed --config explicitly: do NOT silently bootstrap a
+        // template at the platform default; surface the original error so
+        // the user notices their explicit path is wrong.
+        let missing = PathBuf::from("/nonexistent/explicit.toml");
+        let result = try_bootstrap(&missing, true).expect("should not error");
+        assert!(result.is_none());
+    }
 
     #[test]
     fn template_is_valid_toml_and_parses_as_config() {

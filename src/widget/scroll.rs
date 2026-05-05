@@ -2,6 +2,36 @@
 //! be composed into modal state structs — the modal owns its content
 //! and renders the offset; the widget owns only the math.
 
+use ratatui::Frame;
+use ratatui::layout::Rect;
+use ratatui::widgets::{Scrollbar, ScrollbarOrientation, ScrollbarState};
+
+/// Render a vertical scrollbar on the right edge of `area`. Pass the
+/// full bordered area and the scrollbar replaces the right border with
+/// a position indicator. Suppressed when `content_rows <= viewport_rows`
+/// so short panes stay clean.
+///
+/// Takes explicit numbers (rather than `&VerticalScrollState`) so
+/// callers whose render writes `last_viewport_rows` *after* the
+/// scrollbar draws still get correct suppression on the same frame.
+pub fn render_vertical_scrollbar(
+    frame: &mut Frame,
+    area: Rect,
+    offset: usize,
+    viewport_rows: usize,
+    content_rows: usize,
+) {
+    if content_rows <= viewport_rows {
+        return;
+    }
+    let max_offset = content_rows.saturating_sub(viewport_rows);
+    let scrollbar = Scrollbar::new(ScrollbarOrientation::VerticalRight)
+        .begin_symbol(None)
+        .end_symbol(None);
+    let mut sb_state = ScrollbarState::new(max_offset).position(offset);
+    frame.render_stateful_widget(scrollbar, area, &mut sb_state);
+}
+
 /// Vertical-only scroll state used by the Bulletins detail modal.
 /// The modal owns the content; this struct owns only the offset math.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
@@ -217,6 +247,39 @@ impl CursoredScrollState {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use ratatui::Terminal;
+    use ratatui::backend::TestBackend;
+
+    #[test]
+    fn render_vertical_scrollbar_suppresses_when_content_fits() {
+        // Content fits in viewport — bar should not draw.
+        let mut term = Terminal::new(TestBackend::new(20, 5)).unwrap();
+        term.draw(|f| {
+            render_vertical_scrollbar(f, f.area(), 0, 5, 5);
+        })
+        .unwrap();
+        let out = format!("{}", term.backend());
+        assert!(
+            !out.contains('\u{2588}') && !out.contains('\u{2551}'),
+            "expected no scrollbar glyphs, got:\n{out}",
+        );
+    }
+
+    #[test]
+    fn render_vertical_scrollbar_draws_when_content_overflows() {
+        let mut term = Terminal::new(TestBackend::new(20, 5)).unwrap();
+        term.draw(|f| {
+            render_vertical_scrollbar(f, f.area(), 0, 5, 30);
+        })
+        .unwrap();
+        let out = format!("{}", term.backend());
+        // Either a track (║) or a thumb (█) glyph should appear on the
+        // right margin.
+        assert!(
+            out.contains('\u{2588}') || out.contains('\u{2551}'),
+            "expected scrollbar glyphs, got:\n{out}",
+        );
+    }
 
     #[test]
     fn vertical_scroll_by_negative_clamps_to_zero() {

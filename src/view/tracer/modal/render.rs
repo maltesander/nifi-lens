@@ -634,35 +634,18 @@ pub(super) fn render_search_strip(frame: &mut Frame, area: Rect, modal: &Content
     let Some(s) = modal.search.as_ref() else {
         return;
     };
-    if !s.input_active && !s.committed {
-        return;
-    }
-    let match_info = match s.matches.len() {
-        0 if s.committed => " (0 matches)".to_string(),
-        0 => String::new(),
-        n => format!(" ({}/{})", s.current.map(|i| i + 1).unwrap_or(0), n),
-    };
-    let line = Line::from(vec![
-        Span::styled("/", theme::accent()),
-        Span::raw(" "),
-        Span::raw(s.query.clone()),
-        Span::styled(if s.input_active { "_" } else { "" }, theme::accent()),
-        Span::styled(match_info, theme::muted()),
-    ]);
-    frame.render_widget(Paragraph::new(line), area);
+    crate::widget::search::render_search_strip(frame, area, s);
 }
 
-/// Build the footer hint by iterating `ContentModalVerb::all()`, filtering to
-/// verbs that are both `show_in_hint_bar()` and enabled given the current modal
-/// state. This mirrors what the top-level hint_bar does for outer tabs, but uses
-/// a local enabled predicate instead of `HintContext` (which requires `&AppState`
-/// and cannot be constructed here due to split borrow constraints).
+/// Build the footer hint via the shared `render_verb_hint_strip_with`
+/// helper. The enabled-predicate keeps Tracer-specific gates in one
+/// place: only show `JumpDiff` when the two sides are diffable, only
+/// show `n`/`N` after a search is committed, and only show hunk-prev /
+/// hunk-next when the Diff tab is active and has hunks.
 pub(super) fn render_footer_hint(frame: &mut Frame, area: Rect, modal: &ContentModalState) {
     use crate::input::Verb;
     use crate::input::verb::{CommonVerb, ContentModalVerb};
 
-    // Inline enabled check mirroring ContentModalVerb::enabled() but
-    // operating on the modal reference directly (no AppState needed).
     let enabled = |v: ContentModalVerb| -> bool {
         match v {
             ContentModalVerb::JumpDiff => {
@@ -684,16 +667,10 @@ pub(super) fn render_footer_hint(frame: &mut Frame, area: Rect, modal: &ContentM
         }
     };
 
-    let parts: Vec<String> = ContentModalVerb::all()
-        .iter()
-        .copied()
-        .filter(|v| v.show_in_hint_bar() && !v.hint().is_empty() && enabled(*v))
-        .map(|v| format!("[{}] {}", v.chord().display(), v.hint()))
-        .collect();
-
-    let text = parts.join(" · ");
-    frame.render_widget(
-        Paragraph::new(Line::from(Span::styled(text, theme::muted()))),
+    crate::widget::modal::render_verb_hint_strip_with(
+        frame,
         area,
+        ContentModalVerb::all(),
+        enabled,
     );
 }

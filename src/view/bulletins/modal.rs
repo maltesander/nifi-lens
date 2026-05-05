@@ -8,7 +8,7 @@
 use ratatui::Frame;
 use ratatui::layout::Rect;
 use ratatui::text::{Line, Span};
-use ratatui::widgets::{Block, BorderType, Clear, Paragraph, Wrap};
+use ratatui::widgets::{Clear, Paragraph, Wrap};
 
 use crate::theme;
 use crate::view::bulletins::state::{BulletinsState, DetailModalState};
@@ -22,6 +22,12 @@ const FOOTER_ROWS: u16 = 2; // blank · hint line
 /// otherwise. Writes `last_viewport_rows` back into the modal state
 /// so reducers can do page-sized scrolls.
 pub fn render(frame: &mut Frame, area: Rect, state: &mut BulletinsState) {
+    if state.detail_modal.is_none() {
+        return;
+    }
+    if crate::widget::modal::render_too_small(frame, area) {
+        return;
+    }
     let Some(modal) = state.detail_modal.as_mut() else {
         return;
     };
@@ -41,12 +47,12 @@ pub fn render(frame: &mut Frame, area: Rect, state: &mut BulletinsState) {
         modal.details.source_name,
     );
 
-    // Use ratatui's Block directly so we can color the border by severity.
-    // Panel doesn't expose a border_style setter, so we bypass it here.
-    let block = Block::bordered()
-        .border_type(BorderType::Plain)
+    // Severity-coloured frame: Panel's border_style override carries the
+    // severity hue while keeping the rest of the modal-frame styling
+    // consistent with every other Panel in the app.
+    let block = crate::widget::panel::Panel::new(title.as_str())
         .border_style(sev_style)
-        .title(title.as_str());
+        .into_block();
 
     let inner = block.inner(area);
     frame.render_widget(block, area);
@@ -66,10 +72,20 @@ pub fn render(frame: &mut Frame, area: Rect, state: &mut BulletinsState) {
     let rows = crate::layout::split_header_body_footer(inner, HEADER_ROWS, footer_rows);
 
     render_header(frame, rows[0], modal);
-    render_body(frame, rows[1], modal);
+    let body_content_rows = render_body(frame, rows[1], modal);
     render_footer(frame, rows[2], modal);
 
     modal.scroll.last_viewport_rows = rows[1].height as usize;
+
+    // Scrollbar on the right border of the bordered modal frame —
+    // only appears when the wrapped body overflows the viewport.
+    crate::widget::scroll::render_vertical_scrollbar(
+        frame,
+        area,
+        modal.scroll.offset,
+        rows[1].height as usize,
+        body_content_rows,
+    );
 }
 
 fn render_header(frame: &mut Frame, area: Rect, modal: &DetailModalState) {
@@ -101,7 +117,9 @@ fn render_header(frame: &mut Frame, area: Rect, modal: &DetailModalState) {
     frame.render_widget(Paragraph::new(lines), area);
 }
 
-fn render_body(frame: &mut Frame, area: Rect, modal: &mut DetailModalState) {
+/// Returns the estimated wrapped-line count of the rendered body so the
+/// caller can drive a scrollbar against it.
+fn render_body(frame: &mut Frame, area: Rect, modal: &mut DetailModalState) -> usize {
     let body = modal.details.raw_message.clone();
     let search = modal.search.clone();
 
@@ -163,37 +181,55 @@ fn render_body(frame: &mut Frame, area: Rect, modal: &mut DetailModalState) {
             .scroll((modal.scroll.offset as u16, 0)),
         area,
     );
+
+    estimated_rows
 }
 
 fn render_footer(frame: &mut Frame, area: Rect, modal: &DetailModalState) {
-    let mut lines: Vec<Line<'static>> = Vec::new();
+    use crate::input::{BulletinsDetailModalVerb, CommonVerb, Verb};
 
-    // Search input strip (above the hint line) when typing.
-    if let Some(s) = modal.search.as_ref()
-        && s.input_active
-    {
-        lines.push(Line::from(vec![
-            Span::styled("/ ".to_string(), theme::accent()),
-            Span::raw(s.query.clone()),
-            Span::styled("_".to_string(), theme::search_cursor()),
-        ]));
+    // Layout: optional search strip (when typing) on the first row,
+    // blank separator, then the verb hint strip on the bottom row.
+    let show_search_strip = modal
+        .search
+        .as_ref()
+        .map(|s| s.input_active)
+        .unwrap_or(false);
+
+    if area.height >= 2 {
+        let separator_row = ratatui::layout::Rect {
+            x: area.x,
+            y: area.y,
+            width: area.width,
+            height: 1,
+        };
+        let hint_row = ratatui::layout::Rect {
+            x: area.x,
+            y: area.y + area.height.saturating_sub(1),
+            width: area.width,
+            height: 1,
+        };
+        if show_search_strip && let Some(s) = modal.search.as_ref() {
+            crate::widget::search::render_search_input(frame, separator_row, s);
+        } else {
+            // Render an explicit blank separator (no-op draw via Paragraph).
+            frame.render_widget(Paragraph::new(Line::from("")), separator_row);
+        }
+        let committed = modal.search.as_ref().map(|s| s.committed).unwrap_or(false);
+        let enabled = move |v: BulletinsDetailModalVerb| -> bool {
+            match v {
+                BulletinsDetailModalVerb::Common(CommonVerb::SearchNext)
+                | BulletinsDetailModalVerb::Common(CommonVerb::SearchPrev) => committed,
+                _ => true,
+            }
+        };
+        crate::widget::modal::render_verb_hint_strip_with(
+            frame,
+            hint_row,
+            BulletinsDetailModalVerb::all(),
+            enabled,
+        );
     }
-
-    let mut hint = String::from("↑↓ scroll · PgUp/PgDn page · c copy · / find");
-    if let Some(s) = modal.search.as_ref()
-        && s.committed
-    {
-        hint.push_str(" · n next · N prev");
-    }
-    hint.push_str(" · Esc close");
-
-    // Blank separator row above the hint line. When the search strip is
-    // showing, the separator appears between the strip and the hint for
-    // readability.
-    lines.push(Line::from(""));
-    lines.push(Line::from(Span::styled(hint, theme::muted())));
-
-    frame.render_widget(Paragraph::new(lines), area);
 }
 
 /// Approximate wrap-aware row count for `body` rendered at `width`.
@@ -281,11 +317,11 @@ mod tests {
         state.auto_scroll = false;
         state.open_detail_modal();
 
-        let backend = TestBackend::new(60, 15);
+        let backend = TestBackend::new(60, 20);
         let mut terminal = Terminal::new(backend).unwrap();
         terminal
             .draw(|frame| {
-                render(frame, Rect::new(0, 0, 60, 15), &mut state);
+                render(frame, Rect::new(0, 0, 60, 20), &mut state);
             })
             .unwrap();
         insta::assert_debug_snapshot!("modal_short_message", terminal.backend().buffer());
@@ -320,11 +356,11 @@ mod tests {
         state.open_detail_modal();
         state.detail_modal.as_mut().unwrap().scroll.offset = 5;
 
-        let backend = TestBackend::new(60, 15);
+        let backend = TestBackend::new(60, 20);
         let mut terminal = Terminal::new(backend).unwrap();
         terminal
             .draw(|frame| {
-                render(frame, Rect::new(0, 0, 60, 15), &mut state);
+                render(frame, Rect::new(0, 0, 60, 20), &mut state);
             })
             .unwrap();
         insta::assert_debug_snapshot!("modal_long_message_scrolled", terminal.backend().buffer());
@@ -360,11 +396,11 @@ mod tests {
         state.modal_search_commit();
         state.modal_search_cycle_next(); // current = 1
 
-        let backend = TestBackend::new(60, 15);
+        let backend = TestBackend::new(60, 20);
         let mut terminal = Terminal::new(backend).unwrap();
         terminal
             .draw(|frame| {
-                render(frame, Rect::new(0, 0, 60, 15), &mut state);
+                render(frame, Rect::new(0, 0, 60, 20), &mut state);
             })
             .unwrap();
         insta::assert_debug_snapshot!(
@@ -401,11 +437,11 @@ mod tests {
             state.modal_search_push(c);
         }
 
-        let backend = TestBackend::new(60, 15);
+        let backend = TestBackend::new(60, 20);
         let mut terminal = Terminal::new(backend).unwrap();
         terminal
             .draw(|frame| {
-                render(frame, Rect::new(0, 0, 60, 15), &mut state);
+                render(frame, Rect::new(0, 0, 60, 20), &mut state);
             })
             .unwrap();
         insta::assert_debug_snapshot!("modal_search_input_strip", terminal.backend().buffer());

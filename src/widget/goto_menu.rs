@@ -7,7 +7,7 @@
 use ratatui::Frame;
 use ratatui::layout::Rect;
 use ratatui::text::{Line, Span};
-use ratatui::widgets::{Block, BorderType, Clear, Paragraph};
+use ratatui::widgets::{Clear, Paragraph};
 
 use crate::input::GoTarget;
 use crate::theme;
@@ -118,10 +118,10 @@ pub fn render(frame: &mut Frame, area: Rect, state: &GotoMenuState) {
     frame.render_widget(Clear, popup);
 
     let title = title_for(state);
-    let block = Block::bordered()
-        .border_type(BorderType::Rounded)
+    let block = crate::widget::panel::Panel::new(title)
+        .rounded()
         .border_style(theme::accent())
-        .title(title);
+        .into_block();
 
     let inner = block.inner(popup);
     frame.render_widget(block, popup);

@@ -1,5 +1,6 @@
 ---
 source: src/view/tracer/render.rs
+assertion_line: 1031
 expression: snap(&state)
 ---
 "┌ Tracer — Latest Events ──────────────────────────────────────────────────────────────────────────────────────────────┐"
@@ -16,7 +17,7 @@ expression: snap(&state)
 "│                                                                                                                      │"
 "│                                                                                                                      │"
 "│                                                                                                                      │"
-"│                                           loading latest provenance events…                                          │"
+"│                                                       loading…                                                       │"
 "│                                                                                                                      │"
 "│                                                                                                                      │"
 "│                                                                                                                      │"

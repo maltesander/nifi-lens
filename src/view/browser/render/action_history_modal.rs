@@ -64,8 +64,16 @@ pub fn render(frame: &mut Frame, area: Rect, modal: &ActionHistoryModalState) {
 
     let widths = compute_column_widths(modal);
     render_header(frame, rows[0], &widths);
-    render_body(frame, rows[1], modal, &widths);
+    let body_content_rows = render_body(frame, rows[1], modal, &widths);
     render_footer_status(frame, rows[2], modal);
+
+    crate::widget::scroll::render_vertical_scrollbar(
+        frame,
+        area,
+        modal.cursor.scroll.offset,
+        rows[1].height as usize,
+        body_content_rows,
+    );
 }
 
 /// Column widths grow to fit the longest value seen in the data, capped
@@ -137,16 +145,19 @@ fn render_header(frame: &mut Frame, area: Rect, widths: &ColumnWidths) {
     frame.render_widget(Paragraph::new(line), area);
 }
 
+/// Returns the total content row count (sum of one row per action plus
+/// one extra row per expanded action) so the caller can drive a
+/// scrollbar against it.
 fn render_body(
     frame: &mut Frame,
     area: Rect,
     modal: &ActionHistoryModalState,
     widths: &ColumnWidths,
-) {
+) -> usize {
     if let Some(err) = &modal.error {
         let msg = format!(" error: {err}");
         frame.render_widget(Paragraph::new(Span::styled(msg, theme::error())), area);
-        return;
+        return 0;
     }
     if modal.actions.is_empty() {
         let placeholder = if modal.loading {
@@ -158,7 +169,7 @@ fn render_body(
             Paragraph::new(Span::styled(placeholder, theme::muted())),
             area,
         );
-        return;
+        return 0;
     }
 
     let match_line_idx: Option<usize> = modal
@@ -213,7 +224,9 @@ fn render_body(
 
     // Render with the modal's scroll offset.
     let scroll_offset = u16::try_from(modal.cursor.offset).unwrap_or(u16::MAX);
+    let content_rows = lines.len();
     frame.render_widget(Paragraph::new(lines).scroll((scroll_offset, 0)), area);
+    content_rows
 }
 
 /// Bottom strip: when the user is typing a search query, show the

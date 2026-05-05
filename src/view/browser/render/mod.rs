@@ -344,14 +344,12 @@ pub fn render(
     age_warning: std::time::Duration,
     show_node_column: bool,
 ) {
-    let block = Block::default()
-        .borders(Borders::ALL)
-        .title(tab_title(state));
+    let block = crate::widget::panel::Panel::new(tab_title(state)).into_block();
     let inner = block.inner(area);
     frame.render_widget(block, area);
 
     if state.nodes.is_empty() {
-        let p = Paragraph::new("initial fetch…")
+        let p = Paragraph::new(LOADING_LABEL)
             .style(theme::muted())
             .alignment(Alignment::Center);
         let mid = Rect {

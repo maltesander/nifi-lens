@@ -234,6 +234,40 @@ impl ModalGate for AccessModalGate {
     }
 }
 
+/// Bulletins detail modal (`src/view/bulletins/modal.rs`). Body
+/// scrolling (Up/Down/PgUp/PgDn/Home/End) flows through to
+/// `FocusAction` via `scroll_passthrough`; the gate only owns the
+/// modal-scoped `Common(...)` chords (Esc / `/` / `n` / `N` / `c`).
+pub struct BulletinsDetailModalGate;
+
+impl ModalGate for BulletinsDetailModalGate {
+    type V = crate::input::BulletinsDetailModalVerb;
+
+    fn host_view() -> ViewId {
+        ViewId::Bulletins
+    }
+
+    fn is_active(state: &AppState) -> bool {
+        state.bulletins.detail_modal.is_some() && state.modal.is_none()
+    }
+
+    fn to_view_verb(v: Self::V) -> ViewVerb {
+        ViewVerb::BulletinsDetailModal(v)
+    }
+
+    fn scroll_passthrough() -> ScrollPassthrough {
+        ScrollPassthrough::Allow(&[
+            FocusAction::Up,
+            FocusAction::Down,
+            FocusAction::PageUp,
+            FocusAction::PageDown,
+            FocusAction::First,
+            FocusAction::Last,
+            FocusAction::Ascend,
+        ])
+    }
+}
+
 /// Browser identity drill-in modal (`src/view/browser/render/identity_modal.rs`).
 /// Stacks on top of `AccessModalGate`.
 pub struct IdentityModalGate;

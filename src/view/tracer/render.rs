@@ -24,6 +24,7 @@ use crate::view::tracer::state::{
     AttributeClass, AttributeDiffMode, ContentPane, DetailTab, EntryState, EventDetail,
     LatestEventsView, LineageFocus, LineageRunningState, LineageView, TracerMode, TracerState,
 };
+use crate::widget::modal::LOADING_LABEL;
 use crate::widget::panel::Panel;
 
 pub fn render(
@@ -289,7 +290,7 @@ fn render_lineage_detail(frame: &mut Frame, area: Rect, view: &LineageView) {
             frame.render_widget(para, spot);
         }
         EventDetail::Loading => {
-            let para = Paragraph::new(Span::styled("Loading event detail\u{2026}", theme::muted()))
+            let para = Paragraph::new(Span::styled(LOADING_LABEL, theme::muted()))
                 .alignment(Alignment::Center);
             let mid = inner.height.saturating_sub(1) / 2;
             let spot = Rect {
@@ -490,8 +491,8 @@ fn render_attribute_table(
     let table_rows: Vec<Row> = visible_attrs
         .iter()
         .map(|attr| {
-            let prev = attr.previous.as_deref().unwrap_or("(none)");
-            let curr = attr.current.as_deref().unwrap_or("(none)");
+            let prev = attr.previous.as_deref().unwrap_or(theme::PLACEHOLDER_DASH);
+            let curr = attr.current.as_deref().unwrap_or(theme::PLACEHOLDER_DASH);
             let class = AttributeClass::of(attr);
             let gutter = match class {
                 AttributeClass::Added => "+",
@@ -595,13 +596,13 @@ fn render_content_panel(
         ContentPane::LoadingInput => (
             " \u{00b7} input ".to_string(),
             "".to_string(),
-            "loading input\u{2026}".to_string(),
+            LOADING_LABEL.to_string(),
             theme::muted(),
         ),
         ContentPane::LoadingOutput => (
             " \u{00b7} output ".to_string(),
             "".to_string(),
-            "loading output\u{2026}".to_string(),
+            LOADING_LABEL.to_string(),
             theme::muted(),
         ),
         ContentPane::Shown {
@@ -708,11 +709,8 @@ fn render_latest_events(
 
     // Event list (or placeholder).
     if view.loading {
-        let placeholder = Paragraph::new(Span::styled(
-            "loading latest provenance events…",
-            theme::muted(),
-        ))
-        .alignment(Alignment::Center);
+        let placeholder = Paragraph::new(Span::styled(LOADING_LABEL, theme::muted()))
+            .alignment(Alignment::Center);
         let mid = rows[1].height.saturating_sub(1) / 2;
         let spot = Rect {
             x: rows[1].x,
@@ -781,7 +779,11 @@ fn render_event_table(
             let marker = if idx == selected_in_window { ">" } else { " " };
             let time = format_tracer_time(&e.event_time_iso, now, cfg, false);
             let uuid_short = short_uuid(&e.flow_file_uuid);
-            let relationship = e.relationship.as_deref().unwrap_or("-").to_string();
+            let relationship = e
+                .relationship
+                .as_deref()
+                .unwrap_or(theme::PLACEHOLDER_DASH)
+                .to_string();
             let details = e.details.as_deref().unwrap_or("").to_string();
             Row::new(vec![
                 Cell::from(marker),

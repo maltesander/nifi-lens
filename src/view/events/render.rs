@@ -125,7 +125,7 @@ pub fn render(
 fn render_exit_watch_confirm(frame: &mut Frame, area: Rect, n_events: usize) {
     use ratatui::layout::Margin;
     use ratatui::style::{Modifier, Style};
-    use ratatui::widgets::{Block, Borders, Clear, Wrap};
+    use ratatui::widgets::{Clear, Wrap};
 
     // 50x5 area, centred on the visible region.
     let modal_w = 50u16.min(area.width.saturating_sub(2));
@@ -138,10 +138,11 @@ fn render_exit_watch_confirm(frame: &mut Frame, area: Rect, n_events: usize) {
     );
 
     frame.render_widget(Clear, modal_area);
-    let block = Block::default().borders(Borders::ALL).title(Span::styled(
+    let block = crate::widget::panel::Panel::new(Line::from(Span::styled(
         " confirm ",
         Style::default().add_modifier(Modifier::BOLD),
-    ));
+    )))
+    .into_block();
     let inner = block.inner(modal_area);
     frame.render_widget(block, modal_area);
 
@@ -504,7 +505,7 @@ fn render_detail_pane(
         Span::raw(
             e.relationship
                 .clone()
-                .unwrap_or_else(|| "(none)".to_string()),
+                .unwrap_or_else(|| crate::theme::PLACEHOLDER_DASH.to_string()),
         ),
     ]);
     let component_line = Line::from(vec![

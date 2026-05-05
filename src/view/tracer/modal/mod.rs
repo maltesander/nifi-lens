@@ -10,7 +10,7 @@ mod render;
 
 use ratatui::Frame;
 use ratatui::layout::{Constraint, Direction, Layout, Rect};
-use ratatui::widgets::{Block, BorderType, Clear};
+use ratatui::widgets::Clear;
 
 use crate::view::tracer::state::ContentModalState;
 
@@ -22,15 +22,19 @@ pub fn render(
     modal: &mut ContentModalState,
     cfg: &crate::config::TracerCeilingConfig,
 ) {
+    if crate::widget::modal::render_too_small(frame, area) {
+        return;
+    }
+
     frame.render_widget(Clear, area);
 
     let title = format!(
         " Content · {} · event {} · {} ",
         modal.header.component_name, modal.event_id, modal.header.event_type,
     );
-    let block = Block::bordered()
-        .border_type(BorderType::Thick)
-        .title(title.as_str());
+    let block = crate::widget::panel::Panel::new(title.as_str())
+        .focused(true)
+        .into_block();
     let inner = block.inner(area);
     frame.render_widget(block, area);
 

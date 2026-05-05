@@ -58,18 +58,8 @@ pub fn render_peek_modal(f: &mut Frame<'_>, area: Rect, state: &QueueListingPeek
         .as_ref()
         .map(|s| s.input_active)
         .unwrap_or(false);
-    if prompt_active {
-        let query = state
-            .search
-            .as_ref()
-            .map(|s| s.query.clone())
-            .unwrap_or_default();
-        let prompt = Line::from(vec![
-            Span::styled("/", theme::accent()),
-            Span::raw(query),
-            Span::styled("_", theme::muted()),
-        ]);
-        f.render_widget(Paragraph::new(prompt), chunks[3]);
+    if prompt_active && let Some(search) = state.search.as_ref() {
+        crate::widget::search::render_search_input(f, chunks[3], search);
     } else {
         render_hints(f, chunks[3]);
     }
@@ -356,6 +346,6 @@ mod tests {
         });
 
         let out = render_to_string(80, 24, &p);
-        assert!(out.contains("/abc"), "expected prompt overlay:\n{out}");
+        assert!(out.contains("/ abc"), "expected prompt overlay:\n{out}");
     }
 }

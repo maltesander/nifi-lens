@@ -1,5 +1,6 @@
 ---
 source: src/view/events/render.rs
+assertion_line: 787
 expression: render_to_string(&state)
 ---
 "┌ Filters ─────────────────────────────────────────────────────────────────────────────────────────┐"
@@ -19,7 +20,7 @@ expression: render_to_string(&state)
 "┌ Detail ──────────────────────────────────────────────────────────────────────────────────────────┐"
 "│SEND · UpdateRecord-fx-rate · Apr 30 10:42:08 · flowfile ff-aaaaaaaa-bbbb-cccc-dddd-000000000003  │"
 "│                                                                                                  │"
-"│relationship   (none)                                                                             │"
+"│relationship   —                                                                                  │"
 "│component  UpdateRecord-fx-rate   group  g1                                                       │"
 "│                                                                                                  │"
 "│attributes                                                                                        │"

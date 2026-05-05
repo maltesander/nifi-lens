@@ -2,7 +2,6 @@
 
 use ratatui::Frame;
 use ratatui::layout::{Constraint, Direction, Layout, Rect};
-use ratatui::widgets::{Block, Borders};
 
 use crate::app::state::{AppState, Modal, ViewId};
 use crate::view::{browser, bulletins, events, overview, tracer};
@@ -27,14 +26,13 @@ pub fn render(frame: &mut Frame, state: &mut AppState) {
     let hints = crate::app::state::collect_hints(state);
     crate::widget::hint_bar::render(frame, chunks[3], &hints);
 
-    if let Some(modal) = &state.modal {
+    // Compute disjoint reads up-front so the modal arm can take a
+    // mutable borrow on `state.modal` without conflicting.
+    let active_view = state.current_tab;
+    let content_modal_open = state.tracer.content_modal.is_some();
+    if let Some(modal) = state.modal.as_mut() {
         match modal {
-            Modal::Help => help_modal::render(
-                frame,
-                root,
-                state.current_tab,
-                state.tracer.content_modal.is_some(),
-            ),
+            Modal::Help(hs) => help_modal::render(frame, root, active_view, content_modal_open, hs),
             Modal::ContextSwitcher(cs) => context_switcher::render(frame, root, cs),
             Modal::ErrorDetail => render_error_detail(frame, root, state),
             Modal::FuzzyFind(fs) => {
@@ -154,9 +152,7 @@ fn render_content(frame: &mut Frame, area: Rect, state: &mut AppState) {
 fn render_error_detail(frame: &mut Frame, area: Rect, state: &AppState) {
     use ratatui::widgets::{Clear, Paragraph};
     let text = state.error_detail.clone().unwrap_or_default();
-    let block = Block::default()
-        .title(" Error detail (e/Esc to close) ")
-        .borders(Borders::ALL);
+    let block = crate::widget::panel::Panel::new(" Error detail (e/Esc to close) ").into_block();
     let p = Paragraph::new(text).block(block);
     let modal = crate::layout::center_percent(
         area,

@@ -9,6 +9,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **First-run config bootstrap.** Launching `nifilens` without a config
+  file now writes the commented template to the platform default path
+  and prints guidance ("edit it with your cluster URL and credentials,
+  then re-run nifilens"), instead of erroring out. `--config <path>`
+  still surfaces the original error so an explicit override isn't
+  silently bootstrapped at a different location.
+- **Help modal grows and scrolls.** `?` now opens a help modal that
+  sizes to fit the terminal (up to 80 cols × area-4 rows), and scrolls
+  via `↑/↓/PgUp/PgDn/Home/End` when the active tab's verb set
+  overflows. A footer chip shows the current page when scrolling is
+  active.
 - Browser: new **Access** modal (`u`) showing who can view / modify /
   view-data / operate / manage-policies on the selected UUID-bearing
   component (process group, processor, controller service, ports, RPG,
@@ -19,6 +30,46 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **Bulletins hint row** now advertises the `1·2·3 sev` chord that
+  toggles ERROR / WARN / INFO severity filters — the chips themselves
+  showed counts but never the chord that flips them.
+- **Visual language unified.** A single `LOADING_LABEL` (`"loading…"`)
+  now renders everywhere a fetch is in-flight (Browser tree, Bulletins
+  list age chip, Tracer event detail / latest-events / content sides);
+  three previous variants (`"initial fetch…"`, `"connecting…"`,
+  `"Loading event detail…"`) are gone. A new `theme::PLACEHOLDER_DASH`
+  constant (em-dash) replaces the previous mix of `(none)` / `none` /
+  `-` / blank for absent values in Browser connection panes, Events
+  detail relationship, Tracer attribute diff cells and lineage rows,
+  and Overview node-detail TLS chain. The `Panel` widget gained
+  `border_style(Style)` and `rounded()` builder methods; ten previous
+  raw `Block::default().borders(...)` / `Block::bordered()` sites
+  (Browser tree outer block, Events confirm modal, Tracer content
+  modal, Bulletins detail modal, properties / version-control /
+  identity / save / help / error-detail modals, goto menu, watch
+  strip) now route through `Panel`. Severity-coloured frames (the
+  Bulletins detail modal) keep their hue via `border_style`.
+- **Scrollbar indicators.** A new `widget::scroll::render_vertical_scrollbar`
+  helper renders a position indicator on the right edge of any
+  scrollable pane. Wired into the Bulletins detail modal and Browser
+  Action history modal as the first integration sites — the bar
+  auto-suppresses when content fits the viewport. Same helper is
+  available for any further pane that already tracks a
+  `VerticalScrollState`.
+- **Modal framework hardening.** The Bulletins detail modal and Tracer
+  content viewer modal are now consistent with the rest of the
+  framework. Both now short-circuit at `widget::modal::MIN_WIDTH ×
+  MIN_HEIGHT` via `render_too_small`, render the search prompt via
+  the shared `widget::search::render_search_{input,strip}` helpers,
+  and render the footer hint strip via the shared
+  `widget::modal::render_verb_hint_strip{,_with}` helpers. Bulletins
+  detail gained a proper `BulletinsDetailModalVerb` enum + a
+  `BulletinsDetailModalGate` chained in `KeyMap::translate`, so its
+  modal-only chords (`Esc` / `/` / `n` / `N` / `c`) shadow the outer
+  Bulletins-tab keybindings while open instead of running through
+  the parent verb dispatch. The Queue-listing peek modal's hand-rolled
+  `/`-prompt was migrated to `render_search_input`; cursor glyph and
+  spacing now match the rest of the app.
 - Integration test fixture switched from NiFi `single-user-authorizer` to
   `managed-authorizer` with file-based providers. Now seeded with `admin`
   / `alice` / `bob` / `carol` users and an `ops-team` group, plus

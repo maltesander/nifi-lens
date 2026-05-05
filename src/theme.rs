@@ -2,6 +2,13 @@
 
 use ratatui::style::{Color, Modifier, Style};
 
+/// Canonical placeholder glyph for an absent / not-yet-known value
+/// (em-dash). Use this instead of inventing strings like "none",
+/// "(none)", "-", or `\u{2014}` literals — keeping a single source
+/// of truth means the UI reads consistently and one swap changes
+/// every absent-value cell at once.
+pub const PLACEHOLDER_DASH: &str = "\u{2014}";
+
 pub fn muted() -> Style {
     Style::default().fg(Color::DarkGray)
 }

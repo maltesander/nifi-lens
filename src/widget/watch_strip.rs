@@ -25,7 +25,7 @@ use ratatui::Frame;
 use ratatui::layout::Rect;
 use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
-use ratatui::widgets::{Block, Borders, Paragraph};
+use ratatui::widgets::Paragraph;
 
 use crate::theme;
 use crate::view::events::state::{EventsState, WatchSession, WatchStatus};
@@ -67,16 +67,9 @@ fn render_full(frame: &mut Frame, area: Rect, watch: &WatchSession, focused: boo
     ])
     .right_aligned();
 
-    let border_style = if focused {
-        theme::accent()
-    } else {
-        theme::border_dim()
-    };
-
-    let block = Block::default()
-        .borders(Borders::ALL)
-        .border_style(border_style)
-        .title(title)
+    let block = crate::widget::panel::Panel::new(title)
+        .focused(focused)
+        .into_block()
         .title_top(right_title);
 
     let inner = block.inner(area);

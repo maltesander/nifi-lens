@@ -202,7 +202,7 @@ fn render_endpoints_panel(
 
     // Relations.
     let relations = if d.selected_relationships.is_empty() {
-        "(none)".to_string()
+        crate::theme::PLACEHOLDER_DASH.to_string()
     } else {
         d.selected_relationships.join(", ")
     };
@@ -251,7 +251,7 @@ fn render_back_pressure_panel(frame: &mut Frame, area: Rect, d: &ConnectionDetai
         Line::from(vec![
             Span::styled("expire   ", theme::muted()),
             Span::raw(if d.flow_file_expiration.is_empty() {
-                "none".to_string()
+                crate::theme::PLACEHOLDER_DASH.to_string()
             } else {
                 d.flow_file_expiration.clone()
             }),

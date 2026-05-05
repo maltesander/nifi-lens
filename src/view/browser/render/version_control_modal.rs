@@ -6,7 +6,7 @@ use ratatui::Frame;
 use ratatui::layout::{Alignment, Constraint, Direction, Layout, Rect};
 use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
-use ratatui::widgets::{Block, Borders, Clear, Paragraph};
+use ratatui::widgets::{Clear, Paragraph};
 
 use crate::theme;
 use crate::view::browser::state::version_control_modal::short_id;
@@ -49,7 +49,7 @@ pub fn render(frame: &mut Frame, area: Rect, modal: &VersionControlModalState) {
 }
 
 fn render_identity(frame: &mut Frame, area: Rect, modal: &VersionControlModalState) {
-    let block = Block::default().borders(Borders::ALL).title(" Identity ");
+    let block = crate::widget::panel::Panel::new(" Identity ").into_block();
     let inner = block.inner(area);
     frame.render_widget(block, area);
 

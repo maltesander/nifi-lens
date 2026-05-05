@@ -138,7 +138,7 @@ fn render_header(frame: &mut Frame, area: Rect, row: &NodeHealthRow, now: time::
             Span::raw(
                 c.node_start_iso
                     .clone()
-                    .unwrap_or_else(|| "\u{2014}".into()),
+                    .unwrap_or_else(|| crate::theme::PLACEHOLDER_DASH.into()),
             ),
         ]),
         None => Line::from(""),
@@ -169,7 +169,10 @@ fn render_cert_block(
         None => {
             lines.push(Line::from(vec![
                 Span::styled("  cert     ", theme::muted()),
-                Span::styled("\u{2014} fetching", theme::muted()),
+                Span::styled(
+                    format!("{} fetching", crate::theme::PLACEHOLDER_DASH),
+                    theme::muted(),
+                ),
             ]));
         }
         Some(Err(err)) => {
@@ -189,11 +192,11 @@ fn render_cert_block(
                 let date_str = entry
                     .not_after
                     .format(&time::format_description::well_known::Iso8601::DATE)
-                    .unwrap_or_else(|_| "\u{2014}".into());
+                    .unwrap_or_else(|_| crate::theme::PLACEHOLDER_DASH.into());
                 let cn = entry
                     .subject_cn
                     .clone()
-                    .unwrap_or_else(|| "\u{2014}".into());
+                    .unwrap_or_else(|| crate::theme::PLACEHOLDER_DASH.into());
                 lines.push(Line::from(vec![
                     Span::styled(label_cell, theme::muted()),
                     Span::raw(format!("{kind}  ")),
@@ -323,7 +326,7 @@ fn render_resources(frame: &mut Frame, area: Rect, row: &NodeHealthRow) {
         .cluster
         .as_ref()
         .map(|c| c.active_thread_count.to_string())
-        .unwrap_or_else(|| "\u{2014}".into());
+        .unwrap_or_else(|| crate::theme::PLACEHOLDER_DASH.into());
     let queued = row
         .cluster
         .as_ref()
@@ -334,7 +337,7 @@ fn render_resources(frame: &mut Frame, area: Rect, row: &NodeHealthRow) {
                 format_bytes(c.bytes_queued)
             )
         })
-        .unwrap_or_else(|| "\u{2014}".into());
+        .unwrap_or_else(|| crate::theme::PLACEHOLDER_DASH.into());
 
     let lines = vec![
         Line::from(vec![Span::styled("  Resources", theme::bold())]),
@@ -451,7 +454,7 @@ fn render_events(frame: &mut Frame, area: Rect, row: &NodeHealthRow) {
 fn event_hms(ev: &ClusterNodeEvent) -> String {
     crate::timestamp::parse_nifi_timestamp(&ev.timestamp_iso)
         .map(|dt| format!("{:02}:{:02}:{:02}", dt.hour(), dt.minute(), dt.second()))
-        .unwrap_or_else(|| "\u{2014}".into())
+        .unwrap_or_else(|| crate::theme::PLACEHOLDER_DASH.into())
 }
 
 fn event_category_style(category: &str) -> Style {
