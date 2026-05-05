@@ -714,9 +714,7 @@ impl Drop for QueueListingHandle {
         let Some(request_id) = request_id else { return };
         let client = self.client.clone();
         let queue_id = self.queue_id.clone();
-        // Drop runs on the main UI task, which lives on the LocalSet —
-        // spawn_local is the right primitive here.
-        tokio::task::spawn_local(async move {
+        crate::app::cleanup::spawn_cleanup(async move {
             let guard = client.read().await;
             if let Err(e) =
                 crate::client::queues::cancel_listing_request(&guard, &queue_id, &request_id).await
