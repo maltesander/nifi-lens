@@ -322,11 +322,18 @@ fn diff_body_lines(
     search: Option<&crate::widget::search::SearchState>,
 ) -> Vec<Line<'static>> {
     let Some(cache) = modal.diff_cache.as_ref() else {
+        // `Diffable::Ok` + no cache means an off-thread
+        // `compute_diff_cache` is in flight (or about to fire). The
+        // user sees the same "computing diff…" placeholder as during
+        // the initial chunk-load phase — both genuinely block the
+        // Diff tab from rendering.
+        let inflight = modal.diff_inflight_gen.is_some();
         return vec![Line::from(Span::styled(
             match &modal.diffable {
                 Diffable::Pending => "computing diff…".to_string(),
-                Diffable::NotAvailable(r) => format!("diff unavailable: {}", reason_chip(*r)),
+                Diffable::Ok if inflight => "computing diff…".to_string(),
                 Diffable::Ok => "no diff cached".to_string(),
+                Diffable::NotAvailable(r) => format!("diff unavailable: {}", reason_chip(*r)),
             },
             theme::muted(),
         ))];

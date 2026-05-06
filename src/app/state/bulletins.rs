@@ -74,6 +74,7 @@ impl ViewKeyHandler for BulletinsHandler {
             tracer_followup: None,
             sparkline_followup: None,
             queue_listing_followup: None,
+            tracer_diff_followup: None,
         })
     }
 
@@ -105,6 +106,7 @@ impl ViewKeyHandler for BulletinsHandler {
             tracer_followup: None,
             sparkline_followup: None,
             queue_listing_followup: None,
+            tracer_diff_followup: None,
         })
     }
 
@@ -179,6 +181,7 @@ fn handle_modal_focus(state: &mut AppState, action: FocusAction) -> Option<Updat
         tracer_followup: None,
         sparkline_followup: None,
         queue_listing_followup: None,
+        tracer_diff_followup: None,
     })
 }
 
@@ -212,6 +215,7 @@ fn handle_detail_modal_verb(state: &mut AppState, v: BulletinsDetailModalVerb) -
         tracer_followup: None,
         sparkline_followup: None,
         queue_listing_followup: None,
+        tracer_diff_followup: None,
     }
 }
 
@@ -230,6 +234,7 @@ fn handle_modal_search_input(state: &mut AppState, key: KeyEvent) -> Option<Upda
         tracer_followup: None,
         sparkline_followup: None,
         queue_listing_followup: None,
+        tracer_diff_followup: None,
     })
 }
 
@@ -245,6 +250,7 @@ fn handle_text_input(state: &mut AppState, key: KeyEvent) -> Option<UpdateResult
                 tracer_followup: None,
                 sparkline_followup: None,
                 queue_listing_followup: None,
+                tracer_diff_followup: None,
             })
         }
         KeyCode::Enter => {
@@ -256,6 +262,7 @@ fn handle_text_input(state: &mut AppState, key: KeyEvent) -> Option<UpdateResult
                 tracer_followup: None,
                 sparkline_followup: None,
                 queue_listing_followup: None,
+                tracer_diff_followup: None,
             })
         }
         KeyCode::Backspace => {
@@ -267,6 +274,7 @@ fn handle_text_input(state: &mut AppState, key: KeyEvent) -> Option<UpdateResult
                 tracer_followup: None,
                 sparkline_followup: None,
                 queue_listing_followup: None,
+                tracer_diff_followup: None,
             })
         }
         KeyCode::Char('v') if key.modifiers == KeyModifiers::NONE => {
@@ -287,6 +295,7 @@ fn handle_text_input(state: &mut AppState, key: KeyEvent) -> Option<UpdateResult
                 tracer_followup: None,
                 sparkline_followup: None,
                 queue_listing_followup: None,
+                tracer_diff_followup: None,
             })
         }
         KeyCode::Char('x') if key.modifiers == KeyModifiers::NONE => {
@@ -306,6 +315,7 @@ fn handle_text_input(state: &mut AppState, key: KeyEvent) -> Option<UpdateResult
                 tracer_followup: None,
                 sparkline_followup: None,
                 queue_listing_followup: None,
+                tracer_diff_followup: None,
             })
         }
         KeyCode::Char(ch) => {
@@ -317,6 +327,7 @@ fn handle_text_input(state: &mut AppState, key: KeyEvent) -> Option<UpdateResult
                 tracer_followup: None,
                 sparkline_followup: None,
                 queue_listing_followup: None,
+                tracer_diff_followup: None,
             })
         }
         _ => Some(UpdateResult::default()),

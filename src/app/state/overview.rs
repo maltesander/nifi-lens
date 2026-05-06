@@ -42,6 +42,7 @@ impl ViewKeyHandler for OverviewHandler {
                 tracer_followup: None,
                 sparkline_followup: None,
                 queue_listing_followup: None,
+                tracer_diff_followup: None,
             })
         };
 

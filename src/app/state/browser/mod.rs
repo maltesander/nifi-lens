@@ -144,6 +144,7 @@ impl ViewKeyHandler for BrowserHandler {
                         tracer_followup: None,
                         sparkline_followup: None,
                         queue_listing_followup: None,
+                        tracer_diff_followup: None,
                     });
                 }
                 // This branch is unreachable when the enabled() predicate is
@@ -182,6 +183,7 @@ impl ViewKeyHandler for BrowserHandler {
                     tracer_followup: None,
                     sparkline_followup: None,
                     queue_listing_followup: None,
+                    tracer_diff_followup: None,
                 });
             }
             BrowserVerb::Watch => {
@@ -201,6 +203,7 @@ impl ViewKeyHandler for BrowserHandler {
                     tracer_followup: None,
                     sparkline_followup: None,
                     queue_listing_followup: None,
+                    tracer_diff_followup: None,
                 });
             }
             BrowserVerb::ShowVersionControl => {
@@ -224,6 +227,7 @@ impl ViewKeyHandler for BrowserHandler {
                     tracer_followup: None,
                     sparkline_followup: None,
                     queue_listing_followup: None,
+                    tracer_diff_followup: None,
                 });
             }
             // OpenSearch / SearchNext / SearchPrev / Close are not bound on
@@ -263,6 +267,7 @@ impl ViewKeyHandler for BrowserHandler {
                     tracer_followup: None,
                     sparkline_followup: None,
                     queue_listing_followup: None,
+                    tracer_diff_followup: None,
                 });
             }
         }
@@ -272,6 +277,7 @@ impl ViewKeyHandler for BrowserHandler {
             tracer_followup: None,
             sparkline_followup: None,
             queue_listing_followup: None,
+            tracer_diff_followup: None,
         })
     }
 
@@ -346,6 +352,7 @@ impl ViewKeyHandler for BrowserHandler {
                         tracer_followup: None,
                         sparkline_followup: None,
                         queue_listing_followup: None,
+                        tracer_diff_followup: None,
                     })
                 }
                 FocusAction::Left => {
@@ -362,6 +369,7 @@ impl ViewKeyHandler for BrowserHandler {
                         tracer_followup: None,
                         sparkline_followup: None,
                         queue_listing_followup: None,
+                        tracer_diff_followup: None,
                     })
                 }
                 FocusAction::Right => {
@@ -378,6 +386,7 @@ impl ViewKeyHandler for BrowserHandler {
                         tracer_followup: None,
                         sparkline_followup: None,
                         queue_listing_followup: None,
+                        tracer_diff_followup: None,
                     })
                 }
                 FocusAction::Up => {
@@ -394,6 +403,7 @@ impl ViewKeyHandler for BrowserHandler {
                         tracer_followup: None,
                         sparkline_followup: None,
                         queue_listing_followup: None,
+                        tracer_diff_followup: None,
                     })
                 }
                 FocusAction::Down => {
@@ -418,6 +428,7 @@ impl ViewKeyHandler for BrowserHandler {
                         tracer_followup: None,
                         sparkline_followup: None,
                         queue_listing_followup: None,
+                        tracer_diff_followup: None,
                     })
                 }
                 FocusAction::Descend => {
@@ -443,6 +454,7 @@ impl ViewKeyHandler for BrowserHandler {
                             tracer_followup: None,
                             sparkline_followup: None,
                             queue_listing_followup: None,
+                            tracer_diff_followup: None,
                         });
                     }
                     // Properties (Processor or CS): jump when the selected
@@ -483,6 +495,7 @@ impl ViewKeyHandler for BrowserHandler {
                                     tracer_followup: None,
                                     sparkline_followup: None,
                                     queue_listing_followup: None,
+                                    tracer_diff_followup: None,
                                 });
                             }
                             // Parameter reference cross-link.
@@ -511,6 +524,7 @@ impl ViewKeyHandler for BrowserHandler {
                                     tracer_followup: None,
                                     sparkline_followup: None,
                                     queue_listing_followup: None,
+                                    tracer_diff_followup: None,
                                 });
                             }
                         }
@@ -539,6 +553,7 @@ impl ViewKeyHandler for BrowserHandler {
                             tracer_followup: None,
                             sparkline_followup: None,
                             queue_listing_followup: None,
+                            tracer_diff_followup: None,
                         });
                     }
                     // Connections (Processor detail): jump to opposite endpoint.
@@ -562,6 +577,7 @@ impl ViewKeyHandler for BrowserHandler {
                             tracer_followup: None,
                             sparkline_followup: None,
                             queue_listing_followup: None,
+                            tracer_diff_followup: None,
                         });
                     }
                     // On the ControllerServices section of a PG, emit a
@@ -588,6 +604,7 @@ impl ViewKeyHandler for BrowserHandler {
                             tracer_followup: None,
                             sparkline_followup: None,
                             queue_listing_followup: None,
+                            tracer_diff_followup: None,
                         });
                     }
                     // On the ChildGroups section, drill into the selected child PG.
@@ -618,6 +635,7 @@ impl ViewKeyHandler for BrowserHandler {
                             tracer_followup: None,
                             sparkline_followup: __sparkline_fu,
                             queue_listing_followup: __queue_listing_fu,
+                            tracer_diff_followup: None,
                         });
                     }
                     // ParameterContext section: open the parameter-context modal.
@@ -640,6 +658,7 @@ impl ViewKeyHandler for BrowserHandler {
                             tracer_followup: None,
                             sparkline_followup: None,
                             queue_listing_followup: None,
+                            tracer_diff_followup: None,
                         });
                     }
                     // Other sections: no local descent.
@@ -681,6 +700,7 @@ impl ViewKeyHandler for BrowserHandler {
                         tracer_followup: None,
                         sparkline_followup: None,
                         queue_listing_followup: None,
+                        tracer_diff_followup: None,
                     })
                 }
                 FocusAction::PrevPane => {
@@ -703,6 +723,7 @@ impl ViewKeyHandler for BrowserHandler {
                         tracer_followup: None,
                         sparkline_followup: None,
                         queue_listing_followup: None,
+                        tracer_diff_followup: None,
                     })
                 }
                 FocusAction::PageUp
@@ -725,6 +746,7 @@ impl ViewKeyHandler for BrowserHandler {
                     tracer_followup: None,
                     sparkline_followup: __sparkline_fu,
                     queue_listing_followup: __queue_listing_fu,
+                    tracer_diff_followup: None,
                 })
             }
             FocusAction::Down => {
@@ -738,6 +760,7 @@ impl ViewKeyHandler for BrowserHandler {
                     tracer_followup: None,
                     sparkline_followup: __sparkline_fu,
                     queue_listing_followup: __queue_listing_fu,
+                    tracer_diff_followup: None,
                 })
             }
             FocusAction::PageUp => {
@@ -751,6 +774,7 @@ impl ViewKeyHandler for BrowserHandler {
                     tracer_followup: None,
                     sparkline_followup: __sparkline_fu,
                     queue_listing_followup: __queue_listing_fu,
+                    tracer_diff_followup: None,
                 })
             }
             FocusAction::PageDown => {
@@ -764,6 +788,7 @@ impl ViewKeyHandler for BrowserHandler {
                     tracer_followup: None,
                     sparkline_followup: __sparkline_fu,
                     queue_listing_followup: __queue_listing_fu,
+                    tracer_diff_followup: None,
                 })
             }
             FocusAction::First => {
@@ -777,6 +802,7 @@ impl ViewKeyHandler for BrowserHandler {
                     tracer_followup: None,
                     sparkline_followup: __sparkline_fu,
                     queue_listing_followup: __queue_listing_fu,
+                    tracer_diff_followup: None,
                 })
             }
             FocusAction::Last => {
@@ -790,6 +816,7 @@ impl ViewKeyHandler for BrowserHandler {
                     tracer_followup: None,
                     sparkline_followup: __sparkline_fu,
                     queue_listing_followup: __queue_listing_fu,
+                    tracer_diff_followup: None,
                 })
             }
             FocusAction::Right => {
@@ -820,6 +847,7 @@ impl ViewKeyHandler for BrowserHandler {
                     tracer_followup: None,
                     sparkline_followup: __sparkline_fu,
                     queue_listing_followup: __queue_listing_fu,
+                    tracer_diff_followup: None,
                 })
             }
             FocusAction::Left => {
@@ -849,6 +877,7 @@ impl ViewKeyHandler for BrowserHandler {
                     tracer_followup: None,
                     sparkline_followup: __sparkline_fu,
                     queue_listing_followup: __queue_listing_fu,
+                    tracer_diff_followup: None,
                 })
             }
             FocusAction::Descend => {
@@ -874,6 +903,7 @@ impl ViewKeyHandler for BrowserHandler {
                         tracer_followup: None,
                         sparkline_followup: None,
                         queue_listing_followup: None,
+                        tracer_diff_followup: None,
                     });
                 }
                 if matches!(kind, NK::ProcessGroup) {
@@ -887,6 +917,7 @@ impl ViewKeyHandler for BrowserHandler {
                         tracer_followup: None,
                         sparkline_followup: __sparkline_fu,
                         queue_listing_followup: __queue_listing_fu,
+                        tracer_diff_followup: None,
                     })
                 } else if !sections.is_empty() {
                     // Leaf node with focusable sections — enter detail focus.
@@ -901,6 +932,7 @@ impl ViewKeyHandler for BrowserHandler {
                         tracer_followup: None,
                         sparkline_followup: None,
                         queue_listing_followup: None,
+                        tracer_diff_followup: None,
                     })
                 } else {
                     None
@@ -919,6 +951,7 @@ impl ViewKeyHandler for BrowserHandler {
                     tracer_followup: None,
                     sparkline_followup: __sparkline_fu,
                     queue_listing_followup: __queue_listing_fu,
+                    tracer_diff_followup: None,
                 })
             }
             FocusAction::NextPane => {
@@ -941,6 +974,7 @@ impl ViewKeyHandler for BrowserHandler {
                     tracer_followup: None,
                     sparkline_followup: None,
                     queue_listing_followup: None,
+                    tracer_diff_followup: None,
                 })
             }
             FocusAction::PrevPane => {
@@ -963,6 +997,7 @@ impl ViewKeyHandler for BrowserHandler {
                     tracer_followup: None,
                     sparkline_followup: None,
                     queue_listing_followup: None,
+                    tracer_diff_followup: None,
                 })
             }
         }
@@ -1061,6 +1096,7 @@ impl ViewKeyHandler for BrowserHandler {
                 tracer_followup: None,
                 sparkline_followup: None,
                 queue_listing_followup: None,
+                tracer_diff_followup: None,
             });
         }
 
@@ -1088,6 +1124,7 @@ impl ViewKeyHandler for BrowserHandler {
                 tracer_followup: None,
                 sparkline_followup: None,
                 queue_listing_followup: None,
+                tracer_diff_followup: None,
             });
         }
 
@@ -1115,6 +1152,7 @@ impl ViewKeyHandler for BrowserHandler {
                 tracer_followup: None,
                 sparkline_followup: None,
                 queue_listing_followup: None,
+                tracer_diff_followup: None,
             });
         }
 
@@ -1143,6 +1181,7 @@ impl ViewKeyHandler for BrowserHandler {
                 tracer_followup: None,
                 sparkline_followup: None,
                 queue_listing_followup: None,
+                tracer_diff_followup: None,
             });
         }
 
@@ -1172,6 +1211,7 @@ impl ViewKeyHandler for BrowserHandler {
             tracer_followup: None,
             sparkline_followup: None,
             queue_listing_followup: None,
+            tracer_diff_followup: None,
         })
     }
 }
@@ -1227,6 +1267,7 @@ fn handle_version_control_modal_verb(
         tracer_followup: None,
         sparkline_followup: None,
         queue_listing_followup: None,
+        tracer_diff_followup: None,
     };
 
     match v {
@@ -1289,6 +1330,7 @@ fn handle_version_control_modal_verb(
                 tracer_followup: None,
                 sparkline_followup: None,
                 queue_listing_followup: None,
+                tracer_diff_followup: None,
             }
         }
         V::ScrollUp => {
@@ -1349,6 +1391,7 @@ fn handle_parameter_context_modal_verb(
         tracer_followup: None,
         sparkline_followup: None,
         queue_listing_followup: None,
+        tracer_diff_followup: None,
     };
 
     use crate::view::browser::state::parameter_context_modal::ParameterContextPane;
@@ -1408,6 +1451,7 @@ fn handle_parameter_context_modal_verb(
                     tracer_followup: None,
                     sparkline_followup: None,
                     queue_listing_followup: None,
+                    tracer_diff_followup: None,
                 }
             } else {
                 state.browser.apply_parameter_context_modal_failed(
@@ -1648,6 +1692,7 @@ fn handle_action_history_modal_verb(
         tracer_followup: None,
         sparkline_followup: None,
         queue_listing_followup: None,
+        tracer_diff_followup: None,
     };
 
     match v {
@@ -1685,6 +1730,7 @@ fn handle_action_history_modal_verb(
                 tracer_followup: None,
                 sparkline_followup: None,
                 queue_listing_followup: None,
+                tracer_diff_followup: None,
             }
         }
         V::ToggleExpand => {
@@ -2088,6 +2134,7 @@ fn handle_access_modal_verb(
         tracer_followup: None,
         sparkline_followup: None,
         queue_listing_followup: None,
+        tracer_diff_followup: None,
     };
 
     // Early-return arms that need to release the modal borrow before
@@ -2129,6 +2176,7 @@ fn handle_access_modal_verb(
                 tracer_followup: None,
                 sparkline_followup: None,
                 queue_listing_followup: None,
+                tracer_diff_followup: None,
             };
         }
         _ => {}
@@ -2181,6 +2229,7 @@ fn handle_access_modal_verb(
                 tracer_followup: None,
                 sparkline_followup: None,
                 queue_listing_followup: None,
+                tracer_diff_followup: None,
             }
         }
         // Close and DrillIdentity are handled before the modal borrow above.
@@ -2202,6 +2251,7 @@ fn handle_identity_modal_verb(
         tracer_followup: None,
         sparkline_followup: None,
         queue_listing_followup: None,
+        tracer_diff_followup: None,
     };
 
     // Close and CrossLink need to release the modal borrow before calling
@@ -2242,6 +2292,7 @@ fn handle_identity_modal_verb(
                     tracer_followup: None,
                     sparkline_followup: None,
                     queue_listing_followup: None,
+                    tracer_diff_followup: None,
                 };
             }
             return redraw();

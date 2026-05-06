@@ -206,6 +206,8 @@ mod tests {
                 in_flight_pretty: false,
             },
             diff_cache: None,
+            diff_generation: 0,
+            diff_inflight_gen: None,
             scroll: crate::widget::scroll::BidirectionalScrollState::default(),
             search: None,
         }

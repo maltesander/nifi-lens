@@ -34,6 +34,7 @@ impl ViewKeyHandler for TracerHandler {
                         tracer_followup: None,
                         sparkline_followup: None,
                         queue_listing_followup: None,
+                        tracer_diff_followup: None,
                     });
                 }
                 TracerMode::LatestEvents(view) => {
@@ -46,6 +47,7 @@ impl ViewKeyHandler for TracerHandler {
                         tracer_followup: None,
                         sparkline_followup: None,
                         queue_listing_followup: None,
+                        tracer_diff_followup: None,
                     });
                 }
                 _ => {}
@@ -102,6 +104,7 @@ impl ViewKeyHandler for TracerHandler {
                         tracer_followup: None,
                         sparkline_followup: None,
                         queue_listing_followup: None,
+                        tracer_diff_followup: None,
                     });
                 }
                 // No-op when Attributes tab is active or content not shown.
@@ -119,6 +122,7 @@ impl ViewKeyHandler for TracerHandler {
                         tracer_followup: None,
                         sparkline_followup: None,
                         queue_listing_followup: None,
+                        tracer_diff_followup: None,
                     });
                 }
                 return Some(UpdateResult::default());
@@ -155,6 +159,7 @@ impl ViewKeyHandler for TracerHandler {
                         tracer_followup: None,
                         sparkline_followup: None,
                         queue_listing_followup: None,
+                        tracer_diff_followup: None,
                     });
                 }
                 return Some(UpdateResult::default());
@@ -177,6 +182,7 @@ impl ViewKeyHandler for TracerHandler {
                     tracer_followup: None,
                     sparkline_followup: None,
                     queue_listing_followup: None,
+                    tracer_diff_followup: None,
                 });
             }
             // OpenSearch / SearchNext / SearchPrev / Close are not bound on
@@ -196,6 +202,7 @@ impl ViewKeyHandler for TracerHandler {
             tracer_followup: None,
             sparkline_followup: None,
             queue_listing_followup: None,
+            tracer_diff_followup: None,
         })
     }
 
@@ -274,6 +281,7 @@ impl ViewKeyHandler for TracerHandler {
                 tracer_followup: None,
                 sparkline_followup: None,
                 queue_listing_followup: None,
+                tracer_diff_followup: None,
             });
         }
 
@@ -287,6 +295,7 @@ impl ViewKeyHandler for TracerHandler {
                             tracer_followup: None,
                             sparkline_followup: None,
                             queue_listing_followup: None,
+                            tracer_diff_followup: None,
                         })
                     } else {
                         Some(UpdateResult {
@@ -295,6 +304,7 @@ impl ViewKeyHandler for TracerHandler {
                             tracer_followup: None,
                             sparkline_followup: None,
                             queue_listing_followup: None,
+                            tracer_diff_followup: None,
                         })
                     }
                 }
@@ -306,6 +316,7 @@ impl ViewKeyHandler for TracerHandler {
                         tracer_followup: None,
                         sparkline_followup: None,
                         queue_listing_followup: None,
+                        tracer_diff_followup: None,
                     })
                 }
                 _ => None,
@@ -319,6 +330,7 @@ impl ViewKeyHandler for TracerHandler {
                         tracer_followup: None,
                         sparkline_followup: None,
                         queue_listing_followup: None,
+                        tracer_diff_followup: None,
                     })
                 }
                 FocusAction::Down => {
@@ -329,6 +341,7 @@ impl ViewKeyHandler for TracerHandler {
                         tracer_followup: None,
                         sparkline_followup: None,
                         queue_listing_followup: None,
+                        tracer_diff_followup: None,
                     })
                 }
                 FocusAction::Descend => {
@@ -339,6 +352,7 @@ impl ViewKeyHandler for TracerHandler {
                             tracer_followup: None,
                             sparkline_followup: None,
                             queue_listing_followup: None,
+                            tracer_diff_followup: None,
                         })
                     } else {
                         Some(UpdateResult::default())
@@ -352,6 +366,7 @@ impl ViewKeyHandler for TracerHandler {
                         tracer_followup: None,
                         sparkline_followup: None,
                         queue_listing_followup: None,
+                        tracer_diff_followup: None,
                     })
                 }
                 _ => None,
@@ -365,6 +380,7 @@ impl ViewKeyHandler for TracerHandler {
                         tracer_followup: followup,
                         sparkline_followup: None,
                         queue_listing_followup: None,
+                        tracer_diff_followup: None,
                     })
                 }
                 _ => Some(UpdateResult::default()),
@@ -383,6 +399,7 @@ impl ViewKeyHandler for TracerHandler {
                                 tracer_followup: None,
                                 sparkline_followup: None,
                                 queue_listing_followup: None,
+                                tracer_diff_followup: None,
                             })
                         }
                         FocusAction::Down => {
@@ -394,6 +411,7 @@ impl ViewKeyHandler for TracerHandler {
                                 tracer_followup: None,
                                 sparkline_followup: None,
                                 queue_listing_followup: None,
+                                tracer_diff_followup: None,
                             })
                         }
                         FocusAction::PageUp => {
@@ -407,6 +425,7 @@ impl ViewKeyHandler for TracerHandler {
                                 tracer_followup: None,
                                 sparkline_followup: None,
                                 queue_listing_followup: None,
+                                tracer_diff_followup: None,
                             })
                         }
                         FocusAction::PageDown => {
@@ -420,6 +439,7 @@ impl ViewKeyHandler for TracerHandler {
                                 tracer_followup: None,
                                 sparkline_followup: None,
                                 queue_listing_followup: None,
+                                tracer_diff_followup: None,
                             })
                         }
                         FocusAction::First => {
@@ -438,6 +458,7 @@ impl ViewKeyHandler for TracerHandler {
                                 tracer_followup: None,
                                 sparkline_followup: None,
                                 queue_listing_followup: None,
+                                tracer_diff_followup: None,
                             })
                         }
                         FocusAction::Last => {
@@ -457,6 +478,7 @@ impl ViewKeyHandler for TracerHandler {
                                 tracer_followup: None,
                                 sparkline_followup: None,
                                 queue_listing_followup: None,
+                                tracer_diff_followup: None,
                             })
                         }
                         FocusAction::Descend => {
@@ -494,6 +516,7 @@ impl ViewKeyHandler for TracerHandler {
                                     tracer_followup: None,
                                     sparkline_followup: None,
                                     queue_listing_followup: None,
+                                    tracer_diff_followup: None,
                                 })
                             } else {
                                 Some(UpdateResult::default())
@@ -507,6 +530,7 @@ impl ViewKeyHandler for TracerHandler {
                                 tracer_followup: None,
                                 sparkline_followup: None,
                                 queue_listing_followup: None,
+                                tracer_diff_followup: None,
                             })
                         }
                         FocusAction::NextPane => {
@@ -540,6 +564,7 @@ impl ViewKeyHandler for TracerHandler {
                                     tracer_followup: None,
                                     sparkline_followup: None,
                                     queue_listing_followup: None,
+                                    tracer_diff_followup: None,
                                 })
                             } else {
                                 Some(UpdateResult::default())
@@ -568,6 +593,7 @@ impl ViewKeyHandler for TracerHandler {
                                     tracer_followup: None,
                                     sparkline_followup: None,
                                     queue_listing_followup: None,
+                                    tracer_diff_followup: None,
                                 })
                             }
                             FocusAction::Down => {
@@ -585,6 +611,7 @@ impl ViewKeyHandler for TracerHandler {
                                     tracer_followup: None,
                                     sparkline_followup: None,
                                     queue_listing_followup: None,
+                                    tracer_diff_followup: None,
                                 })
                             }
                             FocusAction::PageUp => {
@@ -604,6 +631,7 @@ impl ViewKeyHandler for TracerHandler {
                                     tracer_followup: None,
                                     sparkline_followup: None,
                                     queue_listing_followup: None,
+                                    tracer_diff_followup: None,
                                 })
                             }
                             FocusAction::PageDown => {
@@ -623,6 +651,7 @@ impl ViewKeyHandler for TracerHandler {
                                     tracer_followup: None,
                                     sparkline_followup: None,
                                     queue_listing_followup: None,
+                                    tracer_diff_followup: None,
                                 })
                             }
                             FocusAction::First => {
@@ -645,6 +674,7 @@ impl ViewKeyHandler for TracerHandler {
                                     tracer_followup: None,
                                     sparkline_followup: None,
                                     queue_listing_followup: None,
+                                    tracer_diff_followup: None,
                                 })
                             }
                             FocusAction::Last => {
@@ -667,6 +697,7 @@ impl ViewKeyHandler for TracerHandler {
                                     tracer_followup: None,
                                     sparkline_followup: None,
                                     queue_listing_followup: None,
+                                    tracer_diff_followup: None,
                                 })
                             }
                             FocusAction::Right => {
@@ -679,6 +710,7 @@ impl ViewKeyHandler for TracerHandler {
                                     tracer_followup: None,
                                     sparkline_followup: None,
                                     queue_listing_followup: None,
+                                    tracer_diff_followup: None,
                                 })
                             }
                             FocusAction::Left => {
@@ -691,6 +723,7 @@ impl ViewKeyHandler for TracerHandler {
                                     tracer_followup: None,
                                     sparkline_followup: None,
                                     queue_listing_followup: None,
+                                    tracer_diff_followup: None,
                                 })
                             }
                             FocusAction::Descend => None,
@@ -702,6 +735,7 @@ impl ViewKeyHandler for TracerHandler {
                                     tracer_followup: None,
                                     sparkline_followup: None,
                                     queue_listing_followup: None,
+                                    tracer_diff_followup: None,
                                 })
                             }
                             FocusAction::NextPane => {
@@ -715,6 +749,7 @@ impl ViewKeyHandler for TracerHandler {
                                     tracer_followup: None,
                                     sparkline_followup: None,
                                     queue_listing_followup: None,
+                                    tracer_diff_followup: None,
                                 })
                             }
                             FocusAction::PrevPane => {
@@ -726,6 +761,7 @@ impl ViewKeyHandler for TracerHandler {
                                     tracer_followup: None,
                                     sparkline_followup: None,
                                     queue_listing_followup: None,
+                                    tracer_diff_followup: None,
                                 })
                             }
                         }
@@ -789,6 +825,7 @@ impl ViewKeyHandler for TracerHandler {
                     tracer_followup: None,
                     sparkline_followup: None,
                     queue_listing_followup: None,
+                    tracer_diff_followup: None,
                 })
             }
             (KeyCode::Char('x'), KeyModifiers::NONE) => {
@@ -803,6 +840,7 @@ impl ViewKeyHandler for TracerHandler {
                     tracer_followup: None,
                     sparkline_followup: None,
                     queue_listing_followup: None,
+                    tracer_diff_followup: None,
                 })
             }
             (KeyCode::Char(ch), KeyModifiers::NONE) | (KeyCode::Char(ch), KeyModifiers::SHIFT) => {
@@ -813,6 +851,7 @@ impl ViewKeyHandler for TracerHandler {
                     tracer_followup: None,
                     sparkline_followup: None,
                     queue_listing_followup: None,
+                    tracer_diff_followup: None,
                 })
             }
             (KeyCode::Backspace, KeyModifiers::NONE) => {
@@ -823,6 +862,7 @@ impl ViewKeyHandler for TracerHandler {
                     tracer_followup: None,
                     sparkline_followup: None,
                     queue_listing_followup: None,
+                    tracer_diff_followup: None,
                 })
             }
             (KeyCode::Char('u'), KeyModifiers::CONTROL) | (KeyCode::Esc, _) => {
@@ -833,6 +873,7 @@ impl ViewKeyHandler for TracerHandler {
                     tracer_followup: None,
                     sparkline_followup: None,
                     queue_listing_followup: None,
+                    tracer_diff_followup: None,
                 })
             }
             (KeyCode::Enter, _) => {
@@ -843,6 +884,7 @@ impl ViewKeyHandler for TracerHandler {
                         tracer_followup: None,
                         sparkline_followup: None,
                         queue_listing_followup: None,
+                        tracer_diff_followup: None,
                     })
                 } else {
                     Some(UpdateResult {
@@ -851,6 +893,7 @@ impl ViewKeyHandler for TracerHandler {
                         tracer_followup: None,
                         sparkline_followup: None,
                         queue_listing_followup: None,
+                        tracer_diff_followup: None,
                     })
                 }
             }
@@ -1010,6 +1053,7 @@ fn handle_content_modal_search_input(state: &mut AppState, key: KeyEvent) -> Opt
                     tracer_followup: None,
                     sparkline_followup: None,
                     queue_listing_followup: None,
+                    tracer_diff_followup: None,
                 });
             }
         }
@@ -1023,6 +1067,7 @@ fn handle_content_modal_search_input(state: &mut AppState, key: KeyEvent) -> Opt
         tracer_followup: None,
         sparkline_followup: None,
         queue_listing_followup: None,
+        tracer_diff_followup: None,
     })
 }
 
@@ -1062,6 +1107,7 @@ fn handle_content_modal_verb(
                 tracer_followup: None,
                 sparkline_followup: None,
                 queue_listing_followup: None,
+                tracer_diff_followup: None,
             }
         }
 
@@ -1075,6 +1121,7 @@ fn handle_content_modal_verb(
                 tracer_followup: None,
                 sparkline_followup: None,
                 queue_listing_followup: None,
+                tracer_diff_followup: None,
             }
         }
 
@@ -1113,6 +1160,7 @@ fn handle_content_modal_verb(
                 tracer_followup: None,
                 sparkline_followup: None,
                 queue_listing_followup: None,
+                tracer_diff_followup: None,
             }
         }
 
@@ -1151,6 +1199,7 @@ fn handle_content_modal_verb(
                 tracer_followup: None,
                 sparkline_followup: None,
                 queue_listing_followup: None,
+                tracer_diff_followup: None,
             }
         }
 
@@ -1167,6 +1216,7 @@ fn handle_content_modal_verb(
                 tracer_followup: None,
                 sparkline_followup: None,
                 queue_listing_followup: None,
+                tracer_diff_followup: None,
             }
         }
 
@@ -1183,6 +1233,7 @@ fn handle_content_modal_verb(
                 tracer_followup: None,
                 sparkline_followup: None,
                 queue_listing_followup: None,
+                tracer_diff_followup: None,
             }
         }
 
@@ -1209,6 +1260,7 @@ fn handle_content_modal_verb(
                 tracer_followup: None,
                 sparkline_followup: None,
                 queue_listing_followup: None,
+                tracer_diff_followup: None,
             }
         }
 
@@ -1220,6 +1272,7 @@ fn handle_content_modal_verb(
                 tracer_followup: None,
                 sparkline_followup: None,
                 queue_listing_followup: None,
+                tracer_diff_followup: None,
             }
         }
 
@@ -1231,6 +1284,7 @@ fn handle_content_modal_verb(
                 tracer_followup: None,
                 sparkline_followup: None,
                 queue_listing_followup: None,
+                tracer_diff_followup: None,
             }
         }
 
@@ -1248,6 +1302,7 @@ fn handle_content_modal_verb(
                 tracer_followup: None,
                 sparkline_followup: None,
                 queue_listing_followup: None,
+                tracer_diff_followup: None,
             }
         }
         ContentModalVerb::Common(CommonVerb::SearchNext) => {
@@ -1271,6 +1326,7 @@ fn handle_content_modal_verb(
                 tracer_followup: None,
                 sparkline_followup: None,
                 queue_listing_followup: None,
+                tracer_diff_followup: None,
             }
         }
         ContentModalVerb::Common(CommonVerb::SearchPrev) => {
@@ -1295,6 +1351,7 @@ fn handle_content_modal_verb(
                 tracer_followup: None,
                 sparkline_followup: None,
                 queue_listing_followup: None,
+                tracer_diff_followup: None,
             }
         }
         ContentModalVerb::Save => {
@@ -1320,6 +1377,7 @@ fn handle_content_modal_verb(
                     tracer_followup: None,
                     sparkline_followup: None,
                     queue_listing_followup: None,
+                    tracer_diff_followup: None,
                 }
             } else {
                 UpdateResult::default()

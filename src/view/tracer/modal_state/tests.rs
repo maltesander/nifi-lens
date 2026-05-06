@@ -24,6 +24,8 @@ fn stub_modal(event_id: i64, active: ContentModalTab) -> ContentModalState {
         input: SideBuffer::default(),
         output: SideBuffer::default(),
         diff_cache: None,
+        diff_generation: 0,
+        diff_inflight_gen: None,
         scroll: BidirectionalScrollState::default(),
         search: None,
     }
@@ -1067,46 +1069,203 @@ fn content_modal_scroll_to_match_scrolls_to_visible_line() {
     );
 }
 
-// ── resolve_and_cache_diff tests ──────────────────────────────────────────
+// ── take_pending_diff_compute / apply_diff_cache_result tests ────────────
 
 #[test]
-fn resolve_and_cache_diff_populates_cache_when_both_sides_loaded_and_ok() {
+fn take_pending_diff_compute_returns_some_when_ok_and_no_cache() {
     let mut modal = stub_modal(1, ContentModalTab::Input);
     modal.input = text_buffer("line a\nline b\nline c\n");
     modal.output = text_buffer("line a\nline B\nline c\n");
-    // Active tab is Input — cache must still populate (this is the
-    // bug the helper fixes).
-    resolve_and_cache_diff(&mut modal, &default_ceiling());
+    // Active tab is Input — fresh compute must still fire (this is
+    // the bug the off-thread cache plumbing inherits and preserves).
+    let pending = take_pending_diff_compute(&mut modal, &default_ceiling());
+    let (generation, input, output) =
+        pending.expect("compute pending when both sides loaded and Ok");
+    assert_eq!(generation, 0, "generation starts at 0");
     assert_eq!(modal.diffable, Diffable::Ok);
-    assert!(modal.diff_cache.is_some());
-    let cache = modal.diff_cache.as_ref().unwrap();
-    assert!(!cache.lines.is_empty());
-    assert!(!cache.hunks.is_empty());
+    assert_eq!(modal.diff_inflight_gen, Some(0));
+    assert!(modal.diff_cache.is_none());
+    assert!(input.contains("line b"));
+    assert!(output.contains("line B"));
 }
 
 #[test]
-fn resolve_and_cache_diff_is_idempotent() {
+fn take_pending_diff_compute_skips_when_already_inflight_for_current_gen() {
     let mut modal = stub_modal(1, ContentModalTab::Input);
     modal.input = text_buffer("alpha\nbeta\n");
     modal.output = text_buffer("alpha\nBETA\n");
-    resolve_and_cache_diff(&mut modal, &default_ceiling());
-    let first_ptr = modal.diff_cache.as_ref().unwrap() as *const DiffRender;
-    // Second call must not reallocate — same Box address.
-    resolve_and_cache_diff(&mut modal, &default_ceiling());
-    let second_ptr = modal.diff_cache.as_ref().unwrap() as *const DiffRender;
-    assert_eq!(first_ptr, second_ptr, "cached diff must not be recomputed");
+    // First call kicks off a compute and marks inflight.
+    let first = take_pending_diff_compute(&mut modal, &default_ceiling());
+    assert!(first.is_some());
+    let inflight_after_first = modal.diff_inflight_gen;
+    // Second call returns None — no respawn for the same generation.
+    let second = take_pending_diff_compute(&mut modal, &default_ceiling());
+    assert!(second.is_none(), "must not respawn for the same generation");
+    assert_eq!(
+        modal.diff_inflight_gen, inflight_after_first,
+        "inflight generation untouched"
+    );
 }
 
 #[test]
-fn resolve_and_cache_diff_skips_when_pending() {
+fn take_pending_diff_compute_skips_when_pending() {
     let mut modal = stub_modal(1, ContentModalTab::Input);
     // Input loaded but output not (in_flight) → resolve_diffable
-    // returns Pending → cache stays None.
+    // returns Pending → no compute fires.
     modal.input = text_buffer("anything");
     modal.output.in_flight = true;
-    resolve_and_cache_diff(&mut modal, &default_ceiling());
+    assert!(take_pending_diff_compute(&mut modal, &default_ceiling()).is_none());
     assert_eq!(modal.diffable, Diffable::Pending);
     assert!(modal.diff_cache.is_none());
+    assert_eq!(modal.diff_inflight_gen, None);
+}
+
+#[test]
+fn apply_diff_cache_result_installs_cache_when_generation_matches() {
+    let mut modal = stub_modal(7, ContentModalTab::Input);
+    modal.input = text_buffer("a\nb\n");
+    modal.output = text_buffer("a\nB\n");
+    let (generation, input, output) =
+        take_pending_diff_compute(&mut modal, &default_ceiling()).unwrap();
+    let render = compute_diff_cache(&input, &output, &default_ceiling());
+    let mut state = TracerState {
+        content_modal: Some(modal),
+        ..TracerState::default()
+    };
+    apply_diff_cache_result(&mut state, 7, generation, render);
+    let modal = state.content_modal.as_ref().unwrap();
+    assert!(modal.diff_cache.is_some());
+    assert_eq!(modal.diff_inflight_gen, None);
+}
+
+#[test]
+fn apply_diff_cache_result_drops_stale_generation() {
+    let mut modal = stub_modal(7, ContentModalTab::Input);
+    modal.input = text_buffer("a\nb\n");
+    modal.output = text_buffer("a\nB\n");
+    let (stale_gen, input, output) =
+        take_pending_diff_compute(&mut modal, &default_ceiling()).unwrap();
+    // Simulate a pretty-print arriving mid-compute: it bumps the
+    // generation and clears the cache. The in-flight result is now
+    // stale.
+    apply_json_pretty_result(
+        &mut TracerState {
+            content_modal: Some(modal.clone()),
+            ..TracerState::default()
+        },
+        7,
+        crate::client::ContentSide::Input,
+        Some("pretty".into()),
+    );
+    // Manually mirror the bump for this isolated unit test (the
+    // helper above operated on a clone). Bumping here keeps the
+    // in-flight `stale_gen` distinct from the current generation.
+    modal.diff_generation = modal.diff_generation.wrapping_add(1);
+    let render = compute_diff_cache(&input, &output, &default_ceiling());
+    let mut state = TracerState {
+        content_modal: Some(modal),
+        ..TracerState::default()
+    };
+    apply_diff_cache_result(&mut state, 7, stale_gen, render);
+    let modal = state.content_modal.as_ref().unwrap();
+    assert!(
+        modal.diff_cache.is_none(),
+        "stale result must not install a cache"
+    );
+    // inflight_gen is left as-is so the new (post-bump) compute can
+    // still land normally.
+    assert_eq!(modal.diff_inflight_gen, Some(stale_gen));
+}
+
+#[test]
+fn apply_diff_cache_result_drops_when_modal_closed() {
+    let render = DiffRender::default();
+    let mut state = TracerState::default();
+    apply_diff_cache_result(&mut state, 7, 0, render);
+    assert!(state.content_modal.is_none());
+}
+
+#[test]
+fn apply_diff_cache_result_drops_when_event_id_mismatch() {
+    let mut modal = stub_modal(7, ContentModalTab::Input);
+    modal.input = text_buffer("a\n");
+    modal.output = text_buffer("b\n");
+    let (generation, input, output) =
+        take_pending_diff_compute(&mut modal, &default_ceiling()).unwrap();
+    let render = compute_diff_cache(&input, &output, &default_ceiling());
+    let mut state = TracerState {
+        content_modal: Some(modal),
+        ..TracerState::default()
+    };
+    apply_diff_cache_result(&mut state, /* wrong */ 99, generation, render);
+    assert!(state.content_modal.as_ref().unwrap().diff_cache.is_none());
+}
+
+#[test]
+fn pretty_print_arrival_bumps_generation_and_invalidates_cache() {
+    let mut modal = stub_modal(3, ContentModalTab::Input);
+    // Pre-seed both sides as fully-loaded compact JSON.
+    let compact_in = br#"[{"v":"a"}]"#.to_vec();
+    let compact_out = br#"[{"v":"A"}]"#.to_vec();
+    modal.input = SideBuffer {
+        loaded: compact_in.clone(),
+        decoded: crate::client::tracer::ContentRender::Text {
+            text: String::from_utf8(compact_in).unwrap(),
+            pretty_printed: false,
+        },
+        fully_loaded: true,
+        ceiling_hit: false,
+        in_flight: false,
+        last_error: None,
+        effective_ceiling: None,
+        in_flight_decode: false,
+        in_flight_pretty: true,
+    };
+    modal.output = SideBuffer {
+        loaded: compact_out.clone(),
+        decoded: crate::client::tracer::ContentRender::Text {
+            text: String::from_utf8(compact_out).unwrap(),
+            pretty_printed: false,
+        },
+        fully_loaded: true,
+        ceiling_hit: false,
+        in_flight: false,
+        last_error: None,
+        effective_ceiling: None,
+        in_flight_decode: false,
+        in_flight_pretty: false,
+    };
+    // Seed an existing compact diff cache + pretend a compute is in
+    // flight for the current generation.
+    modal.diff_cache = Some(DiffRender::default());
+    modal.diffable = Diffable::Ok;
+    modal.diff_inflight_gen = Some(modal.diff_generation);
+    let gen_before = modal.diff_generation;
+    let mut state = TracerState {
+        content_modal: Some(modal),
+        ..TracerState::default()
+    };
+    apply_json_pretty_result(
+        &mut state,
+        3,
+        crate::client::ContentSide::Input,
+        Some("[\n  {\n    \"v\": \"a\"\n  }\n]".into()),
+    );
+    let modal = state.content_modal.as_ref().unwrap();
+    assert!(modal.diff_cache.is_none(), "pretty arrival invalidates");
+    assert_eq!(
+        modal.diff_generation,
+        gen_before.wrapping_add(1),
+        "pretty arrival bumps generation"
+    );
+    // The next take_pending must respawn even though inflight is
+    // Some(stale_gen) — the new generation differs.
+    let modal_mut = state.content_modal.as_mut().unwrap();
+    let pending = take_pending_diff_compute(modal_mut, &default_ceiling());
+    assert!(
+        pending.is_some(),
+        "fresh generation must respawn even with a stale inflight"
+    );
 }
 
 #[test]
@@ -1232,7 +1391,7 @@ fn compute_diff_cache_populates_inline_diff_on_replace_pairs() {
 }
 
 #[test]
-fn resolve_and_cache_diff_uses_pretty_printed_text_for_json() {
+fn take_pending_diff_compute_uses_pretty_printed_text_for_json() {
     // Compact JSON in the raw bytes…
     let input_compact = br#"[{"id":1,"v":"a"},{"id":2,"v":"b"}]"#.to_vec();
     let output_compact = br#"[{"id":1,"v":"A"},{"id":2,"v":"B"}]"#.to_vec();
@@ -1264,11 +1423,9 @@ fn resolve_and_cache_diff_uses_pretty_printed_text_for_json() {
         in_flight_pretty: false,
     };
 
-    resolve_and_cache_diff(&mut modal, &default_ceiling());
-    let cache = modal
-        .diff_cache
-        .as_ref()
-        .expect("diff cache populated for diffable JSON");
+    let (_gen, input, output) = take_pending_diff_compute(&mut modal, &default_ceiling())
+        .expect("compute pending for diffable JSON");
+    let cache = compute_diff_cache(&input, &output, &default_ceiling());
 
     // If the diff used the compact bytes, every line would be the
     // entire JSON document → at most ~4 lines (one per change tag).
@@ -1297,11 +1454,12 @@ fn resolve_and_cache_diff_uses_pretty_printed_text_for_json() {
 }
 
 #[test]
-fn resolve_and_cache_diff_skips_when_no_differences() {
+fn take_pending_diff_compute_skips_when_no_differences() {
     let mut modal = stub_modal(1, ContentModalTab::Input);
     modal.input = text_buffer("identical content");
     modal.output = text_buffer("identical content");
-    resolve_and_cache_diff(&mut modal, &default_ceiling());
+    let pending = take_pending_diff_compute(&mut modal, &default_ceiling());
+    assert!(pending.is_none(), "no compute when both sides identical");
     assert_eq!(
         modal.diffable,
         Diffable::NotAvailable(NotDiffableReason::NoDifferences)

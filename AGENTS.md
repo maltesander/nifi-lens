@@ -359,6 +359,22 @@ already covered there.
   is fully loaded, via `serde_transcode` (`Deserializer` →
   `Serializer::pretty`) — this avoids the `serde_json::Value`
   round-trip and **preserves object key order**.
+- **Tracer diff cache** is also built off-thread via
+  `tokio::task::spawn_blocking` (mirrors pretty-print and tabular
+  decode). `take_pending_diff_compute` is called from the chunk-
+  loaded, JSON pretty-print, and tabular decode reducers; it returns
+  a `(generation, input, output)` triple emitted as
+  `PendingIntent::ComputeDiffCache`. The result lands as
+  `TracerPayload::DiffCacheBuilt { generation, render }` and is
+  applied via `apply_diff_cache_result`. **Why the generation
+  token:** pretty-print invalidates the cache mid-compute (the
+  bytes are now line-oriented, not single-line). The reducer bumps
+  `modal.diff_generation` whenever the cache is invalidated; stale
+  results whose generation no longer matches are dropped. The
+  in-flight compute is not aborted (similar's diff has no easy
+  cancellation); the new compute fires alongside it and the loser
+  drops on arrival. Render shows "computing diff…" while
+  `diff_inflight_gen` is `Some` and the cache is `None`.
 - **Tracer tabular** — `classify_content` catches Parquet/Avro decode
   errors, logs `warn!`, and surfaces them as `Hex` (the classifier
   signature stays infallible). Per-side ceiling resolves *after* the

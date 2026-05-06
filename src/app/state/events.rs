@@ -78,6 +78,7 @@ impl ViewKeyHandler for EventsHandler {
             tracer_followup: None,
             sparkline_followup: None,
             queue_listing_followup: None,
+            tracer_diff_followup: None,
         })
     }
 
@@ -100,6 +101,7 @@ impl ViewKeyHandler for EventsHandler {
                         tracer_followup: None,
                         sparkline_followup: None,
                         queue_listing_followup: None,
+                        tracer_diff_followup: None,
                     })
                 }
                 FocusAction::Ascend => {
@@ -110,6 +112,7 @@ impl ViewKeyHandler for EventsHandler {
                         tracer_followup: None,
                         sparkline_followup: None,
                         queue_listing_followup: None,
+                        tracer_diff_followup: None,
                     })
                 }
                 _ => None,
@@ -132,6 +135,7 @@ impl ViewKeyHandler for EventsHandler {
                         tracer_followup: None,
                         sparkline_followup: None,
                         queue_listing_followup: None,
+                        tracer_diff_followup: None,
                     })
                 }
                 FocusAction::Down => {
@@ -142,6 +146,7 @@ impl ViewKeyHandler for EventsHandler {
                         tracer_followup: None,
                         sparkline_followup: None,
                         queue_listing_followup: None,
+                        tracer_diff_followup: None,
                     })
                 }
                 FocusAction::Ascend => {
@@ -152,6 +157,7 @@ impl ViewKeyHandler for EventsHandler {
                         tracer_followup: None,
                         sparkline_followup: None,
                         queue_listing_followup: None,
+                        tracer_diff_followup: None,
                     })
                 }
                 FocusAction::PageUp => {
@@ -168,6 +174,7 @@ impl ViewKeyHandler for EventsHandler {
                         tracer_followup: None,
                         sparkline_followup: None,
                         queue_listing_followup: None,
+                        tracer_diff_followup: None,
                     })
                 }
                 FocusAction::PageDown => {
@@ -185,6 +192,7 @@ impl ViewKeyHandler for EventsHandler {
                         tracer_followup: None,
                         sparkline_followup: None,
                         queue_listing_followup: None,
+                        tracer_diff_followup: None,
                     })
                 }
                 // Descend on a row: no deeper structure — return None.
@@ -199,6 +207,7 @@ impl ViewKeyHandler for EventsHandler {
                         tracer_followup: None,
                         sparkline_followup: None,
                         queue_listing_followup: None,
+                        tracer_diff_followup: None,
                     })
                 }
                 FocusAction::Left | FocusAction::Right | FocusAction::First | FocusAction::Last => {
@@ -218,6 +227,7 @@ impl ViewKeyHandler for EventsHandler {
                     tracer_followup: None,
                     sparkline_followup: None,
                     queue_listing_followup: None,
+                    tracer_diff_followup: None,
                 })
             }
             FocusAction::Left | FocusAction::Right => None,
@@ -246,6 +256,7 @@ impl ViewKeyHandler for EventsHandler {
                     tracer_followup: None,
                     sparkline_followup: None,
                     queue_listing_followup: None,
+                    tracer_diff_followup: None,
                 })
             }
             // Shift+Tab at filter bar: already at top pane, nothing to do.
@@ -303,6 +314,7 @@ fn redraw() -> Option<UpdateResult> {
         tracer_followup: None,
         sparkline_followup: None,
         queue_listing_followup: None,
+        tracer_diff_followup: None,
     })
 }
 
@@ -323,6 +335,7 @@ fn submit_query(state: &mut AppState) -> Option<UpdateResult> {
         tracer_followup: None,
         sparkline_followup: None,
         queue_listing_followup: None,
+        tracer_diff_followup: None,
     })
 }
 

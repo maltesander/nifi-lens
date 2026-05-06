@@ -136,6 +136,18 @@ pub struct ContentModalState {
     pub input: SideBuffer,
     pub output: SideBuffer,
     pub diff_cache: Option<DiffRender>,
+    /// Monotonic counter bumped every time a state change invalidates
+    /// the diff cache (chunk arrival, pretty-print result, tabular
+    /// decode result). The off-thread `compute_diff_cache` job carries
+    /// the generation it was spawned with; results whose generation
+    /// doesn't match the current value are dropped as stale.
+    pub diff_generation: u64,
+    /// Generation an in-flight `compute_diff_cache` was spawned with,
+    /// or `None` when none is in flight. `take_pending_diff_compute`
+    /// only spawns when this is `None` *or* points at an older
+    /// generation — preventing duplicate spawns per generation while
+    /// still respawning when a fresh invalidation arrives mid-compute.
+    pub diff_inflight_gen: Option<u64>,
     /// Combined vertical + horizontal scroll state. `scroll.vertical.offset`
     /// is the scroll row (in lines); `scroll.horizontal_offset` is the
     /// column shift right of the fixed line-number gutter (used by the
@@ -218,6 +230,8 @@ pub fn open_content_modal(
         input: SideBuffer::default(),
         output: SideBuffer::default(),
         diff_cache: None,
+        diff_generation: 0,
+        diff_inflight_gen: None,
         scroll: BidirectionalScrollState::default(),
         search: None,
     };
@@ -364,7 +378,17 @@ pub fn apply_modal_chunk_with_ceiling(
     if eof && !buf.fully_loaded {
         buf.fully_loaded = true;
     }
+    invalidate_diff_cache(modal);
+}
+
+/// Invalidate the modal's diff cache and bump its generation.
+///
+/// Bumping the generation tells `take_pending_diff_compute` to respawn
+/// even if a previous compute is still in flight, and tells
+/// `apply_diff_cache_result` to drop the stale result when it lands.
+fn invalidate_diff_cache(modal: &mut ContentModalState) {
     modal.diff_cache = None;
+    modal.diff_generation = modal.diff_generation.wrapping_add(1);
 }
 
 /// Check whether the given side now needs an off-thread tabular decode.
@@ -427,7 +451,7 @@ pub fn apply_tabular_decode_result(
     }
     buf.in_flight_decode = false;
     buf.decoded = render;
-    modal.diff_cache = None;
+    invalidate_diff_cache(modal);
 }
 
 /// Mirror of [`take_pending_tabular_decode`] for JSON pretty-print.
@@ -509,7 +533,7 @@ pub fn apply_json_pretty_result(
             text,
             pretty_printed: true,
         };
-        modal.diff_cache = None;
+        invalidate_diff_cache(modal);
     }
 }
 
@@ -1185,26 +1209,70 @@ fn make_diff_line(
     }
 }
 
-/// Resolve diffability for the modal and (lazily) populate
-/// `diff_cache` when both sides are loaded and `Diffable::Ok`.
-/// Idempotent — a cached diff stays cached.
+/// Resolve diffability for the modal and, when a fresh diff cache is
+/// needed, return the texts to compute it from. The caller spawns
+/// `compute_diff_cache` off-thread (`tokio::task::spawn_blocking`) and
+/// hands the result back via `apply_diff_cache_result`.
+///
+/// Returns `Some((generation, input, output))` when ALL of:
+/// - `Diffable::Ok` (both sides loaded, mime-compatible, under the cap)
+/// - `diff_cache` is `None` (was invalidated or never built)
+/// - no compute is already in flight for the **current** generation
+///
+/// The generation token lets stale results (from a compute that was
+/// in flight when an invalidation arrived) be discarded by
+/// `apply_diff_cache_result` without aborting the running job.
 ///
 /// Designed to be called from any reducer that may have just mutated
-/// `modal.input` or `modal.output` (chunk arrival, tab switch).
-/// Independent of `modal.active_tab` — users typically open on
-/// Input/Output and switch to Diff *after* both chunks have already
-/// arrived, by which point no further chunks fire and a tab-gated
-/// compute would never trigger.
-pub fn resolve_and_cache_diff(
+/// `modal.input` or `modal.output` (chunk arrival, pretty-print
+/// arrival, tabular decode arrival). Independent of `modal.active_tab`
+/// — users typically open on Input/Output and switch to Diff *after*
+/// both chunks have already loaded.
+pub fn take_pending_diff_compute(
     modal: &mut ContentModalState,
     cfg: &crate::config::TracerCeilingConfig,
-) {
+) -> Option<(u64, String, String)> {
     modal.diffable = resolve_diffable(&modal.header, &modal.input, &modal.output, cfg);
-    if modal.diffable == Diffable::Ok && modal.diff_cache.is_none() {
-        let input_text = side_diff_text(&modal.input);
-        let output_text = side_diff_text(&modal.output);
-        modal.diff_cache = Some(compute_diff_cache(&input_text, &output_text, cfg));
+    if modal.diffable != Diffable::Ok {
+        return None;
     }
+    if modal.diff_cache.is_some() {
+        return None;
+    }
+    if modal.diff_inflight_gen == Some(modal.diff_generation) {
+        return None;
+    }
+    let generation = modal.diff_generation;
+    modal.diff_inflight_gen = Some(generation);
+    let input_text = side_diff_text(&modal.input);
+    let output_text = side_diff_text(&modal.output);
+    Some((generation, input_text, output_text))
+}
+
+/// Apply the result of an off-thread `compute_diff_cache` onto the
+/// modal. Drops the result when:
+/// - the modal is closed or belongs to a different `event_id` (stale)
+/// - the modal's `diff_generation` has moved past `generation` since
+///   the compute was spawned (the inputs changed mid-compute, e.g. a
+///   pretty-print arrival invalidated the cache); a fresh compute is
+///   already pending for the new generation
+pub fn apply_diff_cache_result(
+    state: &mut TracerState,
+    event_id: i64,
+    generation: u64,
+    cache: DiffRender,
+) {
+    let Some(modal) = state.content_modal.as_mut() else {
+        return;
+    };
+    if modal.event_id != event_id {
+        return;
+    }
+    if modal.diff_generation != generation {
+        return;
+    }
+    modal.diff_inflight_gen = None;
+    modal.diff_cache = Some(cache);
 }
 
 /// Pick the text to feed into the line-based diff for a side. Prefers

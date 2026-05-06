@@ -771,6 +771,13 @@ pub struct UpdateResult {
     /// queue-listing worker can be spawned or torn down. Dispatched alongside
     /// `sparkline_followup` without disturbing existing intent semantics.
     pub queue_listing_followup: Option<PendingIntent>,
+    /// Secondary intent emitted by Tracer modal paths (chunk arrival,
+    /// JSON pretty-print arrival, tabular decode arrival) when a fresh
+    /// `compute_diff_cache` should run off-thread. Always
+    /// `PendingIntent::ComputeDiffCache`. Independent of `intent` so a
+    /// chunk arrival can spawn both a tabular decode (or pretty-print)
+    /// **and** the initial diff compute in the same update.
+    pub tracer_diff_followup: Option<PendingIntent>,
 }
 
 /// An intent the reducer wants the caller to dispatch. The caller owns the
@@ -801,6 +808,19 @@ pub enum PendingIntent {
         event_id: i64,
         side: crate::client::ContentSide,
         bytes: Vec<u8>,
+    },
+    /// Spawn an off-thread Tracer diff cache compute via
+    /// `tokio::task::spawn_blocking`. The dispatcher calls
+    /// `compute_diff_cache` and emits `TracerPayload::DiffCacheBuilt`.
+    /// `generation` is echoed back so stale results can be dropped if
+    /// the inputs changed mid-compute (e.g. a pretty-print arrival
+    /// re-invalidated the cache).
+    ComputeDiffCache {
+        event_id: i64,
+        generation: u64,
+        input_text: String,
+        output_text: String,
+        cfg: crate::config::TracerCeilingConfig,
     },
     /// Spawn the Browser version-control modal's one-shot
     /// identity+diff fetch worker. The handle is stored on
@@ -979,6 +999,7 @@ fn update_inner(state: &mut AppState, event: AppEvent, config: &Config) -> Updat
             tracer_followup: None,
             sparkline_followup: None,
             queue_listing_followup: None,
+            tracer_diff_followup: None,
         },
         AppEvent::Input(_) => UpdateResult::default(),
         AppEvent::Tick => UpdateResult {
@@ -987,6 +1008,7 @@ fn update_inner(state: &mut AppState, event: AppEvent, config: &Config) -> Updat
             tracer_followup: None,
             sparkline_followup: None,
             queue_listing_followup: None,
+            tracer_diff_followup: None,
         },
         AppEvent::Data(ViewPayload::Browser(payload)) => {
             handle_browser_payload(state, payload);
@@ -997,6 +1019,7 @@ fn update_inner(state: &mut AppState, event: AppEvent, config: &Config) -> Updat
                 tracer_followup: None,
                 sparkline_followup: None,
                 queue_listing_followup: None,
+                tracer_diff_followup: None,
             }
         }
         AppEvent::Data(ViewPayload::Tracer(payload)) => {
@@ -1053,13 +1076,27 @@ fn update_inner(state: &mut AppState, event: AppEvent, config: &Config) -> Updat
                             }
                         })
                     });
-                    // Recompute diffability and (lazily) populate the
-                    // diff cache after every chunk — independent of the
-                    // currently active tab, since the user may switch to
-                    // Diff after both sides have already loaded.
-                    if let Some(modal) = state.tracer.content_modal.as_mut() {
-                        crate::view::tracer::state::resolve_and_cache_diff(modal, &cfg);
-                    }
+                    // Resolve diffability and emit a `ComputeDiffCache`
+                    // intent when both sides are loaded and a fresh diff
+                    // is needed. Independent of `active_tab` — users
+                    // typically switch to Diff *after* both sides land.
+                    let diff_followup = state
+                        .tracer
+                        .content_modal
+                        .as_mut()
+                        .and_then(|m| {
+                            crate::view::tracer::state::take_pending_diff_compute(m, &cfg)
+                                .map(|t| (m.event_id, t))
+                        })
+                        .map(|(eid, (generation, input_text, output_text))| {
+                            PendingIntent::ComputeDiffCache {
+                                event_id: eid,
+                                generation,
+                                input_text,
+                                output_text,
+                                cfg: cfg.clone(),
+                            }
+                        });
                     state.last_refresh = Instant::now();
                     UpdateResult {
                         redraw: true,
@@ -1067,6 +1104,7 @@ fn update_inner(state: &mut AppState, event: AppEvent, config: &Config) -> Updat
                         tracer_followup: None,
                         sparkline_followup: None,
                         queue_listing_followup: None,
+                        tracer_diff_followup: diff_followup,
                     }
                 }
                 crate::event::TracerPayload::ContentDecoded {
@@ -1081,10 +1119,23 @@ fn update_inner(state: &mut AppState, event: AppEvent, config: &Config) -> Updat
                         side,
                         render,
                     );
-                    // Re-evaluate diff eligibility now that decoded is populated.
-                    if let Some(modal) = state.tracer.content_modal.as_mut() {
-                        crate::view::tracer::state::resolve_and_cache_diff(modal, &cfg);
-                    }
+                    let diff_followup = state
+                        .tracer
+                        .content_modal
+                        .as_mut()
+                        .and_then(|m| {
+                            crate::view::tracer::state::take_pending_diff_compute(m, &cfg)
+                                .map(|t| (m.event_id, t))
+                        })
+                        .map(|(eid, (generation, input_text, output_text))| {
+                            PendingIntent::ComputeDiffCache {
+                                event_id: eid,
+                                generation,
+                                input_text,
+                                output_text,
+                                cfg: cfg.clone(),
+                            }
+                        });
                     state.last_refresh = Instant::now();
                     UpdateResult {
                         redraw: true,
@@ -1092,6 +1143,7 @@ fn update_inner(state: &mut AppState, event: AppEvent, config: &Config) -> Updat
                         tracer_followup: None,
                         sparkline_followup: None,
                         queue_listing_followup: None,
+                        tracer_diff_followup: diff_followup,
                     }
                 }
                 crate::event::TracerPayload::JsonPrettyPrinted {
@@ -1106,9 +1158,23 @@ fn update_inner(state: &mut AppState, event: AppEvent, config: &Config) -> Updat
                         side,
                         pretty,
                     );
-                    if let Some(modal) = state.tracer.content_modal.as_mut() {
-                        crate::view::tracer::state::resolve_and_cache_diff(modal, &cfg);
-                    }
+                    let diff_followup = state
+                        .tracer
+                        .content_modal
+                        .as_mut()
+                        .and_then(|m| {
+                            crate::view::tracer::state::take_pending_diff_compute(m, &cfg)
+                                .map(|t| (m.event_id, t))
+                        })
+                        .map(|(eid, (generation, input_text, output_text))| {
+                            PendingIntent::ComputeDiffCache {
+                                event_id: eid,
+                                generation,
+                                input_text,
+                                output_text,
+                                cfg: cfg.clone(),
+                            }
+                        });
                     state.last_refresh = Instant::now();
                     UpdateResult {
                         redraw: true,
@@ -1116,6 +1182,28 @@ fn update_inner(state: &mut AppState, event: AppEvent, config: &Config) -> Updat
                         tracer_followup: None,
                         sparkline_followup: None,
                         queue_listing_followup: None,
+                        tracer_diff_followup: diff_followup,
+                    }
+                }
+                crate::event::TracerPayload::DiffCacheBuilt {
+                    event_id,
+                    generation,
+                    render,
+                } => {
+                    crate::view::tracer::state::apply_diff_cache_result(
+                        &mut state.tracer,
+                        event_id,
+                        generation,
+                        render,
+                    );
+                    state.last_refresh = Instant::now();
+                    UpdateResult {
+                        redraw: true,
+                        intent: None,
+                        tracer_followup: None,
+                        sparkline_followup: None,
+                        queue_listing_followup: None,
+                        tracer_diff_followup: None,
                     }
                 }
                 crate::event::TracerPayload::ModalChunkFailed {
@@ -1138,6 +1226,7 @@ fn update_inner(state: &mut AppState, event: AppEvent, config: &Config) -> Updat
                         tracer_followup: None,
                         sparkline_followup: None,
                         queue_listing_followup: None,
+                        tracer_diff_followup: None,
                     }
                 }
                 payload => {
@@ -1175,6 +1264,7 @@ fn update_inner(state: &mut AppState, event: AppEvent, config: &Config) -> Updat
                         tracer_followup: followup,
                         sparkline_followup: None,
                         queue_listing_followup: None,
+                        tracer_diff_followup: None,
                     }
                 }
             }
@@ -1193,6 +1283,7 @@ fn update_inner(state: &mut AppState, event: AppEvent, config: &Config) -> Updat
                 tracer_followup: None,
                 sparkline_followup: None,
                 queue_listing_followup: None,
+                tracer_diff_followup: None,
             }
         }
         AppEvent::IntentOutcome(outcome) => handle_intent_outcome(state, outcome, config),
@@ -1208,6 +1299,7 @@ fn update_inner(state: &mut AppState, event: AppEvent, config: &Config) -> Updat
             tracer_followup: None,
             sparkline_followup: None,
             queue_listing_followup: None,
+            tracer_diff_followup: None,
         },
         // Sparkline reducer arms. Both delegate to SparklineState's
         // `(kind, id)`-guarded apply methods so a stale emit between
@@ -1225,6 +1317,7 @@ fn update_inner(state: &mut AppState, event: AppEvent, config: &Config) -> Updat
                 tracer_followup: None,
                 sparkline_followup: None,
                 queue_listing_followup: None,
+                tracer_diff_followup: None,
             }
         }
         AppEvent::SparklineEndpointMissing { kind, id } => {
@@ -1237,6 +1330,7 @@ fn update_inner(state: &mut AppState, event: AppEvent, config: &Config) -> Updat
                 tracer_followup: None,
                 sparkline_followup: None,
                 queue_listing_followup: None,
+                tracer_diff_followup: None,
             }
         }
         AppEvent::Quit => {
@@ -1247,6 +1341,7 @@ fn update_inner(state: &mut AppState, event: AppEvent, config: &Config) -> Updat
                 tracer_followup: None,
                 sparkline_followup: None,
                 queue_listing_followup: None,
+                tracer_diff_followup: None,
             }
         }
     }
@@ -1349,6 +1444,7 @@ fn handle_key(state: &mut AppState, key: KeyEvent, config: &Config) -> UpdateRes
                 tracer_followup: None,
                 sparkline_followup,
                 queue_listing_followup,
+                tracer_diff_followup: None,
             };
         }
         InputEvent::History(HistoryAction::Forward) => {
@@ -1373,6 +1469,7 @@ fn handle_key(state: &mut AppState, key: KeyEvent, config: &Config) -> UpdateRes
                 tracer_followup: None,
                 sparkline_followup,
                 queue_listing_followup,
+                tracer_diff_followup: None,
             };
         }
         InputEvent::Tab(TabAction::Goto(n)) => {
@@ -1393,6 +1490,7 @@ fn handle_key(state: &mut AppState, key: KeyEvent, config: &Config) -> UpdateRes
                 tracer_followup: None,
                 sparkline_followup: None,
                 queue_listing_followup: None,
+                tracer_diff_followup: None,
             };
         }
         InputEvent::App(AppAction::Quit) => {
@@ -1404,6 +1502,7 @@ fn handle_key(state: &mut AppState, key: KeyEvent, config: &Config) -> UpdateRes
                 tracer_followup: None,
                 sparkline_followup: None,
                 queue_listing_followup: None,
+                tracer_diff_followup: None,
             };
         }
         InputEvent::App(_) if state.modal.is_some() || state.app_shortcuts_blocked() => {
@@ -1422,6 +1521,7 @@ fn handle_key(state: &mut AppState, key: KeyEvent, config: &Config) -> UpdateRes
                 tracer_followup: None,
                 sparkline_followup: None,
                 queue_listing_followup: None,
+                tracer_diff_followup: None,
             };
         }
         InputEvent::App(AppAction::ContextSwitcher) => {
@@ -1437,6 +1537,7 @@ fn handle_key(state: &mut AppState, key: KeyEvent, config: &Config) -> UpdateRes
                 tracer_followup: None,
                 sparkline_followup: None,
                 queue_listing_followup: None,
+                tracer_diff_followup: None,
             };
         }
         InputEvent::App(AppAction::FuzzyFind) => {
@@ -1448,6 +1549,7 @@ fn handle_key(state: &mut AppState, key: KeyEvent, config: &Config) -> UpdateRes
                     tracer_followup: None,
                     sparkline_followup: None,
                     queue_listing_followup: None,
+                    tracer_diff_followup: None,
                 };
             }
             let mut fs = crate::widget::fuzzy_find::FuzzyFindState::new();
@@ -1461,6 +1563,7 @@ fn handle_key(state: &mut AppState, key: KeyEvent, config: &Config) -> UpdateRes
                 tracer_followup: None,
                 sparkline_followup: None,
                 queue_listing_followup: None,
+                tracer_diff_followup: None,
             };
         }
         InputEvent::App(AppAction::Goto) => {
@@ -1479,6 +1582,7 @@ fn handle_key(state: &mut AppState, key: KeyEvent, config: &Config) -> UpdateRes
                             tracer_followup: None,
                             sparkline_followup: None,
                             queue_listing_followup: None,
+                            tracer_diff_followup: None,
                         };
                     }
                     return UpdateResult::default();
@@ -1501,6 +1605,7 @@ fn handle_key(state: &mut AppState, key: KeyEvent, config: &Config) -> UpdateRes
                         tracer_followup: None,
                         sparkline_followup: None,
                         queue_listing_followup: None,
+                        tracer_diff_followup: None,
                     };
                 }
             }
@@ -1523,6 +1628,7 @@ fn handle_key(state: &mut AppState, key: KeyEvent, config: &Config) -> UpdateRes
                         tracer_followup: None,
                         sparkline_followup: None,
                         queue_listing_followup: None,
+                        tracer_diff_followup: None,
                     };
                 }
                 if matches!(action, crate::input::FocusAction::Ascend)
@@ -1535,6 +1641,7 @@ fn handle_key(state: &mut AppState, key: KeyEvent, config: &Config) -> UpdateRes
                         tracer_followup: None,
                         sparkline_followup: None,
                         queue_listing_followup: None,
+                        tracer_diff_followup: None,
                     };
                 }
             }
@@ -1558,6 +1665,7 @@ fn handle_key(state: &mut AppState, key: KeyEvent, config: &Config) -> UpdateRes
                             tracer_followup: None,
                             sparkline_followup: None,
                             queue_listing_followup: None,
+                            tracer_diff_followup: None,
                         };
                     }
                 }
@@ -1588,6 +1696,7 @@ fn handle_key(state: &mut AppState, key: KeyEvent, config: &Config) -> UpdateRes
                         tracer_followup: None,
                         sparkline_followup: None,
                         queue_listing_followup: None,
+                        tracer_diff_followup: None,
                     };
                 }
                 // Scroll keys. The render path clamps `scroll` against
@@ -1635,6 +1744,7 @@ fn handle_key(state: &mut AppState, key: KeyEvent, config: &Config) -> UpdateRes
                         tracer_followup: None,
                         sparkline_followup: None,
                         queue_listing_followup: None,
+                        tracer_diff_followup: None,
                     };
                 }
                 return UpdateResult::default();
@@ -1648,6 +1758,7 @@ fn handle_key(state: &mut AppState, key: KeyEvent, config: &Config) -> UpdateRes
                         tracer_followup: None,
                         sparkline_followup: None,
                         queue_listing_followup: None,
+                        tracer_diff_followup: None,
                     };
                 }
                 return UpdateResult::default();
@@ -1665,6 +1776,7 @@ fn handle_key(state: &mut AppState, key: KeyEvent, config: &Config) -> UpdateRes
                             tracer_followup: None,
                             sparkline_followup: None,
                             queue_listing_followup: None,
+                            tracer_diff_followup: None,
                         };
                     }
                     KeyCode::Down => {
@@ -1675,6 +1787,7 @@ fn handle_key(state: &mut AppState, key: KeyEvent, config: &Config) -> UpdateRes
                             tracer_followup: None,
                             sparkline_followup: None,
                             queue_listing_followup: None,
+                            tracer_diff_followup: None,
                         };
                     }
                     KeyCode::Up => {
@@ -1685,6 +1798,7 @@ fn handle_key(state: &mut AppState, key: KeyEvent, config: &Config) -> UpdateRes
                             tracer_followup: None,
                             sparkline_followup: None,
                             queue_listing_followup: None,
+                            tracer_diff_followup: None,
                         };
                     }
                     KeyCode::Enter => {
@@ -1699,6 +1813,7 @@ fn handle_key(state: &mut AppState, key: KeyEvent, config: &Config) -> UpdateRes
                                 tracer_followup: None,
                                 sparkline_followup: None,
                                 queue_listing_followup: None,
+                                tracer_diff_followup: None,
                             };
                         }
                         return UpdateResult::default();
@@ -1716,6 +1831,7 @@ fn handle_key(state: &mut AppState, key: KeyEvent, config: &Config) -> UpdateRes
                             tracer_followup: None,
                             sparkline_followup: None,
                             queue_listing_followup: None,
+                            tracer_diff_followup: None,
                         };
                     }
                     (KeyCode::Up, _) | (KeyCode::Char('p'), KeyModifiers::CONTROL) => {
@@ -1726,6 +1842,7 @@ fn handle_key(state: &mut AppState, key: KeyEvent, config: &Config) -> UpdateRes
                             tracer_followup: None,
                             sparkline_followup: None,
                             queue_listing_followup: None,
+                            tracer_diff_followup: None,
                         };
                     }
                     (KeyCode::Down, _) | (KeyCode::Char('n'), KeyModifiers::CONTROL) => {
@@ -1736,6 +1853,7 @@ fn handle_key(state: &mut AppState, key: KeyEvent, config: &Config) -> UpdateRes
                             tracer_followup: None,
                             sparkline_followup: None,
                             queue_listing_followup: None,
+                            tracer_diff_followup: None,
                         };
                     }
                     (KeyCode::Backspace, KeyModifiers::NONE) => {
@@ -1749,6 +1867,7 @@ fn handle_key(state: &mut AppState, key: KeyEvent, config: &Config) -> UpdateRes
                             tracer_followup: None,
                             sparkline_followup: None,
                             queue_listing_followup: None,
+                            tracer_diff_followup: None,
                         };
                     }
                     (KeyCode::Char(ch), KeyModifiers::NONE)
@@ -1763,6 +1882,7 @@ fn handle_key(state: &mut AppState, key: KeyEvent, config: &Config) -> UpdateRes
                             tracer_followup: None,
                             sparkline_followup: None,
                             queue_listing_followup: None,
+                            tracer_diff_followup: None,
                         };
                     }
                     (KeyCode::Enter, _) => {
@@ -1783,6 +1903,7 @@ fn handle_key(state: &mut AppState, key: KeyEvent, config: &Config) -> UpdateRes
                                 tracer_followup: None,
                                 sparkline_followup: None,
                                 queue_listing_followup: None,
+                                tracer_diff_followup: None,
                             };
                         }
                         return UpdateResult {
@@ -1791,6 +1912,7 @@ fn handle_key(state: &mut AppState, key: KeyEvent, config: &Config) -> UpdateRes
                             tracer_followup: None,
                             sparkline_followup: None,
                             queue_listing_followup: None,
+                            tracer_diff_followup: None,
                         };
                     }
                     _ => return UpdateResult::default(),
@@ -1817,6 +1939,7 @@ fn handle_key(state: &mut AppState, key: KeyEvent, config: &Config) -> UpdateRes
                             tracer_followup: None,
                             sparkline_followup: None,
                             queue_listing_followup: None,
+                            tracer_diff_followup: None,
                         };
                     }
                     (KeyCode::Up, _) => {
@@ -1827,6 +1950,7 @@ fn handle_key(state: &mut AppState, key: KeyEvent, config: &Config) -> UpdateRes
                             tracer_followup: None,
                             sparkline_followup: None,
                             queue_listing_followup: None,
+                            tracer_diff_followup: None,
                         };
                     }
                     (KeyCode::Down, _) => {
@@ -1837,6 +1961,7 @@ fn handle_key(state: &mut AppState, key: KeyEvent, config: &Config) -> UpdateRes
                             tracer_followup: None,
                             sparkline_followup: None,
                             queue_listing_followup: None,
+                            tracer_diff_followup: None,
                         };
                     }
                     (KeyCode::PageUp, _) => {
@@ -1847,6 +1972,7 @@ fn handle_key(state: &mut AppState, key: KeyEvent, config: &Config) -> UpdateRes
                             tracer_followup: None,
                             sparkline_followup: None,
                             queue_listing_followup: None,
+                            tracer_diff_followup: None,
                         };
                     }
                     (KeyCode::PageDown, _) => {
@@ -1857,6 +1983,7 @@ fn handle_key(state: &mut AppState, key: KeyEvent, config: &Config) -> UpdateRes
                             tracer_followup: None,
                             sparkline_followup: None,
                             queue_listing_followup: None,
+                            tracer_diff_followup: None,
                         };
                     }
                     (KeyCode::Home, _) => {
@@ -1867,6 +1994,7 @@ fn handle_key(state: &mut AppState, key: KeyEvent, config: &Config) -> UpdateRes
                             tracer_followup: None,
                             sparkline_followup: None,
                             queue_listing_followup: None,
+                            tracer_diff_followup: None,
                         };
                     }
                     (KeyCode::End, _) => {
@@ -1877,6 +2005,7 @@ fn handle_key(state: &mut AppState, key: KeyEvent, config: &Config) -> UpdateRes
                             tracer_followup: None,
                             sparkline_followup: None,
                             queue_listing_followup: None,
+                            tracer_diff_followup: None,
                         };
                     }
                     (KeyCode::Char('c'), KeyModifiers::NONE) => {
@@ -1901,6 +2030,7 @@ fn handle_key(state: &mut AppState, key: KeyEvent, config: &Config) -> UpdateRes
                             tracer_followup: None,
                             sparkline_followup: None,
                             queue_listing_followup: None,
+                            tracer_diff_followup: None,
                         };
                     }
                     (KeyCode::Enter, _) => {
@@ -1944,6 +2074,7 @@ fn handle_key(state: &mut AppState, key: KeyEvent, config: &Config) -> UpdateRes
                                 tracer_followup: None,
                                 sparkline_followup: None,
                                 queue_listing_followup: None,
+                                tracer_diff_followup: None,
                             };
                         }
                         // Parameter reference cross-link.
@@ -1970,6 +2101,7 @@ fn handle_key(state: &mut AppState, key: KeyEvent, config: &Config) -> UpdateRes
                                 tracer_followup: None,
                                 sparkline_followup: None,
                                 queue_listing_followup: None,
+                                tracer_diff_followup: None,
                             };
                         }
                         return UpdateResult::default();
@@ -1987,6 +2119,7 @@ fn handle_key(state: &mut AppState, key: KeyEvent, config: &Config) -> UpdateRes
                             tracer_followup: None,
                             sparkline_followup: None,
                             queue_listing_followup: None,
+                            tracer_diff_followup: None,
                         };
                     }
                     KeyCode::Backspace => {
@@ -1997,6 +2130,7 @@ fn handle_key(state: &mut AppState, key: KeyEvent, config: &Config) -> UpdateRes
                             tracer_followup: None,
                             sparkline_followup: None,
                             queue_listing_followup: None,
+                            tracer_diff_followup: None,
                         };
                     }
                     KeyCode::Char(ch) if !key.modifiers.contains(KeyModifiers::CONTROL) => {
@@ -2007,6 +2141,7 @@ fn handle_key(state: &mut AppState, key: KeyEvent, config: &Config) -> UpdateRes
                             tracer_followup: None,
                             sparkline_followup: None,
                             queue_listing_followup: None,
+                            tracer_diff_followup: None,
                         };
                     }
                     KeyCode::Enter => {
@@ -2021,6 +2156,7 @@ fn handle_key(state: &mut AppState, key: KeyEvent, config: &Config) -> UpdateRes
                             tracer_followup: None,
                             sparkline_followup: None,
                             queue_listing_followup: None,
+                            tracer_diff_followup: None,
                         };
                     }
                     _ => return UpdateResult::default(),
@@ -2035,6 +2171,7 @@ fn handle_key(state: &mut AppState, key: KeyEvent, config: &Config) -> UpdateRes
                         tracer_followup: None,
                         sparkline_followup: None,
                         queue_listing_followup: None,
+                        tracer_diff_followup: None,
                     };
                 }
                 return UpdateResult::default();
@@ -2048,6 +2185,7 @@ fn handle_key(state: &mut AppState, key: KeyEvent, config: &Config) -> UpdateRes
                         tracer_followup: None,
                         sparkline_followup: None,
                         queue_listing_followup: None,
+                        tracer_diff_followup: None,
                     };
                 }
                 KeyCode::Up => {
@@ -2058,6 +2196,7 @@ fn handle_key(state: &mut AppState, key: KeyEvent, config: &Config) -> UpdateRes
                         tracer_followup: None,
                         sparkline_followup: None,
                         queue_listing_followup: None,
+                        tracer_diff_followup: None,
                     };
                 }
                 KeyCode::Down => {
@@ -2068,6 +2207,7 @@ fn handle_key(state: &mut AppState, key: KeyEvent, config: &Config) -> UpdateRes
                         tracer_followup: None,
                         sparkline_followup: None,
                         queue_listing_followup: None,
+                        tracer_diff_followup: None,
                     };
                 }
                 KeyCode::Enter => {
@@ -2080,6 +2220,7 @@ fn handle_key(state: &mut AppState, key: KeyEvent, config: &Config) -> UpdateRes
                             tracer_followup: None,
                             sparkline_followup: None,
                             queue_listing_followup: None,
+                            tracer_diff_followup: None,
                         };
                     }
                     return UpdateResult {
@@ -2088,6 +2229,7 @@ fn handle_key(state: &mut AppState, key: KeyEvent, config: &Config) -> UpdateRes
                         tracer_followup: None,
                         sparkline_followup: None,
                         queue_listing_followup: None,
+                        tracer_diff_followup: None,
                     };
                 }
                 _ => return UpdateResult::default(),
@@ -2559,6 +2701,7 @@ fn handle_intent_outcome(
                 tracer_followup: None,
                 sparkline_followup: None,
                 queue_listing_followup: None,
+                tracer_diff_followup: None,
             }
         }
         Ok(IntentOutcome::ViewRefreshed { .. }) => {
@@ -2569,6 +2712,7 @@ fn handle_intent_outcome(
                 tracer_followup: None,
                 sparkline_followup: None,
                 queue_listing_followup: None,
+                tracer_diff_followup: None,
             }
         }
         Ok(IntentOutcome::Quitting) => {
@@ -2579,6 +2723,7 @@ fn handle_intent_outcome(
                 tracer_followup: None,
                 sparkline_followup: None,
                 queue_listing_followup: None,
+                tracer_diff_followup: None,
             }
         }
         Ok(IntentOutcome::NotImplemented { intent_name }) => {
@@ -2589,6 +2734,7 @@ fn handle_intent_outcome(
                 tracer_followup: None,
                 sparkline_followup: None,
                 queue_listing_followup: None,
+                tracer_diff_followup: None,
             }
         }
         Ok(IntentOutcome::OpenInBrowserTarget {
@@ -2618,6 +2764,7 @@ fn handle_intent_outcome(
                     tracer_followup: None,
                     sparkline_followup: None,
                     queue_listing_followup: None,
+                    tracer_diff_followup: None,
                 };
             };
             // Expand every ancestor.
@@ -2640,6 +2787,7 @@ fn handle_intent_outcome(
                 tracer_followup: None,
                 sparkline_followup: __sparkline_fu,
                 queue_listing_followup: __queue_listing_fu,
+                tracer_diff_followup: None,
             }
         }
         Ok(IntentOutcome::TracerLandingOn { component_id }) => {
@@ -2657,6 +2805,7 @@ fn handle_intent_outcome(
                 tracer_followup: None,
                 sparkline_followup: None,
                 queue_listing_followup: None,
+                tracer_diff_followup: None,
             }
         }
         Ok(IntentOutcome::TracerLineageStarted { uuid, abort }) => {
@@ -2669,6 +2818,7 @@ fn handle_intent_outcome(
                 tracer_followup: None,
                 sparkline_followup: None,
                 queue_listing_followup: None,
+                tracer_diff_followup: None,
             }
         }
         Ok(IntentOutcome::TracerInputInvalid { raw }) => {
@@ -2679,6 +2829,7 @@ fn handle_intent_outcome(
                 tracer_followup: None,
                 sparkline_followup: None,
                 queue_listing_followup: None,
+                tracer_diff_followup: None,
             }
         }
         Ok(IntentOutcome::EventsLandingOn { component_id }) => {
@@ -2700,6 +2851,7 @@ fn handle_intent_outcome(
                 tracer_followup: None,
                 sparkline_followup: None,
                 queue_listing_followup: None,
+                tracer_diff_followup: None,
             }
         }
         Ok(IntentOutcome::EventsWatchLandingOn { component_id }) => {
@@ -2724,6 +2876,7 @@ fn handle_intent_outcome(
                 tracer_followup: None,
                 sparkline_followup: None,
                 queue_listing_followup: None,
+                tracer_diff_followup: None,
             }
         }
         Ok(IntentOutcome::OpenParameterContextModalTarget { pg_id, preselect }) => {
@@ -2756,6 +2909,7 @@ fn handle_intent_outcome(
                     tracer_followup: None,
                     sparkline_followup: None,
                     queue_listing_followup: None,
+                    tracer_diff_followup: None,
                 }
             } else {
                 // No binding known yet; mark the modal as failed so the
@@ -2772,6 +2926,7 @@ fn handle_intent_outcome(
                     tracer_followup: None,
                     sparkline_followup: None,
                     queue_listing_followup: None,
+                    tracer_diff_followup: None,
                 }
             }
         }
@@ -2786,6 +2941,7 @@ fn handle_intent_outcome(
                 tracer_followup: None,
                 sparkline_followup: None,
                 queue_listing_followup: None,
+                tracer_diff_followup: None,
             }
         }
         Err(err) => {
@@ -2800,6 +2956,7 @@ fn handle_intent_outcome(
                 tracer_followup: None,
                 sparkline_followup: None,
                 queue_listing_followup: None,
+                tracer_diff_followup: None,
             }
         }
     }

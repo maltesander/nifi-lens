@@ -95,6 +95,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Tracer diff modal no longer freezes the UI for ~30s after JSON
+  pretty-print.** Pretty-printing a 2 MB compact JSON FlowFile
+  explodes its line count from a handful to tens of thousands;
+  `compute_diff_cache` then ran synchronously on the UI thread when
+  the pretty-print result invalidated the cache (and again when the
+  second side's pretty arrived), running `similar::TextDiff::from_lines`
+  plus per-pair char-level inline diffs. The diff cache build now
+  runs off-thread via `tokio::task::spawn_blocking` (mirrors the
+  existing pretty-print and tabular-decode plumbing) with a
+  generation token so a stale result whose inputs changed
+  mid-compute is dropped on arrival rather than installed. The Diff
+  tab shows "computing diff…" while the off-thread compute runs.
 - Status bar `init: X/N endpoints ready` chip now counts the
   `reporting_tasks` fetcher (previously hard-coded `/11` even though the
   store owns 12 endpoints, so the chip never reached `12/12`).

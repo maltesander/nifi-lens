@@ -598,6 +598,8 @@ mod keymap_tests {
             input: SideBuffer::default(),
             output: SideBuffer::default(),
             diff_cache: None,
+            diff_generation: 0,
+            diff_inflight_gen: None,
             scroll: BidirectionalScrollState::default(),
             search: None,
         });

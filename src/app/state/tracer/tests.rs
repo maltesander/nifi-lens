@@ -869,6 +869,8 @@ fn state_with_open_modal() -> crate::app::state::AppState {
         },
         output: SideBuffer::default(),
         diff_cache: None,
+        diff_generation: 0,
+        diff_inflight_gen: None,
         scroll: crate::widget::scroll::BidirectionalScrollState {
             vertical: crate::widget::scroll::VerticalScrollState {
                 offset: 50,
@@ -1024,6 +1026,8 @@ fn state_with_searchable_modal(body: &str) -> crate::app::state::AppState {
         },
         output: SideBuffer::default(),
         diff_cache: None,
+        diff_generation: 0,
+        diff_inflight_gen: None,
         scroll: crate::widget::scroll::BidirectionalScrollState {
             vertical: crate::widget::scroll::VerticalScrollState {
                 offset: 0,
@@ -1167,6 +1171,8 @@ fn modal_search_next_scrolls_offset_into_viewport() {
         },
         output: SideBuffer::default(),
         diff_cache: None,
+        diff_generation: 0,
+        diff_inflight_gen: None,
         scroll: crate::widget::scroll::BidirectionalScrollState {
             vertical: crate::widget::scroll::VerticalScrollState {
                 offset: 0,

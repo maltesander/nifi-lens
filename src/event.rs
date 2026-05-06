@@ -330,6 +330,16 @@ pub enum TracerPayload {
         side: crate::client::ContentSide,
         pretty: Option<String>,
     },
+    /// Result of an off-thread Tracer diff cache compute spawned via
+    /// `tokio::task::spawn_blocking`. `generation` is the token
+    /// `take_pending_diff_compute` issued — the UI-task handler uses
+    /// it to drop stale results when an invalidation arrived during
+    /// the compute. The handler calls `apply_diff_cache_result`.
+    DiffCacheBuilt {
+        event_id: i64,
+        generation: u64,
+        render: crate::view::tracer::state::DiffRender,
+    },
 }
 
 /// Payload variants pushed from the Events tab worker back into the UI loop.

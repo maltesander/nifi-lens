@@ -316,6 +316,33 @@ pub async fn run(
             }
         }
 
+        // Dispatch the Tracer diff-cache compute followup. Always
+        // `PendingIntent::ComputeDiffCache`. Independent of `intent`
+        // so a chunk arrival can spawn both a tabular decode (or
+        // pretty-print) and the initial diff compute in the same
+        // update.
+        if let Some(PendingIntent::ComputeDiffCache {
+            event_id,
+            generation,
+            input_text,
+            output_text,
+            cfg,
+        }) = result.tracer_diff_followup
+        {
+            let tx = tx.clone();
+            tokio::task::spawn_blocking(move || {
+                let render =
+                    crate::view::tracer::state::compute_diff_cache(&input_text, &output_text, &cfg);
+                let _ = tx.try_send(AppEvent::Data(crate::event::ViewPayload::Tracer(
+                    crate::event::TracerPayload::DiffCacheBuilt {
+                        event_id,
+                        generation,
+                        render,
+                    },
+                )));
+            });
+        }
+
         if let Some(pending) = result.intent {
             match pending {
                 PendingIntent::SaveEventContent(save) => {
@@ -369,6 +396,29 @@ pub async fn run(
                                 event_id,
                                 side,
                                 pretty,
+                            },
+                        )));
+                    });
+                }
+                PendingIntent::ComputeDiffCache {
+                    event_id,
+                    generation,
+                    input_text,
+                    output_text,
+                    cfg,
+                } => {
+                    let tx = tx.clone();
+                    tokio::task::spawn_blocking(move || {
+                        let render = crate::view::tracer::state::compute_diff_cache(
+                            &input_text,
+                            &output_text,
+                            &cfg,
+                        );
+                        let _ = tx.try_send(AppEvent::Data(crate::event::ViewPayload::Tracer(
+                            crate::event::TracerPayload::DiffCacheBuilt {
+                                event_id,
+                                generation,
+                                render,
                             },
                         )));
                     });
