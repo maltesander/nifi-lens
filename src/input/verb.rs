@@ -836,8 +836,14 @@ pub enum OverviewReportingTasksVerb {
     JumpTop,
     JumpBottom,
     /// `Enter` — when List pane focused: shift focus to Detail pane.
-    /// When Detail pane focused: no-op (activation not required in v0.1).
+    /// When Detail pane focused: cross-link if the focused row is actionable.
     FocusDetail,
+    /// `Tab` — cycle to the next focusable detail sub-section, wrapping
+    /// from the last section back to the List pane.
+    NextPane,
+    /// `Shift+Tab` — cycle to the previous focusable detail sub-section,
+    /// wrapping from the first section back to the List pane.
+    PrevPane,
 }
 
 impl Verb for OverviewReportingTasksVerb {
@@ -851,6 +857,8 @@ impl Verb for OverviewReportingTasksVerb {
             Self::JumpTop => Chord::simple(KeyCode::Home),
             Self::JumpBottom => Chord::simple(KeyCode::End),
             Self::FocusDetail => Chord::simple(KeyCode::Enter),
+            Self::NextPane => Chord::simple(KeyCode::Tab),
+            Self::PrevPane => Chord::simple(KeyCode::BackTab),
         }
     }
 
@@ -864,6 +872,8 @@ impl Verb for OverviewReportingTasksVerb {
             Self::JumpTop => "top",
             Self::JumpBottom => "bottom",
             Self::FocusDetail => "focus detail",
+            Self::NextPane => "next section",
+            Self::PrevPane => "prev section",
         }
     }
 
@@ -875,6 +885,7 @@ impl Verb for OverviewReportingTasksVerb {
             Self::JumpTop => "top",
             Self::JumpBottom => "bottom",
             Self::FocusDetail => "focus detail",
+            Self::NextPane | Self::PrevPane => "section",
         }
     }
 
@@ -890,6 +901,8 @@ impl Verb for OverviewReportingTasksVerb {
                 | Self::JumpTop
                 | Self::JumpBottom
                 | Self::FocusDetail
+                | Self::NextPane
+                | Self::PrevPane
                 | Self::Common(CommonVerb::SearchNext)
                 | Self::Common(CommonVerb::SearchPrev)
         )
@@ -912,6 +925,8 @@ impl Verb for OverviewReportingTasksVerb {
             Self::JumpTop,
             Self::JumpBottom,
             Self::FocusDetail,
+            Self::NextPane,
+            Self::PrevPane,
             Self::Common(CommonVerb::OpenSearch),
             Self::Common(CommonVerb::SearchNext),
             Self::Common(CommonVerb::SearchPrev),
@@ -1444,6 +1459,29 @@ mod tests {
             BulletinsVerb::CycleGroupBy.chord(),
             Chord::shift(KeyCode::Char('G'))
         );
+    }
+
+    #[test]
+    fn reporting_tasks_modal_tab_chord_is_next_pane() {
+        assert_eq!(
+            OverviewReportingTasksVerb::NextPane.chord(),
+            Chord::simple(KeyCode::Tab)
+        );
+    }
+
+    #[test]
+    fn reporting_tasks_modal_back_tab_is_prev_pane() {
+        assert_eq!(
+            OverviewReportingTasksVerb::PrevPane.chord(),
+            Chord::simple(KeyCode::BackTab)
+        );
+    }
+
+    #[test]
+    fn reporting_tasks_modal_all_includes_pane_chords() {
+        let all = OverviewReportingTasksVerb::all();
+        assert!(all.contains(&OverviewReportingTasksVerb::NextPane));
+        assert!(all.contains(&OverviewReportingTasksVerb::PrevPane));
     }
 
     #[test]

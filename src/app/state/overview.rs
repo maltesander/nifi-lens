@@ -298,6 +298,12 @@ fn handle_reporting_tasks_modal_verb(
             redraw()
         }
 
+        // ---- Section cycling (Tab / Shift+Tab) ----
+        V::NextPane | V::PrevPane => {
+            // Wired in Task 4 of the detail-panels plan.
+            redraw()
+        }
+
         // ---- Search ----
         V::Common(CommonVerb::OpenSearch) => {
             let modal = state.overview.reporting_tasks_modal.as_mut()?;
