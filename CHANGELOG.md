@@ -46,6 +46,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **Bulletins detail modal search shows the match counter** (`(n/m)`
+  while typing, `(0 matches)` once committed with no hits). Switched
+  from `render_search_input` to `render_search_strip` and made the
+  strip persist after commit so committed-zero-match queries get
+  explicit feedback instead of a silently-empty body. Matches the
+  surface used by the version-control / parameter-context /
+  action-history modals.
 - **Version-control modal label clarity.** The `[e]` chord now reads
   `[e] bundle diffs` instead of the cryptic `[e] env`, and the body
   status chip reads `bundle diffs shown` / `bundle diffs hidden`

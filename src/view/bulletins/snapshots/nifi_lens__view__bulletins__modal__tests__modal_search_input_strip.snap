@@ -1,6 +1,6 @@
 ---
 source: src/view/bulletins/modal.rs
-assertion_line: 453
+assertion_line: 452
 expression: terminal.backend().buffer()
 ---
 Buffer {
@@ -22,7 +22,7 @@ Buffer {
         "│                                                          │",
         "│                                                          │",
         "│                                                          │",
-        "│/ some_                                                   │",
+        "│/ some_ (1/1)                                             │",
         "│                                                          │",
         "│[Esc] close · [/] find · [c] copy                         │",
         "└──────────────────────────────────────────────────────────┘",
@@ -65,9 +65,10 @@ Buffer {
         x: 1, y: 15, fg: Reset, bg: Reset, underline: Reset, modifier: NONE,
         x: 59, y: 15, fg: Blue, bg: Reset, underline: Reset, modifier: NONE,
         x: 1, y: 16, fg: Cyan, bg: Reset, underline: Reset, modifier: BOLD,
-        x: 3, y: 16, fg: Reset, bg: Reset, underline: Reset, modifier: NONE,
-        x: 7, y: 16, fg: Reset, bg: Reset, underline: Reset, modifier: REVERSED,
-        x: 8, y: 16, fg: Reset, bg: Reset, underline: Reset, modifier: NONE,
+        x: 2, y: 16, fg: Reset, bg: Reset, underline: Reset, modifier: NONE,
+        x: 7, y: 16, fg: Cyan, bg: Reset, underline: Reset, modifier: BOLD,
+        x: 8, y: 16, fg: DarkGray, bg: Reset, underline: Reset, modifier: NONE,
+        x: 14, y: 16, fg: Reset, bg: Reset, underline: Reset, modifier: NONE,
         x: 59, y: 16, fg: Blue, bg: Reset, underline: Reset, modifier: NONE,
         x: 1, y: 17, fg: Reset, bg: Reset, underline: Reset, modifier: NONE,
         x: 59, y: 17, fg: Blue, bg: Reset, underline: Reset, modifier: NONE,

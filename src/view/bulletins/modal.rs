@@ -57,10 +57,14 @@ pub fn render(frame: &mut Frame, area: Rect, state: &mut BulletinsState) {
     let inner = block.inner(area);
     frame.render_widget(block, area);
 
+    // Strip stays visible while the user is typing AND after they
+    // commit, so the `(n/m)` / `(0 matches)` counter from
+    // `render_search_strip` remains as a persistent reference. It
+    // disappears entirely when search is closed (`modal.search = None`).
     let show_search_strip = modal
         .search
         .as_ref()
-        .map(|s| s.input_active)
+        .map(|s| s.input_active || s.committed)
         .unwrap_or(false);
 
     let footer_rows = if show_search_strip {
@@ -190,10 +194,14 @@ fn render_footer(frame: &mut Frame, area: Rect, modal: &DetailModalState) {
 
     // Layout: optional search strip (when typing) on the first row,
     // blank separator, then the verb hint strip on the bottom row.
+    // Strip stays visible while the user is typing AND after they
+    // commit, so the `(n/m)` / `(0 matches)` counter from
+    // `render_search_strip` remains as a persistent reference. It
+    // disappears entirely when search is closed (`modal.search = None`).
     let show_search_strip = modal
         .search
         .as_ref()
-        .map(|s| s.input_active)
+        .map(|s| s.input_active || s.committed)
         .unwrap_or(false);
 
     if area.height >= 2 {
@@ -210,7 +218,12 @@ fn render_footer(frame: &mut Frame, area: Rect, modal: &DetailModalState) {
             height: 1,
         };
         if show_search_strip && let Some(s) = modal.search.as_ref() {
-            crate::widget::search::render_search_input(frame, separator_row, s);
+            // `render_search_strip` adds a `(n/m)` match counter while
+            // typing and `(0 matches)` once committed with no hits —
+            // matches the version-control / parameter-context modal
+            // surface so the user gets the same zero-match feedback
+            // everywhere they search.
+            crate::widget::search::render_search_strip(frame, separator_row, s);
         } else {
             // Render an explicit blank separator (no-op draw via Paragraph).
             frame.render_widget(Paragraph::new(Line::from("")), separator_row);
@@ -445,5 +458,59 @@ mod tests {
             })
             .unwrap();
         insta::assert_debug_snapshot!("modal_search_input_strip", terminal.backend().buffer());
+    }
+
+    /// Committed search with zero matches must render `(0 matches)` —
+    /// the user needs explicit feedback that their query missed,
+    /// otherwise the modal looks identical to a successful committed
+    /// search but with no highlights.
+    #[test]
+    fn modal_committed_search_zero_matches_shows_count() {
+        use crate::client::BulletinSnapshot;
+        use crate::view::bulletins::state::BulletinsState;
+        use ratatui::Terminal;
+        use ratatui::backend::TestBackend;
+        use ratatui::layout::Rect;
+
+        let mut state = BulletinsState::with_capacity(10);
+        state.ring.push_back(BulletinSnapshot {
+            id: 1,
+            level: "INFO".into(),
+            message: "something happens".into(),
+            source_id: "s".into(),
+            source_name: "S".into(),
+            source_type: "PROCESSOR".into(),
+            group_id: "g".into(),
+            timestamp_iso: "2026-04-20T10:00:00Z".into(),
+            timestamp_human: String::new(),
+        });
+        state.selected = 0;
+        state.auto_scroll = false;
+        state.open_detail_modal();
+        state.modal_search_open();
+        for c in "definitely-not-present".chars() {
+            state.modal_search_push(c);
+        }
+        state.modal_search_commit();
+
+        let backend = TestBackend::new(80, 20);
+        let mut terminal = Terminal::new(backend).unwrap();
+        terminal
+            .draw(|frame| {
+                render(frame, Rect::new(0, 0, 80, 20), &mut state);
+            })
+            .unwrap();
+        let buf = terminal.backend().buffer().clone();
+        let mut all_text = String::new();
+        for y in 0..buf.area().height {
+            for x in 0..buf.area().width {
+                all_text.push_str(buf[(x, y)].symbol());
+            }
+            all_text.push('\n');
+        }
+        assert!(
+            all_text.contains("(0 matches)"),
+            "expected `(0 matches)` chip on committed zero-match search; got:\n{all_text}"
+        );
     }
 }

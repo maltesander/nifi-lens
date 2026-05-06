@@ -1,6 +1,6 @@
 ---
 source: src/view/bulletins/modal.rs
-assertion_line: 412
+assertion_line: 419
 expression: terminal.backend().buffer()
 ---
 Buffer {
@@ -22,7 +22,7 @@ Buffer {
         "│                                                          │",
         "│                                                          │",
         "│                                                          │",
-        "│                                                          │",
+        "│/ connection (2/3)                                        │",
         "│                                                          │",
         "│[Esc] close · [/] find · [n] next · [N] prev · [c] copy   │",
         "└──────────────────────────────────────────────────────────┘",
@@ -67,7 +67,10 @@ Buffer {
         x: 59, y: 14, fg: Red, bg: Reset, underline: Reset, modifier: BOLD,
         x: 1, y: 15, fg: Reset, bg: Reset, underline: Reset, modifier: NONE,
         x: 59, y: 15, fg: Red, bg: Reset, underline: Reset, modifier: BOLD,
-        x: 1, y: 16, fg: Reset, bg: Reset, underline: Reset, modifier: NONE,
+        x: 1, y: 16, fg: Cyan, bg: Reset, underline: Reset, modifier: BOLD,
+        x: 2, y: 16, fg: Reset, bg: Reset, underline: Reset, modifier: NONE,
+        x: 13, y: 16, fg: DarkGray, bg: Reset, underline: Reset, modifier: NONE,
+        x: 19, y: 16, fg: Reset, bg: Reset, underline: Reset, modifier: NONE,
         x: 59, y: 16, fg: Red, bg: Reset, underline: Reset, modifier: BOLD,
         x: 1, y: 17, fg: Reset, bg: Reset, underline: Reset, modifier: NONE,
         x: 59, y: 17, fg: Red, bg: Reset, underline: Reset, modifier: BOLD,
