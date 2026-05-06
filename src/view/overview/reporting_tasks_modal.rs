@@ -170,6 +170,21 @@ pub fn short_type(fqcn: &str) -> &str {
     fqcn.rsplit('.').next().unwrap_or(fqcn)
 }
 
+/// Returns the focusable detail sections for `task`. `ValidationErrors`
+/// is omitted when the task has no validation errors. Mirrors browser's
+/// `DetailSections::for_node_detail`.
+pub fn section_list(task: &ReportingTaskRow) -> &'static [DetailSection] {
+    if task.validation_errors.is_empty() {
+        &[DetailSection::Properties, DetailSection::RecentBulletins]
+    } else {
+        &[
+            DetailSection::Properties,
+            DetailSection::ValidationErrors,
+            DetailSection::RecentBulletins,
+        ]
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -212,6 +227,49 @@ mod tests {
         let s = snap(&["a"]);
         let m = ReportingTasksModalState::open(&s);
         assert_eq!(m.focus, ModalFocus::List);
+    }
+
+    fn task_with_id(id: &str) -> ReportingTaskRow {
+        ReportingTaskRow {
+            id: id.into(),
+            name: format!("name-{id}"),
+            task_type: "org.x.Y".into(),
+            state: ReportingTaskState::Running,
+            scheduling_strategy: "TIMER_DRIVEN".into(),
+            scheduling_period: "30s".into(),
+            active_thread_count: 0,
+            validation_status: ValidationStatus::Valid,
+            validation_errors: vec![],
+            comments: None,
+            properties: BTreeMap::new(),
+            descriptors: BTreeMap::new(),
+        }
+    }
+
+    #[test]
+    fn section_list_includes_all_when_task_has_errors() {
+        let mut t = task_with_id("x");
+        t.validation_errors = vec!["err".to_string()];
+        let sections = section_list(&t);
+        assert_eq!(
+            sections,
+            &[
+                DetailSection::Properties,
+                DetailSection::ValidationErrors,
+                DetailSection::RecentBulletins,
+            ]
+        );
+    }
+
+    #[test]
+    fn section_list_omits_validation_when_no_errors() {
+        let t = task_with_id("x");
+        assert!(t.validation_errors.is_empty());
+        let sections = section_list(&t);
+        assert_eq!(
+            sections,
+            &[DetailSection::Properties, DetailSection::RecentBulletins]
+        );
     }
 
     #[test]
