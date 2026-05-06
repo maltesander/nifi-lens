@@ -299,9 +299,40 @@ fn handle_reporting_tasks_modal_verb(
         }
 
         // ---- Section cycling (Tab / Shift+Tab) ----
-        V::NextPane | V::PrevPane => {
-            // Wired in Task 4 of the detail-panels plan.
+        V::NextPane => {
+            let snap = state.cluster.snapshot.reporting_tasks.latest().cloned();
+            let modal = state.overview.reporting_tasks_modal.as_mut()?;
+            let ModalFocus::Detail { idx, rows } = modal.focus else {
+                return redraw();
+            };
+            let Some(snap) = snap.as_ref() else {
+                return redraw();
+            };
+            let Some(task) = modal.selected_row(snap) else {
+                return redraw();
+            };
+            let sections = crate::view::overview::reporting_tasks_modal::section_list(task);
+            let new_idx = idx + 1;
+            if new_idx >= sections.len() {
+                modal.focus = ModalFocus::List;
+            } else {
+                modal.focus = ModalFocus::Detail { idx: new_idx, rows };
+            }
             redraw()
+        }
+        V::PrevPane => {
+            let modal = state.overview.reporting_tasks_modal.as_mut()?;
+            match modal.focus {
+                ModalFocus::List => redraw(),
+                ModalFocus::Detail { idx: 0, .. } => {
+                    modal.focus = ModalFocus::List;
+                    redraw()
+                }
+                ModalFocus::Detail { idx, rows } => {
+                    modal.focus = ModalFocus::Detail { idx: idx - 1, rows };
+                    redraw()
+                }
+            }
         }
 
         // ---- Search ----
@@ -821,6 +852,71 @@ mod tests {
                 .selected_ordinal,
             0
         );
+    }
+
+    fn task_with_validation_error(id: &str) -> ReportingTaskRow {
+        let mut t = bare_task(id);
+        t.validation_status = ValidationStatus::Invalid;
+        t.validation_errors = vec!["err".into()];
+        t
+    }
+
+    #[test]
+    fn tab_from_list_enters_detail_at_first_section() {
+        let mut s = fresh_state();
+        s.current_tab = ViewId::Overview;
+        open_modal_with_tasks(&mut s, vec![task_with_validation_error("t1")]);
+
+        dispatch_modal_verb(&mut s, MV::FocusDetail);
+        let modal = s.overview.reporting_tasks_modal.as_ref().unwrap();
+        assert!(matches!(modal.focus, ModalFocus::Detail { idx: 0, .. }));
+
+        dispatch_modal_verb(&mut s, MV::NextPane);
+        let modal = s.overview.reporting_tasks_modal.as_ref().unwrap();
+        assert!(matches!(modal.focus, ModalFocus::Detail { idx: 1, .. }));
+    }
+
+    #[test]
+    fn tab_from_last_section_wraps_to_list() {
+        let mut s = fresh_state();
+        s.current_tab = ViewId::Overview;
+        // No validation errors → sections = [Properties, RecentBulletins], len 2.
+        open_modal_with_tasks(&mut s, vec![bare_task("t1")]);
+        let modal = s.overview.reporting_tasks_modal.as_mut().unwrap();
+        modal.focus = ModalFocus::Detail {
+            idx: 1,
+            rows: [0; 3],
+        };
+
+        dispatch_modal_verb(&mut s, MV::NextPane);
+        let modal = s.overview.reporting_tasks_modal.as_ref().unwrap();
+        assert_eq!(modal.focus, ModalFocus::List);
+    }
+
+    #[test]
+    fn shift_tab_from_first_section_wraps_to_list() {
+        let mut s = fresh_state();
+        s.current_tab = ViewId::Overview;
+        open_modal_with_tasks(&mut s, vec![bare_task("t1")]);
+        let modal = s.overview.reporting_tasks_modal.as_mut().unwrap();
+        modal.focus = ModalFocus::Detail {
+            idx: 0,
+            rows: [0; 3],
+        };
+
+        dispatch_modal_verb(&mut s, MV::PrevPane);
+        let modal = s.overview.reporting_tasks_modal.as_ref().unwrap();
+        assert_eq!(modal.focus, ModalFocus::List);
+    }
+
+    #[test]
+    fn shift_tab_from_list_is_noop() {
+        let mut s = fresh_state();
+        s.current_tab = ViewId::Overview;
+        open_modal_with_tasks(&mut s, vec![bare_task("t1")]);
+        dispatch_modal_verb(&mut s, MV::PrevPane);
+        let modal = s.overview.reporting_tasks_modal.as_ref().unwrap();
+        assert_eq!(modal.focus, ModalFocus::List);
     }
 
     #[test]
