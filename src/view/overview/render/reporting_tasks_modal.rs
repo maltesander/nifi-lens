@@ -19,7 +19,7 @@ use crate::cluster::EndpointState;
 use crate::cluster::snapshot::BulletinRing;
 use crate::input::{OverviewReportingTasksVerb, Verb};
 use crate::theme;
-use crate::view::overview::reporting_tasks_modal::{ModalPaneFocus, ReportingTasksModalState};
+use crate::view::overview::reporting_tasks_modal::{ModalFocus, ReportingTasksModalState};
 use crate::widget::modal::LOADING_LABEL;
 use crate::widget::panel::Panel;
 
@@ -129,7 +129,7 @@ fn render_list_pane(
         Span::styled(format!("Tasks ({})", snapshot.tasks.len()), theme::accent()),
         Span::raw(" "),
     ]);
-    let panel = Panel::new(title).focused(matches!(state.focus, ModalPaneFocus::List));
+    let panel = Panel::new(title).focused(matches!(state.focus, ModalFocus::List));
     let block = panel.into_block();
     let inner = block.inner(area);
     frame.render_widget(block, area);
@@ -251,7 +251,7 @@ fn render_detail_pane(
     snapshot: &ReportingTasksSnapshot,
     bulletins: &BulletinRing,
 ) {
-    let panel = Panel::new(" Detail ").focused(matches!(state.focus, ModalPaneFocus::Detail));
+    let panel = Panel::new(" Detail ").focused(matches!(state.focus, ModalFocus::Detail { .. }));
     let block = panel.into_block();
     let inner = block.inner(area);
     frame.render_widget(block, area);

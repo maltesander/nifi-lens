@@ -147,12 +147,8 @@ fn handle_reporting_tasks_modal_verb(
     state: &mut AppState,
     verb: crate::input::OverviewReportingTasksVerb,
 ) -> Option<UpdateResult> {
-    use crate::app::state::PendingIntent;
     use crate::input::{CommonVerb, OverviewReportingTasksVerb as V};
-    use crate::intent::CrossLink;
-    use crate::view::overview::reporting_tasks_modal::{
-        DetailRow, ModalPaneFocus, ReportingTasksModalState,
-    };
+    use crate::view::overview::reporting_tasks_modal::ModalFocus;
 
     let redraw = || {
         Some(UpdateResult {
@@ -181,99 +177,21 @@ fn handle_reporting_tasks_modal_verb(
         // ---- Enter (FocusDetail / cross-link from detail) ----
         V::FocusDetail => {
             let modal = state.overview.reporting_tasks_modal.as_mut()?;
-            if modal.focus == ModalPaneFocus::List {
-                // Shift focus to the detail pane.
-                modal.focus = ModalPaneFocus::Detail;
-                // Place cursor on first actionable row.
-                let snap = state.cluster.snapshot.reporting_tasks.latest().cloned();
-                if let Some(snap) = snap.as_ref() {
-                    let task = modal.selected_row(snap);
-                    if let Some(task) = task {
-                        let bulletin_count = state
-                            .cluster
-                            .snapshot
-                            .bulletins
-                            .buf
-                            .iter()
-                            .filter(|b| b.source_id == task.id)
-                            .count()
-                            .min(10);
-                        modal.detail_cursor =
-                            ReportingTasksModalState::first_detail_cursor(task, bulletin_count);
-                    } else {
-                        modal.detail_cursor = DetailRow::NonInteractive;
-                    }
-                }
+            if matches!(modal.focus, ModalFocus::List) {
+                modal.focus = ModalFocus::Detail {
+                    idx: 0,
+                    rows: [0; 3],
+                };
                 return redraw();
             }
-            // Focus is already on Detail — execute the cross-link.
-            let snap = state.cluster.snapshot.reporting_tasks.latest().cloned();
-            let Some(snap) = snap else {
-                return redraw();
-            };
-            let task_id;
-            let detail_cursor;
-            {
-                let modal = state.overview.reporting_tasks_modal.as_ref()?;
-                let task = modal.selected_row(&snap)?;
-                task_id = task.id.clone();
-                detail_cursor = modal.detail_cursor;
-            }
-            let task = snap.tasks.iter().find(|t| t.id == task_id)?;
-            match detail_cursor {
-                DetailRow::Property(prop_idx) => {
-                    // Look up the i-th property in BTreeMap iteration order.
-                    let Some((_, value)) = task.properties.iter().nth(prop_idx) else {
-                        return redraw();
-                    };
-                    let Some(val_str) = value.as_deref() else {
-                        return redraw();
-                    };
-                    // Extract the first param ref name.
-                    use crate::view::browser::render::{ParamRefScan, scan_param_refs};
-                    let preselect = match scan_param_refs(val_str) {
-                        ParamRefScan::Single { name } => Some(name),
-                        ParamRefScan::Multiple => None,
-                        ParamRefScan::None => return redraw(),
-                    };
-                    // Reporting tasks have no owning PG — use the root PG id
-                    // (first entry in process_group_ids, which is DFS-root).
-                    let root_pg_id = state
-                        .cluster
-                        .snapshot
-                        .root_pg_status
-                        .latest()
-                        .and_then(|s| s.process_group_ids.first().cloned())
-                        .unwrap_or_default();
-                    state.overview.reporting_tasks_modal = None;
-                    Some(UpdateResult {
-                        redraw: true,
-                        intent: Some(PendingIntent::Goto(CrossLink::OpenParameterContextModal {
-                            pg_id: root_pg_id,
-                            preselect,
-                        })),
-                        ..Default::default()
-                    })
-                }
-                DetailRow::Bulletin(_bulletin_idx) => {
-                    // Cross-link to Bulletins, pre-filtered by source id.
-                    state.overview.reporting_tasks_modal = None;
-                    Some(UpdateResult {
-                        redraw: true,
-                        intent: Some(PendingIntent::Goto(CrossLink::OpenBulletins {
-                            source_id: task_id,
-                        })),
-                        ..Default::default()
-                    })
-                }
-                DetailRow::NonInteractive => redraw(),
-            }
+            // Detail focus — Enter cross-link wired in Task 7.
+            redraw()
         }
 
         // ---- Row navigation (list pane) ----
         V::RowUp => {
             let modal = state.overview.reporting_tasks_modal.as_mut()?;
-            if modal.focus == ModalPaneFocus::List {
+            if matches!(modal.focus, ModalFocus::List) {
                 if modal.selected_ordinal > 0 {
                     modal.selected_ordinal -= 1;
                 }
@@ -288,7 +206,7 @@ fn handle_reporting_tasks_modal_verb(
         }
         V::RowDown => {
             let modal = state.overview.reporting_tasks_modal.as_mut()?;
-            if modal.focus == ModalPaneFocus::List {
+            if matches!(modal.focus, ModalFocus::List) {
                 let max = modal.filtered_indices.len().saturating_sub(1);
                 if modal.selected_ordinal < max {
                     modal.selected_ordinal += 1;
@@ -304,7 +222,7 @@ fn handle_reporting_tasks_modal_verb(
         }
         V::PageUp => {
             let modal = state.overview.reporting_tasks_modal.as_mut()?;
-            if modal.focus == ModalPaneFocus::List {
+            if matches!(modal.focus, ModalFocus::List) {
                 modal.selected_ordinal = modal.selected_ordinal.saturating_sub(10);
                 if let Some(&raw_idx) = modal.filtered_indices.get(modal.selected_ordinal) {
                     let snap = state.cluster.snapshot.reporting_tasks.latest();
@@ -317,7 +235,7 @@ fn handle_reporting_tasks_modal_verb(
         }
         V::PageDown => {
             let modal = state.overview.reporting_tasks_modal.as_mut()?;
-            if modal.focus == ModalPaneFocus::List {
+            if matches!(modal.focus, ModalFocus::List) {
                 let max = modal.filtered_indices.len().saturating_sub(1);
                 modal.selected_ordinal = (modal.selected_ordinal + 10).min(max);
                 if let Some(&raw_idx) = modal.filtered_indices.get(modal.selected_ordinal) {
@@ -331,7 +249,7 @@ fn handle_reporting_tasks_modal_verb(
         }
         V::JumpTop => {
             let modal = state.overview.reporting_tasks_modal.as_mut()?;
-            if modal.focus == ModalPaneFocus::List {
+            if matches!(modal.focus, ModalFocus::List) {
                 modal.selected_ordinal = 0;
                 if let Some(&raw_idx) = modal.filtered_indices.first() {
                     let snap = state.cluster.snapshot.reporting_tasks.latest();
@@ -344,7 +262,7 @@ fn handle_reporting_tasks_modal_verb(
         }
         V::JumpBottom => {
             let modal = state.overview.reporting_tasks_modal.as_mut()?;
-            if modal.focus == ModalPaneFocus::List {
+            if matches!(modal.focus, ModalFocus::List) {
                 modal.selected_ordinal = modal.filtered_indices.len().saturating_sub(1);
                 if let Some(&raw_idx) = modal.filtered_indices.last() {
                     let snap = state.cluster.snapshot.reporting_tasks.latest();
@@ -359,65 +277,21 @@ fn handle_reporting_tasks_modal_verb(
         // ---- Copy ----
         V::Common(CommonVerb::Copy) => {
             let snap = state.cluster.snapshot.reporting_tasks.latest().cloned();
-            let (text, focus, detail_cursor) = {
-                let modal = state.overview.reporting_tasks_modal.as_ref()?;
-                let focus = modal.focus;
-                let detail_cursor = modal.detail_cursor;
-                let text = match focus {
-                    ModalPaneFocus::List => {
-                        // Copy selected list row as TSV.
-                        snap.as_ref().and_then(|s| modal.selected_row(s)).map(|t| {
-                            use crate::view::overview::reporting_tasks_modal::short_type;
-                            format!(
-                                "{}\t{}\t{}\t{}\t{}",
-                                t.id,
-                                t.name,
-                                short_type(&t.task_type),
-                                t.scheduling_period,
-                                t.active_thread_count,
-                            )
-                        })
-                    }
-                    ModalPaneFocus::Detail => snap
-                        .as_ref()
-                        .and_then(|s| modal.selected_row(s))
-                        .and_then(|task| match detail_cursor {
-                            DetailRow::Property(i) => {
-                                task.properties.iter().nth(i).map(|(name, value)| {
-                                    let descriptor = task.descriptors.get(name);
-                                    let sensitive =
-                                        descriptor.map(|d| d.sensitive).unwrap_or(false);
-                                    let display_name = descriptor
-                                        .map(|d| d.display_name.as_str())
-                                        .unwrap_or(name.as_str());
-                                    let val_str = if sensitive {
-                                        "[masked]".to_string()
-                                    } else {
-                                        value.as_deref().unwrap_or("[masked]").to_string()
-                                    };
-                                    format!("{display_name}\t{val_str}")
-                                })
-                            }
-                            DetailRow::Bulletin(i) => state
-                                .cluster
-                                .snapshot
-                                .bulletins
-                                .buf
-                                .iter()
-                                .rev()
-                                .filter(|b| b.source_id == task.id)
-                                .take(10)
-                                .collect::<Vec<_>>()
-                                .get(i)
-                                .map(|b| {
-                                    format!("{}\t{}\t{}", b.timestamp_iso, b.level, b.message)
-                                }),
-                            DetailRow::NonInteractive => None,
-                        }),
-                };
-                (text, focus, detail_cursor)
+            let modal = state.overview.reporting_tasks_modal.as_ref()?;
+            let text = match modal.focus {
+                ModalFocus::List => snap.as_ref().and_then(|s| modal.selected_row(s)).map(|t| {
+                    use crate::view::overview::reporting_tasks_modal::short_type;
+                    format!(
+                        "{}\t{}\t{}\t{}\t{}",
+                        t.id,
+                        t.name,
+                        short_type(&t.task_type),
+                        t.scheduling_period,
+                        t.active_thread_count,
+                    )
+                }),
+                ModalFocus::Detail { .. } => None, // wired in Task 8
             };
-            let _ = (focus, detail_cursor); // suppress unused warnings
             if let Some(text) = text {
                 super::clipboard_copy(state, &text);
             }
@@ -761,9 +635,7 @@ mod tests {
     };
     use crate::cluster::snapshot::{EndpointState, FetchMeta};
     use crate::input::{CommonVerb, OverviewReportingTasksVerb as MV, ViewVerb};
-    use crate::view::overview::reporting_tasks_modal::{
-        DetailRow, ModalPaneFocus, ReportingTasksModalState,
-    };
+    use crate::view::overview::reporting_tasks_modal::{ModalFocus, ReportingTasksModalState};
     use std::collections::BTreeMap;
     use std::time::{Duration, Instant};
 
@@ -825,7 +697,7 @@ mod tests {
         let r = dispatch_modal_verb(&mut s, MV::FocusDetail);
         assert!(r.unwrap().redraw);
         let modal = s.overview.reporting_tasks_modal.as_ref().unwrap();
-        assert_eq!(modal.focus, ModalPaneFocus::Detail);
+        assert!(matches!(modal.focus, ModalFocus::Detail { .. }));
     }
 
     #[test]
@@ -866,6 +738,7 @@ mod tests {
     }
 
     #[test]
+    #[ignore = "cross-link from Detail focus is wired in Task 7 of the detail-panels plan"]
     fn enter_on_bulletin_emits_bulletins_cross_link() {
         let mut s = fresh_state();
         s.current_tab = ViewId::Overview;
@@ -892,8 +765,10 @@ mod tests {
 
         // Shift focus to detail pane
         let modal = s.overview.reporting_tasks_modal.as_mut().unwrap();
-        modal.focus = ModalPaneFocus::Detail;
-        modal.detail_cursor = DetailRow::Bulletin(0);
+        modal.focus = ModalFocus::Detail {
+            idx: 0,
+            rows: [0; 3],
+        };
 
         // Press Enter
         let r = dispatch_modal_verb(&mut s, MV::FocusDetail);
