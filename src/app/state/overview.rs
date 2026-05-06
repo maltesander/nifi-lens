@@ -138,6 +138,60 @@ impl ViewKeyHandler for OverviewHandler {
     }
 }
 
+/// Computes the clipboard text for the current modal focus + cursor.
+/// Returns `None` if there's no resolvable selection or the focused row
+/// is empty. Pure function — does not touch clipboard or app state.
+fn copy_text_for_focus(
+    cluster_snapshot: &crate::cluster::snapshot::ClusterSnapshot,
+    modal: &crate::view::overview::reporting_tasks_modal::ReportingTasksModalState,
+) -> Option<String> {
+    use crate::view::overview::reporting_tasks_modal::{
+        DetailSection, ModalFocus, section_list, short_type,
+    };
+    let snap = cluster_snapshot.reporting_tasks.latest()?;
+    let task = modal.selected_row(snap)?;
+    match modal.focus {
+        ModalFocus::List => Some(format!(
+            "{}\t{}\t{}\t{}\t{}",
+            task.id,
+            task.name,
+            short_type(&task.task_type),
+            task.scheduling_period,
+            task.active_thread_count,
+        )),
+        ModalFocus::Detail { idx, rows } => {
+            let sections = section_list(task);
+            let &section = sections.get(idx)?;
+            match section {
+                DetailSection::Properties => {
+                    let (name, value) = task.properties.iter().nth(rows[idx])?;
+                    let descriptor = task.descriptors.get(name);
+                    let sensitive = descriptor.map(|d| d.sensitive).unwrap_or(false);
+                    let display_name = descriptor
+                        .map(|d| d.display_name.as_str())
+                        .unwrap_or(name.as_str());
+                    let val_str = if sensitive {
+                        "[masked]".to_string()
+                    } else {
+                        value.as_deref().unwrap_or("[masked]").to_string()
+                    };
+                    Some(format!("{display_name}\t{val_str}"))
+                }
+                DetailSection::ValidationErrors => task.validation_errors.get(rows[idx]).cloned(),
+                DetailSection::RecentBulletins => cluster_snapshot
+                    .bulletins
+                    .buf
+                    .iter()
+                    .rev()
+                    .filter(|b| b.source_id == task.id)
+                    .take(10)
+                    .nth(rows[idx])
+                    .map(|b| format!("{}\t{}\t{}", b.timestamp_iso, b.level, b.message)),
+            }
+        }
+    }
+}
+
 /// Row count for the detail sub-section currently focused by `idx`.
 /// Returns `None` if the snapshot or selection isn't resolvable, or if
 /// `idx` is out of range for the current section list.
@@ -430,22 +484,9 @@ fn handle_reporting_tasks_modal_verb(
 
         // ---- Copy ----
         V::Common(CommonVerb::Copy) => {
-            let snap = state.cluster.snapshot.reporting_tasks.latest().cloned();
+            let cluster_snapshot = &state.cluster.snapshot;
             let modal = state.overview.reporting_tasks_modal.as_ref()?;
-            let text = match modal.focus {
-                ModalFocus::List => snap.as_ref().and_then(|s| modal.selected_row(s)).map(|t| {
-                    use crate::view::overview::reporting_tasks_modal::short_type;
-                    format!(
-                        "{}\t{}\t{}\t{}\t{}",
-                        t.id,
-                        t.name,
-                        short_type(&t.task_type),
-                        t.scheduling_period,
-                        t.active_thread_count,
-                    )
-                }),
-                ModalFocus::Detail { .. } => None, // wired in Task 8
-            };
+            let text = copy_text_for_focus(cluster_snapshot, modal);
             if let Some(text) = text {
                 super::clipboard_copy(state, &text);
             }
@@ -1097,6 +1138,82 @@ mod tests {
         props.insert("rate".into(), Some("#{usd_rate}".into()));
         t.properties = props;
         t
+    }
+
+    #[test]
+    fn copy_in_list_focus_returns_task_summary_tsv() {
+        let mut s = fresh_state();
+        s.current_tab = ViewId::Overview;
+        open_modal_with_tasks(&mut s, vec![bare_task("rt1")]);
+        let modal = s.overview.reporting_tasks_modal.as_ref().unwrap();
+        let text = super::copy_text_for_focus(&s.cluster.snapshot, modal);
+        assert_eq!(text.as_deref(), Some("rt1\tTask-rt1\tY\t30s\t0"));
+    }
+
+    #[test]
+    fn copy_property_row_yields_key_value_tsv() {
+        let mut s = fresh_state();
+        s.current_tab = ViewId::Overview;
+        open_modal_with_tasks(&mut s, vec![task_with_three_properties("rt1")]);
+        let modal = s.overview.reporting_tasks_modal.as_mut().unwrap();
+        modal.focus = ModalFocus::Detail {
+            idx: 0,
+            rows: [1, 0, 0],
+        };
+        let modal = s.overview.reporting_tasks_modal.as_ref().unwrap();
+        let text = super::copy_text_for_focus(&s.cluster.snapshot, modal);
+        assert_eq!(text.as_deref(), Some("p2\tv2"));
+    }
+
+    #[test]
+    fn copy_validation_error_row_yields_error_string() {
+        let mut s = fresh_state();
+        s.current_tab = ViewId::Overview;
+        open_modal_with_tasks(&mut s, vec![task_with_validation_error("rt1")]);
+        // sections = [Properties, ValidationErrors, RecentBulletins]; idx 1.
+        let modal = s.overview.reporting_tasks_modal.as_mut().unwrap();
+        modal.focus = ModalFocus::Detail {
+            idx: 1,
+            rows: [0; 3],
+        };
+        let modal = s.overview.reporting_tasks_modal.as_ref().unwrap();
+        let text = super::copy_text_for_focus(&s.cluster.snapshot, modal);
+        assert_eq!(text.as_deref(), Some("err"));
+    }
+
+    #[test]
+    fn copy_bulletin_row_yields_iso_level_message_tsv() {
+        use crate::client::BulletinSnapshot;
+        let mut s = fresh_state();
+        s.current_tab = ViewId::Overview;
+        open_modal_with_tasks(&mut s, vec![bare_task("rt1")]);
+        s.cluster
+            .snapshot
+            .bulletins
+            .buf
+            .push_back(BulletinSnapshot {
+                id: 1,
+                level: "WARN".into(),
+                message: "low disk".into(),
+                source_id: "rt1".into(),
+                source_name: "Task-rt1".into(),
+                source_type: "REPORTING_TASK".into(),
+                group_id: "".into(),
+                timestamp_iso: "2026-01-01T00:00:00Z".into(),
+                timestamp_human: "00:00:00 UTC".into(),
+            });
+        // sections = [Properties, RecentBulletins]; idx 1.
+        let modal = s.overview.reporting_tasks_modal.as_mut().unwrap();
+        modal.focus = ModalFocus::Detail {
+            idx: 1,
+            rows: [0; 3],
+        };
+        let modal = s.overview.reporting_tasks_modal.as_ref().unwrap();
+        let text = super::copy_text_for_focus(&s.cluster.snapshot, modal);
+        assert_eq!(
+            text.as_deref(),
+            Some("2026-01-01T00:00:00Z\tWARN\tlow disk")
+        );
     }
 
     #[test]
