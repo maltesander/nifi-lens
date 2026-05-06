@@ -168,6 +168,56 @@ pub(crate) fn parse_prefix(query: &str) -> (QueryFilter, String) {
     (QueryFilter::None, query.to_string())
 }
 
+/// Pick the right "no matches" message for the empty-state body.
+///
+/// When a filter is active but the user hasn't typed a fuzzy needle
+/// yet, the filter itself is the most likely source of confusion — a
+/// generic "no matches" leaves the user guessing whether they typed
+/// the wrong filter or the corpus genuinely has none. This helper
+/// returns a filter-aware string that names what was searched.
+fn empty_state_message(filter: QueryFilter, needle: &str) -> String {
+    let needle_present = !needle.trim().is_empty();
+    match filter {
+        QueryFilter::None => {
+            if needle_present {
+                "no matches".to_string()
+            } else {
+                "no entries".to_string()
+            }
+        }
+        QueryFilter::Kind(k) => {
+            let label = match k {
+                NodeKind::Processor => "processors",
+                NodeKind::ProcessGroup => "process groups",
+                NodeKind::ControllerService => "controller services",
+                NodeKind::Connection => "connections",
+                NodeKind::InputPort => "input ports",
+                NodeKind::OutputPort => "output ports",
+                NodeKind::RemoteProcessGroup => "remote process groups",
+                NodeKind::Folder(_) => "folders",
+            };
+            if needle_present {
+                format!("no {label} match")
+            } else {
+                format!("no {label} in this cluster")
+            }
+        }
+        QueryFilter::Drift(d) => {
+            let label = match d {
+                DriftFilter::Any => "PGs with drift",
+                DriftFilter::Stale => "stale PGs",
+                DriftFilter::Modified => "locally modified PGs",
+                DriftFilter::SyncErr => "PGs with sync failure",
+            };
+            if needle_present {
+                format!("no {label} match")
+            } else {
+                format!("no {label}")
+            }
+        }
+    }
+}
+
 impl Default for FuzzyFindState {
     fn default() -> Self {
         Self::new()
@@ -334,11 +384,7 @@ pub fn render(
     };
 
     if fuzz.matches.is_empty() {
-        let msg = if fuzz.effective_query.is_empty() && fuzz.filter == QueryFilter::None {
-            "no entries"
-        } else {
-            "no matches"
-        };
+        let msg = empty_state_message(fuzz.filter, &fuzz.effective_query);
         let body = Paragraph::new(Line::from(Span::styled(msg, theme::muted())));
         frame.render_widget(body, chunks[3]);
         return;
@@ -1290,5 +1336,70 @@ mod tests {
         assert!(!QueryFilter::Kind(NodeKind::Processor).matches(&entry(NodeKind::ProcessGroup)));
         assert!(QueryFilter::None.matches(&entry(NodeKind::Processor)));
         assert!(QueryFilter::None.matches(&entry(NodeKind::ProcessGroup)));
+    }
+
+    #[test]
+    fn empty_state_no_filter_no_needle() {
+        assert_eq!(empty_state_message(QueryFilter::None, ""), "no entries");
+    }
+
+    #[test]
+    fn empty_state_no_filter_with_needle() {
+        assert_eq!(empty_state_message(QueryFilter::None, "putk"), "no matches");
+    }
+
+    #[test]
+    fn empty_state_drift_filter_names_filter() {
+        // Bare `:drift` with no needle — message names what was filtered.
+        assert_eq!(
+            empty_state_message(QueryFilter::Drift(DriftFilter::Any), ""),
+            "no PGs with drift"
+        );
+        assert_eq!(
+            empty_state_message(QueryFilter::Drift(DriftFilter::Stale), ""),
+            "no stale PGs"
+        );
+        assert_eq!(
+            empty_state_message(QueryFilter::Drift(DriftFilter::Modified), ""),
+            "no locally modified PGs"
+        );
+        assert_eq!(
+            empty_state_message(QueryFilter::Drift(DriftFilter::SyncErr), ""),
+            "no PGs with sync failure"
+        );
+    }
+
+    #[test]
+    fn empty_state_kind_filter_names_kind() {
+        assert_eq!(
+            empty_state_message(QueryFilter::Kind(NodeKind::Processor), ""),
+            "no processors in this cluster"
+        );
+        assert_eq!(
+            empty_state_message(QueryFilter::Kind(NodeKind::ControllerService), ""),
+            "no controller services in this cluster"
+        );
+    }
+
+    #[test]
+    fn empty_state_filter_with_needle_says_no_match() {
+        assert_eq!(
+            empty_state_message(QueryFilter::Drift(DriftFilter::Stale), "ingest"),
+            "no stale PGs match"
+        );
+        assert_eq!(
+            empty_state_message(QueryFilter::Kind(NodeKind::Processor), "kafka"),
+            "no processors match"
+        );
+    }
+
+    #[test]
+    fn empty_state_whitespace_needle_treated_as_empty() {
+        // Trailing space the user just typed must not flip the message
+        // from "no PGs with drift" to "no PGs with drift match".
+        assert_eq!(
+            empty_state_message(QueryFilter::Drift(DriftFilter::Any), "   "),
+            "no PGs with drift"
+        );
     }
 }

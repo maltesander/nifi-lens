@@ -17,9 +17,22 @@ use unicode_width::{UnicodeWidthChar, UnicodeWidthStr};
 use crate::app::state::{AppState, BannerSeverity};
 use crate::theme;
 
+/// Refresh-age threshold above which the glyph renders in `theme::warning()`.
+/// At healthy default cadences the longest-period fetcher (`about`, 1 min) is
+/// the main signal; if NO endpoint has reported in 60s, the cluster is likely
+/// degrading.
+const STALE_WARN_SECS: u64 = 60;
+
+/// Refresh-age threshold above which the glyph renders in `theme::error()`.
+/// 5 min matches the recommended-range maximum for every default-cadence
+/// fetcher (see `config/polling.rs`); past that, the cluster is almost
+/// certainly unreachable.
+const STALE_ERROR_SECS: u64 = 5 * 60;
+
 /// Render footer row 1 into `area`.
 pub fn render(frame: &mut Frame, area: Rect, state: &AppState) {
-    let refresh_text = format_refresh_age(state.last_refresh.elapsed().as_secs());
+    let age_secs = state.last_refresh.elapsed().as_secs();
+    let refresh_text = format_refresh_age(age_secs);
     // Reserve enough columns on the right for the refresh-age glyph +
     // text, plus one column of padding. Clamp to the area width so the
     // split is always valid even on a 10-column terminal.
@@ -34,7 +47,21 @@ pub fn render(frame: &mut Frame, area: Rect, state: &AppState) {
         .split(area);
 
     render_banner(frame, chunks[0], state);
-    render_refresh_age(frame, chunks[1], &refresh_text);
+    render_refresh_age(frame, chunks[1], &refresh_text, age_secs);
+}
+
+/// Pick the style for the refresh-age glyph based on how long since any
+/// fetcher last reported success. `last_refresh` is bumped on every
+/// successful `ClusterUpdate`, so a climbing counter signals systemic
+/// failure across all 12 endpoints.
+fn refresh_age_style(age_secs: u64) -> ratatui::style::Style {
+    if age_secs >= STALE_ERROR_SECS {
+        theme::error()
+    } else if age_secs >= STALE_WARN_SECS {
+        theme::warning()
+    } else {
+        theme::muted()
+    }
 }
 
 fn render_banner(frame: &mut Frame, area: Rect, state: &AppState) {
@@ -90,8 +117,9 @@ fn truncate_to_width(s: &str, max_width: usize) -> String {
     out
 }
 
-fn render_refresh_age(frame: &mut Frame, area: Rect, refresh_text: &str) {
-    let line = Line::from(Span::styled(refresh_text.to_string(), theme::muted()));
+fn render_refresh_age(frame: &mut Frame, area: Rect, refresh_text: &str, age_secs: u64) {
+    let style = refresh_age_style(age_secs);
+    let line = Line::from(Span::styled(refresh_text.to_string(), style));
     frame.render_widget(Paragraph::new(line).alignment(Alignment::Right), area);
 }
 
@@ -224,6 +252,62 @@ mod tests {
         assert!(
             !out.contains("init:"),
             "init chip must not appear when a real banner is set"
+        );
+    }
+
+    #[test]
+    fn refresh_age_style_healthy_below_60s() {
+        // Healthy: muted style — same as default 0s.
+        let healthy = refresh_age_style(0);
+        let almost_warn = refresh_age_style(STALE_WARN_SECS - 1);
+        assert_eq!(healthy, theme::muted());
+        assert_eq!(almost_warn, theme::muted());
+    }
+
+    #[test]
+    fn refresh_age_style_warning_at_threshold() {
+        let warn_at = refresh_age_style(STALE_WARN_SECS);
+        let warn_mid = refresh_age_style(STALE_ERROR_SECS - 1);
+        assert_eq!(warn_at, theme::warning());
+        assert_eq!(warn_mid, theme::warning());
+    }
+
+    #[test]
+    fn refresh_age_style_error_at_threshold() {
+        let error_at = refresh_age_style(STALE_ERROR_SECS);
+        let error_far = refresh_age_style(STALE_ERROR_SECS * 10);
+        assert_eq!(error_at, theme::error());
+        assert_eq!(error_far, theme::error());
+    }
+
+    #[test]
+    fn render_uses_warning_style_when_data_is_stale() {
+        use ratatui::style::Color;
+        use std::time::{Duration, Instant};
+
+        let mut state = fresh_state();
+        // Simulate "no successful fetch for 90s" — past the warn threshold.
+        state.last_refresh = Instant::now() - Duration::from_secs(STALE_WARN_SECS + 30);
+
+        let backend = TestBackend::new(60, 1);
+        let mut term = Terminal::new(backend).unwrap();
+        term.draw(|f| render(f, f.area(), &state)).unwrap();
+
+        // Find the cell containing the refresh glyph and verify its style
+        // matches the warning theme — not muted.
+        let buf = term.backend().buffer().clone();
+        let warning_fg = match theme::warning().fg {
+            Some(c) => c,
+            None => Color::Reset,
+        };
+        let glyph_cell = (0..buf.area().width)
+            .map(|x| buf[(x, 0)].clone())
+            .find(|c| c.symbol() == "\u{27f3}")
+            .expect("refresh glyph must be rendered");
+        assert_eq!(
+            glyph_cell.fg, warning_fg,
+            "stale refresh-age glyph must render in warning style; got fg={:?}",
+            glyph_cell.fg
         );
     }
 

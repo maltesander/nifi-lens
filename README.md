@@ -158,6 +158,12 @@ endpoints). The chip disappears once every endpoint has produced its
 first snapshot (success or graceful failure both count). On a slow
 cluster it may take 10–20 seconds.
 
+Once running, the right-aligned `⟳ Ns ago` glyph reports time since
+the last successful fetch from any endpoint. It renders muted while
+healthy, turns yellow after 60 seconds, and red after 5 minutes — a
+red counter means every cluster fetcher has gone silent and the
+displayed data should not be trusted.
+
 ## Compatibility
 
 `nifi-lens` targets Apache NiFi 2.x via `nifi-rust-client`'s `dynamic`

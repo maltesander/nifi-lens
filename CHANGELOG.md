@@ -30,6 +30,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **Hint bar pins `?` help in the right cluster** alongside the
+  version. Previously it lived at the tail of the dynamic hint list
+  and was the first thing to fall off when truncating on narrow
+  terminals — exactly the wrong outcome for the discoverability
+  anchor. The pinned slot now reads `? help · nifi-lens vX.Y.Z` and
+  survives any width below which the dynamic hints collapse to `…`.
+- **Status bar refresh-age glyph turns yellow at 60 s and red at 5 min**
+  since any successful fetch. `state.last_refresh` is bumped on every
+  `ClusterUpdate`, so a climbing counter signals systemic failure
+  across all 12 endpoints; the colour shift gives the user that
+  signal at a glance instead of leaving them to mentally track an
+  ever-incrementing `⟳ Nm ago`.
+- **Fuzzy-find empty state names the active filter** instead of a
+  generic "no matches". `:drift` with no hits now reads
+  `no PGs with drift`, `:stale` reads `no stale PGs`, `:proc` reads
+  `no processors in this cluster`, etc. — so the user can tell
+  whether their filter typo'd or the cluster genuinely has none.
 - **Bulletins hint row** now advertises the `1·2·3 sev` chord that
   toggles ERROR / WARN / INFO severity filters — the chips themselves
   showed counts but never the chord that flips them.

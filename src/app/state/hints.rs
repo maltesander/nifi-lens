@@ -97,13 +97,9 @@ pub fn collect_hints(state: &AppState) -> Vec<crate::widget::hint_bar::HintSpan>
                 for &v in BrowserPeekVerb::all() {
                     push_verb(&mut out, v, &ctx);
                 }
-                // Bare `?` and Goto trailers still apply.
+                // Goto trailer still applies. `?` is rendered in the
+                // hint bar's pinned right cluster.
                 push_verb(&mut out, AppAction::Goto, &ctx);
-                out.push(HintSpan {
-                    key: Cow::Borrowed("?"),
-                    action: Cow::Borrowed("help"),
-                    enabled: true,
-                });
                 return out;
             }
             if state.browser.listing_focused {
@@ -112,11 +108,6 @@ pub fn collect_hints(state: &AppState) -> Vec<crate::widget::hint_bar::HintSpan>
                     push_verb(&mut out, v, &ctx);
                 }
                 push_verb(&mut out, AppAction::Goto, &ctx);
-                out.push(HintSpan {
-                    key: Cow::Borrowed("?"),
-                    action: Cow::Borrowed("help"),
-                    enabled: true,
-                });
                 return out;
             }
             // Multiple BrowserVerbs can share the same chord (e.g. both
@@ -205,15 +196,10 @@ pub fn collect_hints(state: &AppState) -> Vec<crate::widget::hint_bar::HintSpan>
     // actionable destination so the bar doesn't advertise a dead combo.
     push_verb(&mut out, AppAction::Goto, &ctx);
 
-    // Trailing `?` pointer so users always know where to find the
-    // full reference. Everything else (navigation, history, tab
-    // cycling, quit, fuzzy find, context switcher) lives in the help
-    // modal.
-    out.push(HintSpan {
-        key: Cow::Borrowed("?"),
-        action: Cow::Borrowed("help"),
-        enabled: true,
-    });
+    // `?` is rendered in the hint bar's pinned right cluster, so the
+    // discoverability anchor never falls off on narrow terminals.
+    // Everything else (navigation, history, tab cycling, quit, fuzzy
+    // find, context switcher) lives in the help modal.
 
     out
 }

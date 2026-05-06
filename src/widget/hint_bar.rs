@@ -34,7 +34,10 @@ const SEPARATOR: &str = " \u{00B7} ";
 ///
 /// Key portions use `theme::accent()`, action text uses `theme::muted()`,
 /// separated by ` · ` in muted style. If the combined width exceeds
-/// `area.width`, the bar is truncated from the right with `…` (U+2026).
+/// `area.width`, the dynamic hints area is truncated from the right with
+/// `…` (U+2026). The right cluster (`? help · nifi-lens vX.Y.Z`) is
+/// pinned and never truncates — `?` is the fundamental discoverability
+/// anchor, so it must outlive any narrow-terminal pressure.
 /// Empty hints produce no output.
 pub fn render(frame: &mut Frame, area: Rect, hints: &[HintSpan]) {
     if area.width == 0 {
@@ -42,21 +45,21 @@ pub fn render(frame: &mut Frame, area: Rect, hints: &[HintSpan]) {
     }
 
     let version_text = format!("nifi-lens v{}", env!("CARGO_PKG_VERSION"));
-    // Reserve version_text.width() + 1 column of padding on the right.
-    // Clamp to the area width so the split is always valid on very
-    // narrow terminals.
-    let version_cols = version_text
+    let right_text = format!("? help{SEPARATOR}{version_text}");
+    // Reserve right_text.width() + 1 column of padding. Clamp to the
+    // area width so the split is always valid on very narrow terminals.
+    let right_cols = right_text
         .width()
         .saturating_add(1)
         .min(area.width as usize) as u16;
 
     let chunks = Layout::default()
         .direction(Direction::Horizontal)
-        .constraints([Constraint::Fill(1), Constraint::Length(version_cols)])
+        .constraints([Constraint::Fill(1), Constraint::Length(right_cols)])
         .split(area);
 
     render_hints(frame, chunks[0], hints);
-    render_version(frame, chunks[1], &version_text);
+    render_right_cluster(frame, chunks[1], &version_text);
 }
 
 fn render_hints(frame: &mut Frame, area: Rect, hints: &[HintSpan]) {
@@ -74,11 +77,16 @@ fn render_hints(frame: &mut Frame, area: Rect, hints: &[HintSpan]) {
     frame.render_widget(Paragraph::new(line), area);
 }
 
-fn render_version(frame: &mut Frame, area: Rect, version_text: &str) {
+fn render_right_cluster(frame: &mut Frame, area: Rect, version_text: &str) {
     if area.width == 0 {
         return;
     }
-    let line = Line::from(Span::styled(version_text.to_string(), theme::muted()));
+    let line = Line::from(vec![
+        Span::styled("?", theme::accent()),
+        Span::styled(" help", theme::muted()),
+        Span::styled(SEPARATOR, theme::muted()),
+        Span::styled(version_text.to_string(), theme::muted()),
+    ]);
     frame.render_widget(Paragraph::new(line).alignment(Alignment::Right), area);
 }
 
@@ -255,6 +263,59 @@ mod tests {
         assert!(out.contains("nav"));
         assert!(out.contains("Enter"));
         assert!(out.contains("open"));
+    }
+
+    #[test]
+    fn help_marker_pinned_in_right_cluster() {
+        use ratatui::Terminal;
+        use ratatui::backend::TestBackend;
+
+        let hints = vec![HintSpan {
+            key: Cow::Borrowed("\u{2191}/\u{2193}"),
+            action: Cow::Borrowed("nav"),
+            enabled: true,
+        }];
+        let backend = TestBackend::new(120, 1);
+        let mut term = Terminal::new(backend).unwrap();
+        term.draw(|f| render(f, f.area(), &hints)).unwrap();
+        let out = format!("{}", term.backend());
+        let expected_version = format!("nifi-lens v{}", env!("CARGO_PKG_VERSION"));
+        // Both `? help` and the version live in the right cluster, in that order.
+        let help_pos = out.find("? help").expect("? help marker missing");
+        let version_pos = out.find(&expected_version).expect("version label missing");
+        assert!(
+            help_pos < version_pos,
+            "expected `? help` to render before version in the right cluster; got out={out:?}"
+        );
+    }
+
+    #[test]
+    fn help_marker_survives_on_narrow_terminal() {
+        use ratatui::Terminal;
+        use ratatui::backend::TestBackend;
+
+        // Many hints, narrow terminal — hints area must give way to the
+        // pinned right cluster (`? help · nifi-lens vX.Y.Z`).
+        let hints = vec![
+            HintSpan {
+                key: Cow::Borrowed("\u{2191}/\u{2193}"),
+                action: Cow::Borrowed("navigation"),
+                enabled: true,
+            },
+            HintSpan {
+                key: Cow::Borrowed("Enter"),
+                action: Cow::Borrowed("open selected item"),
+                enabled: true,
+            },
+        ];
+        let backend = TestBackend::new(40, 1);
+        let mut term = Terminal::new(backend).unwrap();
+        term.draw(|f| render(f, f.area(), &hints)).unwrap();
+        let out = format!("{}", term.backend());
+        assert!(
+            out.contains("? help"),
+            "`? help` must remain visible on a 40-col terminal; got {out:?}"
+        );
     }
 
     #[test]
