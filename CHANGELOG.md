@@ -15,11 +15,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   then re-run nifilens"), instead of erroring out. `--config <path>`
   still surfaces the original error so an explicit override isn't
   silently bootstrapped at a different location.
-- **Help modal grows and scrolls.** `?` now opens a help modal that
-  sizes to fit the terminal (up to 80 cols × area-4 rows), and scrolls
-  via `↑/↓/PgUp/PgDn/Home/End` when the active tab's verb set
-  overflows. A footer chip shows the current page when scrolling is
-  active.
 - Browser: new **Access** modal (`u`) showing who can view / modify /
   view-data / operate / manage-policies on the selected UUID-bearing
   component (process group, processor, controller service, ports, RPG,
@@ -27,57 +22,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   per-identity view of every (action, resource) grant cluster-wide, with
   cross-links back to Browser arena entries for resolvable resources.
   Read-only. Gracefully disables on clusters with no authorizer configured.
-- **Search inside Access and Identity modals.** Both modals exposed
-  `OpenSearch / SearchNext / SearchPrev` in their verb tables (so the
-  hint bar promised `/ search`), but the dispatcher silently no-op'd
-  every search verb — pressing `/` did nothing. With realistic
-  clusters easily holding 100+ identities, that gap mattered. Search
-  is now wired end-to-end, mirroring the version-control modal:
-  `/ {query}_` live filter against identity strings (Access) or
-  resource paths (Identity), `Enter` to commit, `n` / `N` to cycle
-  matches with the row cursor following, matched substrings rendered
-  in `theme::search_match`. The Access matrix appends `[group]` to
-  group rows so users can narrow by category. The Identity drill-in
-  intentionally keeps the prefix-free `resource` body so match
-  offsets index the rendered path directly. `Esc` cascades through
-  search before closing the modal — first press cancels search,
-  second press closes — matching the established cascade in the
-  ActionHistory and VersionControl modals.
 
 ### Changed
 
-- **Reporting-tasks modal: focusable detail sub-panels.** The right
-  pane previously rendered as one big scrollable text blob; pressing
-  `Enter` shifted focus there but `↑/↓` did nothing visible. The detail
-  pane is now four bordered sub-panels — Identity (non-focusable),
-  Properties, Validation errors (when present), and Recent bulletins —
-  matching the browser controller-service detail pattern. `Tab` /
-  `Shift+Tab` cycle the focusable panels and wrap from last/first back
-  to the list. `↑/↓` / `PgUp/PgDn` / `Home/End` move within the focused
-  section's row cursor. `Esc` from a focused section returns to the
-  list (cascading through search-clear → close-modal as before). Cross-
-  links preserved: `Enter` on a property row with `#{...}` opens the
-  parameter context modal preselected; `Enter` on a bulletin row jumps
-  to the Bulletins tab filtered by source. `c` copies the focused row
-  as TSV (key=value, error string, or timestamp/level/message).
-- **Bulletins empty-state strings adapt to terminal width.**
-  `"waiting for bulletins…"` and `"no bulletins match the current
-  filters (press c to clear)"` previously bled past the panel edge
-  on sub-25-col / sub-58-col terminals. Three-tier fallbacks now
-  render `waiting…` / `no matches (c clears)` / `no matches`
-  depending on the available width.
-- **Help modal lists `F12` under a Diagnostics section.** The
-  keymap-dump diagnostic was previously documented only in
-  AGENTS.md and a code comment, so users filing bug reports had
-  no way to discover it. Surfacing it in `?` makes the tool
-  self-documenting for support workflows.
-- **Bulletins muted-source badge shows the source names**, not just
-  the count. The chip now reads `muted: 3 (PutKafka, GetFile,
-  RouteOnAttribute)` (or `muted: 5 (..., +2)` for longer mute
-  lists). Names are looked up from the ring, with an 8-char id
-  fallback for sources that have scrolled out of the buffer.
-  Previously a `muted: 3` count gave the user no way to recall
-  which sources they had silenced.
 - **Bulletins pause is now `p` (was `Shift+P`).** Aligns with the
   chord-case convention (lowercase = action / open / cross-link;
   Shift+letter = filter / group-by / search-modal) and matches
@@ -91,30 +38,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   explicit feedback instead of a silently-empty body. Matches the
   surface used by the version-control / parameter-context /
   action-history modals.
-- **Version-control modal label clarity.** The `[e]` chord now reads
-  `[e] bundle diffs` instead of the cryptic `[e] env`, and the body
-  status chip reads `bundle diffs shown` / `bundle diffs hidden`
-  instead of `env shown` / `env hidden`. Both refer to the same
-  thing — NAR / bundle-version differences — but the original
-  abbreviation gave a first-time user no clue what was being
-  toggled. Also dropped `[n] next` from the VC modal hint bar to
-  match every other searchable modal (Access / Identity / Reporting
-  Tasks / VC now all show `/` only; `n` / `N` are discovered after
-  pressing `/`).
-- **Events watch predicate parse error stays visible until the next
-  successful commit.** `push_predicate_char` and `pop_predicate_char`
-  used to clear `WatchSession.last_parse_error` on every keystroke,
-  so the user couldn't tell whether their in-progress edit fixed
-  the previously rejected predicate — they only learned by pressing
-  Enter again. The chip now persists across edits and clears in
-  `commit_predicate` only on a successful parse, so disappearance of
-  the chip is itself the success signal.
-- **Bulletins text filter shows the committed value while the user
-  is editing.** Previously the chip row collapsed to `text: foo_`
-  during input, hiding the previously committed `bar` filter that
-  Esc would revert to. Editing now reads `text: foo_  (was: bar)`
-  when a prior committed filter exists, so the user knows whether
-  cancelling unwinds to a filtered or unfiltered state.
 - **Queue listing preserves selection by FlowFile UUID** across the
   next bulk fetch. Previously `apply_complete` replaced `rows` and
   re-clamped `selected` to the visible window, so the cursor stayed
@@ -122,14 +45,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   FlowFile. The reducer now captures the selected UUID before the
   swap and re-locates it in the new visible set; if it's gone (or
   filtered out) selection falls back to the prior clamp behavior.
-- **Bulletins paused mode preserves the selected group across ring
-  eviction.** While paused, when a new bulletin arrives and pushes
-  an old one off the front of the cluster ring, every grouped
-  position shifts up by one — the cursor used to silently land on a
-  different group. `redraw_bulletins` now captures the selected
-  group key before the mirror swap and re-resolves the cursor to
-  the same logical group afterward; auto-scroll is unchanged
-  (still snaps to newest).
 - **Hint bar pins `?` help in the right cluster** alongside the
   version. Previously it lived at the tail of the dynamic hint list
   and was the first thing to fall off when truncating on narrow
@@ -147,53 +62,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `no PGs with drift`, `:stale` reads `no stale PGs`, `:proc` reads
   `no processors in this cluster`, etc. — so the user can tell
   whether their filter typo'd or the cluster genuinely has none.
-- **Bulletins hint row** now advertises the `1·2·3 sev` chord that
-  toggles ERROR / WARN / INFO severity filters — the chips themselves
-  showed counts but never the chord that flips them.
-- **Visual language unified.** A single `LOADING_LABEL` (`"loading…"`)
-  now renders everywhere a fetch is in-flight (Browser tree, Bulletins
-  list age chip, Tracer event detail / latest-events / content sides);
-  three previous variants (`"initial fetch…"`, `"connecting…"`,
-  `"Loading event detail…"`) are gone. A new `theme::PLACEHOLDER_DASH`
-  constant (em-dash) replaces the previous mix of `(none)` / `none` /
-  `-` / blank for absent values in Browser connection panes, Events
-  detail relationship, Tracer attribute diff cells and lineage rows,
-  and Overview node-detail TLS chain. The `Panel` widget gained
-  `border_style(Style)` and `rounded()` builder methods; ten previous
-  raw `Block::default().borders(...)` / `Block::bordered()` sites
-  (Browser tree outer block, Events confirm modal, Tracer content
-  modal, Bulletins detail modal, properties / version-control /
-  identity / save / help / error-detail modals, goto menu, watch
-  strip) now route through `Panel`. Severity-coloured frames (the
-  Bulletins detail modal) keep their hue via `border_style`.
-- **Scrollbar indicators.** A new `widget::scroll::render_vertical_scrollbar`
-  helper renders a position indicator on the right edge of any
-  scrollable pane. Wired into the Bulletins detail modal and Browser
-  Action history modal as the first integration sites — the bar
-  auto-suppresses when content fits the viewport. Same helper is
-  available for any further pane that already tracks a
-  `VerticalScrollState`.
-- **Modal framework hardening.** The Bulletins detail modal and Tracer
-  content viewer modal are now consistent with the rest of the
-  framework. Both now short-circuit at `widget::modal::MIN_WIDTH ×
-  MIN_HEIGHT` via `render_too_small`, render the search prompt via
-  the shared `widget::search::render_search_{input,strip}` helpers,
-  and render the footer hint strip via the shared
-  `widget::modal::render_verb_hint_strip{,_with}` helpers. Bulletins
-  detail gained a proper `BulletinsDetailModalVerb` enum + a
-  `BulletinsDetailModalGate` chained in `KeyMap::translate`, so its
-  modal-only chords (`Esc` / `/` / `n` / `N` / `c`) shadow the outer
-  Bulletins-tab keybindings while open instead of running through
-  the parent verb dispatch. The Queue-listing peek modal's hand-rolled
-  `/`-prompt was migrated to `render_search_input`; cursor glyph and
-  spacing now match the rest of the app.
-- Integration test fixture switched from NiFi `single-user-authorizer` to
-  `managed-authorizer` with file-based providers. Now seeded with `admin`
-  / `alice` / `bob` / `carol` users and an `ops-team` group, plus
-  realistic component-level policies on the `orders-pipeline` and
-  `versioned-clean` PGs. Live integration coverage now exercises the
-  access-policies-audit feature end-to-end
-  (`tests/integration_browser_access.rs`).
 - **Reporting tasks visibility on Overview**: a Components-panel row showing
   `running / stopped / invalid` counts plus a `t`-launched master-detail
   modal with properties, validation errors, parameter-ref annotations, and
@@ -203,12 +71,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   Browser / Tracer rows opens Events pre-narrowed to a component.
 - Config: `[events] watch_buffer_size`, `[events] watch_retry_max`,
   `[polling.cluster] events_tail`.
-- Internal: removed the main-thread `LocalSet` workaround. All polling
-  fetchers and view workers now run on a single multi-thread tokio
-  runtime via `tokio::spawn`. Drop-side cleanup HTTP DELETEs use a new
-  `app::cleanup::spawn_cleanup` helper that silently no-ops outside an
-  active runtime. No user-visible behaviour change; the parquet/avro
-  classification and per-PG fan-out fetchers gain real parallelism.
 
 ### Fixed
 
@@ -231,22 +93,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   closing a brief race window between `mkdir` and `chmod`. Daily log
   files are pruned at startup to keep the most recent 14, capping
   on-disk growth.
-
-### Internal
-
-- Centralised `TransmissionStatus` typed enum (`client::status`) for
-  RPG transmission state; replaced ad-hoc string compares.
-- Production-side `client::ROOT_GROUP_ID` constant for NiFi's documented
-  root-PG alias; replaced literal `"root"` strings across reducers,
-  fixtures, and tests.
-- Extracted shared modal helpers: `layout::center_percent` /
-  `layout::center_absolute` (was duplicated four times) and
-  `widget::search::render_search_input` (footer search-bar prompt was
-  duplicated across the version-control, parameter-context, and
-  action-history modals).
-- Tracer hex-fallback cap is now a named `HEX_PREVIEW_BYTES` constant.
-- Node-detail render fixtures use `bytes::GIB` instead of inline
-  `1024_u64.pow(3)` literals.
 
 ## [0.9.0] — 2026-04-30
 

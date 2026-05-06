@@ -170,10 +170,10 @@ fn copy_text_for_focus(
                     let display_name = descriptor
                         .map(|d| d.display_name.as_str())
                         .unwrap_or(name.as_str());
-                    let val_str = if sensitive {
-                        "[masked]".to_string()
+                    let val_str = if sensitive || value.is_none() {
+                        "[sensitive]".to_string()
                     } else {
-                        value.as_deref().unwrap_or("[masked]").to_string()
+                        value.as_deref().unwrap_or_default().to_string()
                     };
                     Some(format!("{display_name}\t{val_str}"))
                 }
@@ -495,12 +495,12 @@ fn handle_reporting_tasks_modal_verb(
 
         // ---- Section cycling (Tab / Shift+Tab) ----
         V::NextPane => {
-            let snap = state.cluster.snapshot.reporting_tasks.latest().cloned();
+            let cluster_snapshot = &state.cluster.snapshot;
             let modal = state.overview.reporting_tasks_modal.as_mut()?;
-            let ModalFocus::Detail { idx, rows } = modal.focus else {
+            let ModalFocus::Detail { idx, mut rows } = modal.focus else {
                 return redraw();
             };
-            let Some(snap) = snap.as_ref() else {
+            let Some(snap) = cluster_snapshot.reporting_tasks.latest() else {
                 return redraw();
             };
             let Some(task) = modal.selected_row(snap) else {
@@ -511,11 +511,15 @@ fn handle_reporting_tasks_modal_verb(
             if new_idx >= sections.len() {
                 modal.focus = ModalFocus::List;
             } else {
+                let count =
+                    detail_row_count_for_focus(cluster_snapshot, modal, new_idx).unwrap_or(0);
+                rows[new_idx] = rows[new_idx].min(count.saturating_sub(1));
                 modal.focus = ModalFocus::Detail { idx: new_idx, rows };
             }
             redraw()
         }
         V::PrevPane => {
+            let cluster_snapshot = &state.cluster.snapshot;
             let modal = state.overview.reporting_tasks_modal.as_mut()?;
             match modal.focus {
                 ModalFocus::List => redraw(),
@@ -523,8 +527,12 @@ fn handle_reporting_tasks_modal_verb(
                     modal.focus = ModalFocus::List;
                     redraw()
                 }
-                ModalFocus::Detail { idx, rows } => {
-                    modal.focus = ModalFocus::Detail { idx: idx - 1, rows };
+                ModalFocus::Detail { idx, mut rows } => {
+                    let new_idx = idx - 1;
+                    let count =
+                        detail_row_count_for_focus(cluster_snapshot, modal, new_idx).unwrap_or(0);
+                    rows[new_idx] = rows[new_idx].min(count.saturating_sub(1));
+                    modal.focus = ModalFocus::Detail { idx: new_idx, rows };
                     redraw()
                 }
             }
@@ -1123,6 +1131,36 @@ mod tests {
     }
 
     #[test]
+    fn tab_clamps_row_cursor_to_new_section_row_count() {
+        // Task has 3 properties and 0 bulletins. Sections =
+        // [Properties, RecentBulletins]. Cursor on Properties row 2
+        // (last property). Tab moves to RecentBulletins (0 rows) — the
+        // remembered rows[1] is whatever it was; we want the clamp to
+        // produce 0, not stay stale.
+        let mut s = fresh_state();
+        s.current_tab = ViewId::Overview;
+        open_modal_with_tasks(&mut s, vec![task_with_three_properties("rt1")]);
+        let modal = s.overview.reporting_tasks_modal.as_mut().unwrap();
+        // Pretend rows[1] (RecentBulletins, 0 rows) was previously left
+        // at 5 from a different task.
+        modal.focus = ModalFocus::Detail {
+            idx: 0,
+            rows: [2, 5, 0],
+        };
+
+        dispatch_modal_verb(&mut s, MV::NextPane);
+        let modal = s.overview.reporting_tasks_modal.as_ref().unwrap();
+        // RecentBulletins has 0 rows → cursor clamps to 0.
+        assert_eq!(
+            modal.focus,
+            ModalFocus::Detail {
+                idx: 1,
+                rows: [2, 0, 0]
+            }
+        );
+    }
+
+    #[test]
     fn shift_tab_from_list_is_noop() {
         let mut s = fresh_state();
         s.current_tab = ViewId::Overview;
@@ -1163,6 +1201,37 @@ mod tests {
         let modal = s.overview.reporting_tasks_modal.as_ref().unwrap();
         let text = super::copy_text_for_focus(&s.cluster.snapshot, modal);
         assert_eq!(text.as_deref(), Some("p2\tv2"));
+    }
+
+    #[test]
+    fn copy_sensitive_property_yields_sensitive_marker() {
+        use crate::client::reporting_tasks::ReportingTaskPropertyDescriptor;
+        let mut s = fresh_state();
+        s.current_tab = ViewId::Overview;
+        let mut t = bare_task("rt1");
+        let mut props = BTreeMap::new();
+        props.insert("api.password".into(), None);
+        t.properties = props;
+        let mut descriptors = BTreeMap::new();
+        descriptors.insert(
+            "api.password".into(),
+            ReportingTaskPropertyDescriptor {
+                display_name: "API Password".into(),
+                sensitive: true,
+                required: false,
+                default_value: None,
+            },
+        );
+        t.descriptors = descriptors;
+        open_modal_with_tasks(&mut s, vec![t]);
+        let modal = s.overview.reporting_tasks_modal.as_mut().unwrap();
+        modal.focus = ModalFocus::Detail {
+            idx: 0,
+            rows: [0; 3],
+        };
+        let modal = s.overview.reporting_tasks_modal.as_ref().unwrap();
+        let text = super::copy_text_for_focus(&s.cluster.snapshot, modal);
+        assert_eq!(text.as_deref(), Some("API Password\t[sensitive]"));
     }
 
     #[test]
