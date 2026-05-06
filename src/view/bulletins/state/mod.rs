@@ -713,6 +713,39 @@ impl BulletinsState {
         })
     }
 
+    /// Resolve every muted `source_id` to a human-readable label by
+    /// looking up the most recent matching bulletin in the ring. IDs
+    /// with no matching bulletin (the source has scrolled out of the
+    /// ring) fall back to the truncated id. Output order is the most
+    /// recently muted first when possible — but `mutes: HashSet`
+    /// doesn't preserve insertion order, so the order is whatever the
+    /// hash returns. Used for the filter-row chip; callers truncate.
+    pub fn muted_source_labels(&self) -> Vec<String> {
+        if self.mutes.is_empty() {
+            return Vec::new();
+        }
+        let mut out: Vec<String> = Vec::with_capacity(self.mutes.len());
+        for id in &self.mutes {
+            // Walk the ring newest-first to grab the latest seen name.
+            let name = self
+                .ring
+                .iter()
+                .rev()
+                .find(|b| b.source_id == *id)
+                .map(|b| b.source_name.clone());
+            out.push(match name {
+                Some(n) if !n.is_empty() => n,
+                _ => {
+                    let mut short = id.clone();
+                    short.truncate(8);
+                    short
+                }
+            });
+        }
+        out.sort_unstable();
+        out
+    }
+
     /// Build a `GroupKey` for the currently selected group, or `None`
     /// when the list is empty.
     pub fn selected_group_key(&self) -> Option<GroupKey> {

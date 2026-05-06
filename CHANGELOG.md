@@ -46,6 +46,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **Bulletins muted-source badge shows the source names**, not just
+  the count. The chip now reads `muted: 3 (PutKafka, GetFile,
+  RouteOnAttribute)` (or `muted: 5 (..., +2)` for longer mute
+  lists). Names are looked up from the ring, with an 8-char id
+  fallback for sources that have scrolled out of the buffer.
+  Previously a `muted: 3` count gave the user no way to recall
+  which sources they had silenced.
 - **Bulletins pause is now `p` (was `Shift+P`).** Aligns with the
   chord-case convention (lowercase = action / open / cross-link;
   Shift+letter = filter / group-by / search-modal) and matches

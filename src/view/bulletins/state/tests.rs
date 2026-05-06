@@ -150,6 +150,38 @@ fn redraw_bulletins_advances_new_since_pause_when_paused() {
 }
 
 #[test]
+fn muted_source_labels_resolves_names_from_ring() {
+    let mut s = BulletinsState::with_capacity(10);
+    let mut bulletin = b(1, "INFO");
+    bulletin.source_id = "uuid-aaa".into();
+    bulletin.source_name = "PutKafka".into();
+    s.ring.push_back(bulletin);
+    s.mutes.insert("uuid-aaa".into());
+
+    let labels = s.muted_source_labels();
+    assert_eq!(
+        labels,
+        vec!["PutKafka".to_string()],
+        "muted ID should resolve to the latest source_name in the ring"
+    );
+}
+
+#[test]
+fn muted_source_labels_falls_back_to_truncated_id_when_ring_evicts() {
+    let mut s = BulletinsState::with_capacity(10);
+    s.mutes.insert("uuid-no-longer-in-ring".into());
+    let labels = s.muted_source_labels();
+    // 8-char truncation of the id when no name is available in the ring.
+    assert_eq!(labels, vec!["uuid-no-".to_string()]);
+}
+
+#[test]
+fn muted_source_labels_returns_empty_when_no_mutes() {
+    let s = BulletinsState::with_capacity(10);
+    assert!(s.muted_source_labels().is_empty());
+}
+
+#[test]
 fn redraw_bulletins_paused_preserves_selected_group_across_eviction() {
     use crate::cluster::snapshot::FetchMeta;
     use std::time::Instant;

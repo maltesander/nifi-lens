@@ -144,11 +144,24 @@ fn render_filter_bar(frame: &mut Frame, area: Rect, state: &BulletinsState) {
             theme::accent(),
         ));
     }
-    // Mute-count badge.
+    // Mute-count badge with a peek of the source names. Showing just
+    // the count makes the user wonder which sources they muted; first
+    // three names cover the common case and a `+N` chip handles
+    // longer mute lists. Names are looked up from the ring so they
+    // stay current with whatever NiFi reports.
     if !state.mutes.is_empty() {
         row0.push(Span::raw("   "));
+        let labels = state.muted_source_labels();
+        let total = labels.len();
+        const SHOWN: usize = 3;
+        let visible: Vec<String> = labels.into_iter().take(SHOWN).collect();
+        let names = if total <= SHOWN {
+            visible.join(", ")
+        } else {
+            format!("{}, +{}", visible.join(", "), total - SHOWN)
+        };
         row0.push(Span::styled(
-            format!("muted: {}", state.mutes.len()),
+            format!("muted: {total} ({names})"),
             theme::muted(),
         ));
     }
