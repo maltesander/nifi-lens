@@ -46,6 +46,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **Events watch predicate parse error stays visible until the next
+  successful commit.** `push_predicate_char` and `pop_predicate_char`
+  used to clear `WatchSession.last_parse_error` on every keystroke,
+  so the user couldn't tell whether their in-progress edit fixed
+  the previously rejected predicate — they only learned by pressing
+  Enter again. The chip now persists across edits and clears in
+  `commit_predicate` only on a successful parse, so disappearance of
+  the chip is itself the success signal.
+- **Bulletins text filter shows the committed value while the user
+  is editing.** Previously the chip row collapsed to `text: foo_`
+  during input, hiding the previously committed `bar` filter that
+  Esc would revert to. Editing now reads `text: foo_  (was: bar)`
+  when a prior committed filter exists, so the user knows whether
+  cancelling unwinds to a filtered or unfiltered state.
 - **Queue listing preserves selection by FlowFile UUID** across the
   next bulk fetch. Previously `apply_complete` replaced `rows` and
   re-clamped `selected` to the visible window, so the cursor stayed

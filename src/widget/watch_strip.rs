@@ -112,7 +112,9 @@ fn render_full(frame: &mut Frame, area: Rect, watch: &WatchSession, focused: boo
     // sticky on the session (set by `commit_predicate`), replace the
     // stats line with a focused error message — investigators care
     // far more about why their predicate didn't take than the ev/s
-    // counter. The error clears as soon as the user types again.
+    // counter. The error stays visible until the next successful
+    // commit, so the user can iterate on the predicate and see by
+    // the disappearance of the chip whether their edit worked.
     let bottom_line = match &watch.last_parse_error {
         Some(err) => Line::from(vec![
             Span::styled("✖ ", theme::error()),

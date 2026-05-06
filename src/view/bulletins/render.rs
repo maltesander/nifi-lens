@@ -121,14 +121,29 @@ fn render_filter_bar(frame: &mut Frame, area: Rect, state: &BulletinsState) {
     ));
     row0.push(Span::raw("   "));
     // Text-input display folded into the chip row.
-    let text_display = if let Some(buf) = state.text_input.as_deref() {
-        Span::styled(format!("text: {buf}_"), theme::accent())
+    //
+    // While the user is editing, surface the committed value too —
+    // otherwise a half-typed search "fo" reads as `text: fo_` with
+    // no indication that pressing Esc reverts to the prior `bar`
+    // filter still in effect. The (was: …) suffix only renders when
+    // a committed filter exists; no suffix means "Esc returns to
+    // unfiltered" which is also unambiguous.
+    if let Some(buf) = state.text_input.as_deref() {
+        row0.push(Span::styled(format!("text: {buf}_"), theme::accent()));
+        if !state.filters.text.is_empty() {
+            row0.push(Span::styled(
+                format!("  (was: {})", state.filters.text),
+                theme::muted(),
+            ));
+        }
     } else if state.filters.text.is_empty() {
-        Span::styled("text: (none)".to_string(), theme::muted())
+        row0.push(Span::styled("text: (none)".to_string(), theme::muted()));
     } else {
-        Span::styled(format!("text: {}", state.filters.text), theme::accent())
-    };
-    row0.push(text_display);
+        row0.push(Span::styled(
+            format!("text: {}", state.filters.text),
+            theme::accent(),
+        ));
+    }
     // Mute-count badge.
     if !state.mutes.is_empty() {
         row0.push(Span::raw("   "));

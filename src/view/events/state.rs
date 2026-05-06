@@ -228,27 +228,31 @@ impl EventsState {
     }
 
     /// Append a character to the predicate-input buffer. No-op when
-    /// focus is elsewhere. Clears any sticky parse-error chip.
+    /// focus is elsewhere. The sticky `last_parse_error` chip is left
+    /// intact — it represents the last attempted commit, and clearing
+    /// it on every keystroke makes it impossible to tell whether the
+    /// in-progress edit has fixed the problem (the user only learns
+    /// on the next Enter). The error clears in `commit_predicate` on
+    /// a successful parse.
     pub fn push_predicate_char(&mut self, ch: char) {
         if !self.predicate_focus {
             return;
         }
         if let Some(w) = self.watch_mut() {
             w.predicate_input.push(ch);
-            w.last_parse_error = None;
         }
     }
 
     /// Pop the last character from the predicate-input buffer. No-op
-    /// when focus is elsewhere or the buffer is empty. Clears any
-    /// sticky parse-error chip.
+    /// when focus is elsewhere or the buffer is empty. See
+    /// `push_predicate_char` for why the parse-error chip is not
+    /// cleared here.
     pub fn pop_predicate_char(&mut self) {
         if !self.predicate_focus {
             return;
         }
         if let Some(w) = self.watch_mut() {
             w.predicate_input.pop();
-            w.last_parse_error = None;
         }
     }
 
@@ -807,7 +811,13 @@ mod tests {
     }
 
     #[test]
-    fn editing_predicate_clears_sticky_error() {
+    fn editing_predicate_keeps_sticky_error_until_recommit() {
+        // Edits to the buffer must NOT clear `last_parse_error` —
+        // the chip is the user's only signal that the previous commit
+        // failed. Clearing on every keystroke makes it impossible to
+        // tell whether an in-progress edit fixes the problem (the
+        // user only learns at the next Enter). The chip clears in
+        // `commit_predicate` on a successful parse.
         let mut s = EventsState::new();
         let mut session = empty_session(100);
         session.predicate_input = "filename matches /foo/".into();
@@ -816,7 +826,23 @@ mod tests {
         assert!(s.watch().unwrap().last_parse_error.is_some());
 
         s.focus_predicate();
-        s.push_predicate_char(' '); // any edit
+        s.push_predicate_char(' ');
+        assert!(
+            s.watch().unwrap().last_parse_error.is_some(),
+            "push must leave the sticky error visible"
+        );
+        s.pop_predicate_char();
+        assert!(
+            s.watch().unwrap().last_parse_error.is_some(),
+            "pop must leave the sticky error visible"
+        );
+
+        // Replace with a valid predicate and commit — only then does
+        // the chip clear.
+        if let Some(w) = s.watch_mut() {
+            w.predicate_input = "filename = ok".into();
+        }
+        let _ = s.commit_predicate();
         assert!(s.watch().unwrap().last_parse_error.is_none());
     }
 

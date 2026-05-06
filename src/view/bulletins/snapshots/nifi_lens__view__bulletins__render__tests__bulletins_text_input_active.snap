@@ -1,9 +1,10 @@
 ---
 source: src/view/bulletins/render.rs
-expression: render_to_string(&state)
+assertion_line: 748
+expression: render_to_string(&mut state)
 ---
 "┌ Filters ─────────────────────────────────────────────────────────────────────────────────────────────────────────────┐"
-"│[E 1] [W 0] [I 1]   type: All   text: io_                                                                             │"
+"│[E 1] [W 0] [I 1]   type: All   text: io_  (was: io)                                                                  │"
 "│Enter commit · Esc cancel                                                                                             │"
 "└──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┘"
 "┌ Bulletins ────────────────────────────────────────────────────────────────────────────────────────────── last <DUR> ago ┐"
