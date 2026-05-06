@@ -9,7 +9,7 @@ use ratatui::Frame;
 use ratatui::layout::{Alignment, Constraint, Direction, Layout, Rect};
 use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
-use ratatui::widgets::{Clear, Paragraph};
+use ratatui::widgets::{Cell, Clear, Paragraph, Row, Table, TableState};
 
 use crate::client::{
     BulletinSnapshot, ReportingTaskRow, ReportingTaskState, ReportingTasksSnapshot,
@@ -19,7 +19,9 @@ use crate::cluster::EndpointState;
 use crate::cluster::snapshot::BulletinRing;
 use crate::input::{OverviewReportingTasksVerb, Verb};
 use crate::theme;
-use crate::view::overview::reporting_tasks_modal::{ModalFocus, ReportingTasksModalState};
+use crate::view::overview::reporting_tasks_modal::{
+    DetailSection, ModalFocus, ReportingTasksModalState, section_list,
+};
 use crate::widget::modal::LOADING_LABEL;
 use crate::widget::panel::Panel;
 
@@ -251,170 +253,243 @@ fn render_detail_pane(
     snapshot: &ReportingTasksSnapshot,
     bulletins: &BulletinRing,
 ) {
-    let panel = Panel::new(" Detail ").focused(matches!(state.focus, ModalFocus::Detail { .. }));
-    let block = panel.into_block();
-    let inner = block.inner(area);
-    frame.render_widget(block, area);
-
     let Some(task) = state.selected_row(snapshot) else {
         // No selection (empty filter result, or empty snapshot post-reconcile).
-        // Snapshot tests for these states are covered by the empty/failed
-        // frame snapshots; the detail pane just stays empty.
         return;
     };
+    let sections = section_list(task);
+    let recent_bulletins: Vec<&BulletinSnapshot> = bulletins
+        .buf
+        .iter()
+        .rev()
+        .filter(|b| b.source_id == task.id)
+        .take(10)
+        .collect();
 
-    let mut lines: Vec<Line<'static>> = Vec::new();
-    push_identity(&mut lines, task, inner.width as usize);
-    lines.push(Line::raw(""));
-    push_scheduling(&mut lines, task);
-    push_properties(&mut lines, task);
-    push_validation_errors(&mut lines, task);
-    push_recent_bulletins(&mut lines, task, bulletins);
+    let has_validation = !task.validation_errors.is_empty();
+    let mut constraints: Vec<Constraint> = Vec::new();
+    constraints.push(Constraint::Length(7)); // Identity (5 lines + 2 borders)
+    constraints.push(Constraint::Min(5)); // Properties
+    if has_validation {
+        let h = (task
+            .validation_errors
+            .len()
+            .min(crate::layout::VALIDATION_ERROR_ROWS_MAX)
+            + 2) as u16;
+        constraints.push(Constraint::Length(h));
+    }
+    constraints.push(Constraint::Length(5)); // Recent bulletins (3 rows + 2 borders)
 
-    // Apply scroll
-    let total = lines.len();
-    let visible = inner.height as usize;
-    let offset = state
-        .detail_scroll
-        .offset
-        .min(total.saturating_sub(visible));
-    let end = (offset + visible).min(total);
-    let visible_lines: Vec<Line<'static>> = lines
-        .get(offset..end)
-        .map(|s| s.to_vec())
-        .unwrap_or_default();
+    let rows = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints(constraints)
+        .split(area);
 
-    frame.render_widget(Paragraph::new(visible_lines), inner);
+    let mut idx = 0;
+    render_identity_subpanel(frame, rows[idx], task);
+    idx += 1;
+    render_properties_subpanel(frame, rows[idx], state, task, sections);
+    idx += 1;
+    if has_validation {
+        render_validation_subpanel(frame, rows[idx], state, task, sections);
+        idx += 1;
+    }
+    render_bulletins_subpanel(frame, rows[idx], state, &recent_bulletins, sections);
 }
 
-fn push_identity(lines: &mut Vec<Line<'static>>, task: &ReportingTaskRow, width: usize) {
-    lines.push(Line::from(Span::styled(
-        task.name.clone(),
-        Style::default().add_modifier(Modifier::BOLD),
-    )));
-    lines.push(Line::from(Span::raw(truncate_chars(
-        &task.task_type,
-        width,
-    ))));
-    lines.push(Line::from(Span::styled(
-        format!("id  {}", task.id),
-        theme::muted(),
-    )));
-}
-
-fn push_scheduling(lines: &mut Vec<Line<'static>>, task: &ReportingTaskRow) {
-    lines.push(Line::from(Span::styled(
-        "Scheduling",
-        Style::default().add_modifier(Modifier::BOLD),
-    )));
-    lines.push(kv_line("strategy", &task.scheduling_strategy));
-    lines.push(kv_line("period", &task.scheduling_period));
+fn render_identity_subpanel(frame: &mut Frame, area: Rect, task: &ReportingTaskRow) {
+    let block = Panel::new(" Identity ").into_block();
+    let inner = block.inner(area);
+    frame.render_widget(block, area);
     let (state_label, state_style) = match task.state {
         ReportingTaskState::Running => ("RUNNING", theme::success()),
         ReportingTaskState::Stopped => ("STOPPED", theme::muted()),
         ReportingTaskState::Disabled => ("DISABLED", theme::muted()),
     };
-    lines.push(Line::from(vec![
-        Span::raw(format!("  {:<20}", "state")),
-        Span::styled(state_label, state_style),
-    ]));
-    lines.push(kv_line(
-        "active threads",
-        &task.active_thread_count.to_string(),
-    ));
+    let lines = vec![
+        Line::from(Span::styled(
+            task.name.clone(),
+            Style::default().add_modifier(Modifier::BOLD),
+        )),
+        Line::from(Span::raw(truncate_chars(
+            &task.task_type,
+            inner.width as usize,
+        ))),
+        Line::from(Span::styled(format!("id  {}", task.id), theme::muted())),
+        Line::from(vec![
+            Span::raw(format!("{:<20}", "state")),
+            Span::styled(state_label, state_style),
+            Span::raw(format!("  period  {}", task.scheduling_period)),
+        ]),
+        Line::from(Span::raw(format!("threads  {}", task.active_thread_count))),
+    ];
+    frame.render_widget(Paragraph::new(lines), inner);
 }
 
-fn push_properties(lines: &mut Vec<Line<'static>>, task: &ReportingTaskRow) {
-    if task.properties.is_empty() {
-        return;
-    }
-    lines.push(Line::raw(""));
-    lines.push(Line::from(Span::styled(
-        "Properties",
-        Style::default().add_modifier(Modifier::BOLD),
-    )));
-    for (name, value) in &task.properties {
-        let descriptor = task.descriptors.get(name);
-        let sensitive = descriptor.map(|d| d.sensitive).unwrap_or(false);
-        let display_name = descriptor
-            .map(|d| d.display_name.as_str())
-            .unwrap_or(name.as_str());
-        let mut spans = vec![Span::raw(format!(
-            "  {:<28}",
-            truncate_chars(display_name, 28)
-        ))];
-        if sensitive || value.is_none() {
-            spans.push(Span::styled("[sensitive]", theme::muted()));
-        } else {
-            match value.as_deref() {
-                Some("") | None => spans.push(Span::styled("(empty)", theme::muted())),
-                Some(s) => {
-                    spans.push(Span::raw(s.to_string()));
-                    if contains_param_ref(s) {
-                        spans.push(Span::styled(" →", theme::accent()));
-                    }
-                }
-            }
-        }
-        lines.push(Line::from(spans));
-    }
-}
-
-fn push_validation_errors(lines: &mut Vec<Line<'static>>, task: &ReportingTaskRow) {
-    if task.validation_errors.is_empty() {
-        return;
-    }
-    lines.push(Line::raw(""));
-    lines.push(Line::from(Span::styled(
-        "Validation errors",
-        theme::warning(),
-    )));
-    for e in &task.validation_errors {
-        lines.push(Line::from(vec![
-            Span::styled("  • ", theme::warning()),
-            Span::raw(e.clone()),
-        ]));
-    }
-}
-
-fn push_recent_bulletins(
-    lines: &mut Vec<Line<'static>>,
+fn render_properties_subpanel(
+    frame: &mut Frame,
+    area: Rect,
+    state: &ReportingTasksModalState,
     task: &ReportingTaskRow,
-    ring: &BulletinRing,
+    sections: &[DetailSection],
 ) {
-    let matches: Vec<&BulletinSnapshot> = ring
-        .buf
+    let title = Line::from(vec![
+        Span::raw(" "),
+        Span::styled(
+            format!("Properties ({})", task.properties.len()),
+            theme::accent(),
+        ),
+        Span::raw(" "),
+    ]);
+    let focused = matches!(
+        state.focus,
+        ModalFocus::Detail { idx, .. }
+            if sections.get(idx) == Some(&DetailSection::Properties)
+    );
+    let panel = Panel::new(title).focused(focused);
+    let block = panel.into_block();
+    let inner = block.inner(area);
+    frame.render_widget(block, area);
+
+    let rows: Vec<Row> = task
+        .properties
         .iter()
-        .rev() // newest first
-        .filter(|b| b.source_id == task.id)
-        .take(10)
+        .map(|(name, value)| {
+            let descriptor = task.descriptors.get(name);
+            let sensitive = descriptor.map(|d| d.sensitive).unwrap_or(false);
+            let display_name = descriptor
+                .map(|d| d.display_name.as_str())
+                .unwrap_or(name.as_str());
+            let value_cell = if sensitive || value.is_none() {
+                Cell::from(Span::styled("[sensitive]", theme::muted()))
+            } else {
+                let s = value.as_deref().unwrap_or_default();
+                if s.is_empty() {
+                    Cell::from(Span::styled("(empty)", theme::muted()))
+                } else if contains_param_ref(s) {
+                    Cell::from(Line::from(vec![
+                        Span::raw(s.to_string()),
+                        Span::styled(" →", theme::accent()),
+                    ]))
+                } else {
+                    Cell::from(Span::raw(s.to_string()))
+                }
+            };
+            Row::new(vec![Cell::from(display_name.to_string()), value_cell])
+        })
         .collect();
-    lines.push(Line::raw(""));
-    lines.push(Line::from(Span::styled(
-        format!("Recent bulletins ({})", matches.len()),
-        Style::default().add_modifier(Modifier::BOLD),
-    )));
-    if matches.is_empty() {
-        lines.push(Line::from(Span::styled(
-            "  no bulletins in ring buffer",
+
+    let widths = [Constraint::Length(28), Constraint::Min(1)];
+    let table = Table::new(rows, widths).header(
+        Row::new(vec!["KEY", "VALUE"]).style(Style::default().add_modifier(Modifier::BOLD)),
+    );
+    let mut ts = TableState::default();
+    if let ModalFocus::Detail { idx, rows: r } = state.focus
+        && focused
+    {
+        ts.select(Some(r[idx]));
+    }
+    frame.render_stateful_widget(table, inner, &mut ts);
+}
+
+fn render_validation_subpanel(
+    frame: &mut Frame,
+    area: Rect,
+    state: &ReportingTasksModalState,
+    task: &ReportingTaskRow,
+    sections: &[DetailSection],
+) {
+    let title = Line::from(vec![
+        Span::raw(" "),
+        Span::styled(
+            format!("Validation errors ({})", task.validation_errors.len()),
+            theme::warning(),
+        ),
+        Span::raw(" "),
+    ]);
+    let focused = matches!(
+        state.focus,
+        ModalFocus::Detail { idx, .. }
+            if sections.get(idx) == Some(&DetailSection::ValidationErrors)
+    );
+    let panel = Panel::new(title).focused(focused);
+    let block = panel.into_block();
+    let inner = block.inner(area);
+    frame.render_widget(block, area);
+
+    let rows: Vec<Row> = task
+        .validation_errors
+        .iter()
+        .map(|e| Row::new(vec![Cell::from(e.clone())]))
+        .collect();
+    let widths = [Constraint::Min(1)];
+    let table = Table::new(rows, widths);
+    let mut ts = TableState::default();
+    if let ModalFocus::Detail { idx, rows: r } = state.focus
+        && focused
+    {
+        ts.select(Some(r[idx]));
+    }
+    frame.render_stateful_widget(table, inner, &mut ts);
+}
+
+fn render_bulletins_subpanel(
+    frame: &mut Frame,
+    area: Rect,
+    state: &ReportingTasksModalState,
+    bulletins: &[&BulletinSnapshot],
+    sections: &[DetailSection],
+) {
+    let title = Line::from(vec![
+        Span::raw(" "),
+        Span::styled(
+            format!("Recent bulletins ({})", bulletins.len()),
+            theme::accent(),
+        ),
+        Span::raw(" "),
+    ]);
+    let focused = matches!(
+        state.focus,
+        ModalFocus::Detail { idx, .. }
+            if sections.get(idx) == Some(&DetailSection::RecentBulletins)
+    );
+    let panel = Panel::new(title).focused(focused);
+    let block = panel.into_block();
+    let inner = block.inner(area);
+    frame.render_widget(block, area);
+
+    if bulletins.is_empty() {
+        let p = Paragraph::new(Line::from(Span::styled(
+            "no bulletins in ring buffer",
             theme::muted(),
         )));
+        frame.render_widget(p, inner);
         return;
     }
-    for b in matches {
-        lines.push(Line::from(vec![
-            Span::raw(format!("  {} ", b.timestamp_human)),
-            Span::styled(b.level.clone(), level_style(&b.level)),
-            Span::raw(format!("  {}", truncate_chars(&b.message, 80))),
-        ]));
-    }
-}
 
-fn kv_line(k: &str, v: &str) -> Line<'static> {
-    Line::from(vec![
-        Span::raw(format!("  {k:<20}")),
-        Span::raw(v.to_string()),
-    ])
+    let rows: Vec<Row> = bulletins
+        .iter()
+        .map(|b| {
+            Row::new(vec![
+                Cell::from(b.timestamp_human.clone()),
+                Cell::from(Span::styled(b.level.clone(), level_style(&b.level))),
+                Cell::from(truncate_chars(&b.message, 80)),
+            ])
+        })
+        .collect();
+    let widths = [
+        Constraint::Length(20),
+        Constraint::Length(8),
+        Constraint::Min(1),
+    ];
+    let table = Table::new(rows, widths);
+    let mut ts = TableState::default();
+    if let ModalFocus::Detail { idx, rows: r } = state.focus
+        && focused
+    {
+        ts.select(Some(r[idx]));
+    }
+    frame.render_stateful_widget(table, inner, &mut ts);
 }
 
 fn level_style(level: &str) -> Style {
@@ -714,6 +789,84 @@ mod tests {
                 MaybeSnapshot::Ready(&snapshot),
                 "dev",
                 &ring,
+            );
+        })
+        .unwrap();
+        insta::assert_snapshot!(format!("{}", term.backend()));
+    }
+
+    #[test]
+    fn reporting_tasks_modal_properties_focused() {
+        let snapshot = reporting_tasks_modal_fixture_5_tasks();
+        let mut modal_state = ReportingTasksModalState::open(&snapshot);
+        // Task id-1 is RUNNING+VALID with no errors, no properties.
+        // Section list = [Properties, RecentBulletins]; idx 0 = Properties.
+        modal_state.focus = ModalFocus::Detail {
+            idx: 0,
+            rows: [0; 3],
+        };
+        let mut term = Terminal::new(test_backend(30)).unwrap();
+        term.draw(|f| {
+            render(
+                f,
+                f.area(),
+                &modal_state,
+                MaybeSnapshot::Ready(&snapshot),
+                "prod-cluster",
+                &BulletinRing::new(100),
+            );
+        })
+        .unwrap();
+        insta::assert_snapshot!(format!("{}", term.backend()));
+    }
+
+    #[test]
+    fn reporting_tasks_modal_bulletins_focused() {
+        let snapshot = reporting_tasks_modal_fixture_5_tasks();
+        let mut modal_state = ReportingTasksModalState::open(&snapshot);
+        // No validation errors on id-1, so sections = [Properties,
+        // RecentBulletins]; idx 1 = RecentBulletins.
+        modal_state.focus = ModalFocus::Detail {
+            idx: 1,
+            rows: [0; 3],
+        };
+        let mut term = Terminal::new(test_backend(30)).unwrap();
+        term.draw(|f| {
+            render(
+                f,
+                f.area(),
+                &modal_state,
+                MaybeSnapshot::Ready(&snapshot),
+                "prod-cluster",
+                &BulletinRing::new(100),
+            );
+        })
+        .unwrap();
+        insta::assert_snapshot!(format!("{}", term.backend()));
+    }
+
+    #[test]
+    fn reporting_tasks_modal_validation_focused() {
+        let snapshot = reporting_tasks_modal_fixture_5_tasks();
+        let mut modal_state = ReportingTasksModalState::open(&snapshot);
+        // Select task id-4 (INVALID + 2 errors). Section list =
+        // [Properties, ValidationErrors, RecentBulletins]; idx 1 =
+        // ValidationErrors.
+        modal_state.selected_id = Some("id-4".to_string());
+        modal_state.selected_ordinal = 3;
+        modal_state.focus = ModalFocus::Detail {
+            idx: 1,
+            rows: [0; 3],
+        };
+        let mut term = Terminal::new(test_backend(30)).unwrap();
+        term.draw(|f| {
+            render(
+                f,
+                f.area(),
+                &modal_state,
+                MaybeSnapshot::Ready(&snapshot),
+                "prod-cluster",
+                &BulletinRing::new(100),
             );
         })
         .unwrap();
