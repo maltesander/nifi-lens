@@ -46,6 +46,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **Bulletins pause is now `p` (was `Shift+P`).** Aligns with the
+  chord-case convention (lowercase = action / open / cross-link;
+  Shift+letter = filter / group-by / search-modal) and matches
+  `EventsWatchVerb::Pause` so the same physical key pauses both
+  Bulletins auto-scroll and the Events watch worker. Lowercase `p`
+  was unbound in Bulletins; no conflict.
 - **Bulletins detail modal search shows the match counter** (`(n/m)`
   while typing, `(0 matches)` once committed with no hits). Switched
   from `render_search_input` to `render_search_strip` and made the

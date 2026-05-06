@@ -180,7 +180,7 @@ impl Verb for BulletinsVerb {
             Self::ToggleSeverity(Severity::Info) => Chord::simple(KeyCode::Char('3')),
             Self::CycleTypeFilter => Chord::shift(KeyCode::Char('T')),
             Self::CycleGroupBy => Chord::shift(KeyCode::Char('G')),
-            Self::TogglePause => Chord::shift(KeyCode::Char('P')),
+            Self::TogglePause => Chord::simple(KeyCode::Char('p')),
             Self::MuteSource => Chord::shift(KeyCode::Char('M')),
             Self::ClearFilters => Chord::shift(KeyCode::Char('R')),
             Self::OpenDetail => Chord::simple(KeyCode::Char('i')),
@@ -1447,10 +1447,14 @@ mod tests {
     }
 
     #[test]
-    fn bulletins_pause_is_shift_p() {
+    fn bulletins_pause_is_lowercase_p() {
+        // `p` is the consistent pause chord across the app — also bound
+        // on `EventsWatchVerb::Pause`. The chord-case convention
+        // (lowercase = action / open / cross-link, Shift = filter or
+        // group-by) puts state mutations like pause into lowercase.
         assert_eq!(
             BulletinsVerb::TogglePause.chord(),
-            Chord::shift(KeyCode::Char('P'))
+            Chord::simple(KeyCode::Char('p'))
         );
     }
 

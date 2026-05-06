@@ -379,7 +379,7 @@ Drift filters (PG-only):
 | `1` / `2` / `3` | Toggle ERROR / WARN / INFO severity filter          |
 | `Shift+G`    | Cycle group-by mode (source + message / source / off)  |
 | `Shift+T`    | Cycle component-type filter                            |
-| `Shift+P`    | Pause / resume auto-scroll                             |
+| `p`          | Pause / resume auto-scroll                             |
 | `Shift+M`    | Mute the selected source                               |
 | `Shift+R`    | Clear all filters                                      |
 | `i`          | Open the bulletin detail modal                         |
