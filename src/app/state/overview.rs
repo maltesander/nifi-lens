@@ -138,6 +138,32 @@ impl ViewKeyHandler for OverviewHandler {
     }
 }
 
+/// Row count for the detail sub-section currently focused by `idx`.
+/// Returns `None` if the snapshot or selection isn't resolvable, or if
+/// `idx` is out of range for the current section list.
+fn detail_row_count_for_focus(
+    cluster_snapshot: &crate::cluster::snapshot::ClusterSnapshot,
+    modal: &crate::view::overview::reporting_tasks_modal::ReportingTasksModalState,
+    idx: usize,
+) -> Option<usize> {
+    use crate::view::overview::reporting_tasks_modal::{DetailSection, section_list};
+    let snap = cluster_snapshot.reporting_tasks.latest()?;
+    let task = modal.selected_row(snap)?;
+    let sections = section_list(task);
+    let &section = sections.get(idx)?;
+    Some(match section {
+        DetailSection::Properties => task.properties.len(),
+        DetailSection::ValidationErrors => task.validation_errors.len(),
+        DetailSection::RecentBulletins => cluster_snapshot
+            .bulletins
+            .buf
+            .iter()
+            .filter(|b| b.source_id == task.id)
+            .take(10)
+            .count(),
+    })
+}
+
 /// Handler for Overview reporting-tasks modal verbs.
 ///
 /// Covers: Esc cascade (search → close), Copy, row navigation, Enter
@@ -188,87 +214,145 @@ fn handle_reporting_tasks_modal_verb(
             redraw()
         }
 
-        // ---- Row navigation (list pane) ----
+        // ---- Row navigation (list pane or detail section) ----
         V::RowUp => {
+            let cluster_snapshot = &state.cluster.snapshot;
             let modal = state.overview.reporting_tasks_modal.as_mut()?;
-            if matches!(modal.focus, ModalFocus::List) {
-                if modal.selected_ordinal > 0 {
-                    modal.selected_ordinal -= 1;
+            match modal.focus {
+                ModalFocus::List => {
+                    if modal.selected_ordinal > 0 {
+                        modal.selected_ordinal -= 1;
+                    }
+                    if let Some(&raw_idx) = modal.filtered_indices.get(modal.selected_ordinal) {
+                        modal.selected_id = cluster_snapshot
+                            .reporting_tasks
+                            .latest()
+                            .and_then(|s| s.tasks.get(raw_idx))
+                            .map(|t| t.id.clone());
+                    }
                 }
-                if let Some(&raw_idx) = modal.filtered_indices.get(modal.selected_ordinal) {
-                    let snap = state.cluster.snapshot.reporting_tasks.latest();
-                    modal.selected_id = snap
-                        .and_then(|s| s.tasks.get(raw_idx))
-                        .map(|t| t.id.clone());
+                ModalFocus::Detail { idx, mut rows } => {
+                    rows[idx] = rows[idx].saturating_sub(1);
+                    modal.focus = ModalFocus::Detail { idx, rows };
                 }
             }
             redraw()
         }
         V::RowDown => {
+            let cluster_snapshot = &state.cluster.snapshot;
             let modal = state.overview.reporting_tasks_modal.as_mut()?;
-            if matches!(modal.focus, ModalFocus::List) {
-                let max = modal.filtered_indices.len().saturating_sub(1);
-                if modal.selected_ordinal < max {
-                    modal.selected_ordinal += 1;
+            match modal.focus {
+                ModalFocus::List => {
+                    let max = modal.filtered_indices.len().saturating_sub(1);
+                    if modal.selected_ordinal < max {
+                        modal.selected_ordinal += 1;
+                    }
+                    if let Some(&raw_idx) = modal.filtered_indices.get(modal.selected_ordinal) {
+                        modal.selected_id = cluster_snapshot
+                            .reporting_tasks
+                            .latest()
+                            .and_then(|s| s.tasks.get(raw_idx))
+                            .map(|t| t.id.clone());
+                    }
                 }
-                if let Some(&raw_idx) = modal.filtered_indices.get(modal.selected_ordinal) {
-                    let snap = state.cluster.snapshot.reporting_tasks.latest();
-                    modal.selected_id = snap
-                        .and_then(|s| s.tasks.get(raw_idx))
-                        .map(|t| t.id.clone());
+                ModalFocus::Detail { idx, mut rows } => {
+                    let count =
+                        detail_row_count_for_focus(cluster_snapshot, modal, idx).unwrap_or(0);
+                    let max = count.saturating_sub(1);
+                    if rows[idx] < max {
+                        rows[idx] += 1;
+                    }
+                    modal.focus = ModalFocus::Detail { idx, rows };
                 }
             }
             redraw()
         }
         V::PageUp => {
+            let cluster_snapshot = &state.cluster.snapshot;
             let modal = state.overview.reporting_tasks_modal.as_mut()?;
-            if matches!(modal.focus, ModalFocus::List) {
-                modal.selected_ordinal = modal.selected_ordinal.saturating_sub(10);
-                if let Some(&raw_idx) = modal.filtered_indices.get(modal.selected_ordinal) {
-                    let snap = state.cluster.snapshot.reporting_tasks.latest();
-                    modal.selected_id = snap
-                        .and_then(|s| s.tasks.get(raw_idx))
-                        .map(|t| t.id.clone());
+            match modal.focus {
+                ModalFocus::List => {
+                    modal.selected_ordinal = modal.selected_ordinal.saturating_sub(10);
+                    if let Some(&raw_idx) = modal.filtered_indices.get(modal.selected_ordinal) {
+                        modal.selected_id = cluster_snapshot
+                            .reporting_tasks
+                            .latest()
+                            .and_then(|s| s.tasks.get(raw_idx))
+                            .map(|t| t.id.clone());
+                    }
+                }
+                ModalFocus::Detail { idx, mut rows } => {
+                    rows[idx] = rows[idx].saturating_sub(10);
+                    modal.focus = ModalFocus::Detail { idx, rows };
                 }
             }
             redraw()
         }
         V::PageDown => {
+            let cluster_snapshot = &state.cluster.snapshot;
             let modal = state.overview.reporting_tasks_modal.as_mut()?;
-            if matches!(modal.focus, ModalFocus::List) {
-                let max = modal.filtered_indices.len().saturating_sub(1);
-                modal.selected_ordinal = (modal.selected_ordinal + 10).min(max);
-                if let Some(&raw_idx) = modal.filtered_indices.get(modal.selected_ordinal) {
-                    let snap = state.cluster.snapshot.reporting_tasks.latest();
-                    modal.selected_id = snap
-                        .and_then(|s| s.tasks.get(raw_idx))
-                        .map(|t| t.id.clone());
+            match modal.focus {
+                ModalFocus::List => {
+                    let max = modal.filtered_indices.len().saturating_sub(1);
+                    modal.selected_ordinal = (modal.selected_ordinal + 10).min(max);
+                    if let Some(&raw_idx) = modal.filtered_indices.get(modal.selected_ordinal) {
+                        modal.selected_id = cluster_snapshot
+                            .reporting_tasks
+                            .latest()
+                            .and_then(|s| s.tasks.get(raw_idx))
+                            .map(|t| t.id.clone());
+                    }
+                }
+                ModalFocus::Detail { idx, mut rows } => {
+                    let count =
+                        detail_row_count_for_focus(cluster_snapshot, modal, idx).unwrap_or(0);
+                    let max = count.saturating_sub(1);
+                    rows[idx] = (rows[idx] + 10).min(max);
+                    modal.focus = ModalFocus::Detail { idx, rows };
                 }
             }
             redraw()
         }
         V::JumpTop => {
+            let cluster_snapshot = &state.cluster.snapshot;
             let modal = state.overview.reporting_tasks_modal.as_mut()?;
-            if matches!(modal.focus, ModalFocus::List) {
-                modal.selected_ordinal = 0;
-                if let Some(&raw_idx) = modal.filtered_indices.first() {
-                    let snap = state.cluster.snapshot.reporting_tasks.latest();
-                    modal.selected_id = snap
-                        .and_then(|s| s.tasks.get(raw_idx))
-                        .map(|t| t.id.clone());
+            match modal.focus {
+                ModalFocus::List => {
+                    modal.selected_ordinal = 0;
+                    if let Some(&raw_idx) = modal.filtered_indices.first() {
+                        modal.selected_id = cluster_snapshot
+                            .reporting_tasks
+                            .latest()
+                            .and_then(|s| s.tasks.get(raw_idx))
+                            .map(|t| t.id.clone());
+                    }
+                }
+                ModalFocus::Detail { idx, mut rows } => {
+                    rows[idx] = 0;
+                    modal.focus = ModalFocus::Detail { idx, rows };
                 }
             }
             redraw()
         }
         V::JumpBottom => {
+            let cluster_snapshot = &state.cluster.snapshot;
             let modal = state.overview.reporting_tasks_modal.as_mut()?;
-            if matches!(modal.focus, ModalFocus::List) {
-                modal.selected_ordinal = modal.filtered_indices.len().saturating_sub(1);
-                if let Some(&raw_idx) = modal.filtered_indices.last() {
-                    let snap = state.cluster.snapshot.reporting_tasks.latest();
-                    modal.selected_id = snap
-                        .and_then(|s| s.tasks.get(raw_idx))
-                        .map(|t| t.id.clone());
+            match modal.focus {
+                ModalFocus::List => {
+                    modal.selected_ordinal = modal.filtered_indices.len().saturating_sub(1);
+                    if let Some(&raw_idx) = modal.filtered_indices.last() {
+                        modal.selected_id = cluster_snapshot
+                            .reporting_tasks
+                            .latest()
+                            .and_then(|s| s.tasks.get(raw_idx))
+                            .map(|t| t.id.clone());
+                    }
+                }
+                ModalFocus::Detail { idx, mut rows } => {
+                    let count =
+                        detail_row_count_for_focus(cluster_snapshot, modal, idx).unwrap_or(0);
+                    rows[idx] = count.saturating_sub(1);
+                    modal.focus = ModalFocus::Detail { idx, rows };
                 }
             }
             redraw()
@@ -917,6 +1001,83 @@ mod tests {
         dispatch_modal_verb(&mut s, MV::PrevPane);
         let modal = s.overview.reporting_tasks_modal.as_ref().unwrap();
         assert_eq!(modal.focus, ModalFocus::List);
+    }
+
+    fn task_with_three_properties(id: &str) -> ReportingTaskRow {
+        let mut t = bare_task(id);
+        let mut props = BTreeMap::new();
+        props.insert("p1".into(), Some("v1".into()));
+        props.insert("p2".into(), Some("v2".into()));
+        props.insert("p3".into(), Some("v3".into()));
+        t.properties = props;
+        t
+    }
+
+    #[test]
+    fn row_down_in_detail_moves_section_row_cursor() {
+        let mut s = fresh_state();
+        s.current_tab = ViewId::Overview;
+        open_modal_with_tasks(&mut s, vec![task_with_three_properties("t1")]);
+        let modal = s.overview.reporting_tasks_modal.as_mut().unwrap();
+        modal.focus = ModalFocus::Detail {
+            idx: 0,
+            rows: [0; 3],
+        };
+
+        dispatch_modal_verb(&mut s, MV::RowDown);
+        let modal = s.overview.reporting_tasks_modal.as_ref().unwrap();
+        assert_eq!(
+            modal.focus,
+            ModalFocus::Detail {
+                idx: 0,
+                rows: [1, 0, 0]
+            }
+        );
+    }
+
+    #[test]
+    fn row_up_in_detail_clamps_at_zero() {
+        let mut s = fresh_state();
+        s.current_tab = ViewId::Overview;
+        open_modal_with_tasks(&mut s, vec![task_with_three_properties("t1")]);
+        let modal = s.overview.reporting_tasks_modal.as_mut().unwrap();
+        modal.focus = ModalFocus::Detail {
+            idx: 0,
+            rows: [0; 3],
+        };
+
+        dispatch_modal_verb(&mut s, MV::RowUp);
+        let modal = s.overview.reporting_tasks_modal.as_ref().unwrap();
+        assert_eq!(
+            modal.focus,
+            ModalFocus::Detail {
+                idx: 0,
+                rows: [0; 3]
+            }
+        );
+    }
+
+    #[test]
+    fn row_down_in_detail_clamps_at_section_row_count() {
+        let mut s = fresh_state();
+        s.current_tab = ViewId::Overview;
+        open_modal_with_tasks(&mut s, vec![task_with_three_properties("t1")]);
+        let modal = s.overview.reporting_tasks_modal.as_mut().unwrap();
+        // Last property index = 2.
+        modal.focus = ModalFocus::Detail {
+            idx: 0,
+            rows: [2, 0, 0],
+        };
+
+        dispatch_modal_verb(&mut s, MV::RowDown);
+        let modal = s.overview.reporting_tasks_modal.as_ref().unwrap();
+        assert_eq!(
+            modal.focus,
+            ModalFocus::Detail {
+                idx: 0,
+                rows: [2, 0, 0]
+            }
+        );
     }
 
     #[test]
