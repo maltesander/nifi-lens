@@ -1042,6 +1042,28 @@ impl ViewKeyHandler for BrowserHandler {
         if ah_active {
             return true;
         }
+        // Access matrix modal's search input.
+        let am_active = state
+            .browser
+            .access_modal
+            .as_ref()
+            .and_then(|m| m.search.as_ref())
+            .map(|s| s.input_active)
+            .unwrap_or(false);
+        if am_active {
+            return true;
+        }
+        // Identity drill-in modal's search input.
+        let im_active = state
+            .browser
+            .identity_modal
+            .as_ref()
+            .and_then(|m| m.search.as_ref())
+            .map(|s| s.input_active)
+            .unwrap_or(false);
+        if im_active {
+            return true;
+        }
         // Queue-listing peek-modal search input.
         let peek_search_active = state
             .browser
@@ -1143,6 +1165,62 @@ impl ViewKeyHandler for BrowserHandler {
                 KeyCode::Backspace => state.browser.action_history_modal_search_pop(),
                 KeyCode::Char(ch) if !key.modifiers.contains(KeyModifiers::CONTROL) => {
                     state.browser.action_history_modal_search_push(ch);
+                }
+                _ => return None,
+            }
+            return Some(UpdateResult {
+                redraw: true,
+                intent: None,
+                tracer_followup: None,
+                sparkline_followup: None,
+                queue_listing_followup: None,
+                tracer_diff_followup: None,
+            });
+        }
+
+        // Access matrix modal's search input.
+        let am_active = state
+            .browser
+            .access_modal
+            .as_ref()
+            .and_then(|m| m.search.as_ref())
+            .map(|s| s.input_active)
+            .unwrap_or(false);
+        if am_active {
+            match key.code {
+                KeyCode::Esc => state.browser.access_modal_search_cancel(),
+                KeyCode::Enter => state.browser.access_modal_search_commit(),
+                KeyCode::Backspace => state.browser.access_modal_search_pop(),
+                KeyCode::Char(ch) if !key.modifiers.contains(KeyModifiers::CONTROL) => {
+                    state.browser.access_modal_search_push(ch);
+                }
+                _ => return None,
+            }
+            return Some(UpdateResult {
+                redraw: true,
+                intent: None,
+                tracer_followup: None,
+                sparkline_followup: None,
+                queue_listing_followup: None,
+                tracer_diff_followup: None,
+            });
+        }
+
+        // Identity drill-in modal's search input.
+        let im_active = state
+            .browser
+            .identity_modal
+            .as_ref()
+            .and_then(|m| m.search.as_ref())
+            .map(|s| s.input_active)
+            .unwrap_or(false);
+        if im_active {
+            match key.code {
+                KeyCode::Esc => state.browser.identity_modal_search_cancel(),
+                KeyCode::Enter => state.browser.identity_modal_search_commit(),
+                KeyCode::Backspace => state.browser.identity_modal_search_pop(),
+                KeyCode::Char(ch) if !key.modifiers.contains(KeyModifiers::CONTROL) => {
+                    state.browser.identity_modal_search_push(ch);
                 }
                 _ => return None,
             }
@@ -2141,10 +2219,33 @@ fn handle_access_modal_verb(
     // calling state methods go through manual option checks below.
     match verb {
         V::Common(CommonVerb::Close) => {
+            // Cascade: cancel an active search before closing the modal.
+            // Mirrors the ActionHistory and VersionControl modal pattern.
+            let has_search = state
+                .browser
+                .access_modal
+                .as_ref()
+                .is_some_and(|m| m.search.is_some());
+            if has_search {
+                state.browser.access_modal_search_cancel();
+                return redraw();
+            }
             if state.browser.access_modal.is_none() {
                 return UpdateResult::default();
             }
             state.browser.close_access_modal();
+            return redraw();
+        }
+        V::Common(CommonVerb::OpenSearch) => {
+            state.browser.access_modal_search_open();
+            return redraw();
+        }
+        V::Common(CommonVerb::SearchNext) => {
+            state.browser.access_modal_search_cycle_next();
+            return redraw();
+        }
+        V::Common(CommonVerb::SearchPrev) => {
+            state.browser.access_modal_search_cycle_prev();
             return redraw();
         }
         V::DrillIdentity => {
@@ -2258,10 +2359,32 @@ fn handle_identity_modal_verb(
     // state-level methods; handle them before the shared borrow below.
     match verb {
         V::Common(CommonVerb::Close) => {
+            // Cascade: cancel an active search before closing the modal.
+            let has_search = state
+                .browser
+                .identity_modal
+                .as_ref()
+                .is_some_and(|m| m.search.is_some());
+            if has_search {
+                state.browser.identity_modal_search_cancel();
+                return redraw();
+            }
             if state.browser.identity_modal.is_none() {
                 return UpdateResult::default();
             }
             state.browser.close_identity_modal();
+            return redraw();
+        }
+        V::Common(CommonVerb::OpenSearch) => {
+            state.browser.identity_modal_search_open();
+            return redraw();
+        }
+        V::Common(CommonVerb::SearchNext) => {
+            state.browser.identity_modal_search_cycle_next();
+            return redraw();
+        }
+        V::Common(CommonVerb::SearchPrev) => {
+            state.browser.identity_modal_search_cycle_prev();
             return redraw();
         }
         V::CrossLink => {

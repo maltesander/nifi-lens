@@ -3893,6 +3893,70 @@ fn open_access_emits_spawn_intent_and_opens_modal() {
 }
 
 // ---------------------------------------------------------------------------
+// Access matrix modal: Esc cascade through search
+// ---------------------------------------------------------------------------
+
+#[test]
+fn access_modal_esc_cancels_search_before_closing_modal() {
+    use crate::cluster::AccessAuditState;
+    use crate::input::{AccessModalVerb, BrowserVerb, CommonVerb, ViewVerb};
+
+    let mut state = make_state_with_processor_selected("proc-1", "FetchKafka");
+    state.cluster.access_audit = AccessAuditState::Supported;
+    BrowserHandler::handle_verb(&mut state, ViewVerb::Browser(BrowserVerb::OpenAccess))
+        .expect("OpenAccess");
+
+    // Open search inside the access modal.
+    BrowserHandler::handle_verb(
+        &mut state,
+        ViewVerb::AccessModal(AccessModalVerb::Common(CommonVerb::OpenSearch)),
+    )
+    .expect("OpenSearch");
+    assert!(
+        state
+            .browser
+            .access_modal
+            .as_ref()
+            .unwrap()
+            .search
+            .is_some(),
+        "search must be open after OpenSearch"
+    );
+
+    // First Esc: cancel search but keep modal open.
+    BrowserHandler::handle_verb(
+        &mut state,
+        ViewVerb::AccessModal(AccessModalVerb::Common(CommonVerb::Close)),
+    )
+    .expect("first Close");
+    assert!(
+        state.browser.access_modal.is_some(),
+        "modal must remain open after the first Esc clears search"
+    );
+    assert!(
+        state
+            .browser
+            .access_modal
+            .as_ref()
+            .unwrap()
+            .search
+            .is_none(),
+        "search must be cleared by the first Esc"
+    );
+
+    // Second Esc: close the modal.
+    BrowserHandler::handle_verb(
+        &mut state,
+        ViewVerb::AccessModal(AccessModalVerb::Common(CommonVerb::Close)),
+    )
+    .expect("second Close");
+    assert!(
+        state.browser.access_modal.is_none(),
+        "modal must close on the second Esc"
+    );
+}
+
+// ---------------------------------------------------------------------------
 // uuid_from_resource helper
 // ---------------------------------------------------------------------------
 

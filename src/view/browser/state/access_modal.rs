@@ -169,7 +169,10 @@ pub struct AccessModalState {
     pub status: ModalStatus,
     pub matrix: Vec<MatrixRow>,
     pub scroll: CursoredScrollState,
-    pub search: SearchState,
+    /// `Some` while the user is typing or after pressing Enter to
+    /// commit. `None` means no active search. Mirrors the
+    /// version-control / parameter-context modal lifecycle.
+    pub search: Option<SearchState>,
 }
 
 /// Lifecycle status of the `AccessModalState`.
@@ -222,8 +225,22 @@ impl AccessModalState {
             status: ModalStatus::Loading,
             matrix: Vec::new(),
             scroll: CursoredScrollState::default(),
-            search: SearchState::default(),
+            search: None,
         }
+    }
+
+    /// Flat searchable body for `/`-search. One line per matrix row in
+    /// `matrix` order, so a `MatchSpan { line_idx, .. }` indexes
+    /// directly into `self.matrix`. Identity strings are the natural
+    /// search target ("alice", "ops-team", DN suffixes, etc.); the
+    /// `[group]` tag lets users narrow by category with `:group`.
+    pub fn searchable_body(&self) -> String {
+        let mut lines: Vec<String> = Vec::with_capacity(self.matrix.len());
+        for row in &self.matrix {
+            let tag = if row.is_group { " [group]" } else { "" };
+            lines.push(format!("{}{tag}", row.tenant.identity));
+        }
+        lines.join("\n")
     }
 
     /// Builds the matrix from a 5-axis fetch result. Identities are

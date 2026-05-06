@@ -223,7 +223,9 @@ pub struct IdentityModalState {
     pub grants: Vec<IdentityGrant>,
     pub group_memberships: Vec<String>,
     pub scroll: CursoredScrollState,
-    pub search: SearchState,
+    /// `Some` while the user is typing or after pressing Enter to
+    /// commit. Mirrors the access-modal lifecycle.
+    pub search: Option<SearchState>,
 }
 
 /// Lifecycle status of the `IdentityModalState`.
@@ -245,8 +247,23 @@ impl IdentityModalState {
             grants: Vec::new(),
             group_memberships: Vec::new(),
             scroll: CursoredScrollState::default(),
-            search: SearchState::default(),
+            search: None,
         }
+    }
+
+    /// Flat searchable body for `/`-search. One line per grant in
+    /// `self.grants` order (sorted by bucket in `apply_fetch`), so a
+    /// `MatchSpan { line_idx, .. }` indexes directly into both
+    /// `self.grants` AND the rendered resource path (no prefix
+    /// offset). Users searching by axis can use the resource-path
+    /// segments NiFi already encodes (`/data/`, `/operate/`,
+    /// `/policies/`) — those are more precise than a derived label.
+    pub fn searchable_body(&self) -> String {
+        let mut lines: Vec<String> = Vec::with_capacity(self.grants.len());
+        for grant in &self.grants {
+            lines.push(grant.resource.clone());
+        }
+        lines.join("\n")
     }
 
     /// Apply a successful fetch result, transitioning to `Loaded`.

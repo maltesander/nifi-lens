@@ -3,8 +3,9 @@
 use crate::theme;
 use crate::view::browser::state::access_modal::{AccessModalState, Axis, MatrixCell, ModalStatus};
 use crate::widget::modal::{LoadGate, render_load_gate, render_too_small};
+use crate::widget::search::{MatchSpan, SearchState};
 use ratatui::Frame;
-use ratatui::layout::Rect;
+use ratatui::layout::{Constraint, Direction, Layout, Rect};
 use ratatui::style::Style;
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Clear, Paragraph};
@@ -38,8 +39,17 @@ pub fn render_access_modal(frame: &mut Frame, area: Rect, state: &mut AccessModa
         return;
     }
 
-    // Header + legend each take 1 row; the rest is data rows.
-    let visible_rows = inner.height.saturating_sub(2) as usize;
+    // Reserve a single footer row for either the search strip (when
+    // active) or the legend. Both occupy one row, so the matrix area
+    // stays the same regardless. Header takes one row above.
+    let chunks = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([Constraint::Min(0), Constraint::Length(1)])
+        .split(inner);
+    let matrix_area = chunks[0];
+    let footer_area = chunks[1];
+
+    let visible_rows = matrix_area.height.saturating_sub(1) as usize;
     let selected = state.scroll.selected;
     let matrix_len = state.matrix.len();
     state.scroll.last_viewport_rows = visible_rows;
@@ -47,7 +57,7 @@ pub fn render_access_modal(frame: &mut Frame, area: Rect, state: &mut AccessModa
     state.scroll.clamp_to_content(matrix_len);
     let header_off = state.scroll.offset;
 
-    let mut lines: Vec<Line<'_>> = Vec::with_capacity(visible_rows + 2);
+    let mut lines: Vec<Line<'_>> = Vec::with_capacity(visible_rows + 1);
 
     // Header row — must match the per-cell format below so columns align.
     let mut header_spans: Vec<Span<'_>> =
@@ -74,10 +84,9 @@ pub fn render_access_modal(frame: &mut Frame, area: Rect, state: &mut AccessModa
         } else {
             Style::default()
         };
-        let mut spans: Vec<Span<'_>> = vec![Span::styled(
-            format!("{:<28}", row.tenant.identity),
-            row_style,
-        )];
+        let identity_cell =
+            highlighted_identity_cell(&row.tenant.identity, idx, &state.search, row_style);
+        let mut spans: Vec<Span<'_>> = identity_cell;
         for axis in Axis::ALL {
             let cell = row.cells.get(&axis).map(MatrixCell::glyph).unwrap_or("—");
             spans.push(Span::styled(format!("  {:<5}", cell), row_style));
@@ -85,13 +94,65 @@ pub fn render_access_modal(frame: &mut Frame, area: Rect, state: &mut AccessModa
         lines.push(Line::from(spans));
     }
 
-    // Legend row at the bottom
-    lines.push(Line::from(Span::styled(
-        "legend  ✓ explicit · ↑ inherited · — none · ? error",
-        theme::muted(),
-    )));
+    frame.render_widget(Paragraph::new(lines), matrix_area);
 
-    frame.render_widget(Paragraph::new(lines), inner);
+    if let Some(search) = state.search.as_ref() {
+        crate::widget::search::render_search_strip(frame, footer_area, search);
+    } else {
+        let legend = Paragraph::new(Line::from(Span::styled(
+            "legend  ✓ explicit · ↑ inherited · — none · ? error",
+            theme::muted(),
+        )));
+        frame.render_widget(legend, footer_area);
+    }
+}
+
+/// Build the spans for the 28-column identity cell, applying
+/// search-match highlight bands when search is active and the row has
+/// matches. The padded width is preserved by adding a final `Span` of
+/// trailing spaces if the identity is shorter than 28 columns.
+fn highlighted_identity_cell<'a>(
+    identity: &'a str,
+    row_idx: usize,
+    search: &Option<SearchState>,
+    base_style: Style,
+) -> Vec<Span<'a>> {
+    const WIDTH: usize = 28;
+    let row_matches: Vec<&MatchSpan> = match search.as_ref() {
+        Some(s) if !s.matches.is_empty() => {
+            s.matches.iter().filter(|m| m.line_idx == row_idx).collect()
+        }
+        _ => Vec::new(),
+    };
+    if row_matches.is_empty() {
+        // No matches on this row — keep the existing single-span format.
+        let padded = format!("{:<width$}", identity, width = WIDTH);
+        return vec![Span::styled(padded, base_style)];
+    }
+    let highlight_style = base_style.patch(theme::search_match());
+    let mut spans: Vec<Span<'a>> = Vec::new();
+    let bytes = identity.as_bytes();
+    let mut cursor = 0usize;
+    for m in row_matches {
+        let start = m.byte_start.min(bytes.len());
+        let end = m.byte_end.min(bytes.len());
+        if start > cursor {
+            spans.push(Span::styled(&identity[cursor..start], base_style));
+        }
+        if end > start {
+            spans.push(Span::styled(&identity[start..end], highlight_style));
+        }
+        cursor = end;
+    }
+    if cursor < identity.len() {
+        spans.push(Span::styled(&identity[cursor..], base_style));
+    }
+    let used_cols = identity.chars().count();
+    if used_cols < WIDTH {
+        let pad = " ".repeat(WIDTH - used_cols);
+        spans.push(Span::styled(pad, base_style));
+    }
+    spans
 }
 
 #[cfg(test)]

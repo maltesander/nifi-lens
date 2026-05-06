@@ -6,8 +6,9 @@ use crate::view::browser::state::identity_modal::{
 };
 use crate::widget::modal::{LoadGate, render_load_gate, render_too_small};
 use crate::widget::panel::Panel;
+use crate::widget::search::{MatchSpan, SearchState};
 use ratatui::Frame;
-use ratatui::layout::Rect;
+use ratatui::layout::{Constraint, Direction, Layout, Rect};
 use ratatui::style::Style;
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Clear, Paragraph};
@@ -38,6 +39,17 @@ pub fn render_identity_modal(frame: &mut Frame, area: Rect, state: &mut Identity
     if render_load_gate(frame, inner, gate) {
         return;
     }
+
+    // Reserve a single footer row for the search strip when active.
+    let (body_area, footer_area) = if state.search.is_some() {
+        let chunks = Layout::default()
+            .direction(Direction::Vertical)
+            .constraints([Constraint::Min(0), Constraint::Length(1)])
+            .split(inner);
+        (chunks[0], Some(chunks[1]))
+    } else {
+        (inner, None)
+    };
 
     let mut lines: Vec<Line<'_>> = Vec::new();
     lines.push(Line::from(Span::styled(
@@ -72,20 +84,69 @@ pub fn render_identity_modal(frame: &mut Frame, area: Rect, state: &mut Identity
         } else {
             Style::default()
         };
-        lines.push(Line::from(vec![
-            Span::styled("  ", row_style),
-            Span::styled(grant.resource.clone(), row_style),
-        ]));
+        lines.push(Line::from(grant_line_spans(
+            &grant.resource,
+            i,
+            &state.search,
+            row_style,
+        )));
     }
 
-    state.scroll.last_viewport_rows = inner.height as usize;
+    state.scroll.last_viewport_rows = body_area.height as usize;
     if let Some(target_line) = grant_line_pos.get(state.scroll.selected).copied() {
         state.scroll.scroll_to_visible(target_line);
     }
     state.scroll.clamp_to_content(lines.len());
     let scroll_offset = u16::try_from(state.scroll.offset).unwrap_or(u16::MAX);
 
-    frame.render_widget(Paragraph::new(lines).scroll((scroll_offset, 0)), inner);
+    frame.render_widget(Paragraph::new(lines).scroll((scroll_offset, 0)), body_area);
+
+    if let (Some(area), Some(search)) = (footer_area, state.search.as_ref()) {
+        crate::widget::search::render_search_strip(frame, area, search);
+    }
+}
+
+/// Build the spans for one grant line: a 2-space indent followed by
+/// the resource path, with search-match highlight bands when the row
+/// has matches. `line_idx` in `MatchSpan` corresponds 1:1 to the
+/// grant index AND to byte offsets in the resource path — see
+/// `IdentityModalState::searchable_body`.
+fn grant_line_spans<'a>(
+    resource: &'a str,
+    row_idx: usize,
+    search: &Option<SearchState>,
+    row_style: Style,
+) -> Vec<Span<'a>> {
+    let mut spans: Vec<Span<'a>> = vec![Span::styled("  ", row_style)];
+    let row_matches: Vec<&MatchSpan> = match search.as_ref() {
+        Some(s) if !s.matches.is_empty() => {
+            s.matches.iter().filter(|m| m.line_idx == row_idx).collect()
+        }
+        _ => Vec::new(),
+    };
+    if row_matches.is_empty() {
+        spans.push(Span::styled(resource, row_style));
+        return spans;
+    }
+    let highlight_style = row_style.patch(theme::search_match());
+    let bytes = resource.as_bytes();
+    let mut cursor = 0usize;
+    for m in row_matches {
+        let start = m.byte_start.min(bytes.len());
+        let end = m.byte_end.min(bytes.len());
+        if end <= cursor || end == start {
+            continue;
+        }
+        if start > cursor {
+            spans.push(Span::styled(&resource[cursor..start], row_style));
+        }
+        spans.push(Span::styled(&resource[start..end], highlight_style));
+        cursor = end;
+    }
+    if cursor < resource.len() {
+        spans.push(Span::styled(&resource[cursor..], row_style));
+    }
+    spans
 }
 
 #[cfg(test)]

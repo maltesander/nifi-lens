@@ -27,6 +27,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   per-identity view of every (action, resource) grant cluster-wide, with
   cross-links back to Browser arena entries for resolvable resources.
   Read-only. Gracefully disables on clusters with no authorizer configured.
+- **Search inside Access and Identity modals.** Both modals exposed
+  `OpenSearch / SearchNext / SearchPrev` in their verb tables (so the
+  hint bar promised `/ search`), but the dispatcher silently no-op'd
+  every search verb — pressing `/` did nothing. With realistic
+  clusters easily holding 100+ identities, that gap mattered. Search
+  is now wired end-to-end, mirroring the version-control modal:
+  `/ {query}_` live filter against identity strings (Access) or
+  resource paths (Identity), `Enter` to commit, `n` / `N` to cycle
+  matches with the row cursor following, matched substrings rendered
+  in `theme::search_match`. The Access matrix appends `[group]` to
+  group rows so users can narrow by category. The Identity drill-in
+  intentionally keeps the prefix-free `resource` body so match
+  offsets index the rendered path directly. `Esc` cascades through
+  search before closing the modal — first press cancels search,
+  second press closes — matching the established cascade in the
+  ActionHistory and VersionControl modals.
 
 ### Changed
 

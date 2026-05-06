@@ -3234,3 +3234,293 @@ fn open_close_access_modal_round_trips() {
         "close_access_modal must cascade to identity_modal"
     );
 }
+
+// ── Access matrix modal: search reducers ─────────────────────────────────────
+
+mod access_modal_search {
+    use crate::client::NodeKind;
+    use crate::client::access::AccessFetchResult;
+    use crate::view::browser::state::access_modal::{Axis, AxisOutcome, TenantRef};
+
+    fn user(id: &str, identity: &str) -> TenantRef {
+        TenantRef {
+            id: id.into(),
+            identity: identity.into(),
+            member_count: None,
+        }
+    }
+    fn group(id: &str, identity: &str) -> TenantRef {
+        TenantRef {
+            id: id.into(),
+            identity: identity.into(),
+            member_count: Some(0),
+        }
+    }
+
+    /// Build a 3-tenant matrix (alice, bob, ops-team) so search has
+    /// enough rows to exercise multi-match and cycling.
+    fn open_loaded(s: &mut crate::view::browser::state::BrowserState) {
+        s.open_access_modal("p1".into(), NodeKind::Processor, "EnrichOrders".into());
+        let mut outcomes: std::collections::HashMap<Axis, AxisOutcome> =
+            std::collections::HashMap::new();
+        for axis in Axis::ALL {
+            outcomes.insert(
+                axis,
+                AxisOutcome::Direct {
+                    users: vec![user("u1", "alice@corp"), user("u2", "bob@corp")],
+                    groups: vec![group("g1", "ops-team")],
+                },
+            );
+        }
+        s.access_modal
+            .as_mut()
+            .unwrap()
+            .apply_fetch(AccessFetchResult { outcomes });
+    }
+
+    #[test]
+    fn open_initializes_input_active_state() {
+        let mut s = crate::view::browser::state::BrowserState::default();
+        open_loaded(&mut s);
+        s.access_modal_search_open();
+        let search = s.access_modal.as_ref().unwrap().search.as_ref().unwrap();
+        assert!(search.input_active);
+        assert!(!search.committed);
+        assert!(search.query.is_empty());
+    }
+
+    #[test]
+    fn push_recomputes_matches_against_searchable_body() {
+        let mut s = crate::view::browser::state::BrowserState::default();
+        open_loaded(&mut s);
+        s.access_modal_search_open();
+        // "ops" appears in only "ops-team [group]" → exactly one match.
+        for ch in "ops".chars() {
+            s.access_modal_search_push(ch);
+        }
+        let search = s.access_modal.as_ref().unwrap().search.as_ref().unwrap();
+        assert_eq!(search.matches.len(), 1, "exactly one row should match");
+        assert_eq!(search.current, Some(0));
+    }
+
+    #[test]
+    fn pop_shrinks_query_and_recomputes() {
+        let mut s = crate::view::browser::state::BrowserState::default();
+        open_loaded(&mut s);
+        s.access_modal_search_open();
+        for ch in "team".chars() {
+            s.access_modal_search_push(ch);
+        }
+        s.access_modal_search_pop();
+        s.access_modal_search_pop();
+        let search = s.access_modal.as_ref().unwrap().search.as_ref().unwrap();
+        assert_eq!(search.query, "te");
+        // "te" appears only in "ops-team [group]" → exactly one match.
+        assert_eq!(search.matches.len(), 1);
+    }
+
+    #[test]
+    fn commit_jumps_cursor_to_first_match() {
+        let mut s = crate::view::browser::state::BrowserState::default();
+        open_loaded(&mut s);
+        // Cursor starts at 0 (alice). Commit a query whose first match
+        // is on row 2 (ops-team) — cursor must follow.
+        s.access_modal_search_open();
+        for ch in "ops".chars() {
+            s.access_modal_search_push(ch);
+        }
+        s.access_modal_search_commit();
+        let modal = s.access_modal.as_ref().unwrap();
+        assert!(!modal.search.as_ref().unwrap().input_active);
+        assert!(modal.search.as_ref().unwrap().committed);
+        assert_eq!(
+            modal.scroll.selected, 2,
+            "commit must jump cursor to first match (ops-team is row 2)"
+        );
+    }
+
+    #[test]
+    fn empty_commit_closes_search() {
+        let mut s = crate::view::browser::state::BrowserState::default();
+        open_loaded(&mut s);
+        s.access_modal_search_open();
+        s.access_modal_search_commit();
+        assert!(s.access_modal.as_ref().unwrap().search.is_none());
+    }
+
+    #[test]
+    fn cancel_clears_search_state() {
+        let mut s = crate::view::browser::state::BrowserState::default();
+        open_loaded(&mut s);
+        s.access_modal_search_open();
+        s.access_modal_search_push('a');
+        s.access_modal_search_cancel();
+        assert!(s.access_modal.as_ref().unwrap().search.is_none());
+    }
+
+    #[test]
+    fn cycle_next_wraps_and_moves_cursor() {
+        let mut s = crate::view::browser::state::BrowserState::default();
+        open_loaded(&mut s);
+        s.access_modal_search_open();
+        // "@corp" matches both alice@corp (row 0) and bob@corp (row 1) once each.
+        for ch in "@corp".chars() {
+            s.access_modal_search_push(ch);
+        }
+        s.access_modal_search_commit();
+        // commit jumped to row 0 (first match).
+        assert_eq!(s.access_modal.as_ref().unwrap().scroll.selected, 0);
+        s.access_modal_search_cycle_next();
+        assert_eq!(
+            s.access_modal.as_ref().unwrap().scroll.selected,
+            1,
+            "cycle_next must move cursor to second match"
+        );
+        s.access_modal_search_cycle_next();
+        assert_eq!(
+            s.access_modal.as_ref().unwrap().scroll.selected,
+            0,
+            "cycle_next must wrap back to first match"
+        );
+    }
+
+    #[test]
+    fn cycle_prev_wraps_and_moves_cursor() {
+        let mut s = crate::view::browser::state::BrowserState::default();
+        open_loaded(&mut s);
+        s.access_modal_search_open();
+        for ch in "@corp".chars() {
+            s.access_modal_search_push(ch);
+        }
+        s.access_modal_search_commit();
+        // First match is row 0; prev must wrap to last match (row 1).
+        s.access_modal_search_cycle_prev();
+        assert_eq!(s.access_modal.as_ref().unwrap().scroll.selected, 1);
+    }
+
+    #[test]
+    fn cycle_is_noop_before_commit() {
+        let mut s = crate::view::browser::state::BrowserState::default();
+        open_loaded(&mut s);
+        s.access_modal_search_open();
+        s.access_modal_search_push('o');
+        let before = s.access_modal.as_ref().unwrap().scroll.selected;
+        s.access_modal_search_cycle_next();
+        let after = s.access_modal.as_ref().unwrap().scroll.selected;
+        assert_eq!(
+            before, after,
+            "cycle_next must be a no-op while search is still input_active"
+        );
+    }
+
+    #[test]
+    fn group_tag_makes_groups_searchable() {
+        let mut s = crate::view::browser::state::BrowserState::default();
+        open_loaded(&mut s);
+        s.access_modal_search_open();
+        for ch in "[group]".chars() {
+            s.access_modal_search_push(ch);
+        }
+        let search = s.access_modal.as_ref().unwrap().search.as_ref().unwrap();
+        assert_eq!(
+            search.matches.len(),
+            1,
+            "exactly one group row should match the [group] tag"
+        );
+        assert_eq!(search.matches[0].line_idx, 2, "ops-team is the group row");
+    }
+}
+
+// ── Identity drill-in modal: search reducers ─────────────────────────────────
+
+mod identity_modal_search {
+    use crate::client::access::IdentityFetchResult;
+    use crate::view::browser::state::identity_modal::{
+        GrantSource, IdentityGrant, IdentityKind, ResourceBucket,
+    };
+
+    fn grant(resource: &str, bucket: ResourceBucket) -> IdentityGrant {
+        IdentityGrant {
+            axis: None,
+            resource: resource.into(),
+            bucket,
+            source: GrantSource::Direct,
+        }
+    }
+
+    fn open_loaded(s: &mut crate::view::browser::state::BrowserState) {
+        s.open_identity_modal(IdentityKind::User, "u1".into(), "alice@corp".into());
+        s.identity_modal
+            .as_mut()
+            .unwrap()
+            .apply_fetch(IdentityFetchResult {
+                identity: "alice@corp".into(),
+                grants: vec![
+                    grant("/processors/abc", ResourceBucket::Processors),
+                    grant("/processors/def", ResourceBucket::Processors),
+                    grant("/process-groups/ingest", ResourceBucket::ProcessGroups),
+                ],
+                group_memberships: Vec::new(),
+            });
+    }
+
+    #[test]
+    fn open_initializes_input_active_state() {
+        let mut s = crate::view::browser::state::BrowserState::default();
+        open_loaded(&mut s);
+        s.identity_modal_search_open();
+        let search = s.identity_modal.as_ref().unwrap().search.as_ref().unwrap();
+        assert!(search.input_active);
+        assert!(!search.committed);
+    }
+
+    #[test]
+    fn commit_jumps_cursor_to_first_matching_grant() {
+        let mut s = crate::view::browser::state::BrowserState::default();
+        open_loaded(&mut s);
+        s.identity_modal_search_open();
+        for ch in "ingest".chars() {
+            s.identity_modal_search_push(ch);
+        }
+        s.identity_modal_search_commit();
+        // After bucket-sort, ProcessGroups precedes Processors, so
+        // "/process-groups/ingest" is grant index 0. Cursor must
+        // land on it.
+        let modal = s.identity_modal.as_ref().unwrap();
+        let target_idx = modal
+            .grants
+            .iter()
+            .position(|g| g.resource == "/process-groups/ingest")
+            .unwrap();
+        assert_eq!(modal.scroll.selected, target_idx);
+    }
+
+    #[test]
+    fn cycle_next_moves_to_second_match() {
+        let mut s = crate::view::browser::state::BrowserState::default();
+        open_loaded(&mut s);
+        s.identity_modal_search_open();
+        // "/processors" matches both processor grants.
+        for ch in "/processors".chars() {
+            s.identity_modal_search_push(ch);
+        }
+        s.identity_modal_search_commit();
+        let first = s.identity_modal.as_ref().unwrap().scroll.selected;
+        s.identity_modal_search_cycle_next();
+        let second = s.identity_modal.as_ref().unwrap().scroll.selected;
+        assert_ne!(
+            first, second,
+            "cycle_next must move cursor to a different grant"
+        );
+    }
+
+    #[test]
+    fn cancel_clears_search_state() {
+        let mut s = crate::view::browser::state::BrowserState::default();
+        open_loaded(&mut s);
+        s.identity_modal_search_open();
+        s.identity_modal_search_push('p');
+        s.identity_modal_search_cancel();
+        assert!(s.identity_modal.as_ref().unwrap().search.is_none());
+    }
+}

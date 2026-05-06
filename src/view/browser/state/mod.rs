@@ -617,6 +617,272 @@ impl BrowserState {
         self.identity_modal = None;
     }
 
+    // Search reducer methods for the access matrix modal. Mirror the
+    // version_modal_search_* / parameter_modal_search_* family. Each
+    // operates against `access_modal.search` and the body from
+    // `AccessModalState::searchable_body`, where `MatchSpan.line_idx`
+    // indexes directly into `access_modal.matrix`.
+
+    /// Open a fresh live-input search session on the access modal.
+    pub fn access_modal_search_open(&mut self) {
+        let Some(modal) = self.access_modal.as_mut() else {
+            return;
+        };
+        modal.search = Some(crate::widget::search::SearchState {
+            query: String::new(),
+            input_active: true,
+            committed: false,
+            matches: Vec::new(),
+            current: None,
+        });
+    }
+
+    /// Append a character to the live search query and recompute matches.
+    pub fn access_modal_search_push(&mut self, ch: char) {
+        let Some(modal) = self.access_modal.as_mut() else {
+            return;
+        };
+        let body = modal.searchable_body();
+        let Some(search) = modal.search.as_mut() else {
+            return;
+        };
+        if !search.input_active {
+            return;
+        }
+        search.query.push(ch);
+        search.matches = crate::widget::search::compute_matches(&body, &search.query);
+        search.current = if search.matches.is_empty() {
+            None
+        } else {
+            Some(0)
+        };
+    }
+
+    /// Remove the last character from the live search query and recompute matches.
+    pub fn access_modal_search_pop(&mut self) {
+        let Some(modal) = self.access_modal.as_mut() else {
+            return;
+        };
+        let body = modal.searchable_body();
+        let Some(search) = modal.search.as_mut() else {
+            return;
+        };
+        if !search.input_active {
+            return;
+        }
+        search.query.pop();
+        search.matches = crate::widget::search::compute_matches(&body, &search.query);
+        search.current = if search.matches.is_empty() {
+            None
+        } else {
+            Some(0)
+        };
+    }
+
+    /// Commit the current query. Empty query → close search. Otherwise
+    /// flip into committed mode and jump the row cursor to the first match.
+    pub fn access_modal_search_commit(&mut self) {
+        let Some(modal) = self.access_modal.as_mut() else {
+            return;
+        };
+        let Some(search) = modal.search.as_mut() else {
+            return;
+        };
+        if search.query.is_empty() {
+            modal.search = None;
+            return;
+        }
+        search.input_active = false;
+        search.committed = true;
+        if let Some(idx) = search.current
+            && let Some(m) = search.matches.get(idx)
+        {
+            modal.scroll.selected = m.line_idx.min(modal.matrix.len().saturating_sub(1));
+        }
+    }
+
+    /// Cancel search and clear all search state from the modal.
+    pub fn access_modal_search_cancel(&mut self) {
+        if let Some(modal) = self.access_modal.as_mut() {
+            modal.search = None;
+        }
+    }
+
+    /// Advance to the next match (wrap), and move the row cursor with it.
+    pub fn access_modal_search_cycle_next(&mut self) {
+        let Some(modal) = self.access_modal.as_mut() else {
+            return;
+        };
+        let Some(search) = modal.search.as_mut() else {
+            return;
+        };
+        if !search.committed || search.matches.is_empty() {
+            return;
+        }
+        let cur = search.current.unwrap_or(0);
+        let next = (cur + 1) % search.matches.len();
+        search.current = Some(next);
+        modal.scroll.selected = search.matches[next]
+            .line_idx
+            .min(modal.matrix.len().saturating_sub(1));
+    }
+
+    /// Move to the previous match (wrap), and move the row cursor with it.
+    pub fn access_modal_search_cycle_prev(&mut self) {
+        let Some(modal) = self.access_modal.as_mut() else {
+            return;
+        };
+        let Some(search) = modal.search.as_mut() else {
+            return;
+        };
+        if !search.committed || search.matches.is_empty() {
+            return;
+        }
+        let cur = search.current.unwrap_or(0);
+        let prev = if cur == 0 {
+            search.matches.len() - 1
+        } else {
+            cur - 1
+        };
+        search.current = Some(prev);
+        modal.scroll.selected = search.matches[prev]
+            .line_idx
+            .min(modal.matrix.len().saturating_sub(1));
+    }
+
+    // Search reducer methods for the identity drill-in modal. Same
+    // shape as the access-modal family; operates against
+    // `identity_modal.search` and `IdentityModalState::searchable_body`,
+    // where `MatchSpan.line_idx` indexes directly into
+    // `identity_modal.grants`.
+
+    /// Open a fresh live-input search session on the identity modal.
+    pub fn identity_modal_search_open(&mut self) {
+        let Some(modal) = self.identity_modal.as_mut() else {
+            return;
+        };
+        modal.search = Some(crate::widget::search::SearchState {
+            query: String::new(),
+            input_active: true,
+            committed: false,
+            matches: Vec::new(),
+            current: None,
+        });
+    }
+
+    /// Append a character to the live search query and recompute matches.
+    pub fn identity_modal_search_push(&mut self, ch: char) {
+        let Some(modal) = self.identity_modal.as_mut() else {
+            return;
+        };
+        let body = modal.searchable_body();
+        let Some(search) = modal.search.as_mut() else {
+            return;
+        };
+        if !search.input_active {
+            return;
+        }
+        search.query.push(ch);
+        search.matches = crate::widget::search::compute_matches(&body, &search.query);
+        search.current = if search.matches.is_empty() {
+            None
+        } else {
+            Some(0)
+        };
+    }
+
+    /// Remove the last character from the live search query and recompute matches.
+    pub fn identity_modal_search_pop(&mut self) {
+        let Some(modal) = self.identity_modal.as_mut() else {
+            return;
+        };
+        let body = modal.searchable_body();
+        let Some(search) = modal.search.as_mut() else {
+            return;
+        };
+        if !search.input_active {
+            return;
+        }
+        search.query.pop();
+        search.matches = crate::widget::search::compute_matches(&body, &search.query);
+        search.current = if search.matches.is_empty() {
+            None
+        } else {
+            Some(0)
+        };
+    }
+
+    /// Commit the current query. Empty query → close search. Otherwise
+    /// flip into committed mode and jump the row cursor to the first match.
+    pub fn identity_modal_search_commit(&mut self) {
+        let Some(modal) = self.identity_modal.as_mut() else {
+            return;
+        };
+        let Some(search) = modal.search.as_mut() else {
+            return;
+        };
+        if search.query.is_empty() {
+            modal.search = None;
+            return;
+        }
+        search.input_active = false;
+        search.committed = true;
+        if let Some(idx) = search.current
+            && let Some(m) = search.matches.get(idx)
+        {
+            modal.scroll.selected = m.line_idx.min(modal.grants.len().saturating_sub(1));
+        }
+    }
+
+    /// Cancel search and clear all search state from the modal.
+    pub fn identity_modal_search_cancel(&mut self) {
+        if let Some(modal) = self.identity_modal.as_mut() {
+            modal.search = None;
+        }
+    }
+
+    /// Advance to the next match (wrap), and move the row cursor with it.
+    pub fn identity_modal_search_cycle_next(&mut self) {
+        let Some(modal) = self.identity_modal.as_mut() else {
+            return;
+        };
+        let Some(search) = modal.search.as_mut() else {
+            return;
+        };
+        if !search.committed || search.matches.is_empty() {
+            return;
+        }
+        let cur = search.current.unwrap_or(0);
+        let next = (cur + 1) % search.matches.len();
+        search.current = Some(next);
+        modal.scroll.selected = search.matches[next]
+            .line_idx
+            .min(modal.grants.len().saturating_sub(1));
+    }
+
+    /// Move to the previous match (wrap), and move the row cursor with it.
+    pub fn identity_modal_search_cycle_prev(&mut self) {
+        let Some(modal) = self.identity_modal.as_mut() else {
+            return;
+        };
+        let Some(search) = modal.search.as_mut() else {
+            return;
+        };
+        if !search.committed || search.matches.is_empty() {
+            return;
+        }
+        let cur = search.current.unwrap_or(0);
+        let prev = if cur == 0 {
+            search.matches.len() - 1
+        } else {
+            cur - 1
+        };
+        search.current = Some(prev);
+        modal.scroll.selected = search.matches[prev]
+            .line_idx
+            .min(modal.grants.len().saturating_sub(1));
+    }
+
     /// Install a fresh `SparklineState` for the given component. Aborts
     /// any previous worker handle so the dispatcher can spawn a new one
     /// without racing with the old loop. Idempotent on `(kind, id)`
