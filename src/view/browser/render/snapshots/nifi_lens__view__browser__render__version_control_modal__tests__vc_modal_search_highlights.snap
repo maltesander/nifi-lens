@@ -1,5 +1,6 @@
 ---
 source: src/view/browser/render/version_control_modal.rs
+assertion_line: 583
 expression: "format!(\"{}\", term.backend())"
 ---
 "┌ ingest · version control ────────────────────────────────────────────────────────────────────────┐"
@@ -27,6 +28,6 @@ expression: "format!(\"{}\", term.backend())"
 "│                                                                                                  │"
 "│                                                                                                  │"
 "│                                                                                                  │"
-"│2 differences across 1 components · env hidden                                                    │"
-"│[Esc] close · [/] find · [n] next · [c] copy · [e] env · [r] refresh                              │"
+"│2 differences across 1 components · bundle diffs hidden                                           │"
+"│[Esc] close · [/] find · [c] copy · [e] bundle diffs · [r] refresh                                │"
 "└──────────────────────────────────────────────────────────────────────────────────────────────────┘"

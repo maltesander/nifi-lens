@@ -272,9 +272,9 @@ fn render_footer_status(frame: &mut Frame, area: Rect, modal: &VersionControlMod
     }
 
     let env_label = if modal.show_environmental {
-        "env shown"
+        "bundle diffs shown"
     } else {
-        "env hidden"
+        "bundle diffs hidden"
     };
     let status = match &modal.differences {
         VersionControlDifferenceLoad::Loading => LOADING_LABEL.to_string(),
@@ -531,7 +531,7 @@ mod tests {
             }],
         );
         term.draw(|f| render(f, f.area(), &modal)).unwrap();
-        // Footer should read: "2 differences across 1 components · env hidden"
+        // Footer should read: "2 differences across 1 components · bundle diffs hidden"
         assert_snapshot!("vc_modal_footer_diff_count", format!("{}", term.backend()));
     }
 

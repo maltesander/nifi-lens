@@ -46,6 +46,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **Version-control modal label clarity.** The `[e]` chord now reads
+  `[e] bundle diffs` instead of the cryptic `[e] env`, and the body
+  status chip reads `bundle diffs shown` / `bundle diffs hidden`
+  instead of `env shown` / `env hidden`. Both refer to the same
+  thing — NAR / bundle-version differences — but the original
+  abbreviation gave a first-time user no clue what was being
+  toggled. Also dropped `[n] next` from the VC modal hint bar to
+  match every other searchable modal (Access / Identity / Reporting
+  Tasks / VC now all show `/` only; `n` / `N` are discovered after
+  pressing `/`).
 - **Events watch predicate parse error stays visible until the next
   successful commit.** `push_predicate_char` and `pop_predicate_char`
   used to clear `WatchSession.last_parse_error` on every keystroke,

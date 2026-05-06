@@ -740,7 +740,7 @@ impl Verb for VersionControlModalVerb {
     fn hint(self) -> &'static str {
         match self {
             Self::Common(c) => c.hint(),
-            Self::ToggleEnvironmental => "env",
+            Self::ToggleEnvironmental => "bundle diffs",
             // Scroll variants have no hint — surfaced in `?` help only.
             _ => "",
         }
@@ -749,11 +749,13 @@ impl Verb for VersionControlModalVerb {
         50
     }
     fn show_in_hint_bar(self) -> bool {
+        // `n` / `N` for search cycling are intentionally hidden — they
+        // crowd the bar and the user discovers them after `/` opens
+        // search. This matches Access / Identity / Reporting Tasks.
         matches!(
             self,
             Self::Common(CommonVerb::Close)
                 | Self::Common(CommonVerb::OpenSearch)
-                | Self::Common(CommonVerb::SearchNext)
                 | Self::Common(CommonVerb::Copy)
                 | Self::Common(CommonVerb::Refresh)
                 | Self::ToggleEnvironmental
