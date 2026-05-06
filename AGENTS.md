@@ -178,8 +178,9 @@ drill/activate/submit; `Ascend` = leave focused pane / cancel input.
 When a view has no local descent target, `Enter` falls back to
 `default_cross_link` (Bulletins → Browser).
 
-`F12` dumps the keymap reverse table + subscriber state to the log
-(unadvertised debug aid).
+`F12` dumps the keymap reverse table + subscriber state to the log;
+listed under "Diagnostics" in the help modal so users filing bug
+reports know it exists.
 
 ### Adding a new view
 

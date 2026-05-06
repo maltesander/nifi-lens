@@ -46,6 +46,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **Bulletins empty-state strings adapt to terminal width.**
+  `"waiting for bulletins…"` and `"no bulletins match the current
+  filters (press c to clear)"` previously bled past the panel edge
+  on sub-25-col / sub-58-col terminals. Three-tier fallbacks now
+  render `waiting…` / `no matches (c clears)` / `no matches`
+  depending on the available width.
+- **Help modal lists `F12` under a Diagnostics section.** The
+  keymap-dump diagnostic was previously documented only in
+  AGENTS.md and a code comment, so users filing bug reports had
+  no way to discover it. Surfacing it in `?` makes the tool
+  self-documenting for support workflows.
 - **Bulletins muted-source badge shows the source names**, not just
   the count. The chip now reads `muted: 3 (PutKafka, GetFile,
   RouteOnAttribute)` (or `muted: 5 (..., +2)` for longer mute

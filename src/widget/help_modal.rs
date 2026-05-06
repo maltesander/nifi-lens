@@ -119,6 +119,10 @@ pub fn general_sections() -> Vec<HelpSection> {
             title: "Cross-tab",
             rows: vec![(AppAction::Goto.chord().display(), "goto related tab")],
         },
+        HelpSection {
+            title: "Diagnostics",
+            rows: vec![("F12".to_string(), "dump keymap + subscriber state to log")],
+        },
     ]
 }
 
@@ -335,13 +339,32 @@ mod tests {
     }
 
     #[test]
-    fn general_sections_have_five_titles() {
+    fn general_sections_have_six_titles() {
         let s = general_sections();
         let titles: Vec<_> = s.iter().map(|s| s.title).collect();
         assert_eq!(
             titles,
-            vec!["Navigation", "History", "Tabs", "App", "Cross-tab"]
+            vec![
+                "Navigation",
+                "History",
+                "Tabs",
+                "App",
+                "Cross-tab",
+                "Diagnostics",
+            ]
         );
+    }
+
+    #[test]
+    fn diagnostics_section_documents_f12_keymap_dump() {
+        let s = general_sections();
+        let diag = s
+            .iter()
+            .find(|s| s.title == "Diagnostics")
+            .expect("Diagnostics section");
+        assert_eq!(diag.rows.len(), 1);
+        assert_eq!(diag.rows[0].0, "F12");
+        assert!(diag.rows[0].1.contains("keymap"));
     }
 
     #[test]

@@ -36,6 +36,32 @@ use crate::widget::severity::{format_severity_label, severity_style};
 const FILTER_BAR_ROWS: u16 = 2;
 const DETAIL_PANE_ROWS: u16 = 8;
 
+/// Pick the empty-ring message for the given panel width. The full
+/// string would overflow on a sub-25-col terminal; the fallback says
+/// the same thing in fewer columns.
+fn empty_ring_message(width: usize) -> String {
+    const FULL: &str = "waiting for bulletins…";
+    if width >= FULL.chars().count() {
+        FULL.to_string()
+    } else {
+        "waiting…".to_string()
+    }
+}
+
+/// Pick the no-match message for the given panel width. Three tiers
+/// so a narrow terminal still renders a complete sentence.
+fn no_match_message(width: usize) -> String {
+    const FULL: &str = "no bulletins match the current filters (press c to clear)";
+    const MID: &str = "no matches (c clears)";
+    if width >= FULL.chars().count() {
+        FULL.to_string()
+    } else if width >= MID.chars().count() {
+        MID.to_string()
+    } else {
+        "no matches".to_string()
+    }
+}
+
 pub fn render(
     frame: &mut Frame,
     area: Rect,
@@ -223,11 +249,9 @@ fn render_list(
     cfg: &crate::timestamp::TimestampConfig,
 ) {
     if state.ring.is_empty() {
-        let centered = Paragraph::new(Span::styled(
-            "waiting for bulletins…".to_string(),
-            theme::muted(),
-        ))
-        .alignment(Alignment::Center);
+        let msg = empty_ring_message(area.width as usize);
+        let centered =
+            Paragraph::new(Span::styled(msg, theme::muted())).alignment(Alignment::Center);
         let mid = area.height.saturating_sub(1) / 2;
         let spot = Rect {
             x: area.x,
@@ -240,11 +264,9 @@ fn render_list(
     }
     let groups: Vec<GroupedRow> = state.grouped_view();
     if groups.is_empty() {
-        let centered = Paragraph::new(Span::styled(
-            "no bulletins match the current filters (press c to clear)".to_string(),
-            theme::muted(),
-        ))
-        .alignment(Alignment::Center);
+        let msg = no_match_message(area.width as usize);
+        let centered =
+            Paragraph::new(Span::styled(msg, theme::muted())).alignment(Alignment::Center);
         let mid = area.height.saturating_sub(1) / 2;
         let spot = Rect {
             x: area.x,
@@ -549,7 +571,7 @@ fn short_time(iso: &str) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::render;
+    use super::{empty_ring_message, no_match_message, render};
     use crate::client::BulletinSnapshot;
     use crate::view::bulletins::state::BulletinsState;
     use ratatui::Terminal;
@@ -820,5 +842,27 @@ mod tests {
                 );
             }
         );
+    }
+
+    #[test]
+    fn empty_ring_message_full_at_wide_width() {
+        assert_eq!(empty_ring_message(80), "waiting for bulletins…");
+        assert_eq!(empty_ring_message(22), "waiting for bulletins…");
+    }
+
+    #[test]
+    fn empty_ring_message_falls_back_at_narrow_width() {
+        assert_eq!(empty_ring_message(20), "waiting…");
+        assert_eq!(empty_ring_message(8), "waiting…");
+    }
+
+    #[test]
+    fn no_match_message_three_tiers() {
+        let full = "no bulletins match the current filters (press c to clear)";
+        assert_eq!(no_match_message(80), full);
+        assert_eq!(no_match_message(full.chars().count()), full);
+        assert_eq!(no_match_message(40), "no matches (c clears)");
+        assert_eq!(no_match_message(21), "no matches (c clears)");
+        assert_eq!(no_match_message(15), "no matches");
     }
 }
