@@ -79,8 +79,12 @@
 - **Remote Process Groups** — appear as leaves in the Browser tree with a transmission badge and target URI chip. Selecting a row opens an Identity pane with target URI, transport protocol, validation status, and the remote ports the target NiFi exposes. A 3-row sparkline tracks received / sent / total-bytes-per-second. Supports action history (`a`) and fuzzy-find (`:rpg`).
 - **Reporting tasks** — `t` opens a master-detail modal listing every NiFi
   reporting task with state, scheduling, properties (sensitive masked),
-  validation errors, and recent bulletins. Components panel surfaces a
-  `running / stopped / invalid` chip and `[t]` hint.
+  validation errors, and recent bulletins. The detail pane is a stack of
+  bordered sub-panels (Identity / Properties / Validation errors / Recent
+  bulletins); `Tab` / `Shift+Tab` cycle the focusable ones, `↑/↓` move
+  within a section, `Enter` cross-links a `#{name}` property to the
+  parameter context modal or a bulletin to the Bulletins tab. Components
+  panel surfaces a `running / stopped / invalid` chip and `[t]` hint.
 - **Provenance events** — filterable cluster-wide event search cross-linked from Bulletins and Browser.
 - **Flowfile tracer** — paste a UUID for full lineage with attribute diffs and a full-screen content viewer that streams large bodies in 512 KiB chunks and renders colored unified diffs (JSON / CSV / Parquet / Avro).
 - **Multi-cluster** — kubeconfig-style contexts; one binary for every NiFi 2.x version.

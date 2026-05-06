@@ -344,6 +344,21 @@ already covered there.
 - **Reporting tasks** piggyback on Overview's subscription rather than
   adding a separate gate; "recent bulletins" filters the existing ring
   by `source_id`, no extra fetch.
+- **Reporting-tasks modal — focusable detail sub-panels** —
+  `ModalFocus::Detail { idx, rows: [usize; MAX_DETAIL_SECTIONS] }`
+  mirrors browser's `DetailFocus`. Sections come from
+  `section_list(task)` (Properties, ValidationErrors-when-present,
+  RecentBulletins; Identity is non-focusable). `rows` is indexed by
+  position in the filtered section list, not by `DetailSection` value
+  — when validation errors disappear, `rows[1]` shifts meaning from
+  "validation row" to "bulletin row". `Tab`/`Shift+Tab` cycle sections
+  and wrap from last/first back to List. Esc cascade from Detail is
+  leave-Detail → clear-search → close-modal. Enter cross-links by
+  `(section, rows[idx])`: Properties param-ref →
+  `OpenParameterContextModal`; RecentBulletins → `OpenBulletins`;
+  ValidationErrors → no-op. Copy is also section-aware (pure
+  `copy_text_for_focus` helper). No horizontal scroll within
+  sub-panels.
 - **Sparkline reducer fallback** — `reduce_status_history` reads
   `aggregateSnapshots` first, then sums `nodeSnapshots[*].statusSnapshots`
   per timestamp (NiFi clustered mode often returns empty aggregate).

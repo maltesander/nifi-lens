@@ -46,6 +46,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **Reporting-tasks modal: focusable detail sub-panels.** The right
+  pane previously rendered as one big scrollable text blob; pressing
+  `Enter` shifted focus there but `↑/↓` did nothing visible. The detail
+  pane is now four bordered sub-panels — Identity (non-focusable),
+  Properties, Validation errors (when present), and Recent bulletins —
+  matching the browser controller-service detail pattern. `Tab` /
+  `Shift+Tab` cycle the focusable panels and wrap from last/first back
+  to the list. `↑/↓` / `PgUp/PgDn` / `Home/End` move within the focused
+  section's row cursor. `Esc` from a focused section returns to the
+  list (cascading through search-clear → close-modal as before). Cross-
+  links preserved: `Enter` on a property row with `#{...}` opens the
+  parameter context modal preselected; `Enter` on a bulletin row jumps
+  to the Bulletins tab filtered by source. `c` copies the focused row
+  as TSV (key=value, error string, or timestamp/level/message).
 - **Bulletins empty-state strings adapt to terminal width.**
   `"waiting for bulletins…"` and `"no bulletins match the current
   filters (press c to clear)"` previously bled past the panel edge
