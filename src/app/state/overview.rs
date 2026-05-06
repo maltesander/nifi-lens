@@ -184,10 +184,16 @@ fn handle_reporting_tasks_modal_verb(
     };
 
     match verb {
-        // ---- Esc cascade: search → close modal ----
+        // ---- Esc cascade: leave Detail focus → search → close modal ----
         V::Common(CommonVerb::Close) => {
             let snap = state.cluster.snapshot.reporting_tasks.latest().cloned();
             let modal = state.overview.reporting_tasks_modal.as_mut()?;
+            // Step 1: if focused inside Detail, return to List.
+            if matches!(modal.focus, ModalFocus::Detail { .. }) {
+                modal.focus = ModalFocus::List;
+                return redraw();
+            }
+            // Step 2: clear active search query if present.
             if !modal.search.query.is_empty() {
                 modal.search.query.clear();
                 if let Some(snap) = snap {
@@ -195,7 +201,7 @@ fn handle_reporting_tasks_modal_verb(
                 }
                 return redraw();
             }
-            // No active search — close the modal.
+            // Step 3: close the modal.
             state.overview.reporting_tasks_modal = None;
             redraw()
         }
@@ -819,6 +825,24 @@ mod tests {
         assert!(r.unwrap().redraw);
         let modal = s.overview.reporting_tasks_modal.as_ref().unwrap();
         assert!(matches!(modal.focus, ModalFocus::Detail { .. }));
+    }
+
+    #[test]
+    fn esc_from_detail_returns_to_list() {
+        let mut s = fresh_state();
+        s.current_tab = ViewId::Overview;
+        open_modal_with_tasks(&mut s, vec![bare_task("t1")]);
+        let modal = s.overview.reporting_tasks_modal.as_mut().unwrap();
+        modal.focus = ModalFocus::Detail {
+            idx: 0,
+            rows: [0; 3],
+        };
+
+        dispatch_modal_verb(&mut s, MV::Common(CommonVerb::Close));
+        let modal = s.overview.reporting_tasks_modal.as_ref().unwrap();
+        assert_eq!(modal.focus, ModalFocus::List);
+        // Modal still open after first Esc.
+        assert!(s.overview.reporting_tasks_modal.is_some());
     }
 
     #[test]
