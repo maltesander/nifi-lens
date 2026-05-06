@@ -46,6 +46,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **Queue listing preserves selection by FlowFile UUID** across the
+  next bulk fetch. Previously `apply_complete` replaced `rows` and
+  re-clamped `selected` to the visible window, so the cursor stayed
+  numerically at index 50 even though row 50 was now a different
+  FlowFile. The reducer now captures the selected UUID before the
+  swap and re-locates it in the new visible set; if it's gone (or
+  filtered out) selection falls back to the prior clamp behavior.
+- **Bulletins paused mode preserves the selected group across ring
+  eviction.** While paused, when a new bulletin arrives and pushes
+  an old one off the front of the cluster ring, every grouped
+  position shifts up by one — the cursor used to silently land on a
+  different group. `redraw_bulletins` now captures the selected
+  group key before the mirror swap and re-resolves the cursor to
+  the same logical group afterward; auto-scroll is unchanged
+  (still snaps to newest).
 - **Hint bar pins `?` help in the right cluster** alongside the
   version. Previously it lived at the tail of the dynamic hint list
   and was the first thing to fall off when truncating on narrow

@@ -130,7 +130,11 @@ impl QueueListingState {
     /// Apply a `BrowserPayload::QueueListingComplete`. Returns `true` if
     /// the payload matches the active queue and the state mutated.
     /// Sets `rows`, `total`, `truncated`, `percent = 100`, `fetched_at`,
-    /// clears `error` / `timed_out`, and re-clamps the selection.
+    /// clears `error` / `timed_out`. Selection is preserved by FlowFile
+    /// UUID across the row replacement: if the previously selected
+    /// FlowFile is still present in the new fetch (and still visible
+    /// under any active filter), the cursor moves to its new position;
+    /// otherwise it falls back to a clamp.
     pub fn apply_complete(
         &mut self,
         queue_id: &str,
@@ -141,6 +145,7 @@ impl QueueListingState {
         if self.queue_id != queue_id {
             return false;
         }
+        let prior_uuid = self.selected_uuid();
         self.rows = rows;
         self.total = total;
         self.truncated = truncated;
@@ -148,8 +153,34 @@ impl QueueListingState {
         self.fetched_at = Some(SystemTime::now());
         self.error = None;
         self.timed_out = false;
-        self.clamp_selection();
+        if let Some(uuid) = prior_uuid
+            && let Some(visible_idx) = self.visible_index_for_uuid(&uuid)
+        {
+            self.selected = visible_idx;
+        } else {
+            self.clamp_selection();
+        }
         true
+    }
+
+    /// UUID of the currently selected FlowFile (under the active filter),
+    /// or `None` when the visible set is empty. Used by `apply_complete`
+    /// to preserve selection across row replacement.
+    pub fn selected_uuid(&self) -> Option<String> {
+        let visible = self.visible_indices();
+        let row_idx = *visible.get(self.selected)?;
+        self.rows.get(row_idx).map(|r| r.uuid.clone())
+    }
+
+    /// Visible-set position of `uuid`, or `None` if the FlowFile is no
+    /// longer present or no longer visible under the active filter.
+    pub fn visible_index_for_uuid(&self, uuid: &str) -> Option<usize> {
+        self.visible_indices().into_iter().position(|row_idx| {
+            self.rows
+                .get(row_idx)
+                .map(|r| r.uuid == uuid)
+                .unwrap_or(false)
+        })
     }
 
     /// Apply a `BrowserPayload::QueueListingError`. Returns `true` if
@@ -579,5 +610,84 @@ mod tests {
         s.push_filter_char('b');
         s.backspace_filter_char();
         assert_eq!(s.filter_prompt.as_ref().unwrap().draft, "a");
+    }
+
+    #[test]
+    fn complete_preserves_selection_by_uuid_when_rows_reshuffle() {
+        // User selects ff-2 (visible index 1). Next fetch reshuffles
+        // the rows so ff-2 lands at index 0, with new ff-x ahead and
+        // behind. Selection must follow ff-2, not stay numerically at 1.
+        let mut s = QueueListingState::pending("q1".into(), "Q1".into());
+        s.rows = vec![
+            row("ff-1", Some("a.txt"), 1000, false),
+            row("ff-2", Some("b.txt"), 1000, false),
+            row("ff-3", Some("c.txt"), 1000, false),
+        ];
+        s.selected = 1;
+
+        let new_rows = vec![
+            row("ff-2", Some("b.txt"), 1500, false),
+            row("ff-x", Some("x.txt"), 1000, false),
+            row("ff-1", Some("a.txt"), 2000, false),
+        ];
+        s.apply_complete("q1", new_rows, 3, false);
+        assert_eq!(
+            s.selected, 0,
+            "selection must follow ff-2 to its new position"
+        );
+    }
+
+    #[test]
+    fn complete_clamps_when_selected_uuid_disappears() {
+        // User selects ff-2. Next fetch drops ff-2 entirely. Without
+        // any UUID match, selection must clamp into the new visible
+        // range rather than pointing at row 1 of an unrelated dataset.
+        let mut s = QueueListingState::pending("q1".into(), "Q1".into());
+        s.rows = vec![
+            row("ff-1", Some("a.txt"), 1000, false),
+            row("ff-2", Some("b.txt"), 1000, false),
+            row("ff-3", Some("c.txt"), 1000, false),
+        ];
+        s.selected = 1;
+
+        let new_rows = vec![row("ff-7", Some("g.txt"), 1000, false)];
+        s.apply_complete("q1", new_rows, 1, false);
+        assert_eq!(
+            s.selected, 0,
+            "selection must clamp when the prior UUID is gone"
+        );
+    }
+
+    #[test]
+    fn complete_falls_back_to_clamp_when_uuid_filtered_out() {
+        // User selects ff-2 (visible under filter "b"). Fetch keeps
+        // ff-2 in the row set but the (still-active) filter no longer
+        // matches it because filename changed to "x.txt" — selection
+        // can't be restored, so it clamps.
+        let mut s = QueueListingState::pending("q1".into(), "Q1".into());
+        s.rows = vec![
+            row("ff-1", Some("a.txt"), 1000, false),
+            row("ff-2", Some("b.txt"), 1000, false),
+        ];
+        s.set_filter(Some("b".into()));
+        // After filter, only ff-2 visible at visible index 0.
+        s.selected = 0;
+
+        // Replace rows: ff-2's filename changed to "x.txt" — no longer
+        // matches "b" filter. Filter `b` now matches only the new ff-9.
+        let new_rows = vec![
+            row("ff-9", Some("b9.txt"), 1000, false),
+            row("ff-2", Some("x.txt"), 1500, false),
+        ];
+        s.apply_complete("q1", new_rows, 2, false);
+        // Visible under filter "b": only ff-9 → selected clamps to 0.
+        assert_eq!(s.selected, 0);
+        assert_eq!(s.visible_indices(), vec![0]);
+    }
+
+    #[test]
+    fn selected_uuid_returns_none_on_empty_visible() {
+        let s = QueueListingState::pending("q1".into(), "Q1".into());
+        assert!(s.selected_uuid().is_none());
     }
 }

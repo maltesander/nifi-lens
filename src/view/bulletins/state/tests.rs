@@ -150,6 +150,78 @@ fn redraw_bulletins_advances_new_since_pause_when_paused() {
 }
 
 #[test]
+fn redraw_bulletins_paused_preserves_selected_group_across_eviction() {
+    use crate::cluster::snapshot::FetchMeta;
+    use std::time::Instant;
+
+    let mut state = crate::test_support::fresh_state();
+    state.cluster.snapshot.bulletins.capacity = 3;
+    state.bulletins.auto_scroll = false;
+
+    // Mirror an initial 3 bulletins → 3 grouped rows (each from a
+    // distinct source). User selects index 1 (the middle group).
+    state
+        .cluster
+        .snapshot
+        .bulletins
+        .merge(vec![b(1, "INFO"), b(2, "WARN"), b(3, "ERROR")]);
+    state.cluster.snapshot.bulletins.meta = Some(FetchMeta {
+        fetched_at: Instant::now(),
+        fetch_duration: crate::test_support::default_fetch_duration(),
+        next_interval: Duration::from_secs(5),
+    });
+    crate::view::bulletins::state::redraw_bulletins(&mut state);
+    assert_eq!(state.bulletins.grouped_view().len(), 3);
+    state.bulletins.selected = 1;
+    let prior_key = state.bulletins.selected_group_key().expect("group at 1");
+
+    // Add a 4th bulletin — capacity is 3 so the oldest (id 1) is
+    // evicted. Without preservation, every grouped position shifts up
+    // by one and `selected = 1` would land on what used to be group 2
+    // (instead of staying on the user's chosen group, now at position 0).
+    state.cluster.snapshot.bulletins.merge(vec![b(4, "ERROR")]);
+    crate::view::bulletins::state::redraw_bulletins(&mut state);
+    assert_eq!(state.bulletins.grouped_view().len(), 3);
+
+    let new_key = state.bulletins.selected_group_key().expect("group");
+    assert_eq!(
+        new_key, prior_key,
+        "selected group key must survive eviction in paused mode"
+    );
+    assert_eq!(
+        state.bulletins.selected, 0,
+        "the selected group should now be at position 0 (one shift up)"
+    );
+}
+
+#[test]
+fn redraw_bulletins_auto_scroll_unaffected_by_preservation_logic() {
+    // When auto_scroll is on, selection always snaps to the newest
+    // group regardless of any preservation. Verify the new branch
+    // doesn't accidentally fire on auto_scroll.
+    use crate::cluster::snapshot::FetchMeta;
+    use std::time::Instant;
+    let mut state = crate::test_support::fresh_state();
+    state.bulletins.auto_scroll = true;
+    state
+        .cluster
+        .snapshot
+        .bulletins
+        .merge(vec![b(1, "INFO"), b(2, "INFO"), b(3, "INFO")]);
+    state.cluster.snapshot.bulletins.meta = Some(FetchMeta {
+        fetched_at: Instant::now(),
+        fetch_duration: crate::test_support::default_fetch_duration(),
+        next_interval: Duration::from_secs(5),
+    });
+    crate::view::bulletins::state::redraw_bulletins(&mut state);
+    let last = state.bulletins.grouped_view().len() - 1;
+    assert_eq!(
+        state.bulletins.selected, last,
+        "auto_scroll snaps to newest"
+    );
+}
+
+#[test]
 fn redraw_bulletins_with_grouping_preserves_render_time_dedup() {
     use crate::cluster::snapshot::FetchMeta;
     use std::time::Instant;

@@ -731,6 +731,26 @@ impl BulletinsState {
         })
     }
 
+    /// Position of the group matching `key` in the current
+    /// `grouped_view()`, or `None` when no group with that key is
+    /// visible. Used by `redraw_bulletins` to preserve the user's
+    /// selection across ring evictions while paused.
+    pub fn position_for_group_key(&self, key: &GroupKey) -> Option<usize> {
+        if key.mode != self.group_mode {
+            return None;
+        }
+        self.grouped_view().into_iter().position(|g| {
+            let latest = &self.ring[g.latest_ring_idx];
+            let stem = match self.group_mode {
+                GroupMode::SourceAndMessage => {
+                    normalize_dynamic_brackets(strip_component_prefix(&latest.message))
+                }
+                GroupMode::Source | GroupMode::Off => String::new(),
+            };
+            latest.source_id == key.source_id && stem == key.message_stem
+        })
+    }
+
     /// Open the detail modal for the currently selected group.
     /// Returns `true` if opened, `false` if there is nothing selected.
     pub fn open_detail_modal(&mut self) -> bool {
@@ -962,6 +982,17 @@ pub fn redraw_bulletins(state: &mut AppState) {
         }
     }
 
+    // Capture the user's selected group BEFORE the mirror swap so we
+    // can restore it after — paused mode must keep the cursor on the
+    // same logical group across ring eviction. Without this, an old
+    // bulletin dropping off the front shifts every subsequent group's
+    // position, silently moving the cursor onto a different group.
+    let prior_group_key = if !state.bulletins.auto_scroll {
+        state.bulletins.selected_group_key()
+    } else {
+        None
+    };
+
     state.bulletins.ring = new_ring;
 
     // Derive a `SystemTime` anchor for the renderer. The cluster meta
@@ -982,6 +1013,11 @@ pub fn redraw_bulletins(state: &mut AppState) {
     } else {
         state.bulletins.new_since_pause =
             state.bulletins.new_since_pause.saturating_add(new_matching);
+        if let Some(key) = prior_group_key
+            && let Some(pos) = state.bulletins.position_for_group_key(&key)
+        {
+            state.bulletins.selected = pos;
+        }
     }
 }
 
