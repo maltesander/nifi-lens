@@ -208,6 +208,13 @@ fn handle_reporting_tasks_modal_verb(
 
         // ---- Enter (FocusDetail / cross-link from detail) ----
         V::FocusDetail => {
+            use crate::app::state::PendingIntent;
+            use crate::intent::CrossLink;
+            use crate::view::overview::reporting_tasks_modal::{
+                DetailSection, contains_param_ref_raw, section_list,
+            };
+
+            // Step 1: List → Detail focus shift.
             let modal = state.overview.reporting_tasks_modal.as_mut()?;
             if matches!(modal.focus, ModalFocus::List) {
                 modal.focus = ModalFocus::Detail {
@@ -216,8 +223,65 @@ fn handle_reporting_tasks_modal_verb(
                 };
                 return redraw();
             }
-            // Detail focus — Enter cross-link wired in Task 7.
-            redraw()
+
+            // Step 2: Detail focus — dispatch by (section, rows[idx]).
+            let ModalFocus::Detail { idx, rows } = modal.focus else {
+                return redraw();
+            };
+            let snap = state.cluster.snapshot.reporting_tasks.latest().cloned()?;
+            let modal = state.overview.reporting_tasks_modal.as_ref()?;
+            let task = modal.selected_row(&snap)?;
+            let task_id = task.id.clone();
+            let sections = section_list(task);
+            let &section = sections.get(idx)?;
+            match section {
+                DetailSection::Properties => {
+                    let Some((_, value)) = task.properties.iter().nth(rows[idx]) else {
+                        return redraw();
+                    };
+                    let Some(val_str) = value.as_deref() else {
+                        return redraw();
+                    };
+                    if !contains_param_ref_raw(val_str) {
+                        return redraw();
+                    }
+                    use crate::view::browser::render::{ParamRefScan, scan_param_refs};
+                    let preselect = match scan_param_refs(val_str) {
+                        ParamRefScan::Single { name } => Some(name),
+                        ParamRefScan::Multiple => None,
+                        ParamRefScan::None => return redraw(),
+                    };
+                    // Reporting tasks have no owning PG — use the root PG id
+                    // (first entry in process_group_ids, the DFS root).
+                    let root_pg_id = state
+                        .cluster
+                        .snapshot
+                        .root_pg_status
+                        .latest()
+                        .and_then(|s| s.process_group_ids.first().cloned())
+                        .unwrap_or_default();
+                    state.overview.reporting_tasks_modal = None;
+                    Some(UpdateResult {
+                        redraw: true,
+                        intent: Some(PendingIntent::Goto(CrossLink::OpenParameterContextModal {
+                            pg_id: root_pg_id,
+                            preselect,
+                        })),
+                        ..Default::default()
+                    })
+                }
+                DetailSection::ValidationErrors => redraw(),
+                DetailSection::RecentBulletins => {
+                    state.overview.reporting_tasks_modal = None;
+                    Some(UpdateResult {
+                        redraw: true,
+                        intent: Some(PendingIntent::Goto(CrossLink::OpenBulletins {
+                            source_id: task_id,
+                        })),
+                        ..Default::default()
+                    })
+                }
+            }
         }
 
         // ---- Row navigation (list pane or detail section) ----
@@ -883,7 +947,6 @@ mod tests {
     }
 
     #[test]
-    #[ignore = "cross-link from Detail focus is wired in Task 7 of the detail-panels plan"]
     fn enter_on_bulletin_emits_bulletins_cross_link() {
         let mut s = fresh_state();
         s.current_tab = ViewId::Overview;
@@ -908,10 +971,11 @@ mod tests {
                 timestamp_human: "00:00:00 UTC".into(),
             });
 
-        // Shift focus to detail pane
+        // Shift focus to detail pane, RecentBulletins section.
+        // No validation errors → sections = [Properties, RecentBulletins], idx 1.
         let modal = s.overview.reporting_tasks_modal.as_mut().unwrap();
         modal.focus = ModalFocus::Detail {
-            idx: 0,
+            idx: 1,
             rows: [0; 3],
         };
 
@@ -1025,6 +1089,73 @@ mod tests {
         dispatch_modal_verb(&mut s, MV::PrevPane);
         let modal = s.overview.reporting_tasks_modal.as_ref().unwrap();
         assert_eq!(modal.focus, ModalFocus::List);
+    }
+
+    fn task_with_param_ref(id: &str) -> ReportingTaskRow {
+        let mut t = bare_task(id);
+        let mut props = BTreeMap::new();
+        props.insert("rate".into(), Some("#{usd_rate}".into()));
+        t.properties = props;
+        t
+    }
+
+    #[test]
+    fn enter_on_param_ref_property_opens_parameter_context_modal() {
+        let mut s = fresh_state();
+        s.current_tab = ViewId::Overview;
+        open_modal_with_tasks(&mut s, vec![task_with_param_ref("rt1")]);
+        let modal = s.overview.reporting_tasks_modal.as_mut().unwrap();
+        modal.focus = ModalFocus::Detail {
+            idx: 0,
+            rows: [0; 3],
+        };
+
+        let r = dispatch_modal_verb(&mut s, MV::FocusDetail).unwrap();
+        match r.intent {
+            Some(PendingIntent::Goto(crate::intent::CrossLink::OpenParameterContextModal {
+                preselect,
+                ..
+            })) => {
+                assert_eq!(preselect.as_deref(), Some("usd_rate"));
+            }
+            other => panic!("expected OpenParameterContextModal, got {other:?}"),
+        }
+        assert!(s.overview.reporting_tasks_modal.is_none());
+    }
+
+    #[test]
+    fn enter_on_plain_property_is_noop() {
+        let mut s = fresh_state();
+        s.current_tab = ViewId::Overview;
+        open_modal_with_tasks(&mut s, vec![task_with_three_properties("rt1")]);
+        let modal = s.overview.reporting_tasks_modal.as_mut().unwrap();
+        modal.focus = ModalFocus::Detail {
+            idx: 0,
+            rows: [0; 3],
+        };
+
+        let r = dispatch_modal_verb(&mut s, MV::FocusDetail).unwrap();
+        assert!(r.intent.is_none());
+        // Modal still open.
+        assert!(s.overview.reporting_tasks_modal.is_some());
+    }
+
+    #[test]
+    fn enter_on_validation_error_is_noop() {
+        let mut s = fresh_state();
+        s.current_tab = ViewId::Overview;
+        open_modal_with_tasks(&mut s, vec![task_with_validation_error("rt1")]);
+        // With validation errors, sections = [Properties, ValidationErrors,
+        // RecentBulletins]. Focus the ValidationErrors section (idx 1).
+        let modal = s.overview.reporting_tasks_modal.as_mut().unwrap();
+        modal.focus = ModalFocus::Detail {
+            idx: 1,
+            rows: [0; 3],
+        };
+
+        let r = dispatch_modal_verb(&mut s, MV::FocusDetail).unwrap();
+        assert!(r.intent.is_none());
+        assert!(s.overview.reporting_tasks_modal.is_some());
     }
 
     fn task_with_three_properties(id: &str) -> ReportingTaskRow {
