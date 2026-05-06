@@ -279,8 +279,8 @@ render a trailing chip on their Browser tree row: `[STALE]`,
 to open the version-control modal — registry / bucket / branch / flow /
 version identity at the top, then a per-component, per-property diff
 sourced from NiFi's `local-modifications` endpoint. Press `e` to
-include or exclude environmental differences (NAR-bundle bumps after a
-NiFi upgrade, hidden by default).
+include or exclude bundle diffs (NAR-bundle bumps after a NiFi
+upgrade, hidden by default).
 
 For a cluster-wide audit, open Fuzzy Find (`Shift+F`) and type `:drift`
 to filter the corpus to all non-clean versioned PGs.
@@ -461,7 +461,7 @@ every (action, resource) grant cluster-wide, grouped by resource bucket.
 
 | Key                              | Action                                                  |
 |----------------------------------|---------------------------------------------------------|
-| `Shift+D` / `T` / `S` / `U` / `A` | Edit filters (time / type / source / UUID / attribute) |
+| `Shift+D` / `Shift+T` / `Shift+S` / `Shift+U` / `Shift+A` | Edit filters (time / type / source / UUID / attribute) |
 | `Enter` (in filter bar)          | Submit the query                                        |
 | `w`                              | Edit the watch predicate (live tail mode)               |
 | `p`                              | Pause / resume the watch                                |
@@ -591,6 +591,7 @@ cluster_nodes               = "5s"
 connections_by_pg           = "15s"
 version_control             = "30s"
 parameter_context_bindings  = "30s"
+reporting_tasks             = "30s"
 status_history              = "30s"   # selection-scoped sparkline cadence
 events_tail                 = "2s"    # Events watch sub-mode tail cadence
 about                       = "5m"

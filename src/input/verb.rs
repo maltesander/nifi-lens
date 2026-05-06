@@ -416,11 +416,11 @@ impl Verb for EventsVerb {
     fn label(self) -> &'static str {
         match self {
             Self::Common(c) => c.label(),
-            Self::EditField(FilterField::Time) => "edit Time filter",
-            Self::EditField(FilterField::Types) => "edit Types filter",
-            Self::EditField(FilterField::Source) => "edit Source filter",
-            Self::EditField(FilterField::Uuid) => "edit UUID filter",
-            Self::EditField(FilterField::Attr) => "edit Attributes filter",
+            Self::EditField(FilterField::Time) => "edit time filter",
+            Self::EditField(FilterField::Types) => "edit types filter",
+            Self::EditField(FilterField::Source) => "edit source filter",
+            Self::EditField(FilterField::Uuid) => "edit uuid filter",
+            Self::EditField(FilterField::Attr) => "edit attributes filter",
             Self::NewQuery => "clear filters and submit new query",
             Self::Reset => "reset filters (no submit)",
             Self::RaiseCap => "raise result cap 500 -> 5000",
@@ -728,7 +728,7 @@ impl Verb for VersionControlModalVerb {
     fn label(self) -> &'static str {
         match self {
             Self::Common(c) => c.label(),
-            Self::ToggleEnvironmental => "toggle environmental differences",
+            Self::ToggleEnvironmental => "toggle bundle diffs",
             Self::ScrollUp => "scroll up",
             Self::ScrollDown => "scroll down",
             Self::PageUp => "page up",
