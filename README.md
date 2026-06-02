@@ -222,6 +222,8 @@ NiFi 2.x policies — nothing more:
 | `access the controller` | `/flow/status` (version-sync + component counts) and `/controller/cluster` (cluster membership + heartbeats). |
 | `view system diagnostics` | `/system-diagnostics` (heap, GC, repository fill, per-node metrics). |
 | `query provenance` | All Events and Tracer operations — provenance search, lineage, event detail. |
+| `access users / user groups` | *Optional.* Only needed for the Browser **Access** modal (`u`) drill-in (`/tenants/users/{id}`, `/tenants/user-groups/{id}`). Without it the drill-in renders a `403` instead of the user/group's grants. |
+| `access the policies` | *Optional.* Only needed for the Browser **Access** modal (`u`) matrix (`/policies/{action}/{resource}`). Without it the matrix cells render forbidden instead of the per-component policy state. |
 
 **Component-level policies** — grant these on the **root Process Group**;
 they cascade to every descendant:
@@ -235,7 +237,7 @@ they cascade to every descendant:
 
 - Any `modify …` policies — `nifi-lens` never writes.
 - `access restricted components` — no restricted components are executed.
-- `access users / user groups / policies / counters`.
+- `access counters` — no counters feature.
 - `retrieve site-to-site details`.
 
 ## Core Components
