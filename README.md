@@ -109,6 +109,12 @@ curl --proto '=https' --tlsv1.2 -LsSf \
 powershell -c "irm https://github.com/maltesander/nifi-lens/releases/latest/download/nifi-lens-installer.ps1 | iex"
 ```
 
+Homebrew (macOS / Linux):
+
+```bash
+brew install maltesander/tap/nifi-lens
+```
+
 From crates.io (requires a Rust toolchain):
 
 ```bash

@@ -544,10 +544,12 @@ run `dist generate`, commit the regenerated workflow alongside the
 config. Install once: `cargo install cargo-release --locked && cargo
 install cargo-dist --locked` (the cargo-dist binary is named `dist`).
 
-Homebrew tap (not yet configured): create `maltesander/homebrew-tap`,
-add `tap` / `formula` keys to `dist-workspace.toml`'s `[dist]` table,
-regenerate, and add a `HOMEBREW_TAP_TOKEN` repo secret with
-`contents: write` on the tap repo.
+Homebrew tap: configured via `tap = "maltesander/homebrew-tap"` +
+`publish-jobs = ["homebrew"]` in `dist-workspace.toml`'s `[dist]`
+table; `release.yml`'s `publish-homebrew-formula` job pushes the
+formula on every release. Requires a `HOMEBREW_TAP_TOKEN` repo secret
+with `contents: write` on the tap repo. Users install with
+`brew install maltesander/tap/nifi-lens`.
 
 ## Documentation Policy
 
