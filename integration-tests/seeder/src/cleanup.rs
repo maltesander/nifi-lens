@@ -23,6 +23,7 @@
 use std::time::Duration;
 
 use nifi_rust_client::dynamic::{DynamicClient, types};
+use nifi_rust_client::wait;
 
 use crate::error::{Result, SeederError};
 use crate::state::poll_until;
@@ -453,15 +454,31 @@ async fn delete_all_child_pgs(client: &DynamicClient) -> Result<()> {
 
             // Empty all connections under this PG before deleting — NiFi
             // refuses to delete PGs whose connections still have queued
-            // flowfiles (e.g. the backpressure fixture queue). The
-            // empty-all-connections request is fire-and-forget; flowfiles
-            // drop within ~100ms.
-            if let Err(e) = client
+            // flowfiles (e.g. the backpressure fixture queue). Wait for the
+            // drop request to reach a terminal state so the subsequent
+            // delete can't race a still-draining queue. Best-effort: log and
+            // continue on any error.
+            match client
                 .processgroups()
                 .create_empty_all_connections_request(&id)
                 .await
             {
-                tracing::debug!(%id, error = %e, "empty-all-connections request failed; continuing");
+                Ok(drop_request) => {
+                    if let Some(request_id) = drop_request.id
+                        && let Err(e) = wait::empty_all_connections_dynamic(
+                            client,
+                            &id,
+                            &request_id,
+                            wait::WaitConfig::default(),
+                        )
+                        .await
+                    {
+                        tracing::debug!(%id, %request_id, error = %e, "empty-all-connections wait failed; continuing");
+                    }
+                }
+                Err(e) => {
+                    tracing::debug!(%id, error = %e, "empty-all-connections request failed; continuing");
+                }
             }
 
             let version = pg

@@ -415,7 +415,15 @@ already covered there.
   `finished` → `DELETE`). `QueueListingHandle::drop` fires-and-forgets
   the `DELETE`; NiFi's listing-request TTL is the safety net if Drop
   misses. Polling cadence is 500 ms (not user-configurable). Server
-  caps at 100 rows; `total > 100` → `[100 / N]` chip.
+  caps at 100 rows; `total > 100` → `[100 / N]` chip. This worker
+  intentionally does **not** use `nifi_rust_client::wait::flowfile_listing`:
+  it emits a per-tick `QueueListingProgress { percent }` to drive the UI
+  progress bar (the helper polls silently with no progress callback) and
+  relies on the RAII `QueueListingHandle::drop` to fire the abort-path
+  `DELETE` when the user navigates away mid-listing (the helper's
+  `cleanup` DELETE only runs if its future is awaited to completion). The
+  seeder's nuke-and-repave *does* use `wait::empty_all_connections_dynamic`
+  (`cleanup.rs`) — that path needs no progress UI and runs to completion.
 - **Fuzzy Find filter** (`Shift+F`) — a leading `:`-token narrows the
   corpus before fuzzy scoring via a `QueryFilter` enum (`:proc`,
   `:pg`, `:cs`, `:conn`, `:in`, `:out`, `:rpg`, `:drift`, `:stale`,
