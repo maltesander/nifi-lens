@@ -67,7 +67,14 @@ pub fn build_dynamic_client(ctx: &ResolvedContext) -> Result<DynamicClient, Nifi
 
     // Proxied entities chain.
     if let Some(ref chain) = ctx.proxied_entities_chain {
-        builder = builder.proxied_entities_chain(chain);
+        builder = builder.proxied_entities_chain(chain).map_err(|err| {
+            classify_or_fallback(&ctx.name, Box::new(err), |source| {
+                NifiLensError::ClientBuildFailed {
+                    context: ctx.name.clone(),
+                    source,
+                }
+            })
+        })?;
     }
 
     // Auth provider (password and token; mTLS authenticates via TLS handshake).
